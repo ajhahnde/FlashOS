@@ -1,0 +1,9 @@
+arm_64bit=1
+disable_commandline_tags=1
+uart_2ndstage=1
+enable_uart=1
+dtoverlay=miniuart-bt
+kernel=kernel8.img
+armstub=armstub8.bin
+arm_peri_high=0
+enable_gic=1

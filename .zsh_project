@@ -1,0 +1,241 @@
+# FlashOS shell helpers. Source from your ~/.zshrc:
+#   [[ -f /path/to/FlashOS/.zsh_project ]] && source /path/to/FlashOS/.zsh_project
+#
+# Naming: pi*  = serial console helpers, build/showfns = project utilities.
+
+# Resolve the directory of this file once at source time. Inside a function,
+# ${0:A:h} refers to the function name, not the source file — capture it now
+# while %x still points at the file being sourced.
+typeset -g _FLASHOS_DIR="${${(%):-%x}:A:h}"
+
+typeset -g _RED=$'\033[0;31m'
+typeset -g _GREEN=$'\033[0;32m'
+typeset -g _YELLOW=$'\033[1;33m'
+typeset -g _NC=$'\033[0m'
+
+_flashos_serial_device() {
+  # Echo the serial device path on stdout, or return non-zero with a message
+  # on stderr. Honors $PI_SERIAL_DEVICE if set; otherwise picks the first
+  # /dev/cu.usbserial-* glob match.
+  if [[ -n "$PI_SERIAL_DEVICE" ]]; then
+    if [[ ! -e "$PI_SERIAL_DEVICE" ]]; then
+      print -u2 "${_RED}\$PI_SERIAL_DEVICE ($PI_SERIAL_DEVICE) does not exist${_NC}"
+      return 1
+    fi
+    print -r -- "$PI_SERIAL_DEVICE"
+    return 0
+  fi
+  local devs=(/dev/cu.usbserial-*(N))
+  if (( ${#devs} == 0 )); then
+    print -u2 "${_RED}no '/dev/cu.usbserial-*' device found${_NC}"
+    return 1
+  fi
+  print -r -- "${devs[1]}"
+}
+
+# Quit the picapture screen session (matches the session name picapture uses).
+piquit() {
+  if screen -S pi_capture -X quit 2>/dev/null; then
+    print -- "${_GREEN}picapture session terminated${_NC}"
+  else
+    print -u2 "${_YELLOW}no picapture session is running${_NC}"
+  fi
+}
+
+# List attached USB-serial adapters.
+pilist() {
+  local devs=(/dev/cu.usbserial-*(N))
+  if (( ${#devs} == 0 )); then
+    print -u2 "${_RED}no device found${_NC}"
+    return 1
+  fi
+  print -- "usb-serial adapter(s):"
+  print -l -- ""${^devs}""
+}
+
+# Attach an interactive screen session to the Pi's serial console.
+piconnect() {
+  local device
+  device="$(_flashos_serial_device)" || return 1
+  screen "$device" 115200
+}
+
+# Capture serial output until SUCCESS or ERROR CAUGHT appears, then a few more
+# seconds of post-boot output. Override the post-success window per call:
+#   picapture 15
+picapture() {
+  local logfile="screenlog.0"
+  local session="pi_capture"
+  local timeout=60
+  local post_success="${1:-10}"
+
+  if ! [[ "$post_success" =~ ^[0-9]+$ ]]; then
+    print -u2 "${_RED}post-success seconds must be a non-negative integer (got: $post_success)${_NC}"
+    return 1
+  fi
+
+  local device
+  device="$(_flashos_serial_device)" || return 1
+
+  rm -f -- "$PWD/$logfile"
+  screen -S "$session" -X quit >/dev/null 2>&1
+
+  print -- "${_GREEN}cable detected (${device})${_NC}"
+  print -- "please connect pi to power now..."
+
+  if ! screen -L -dmS "$session" "$device" 115200; then
+    print -u2 "${_RED}failed to start screen session${_NC}"
+    return 1
+  fi
+
+  sleep 1
+  if ! screen -list | grep -q "$session"; then
+    print -u2 "${_RED}screen session failed to start; port may be occupied${_NC}"
+    return 1
+  fi
+
+  local elapsed=0
+  local result="timeout"
+  print -n -- "monitoring "
+
+  while (( elapsed < timeout )); do
+    sleep 1
+    (( elapsed++ ))
+    print -n -- "."
+
+    if [[ -f "$PWD/$logfile" ]]; then
+      # Check ERROR before SUCCESS: if both appear, the error is the more
+      # informative outcome.
+      if grep -q "ERROR CAUGHT:" "$PWD/$logfile"; then
+        result="error"
+        break
+      fi
+      if grep -q "SUCCESS" "$PWD/$logfile"; then
+        result="success"
+        break
+      fi
+    fi
+  done
+
+  case "$result" in
+    success)
+      print -- "\n${_GREEN}boot successful${_NC}"
+      if (( post_success > 0 )); then
+        print -- "capturing ${post_success}s of post-boot output..."
+        sleep "$post_success"
+      fi
+      ;;
+    error)
+      print -- "\n${_RED}kernel fault: 'error caught' identified${_NC}"
+      ;;
+    timeout)
+      print -- "\n${_YELLOW}timeout: no relevant kernel messages detected after ${timeout}s${_NC}"
+      ;;
+  esac
+
+  screen -S "$session" -X quit >/dev/null 2>&1
+  print -- "session terminated"
+  print -- "output saved to: $PWD/$logfile"
+
+  if [[ ! -s "$PWD/$logfile" ]]; then
+    print -u2 "${_YELLOW}warning: $logfile is empty${_NC}"
+    print -u2 "${_YELLOW}verify tx/rx wiring (pins 14/15) and power supply${_NC}"
+  fi
+
+  [[ "$result" == "success" ]]
+}
+
+# List shell helpers, zig build steps, and zig functions defined in build.zig.
+showfns() {
+  local project_file="$_FLASHOS_DIR/.zsh_project"
+  local zig_file="$_FLASHOS_DIR/build.zig"
+
+  print -- "--- shell functions (.zsh_project) ---"
+  if [[ -f "$project_file" ]]; then
+    grep -E '^[[:alnum:]_-]+\(\)' "$project_file" | sed 's/().*//'
+  else
+    print -- "${_RED}not found: $project_file${_NC}"
+  fi
+
+  print -- "\n--- zig build steps (build.zig) ---"
+  if [[ -f "$zig_file" ]]; then
+    (cd "$_FLASHOS_DIR" && zig build --list-steps 2>/dev/null)
+  else
+    print -- "${_RED}not found: $zig_file${_NC}"
+  fi
+
+  print -- "\n--- zig src functions (build.zig) ---"
+  if [[ -f "$zig_file" ]]; then
+    grep -E '^(pub )?fn ' "$zig_file" | sed -E 's/.*fn ([[:alnum:]_]+).*/\1/'
+  fi
+}
+
+# Two-pass kernel build (mirrors ./build.sh). Run from the project root.
+build() {
+  emulate -L zsh
+  setopt local_options err_return pipe_fail
+
+  local red=$'\033[0;31m'
+  local green=$'\033[0;32m'
+  local yellow=$'\033[1;33m'
+  local nc=$'\033[0m'
+
+  local kernel_elf="zig-out/bin/kernel8.elf"
+  local nm_bin="${NM:-aarch64-elf-nm}"
+
+  if ! command -v "$nm_bin" >/dev/null 2>&1; then
+    print -u2 "${red}$nm_bin not found in path (set \$NM to override)${nc}"
+    return 1
+  fi
+
+  if [[ -f .zigversion ]]; then
+    local required_zig actual_zig
+    required_zig="$(<.zigversion)"
+    actual_zig="$(zig version)"
+    if [[ "$actual_zig" != "$required_zig" ]]; then
+      print -u2 "${red}error: flashos requires zig ${required_zig} (found ${actual_zig}).${nc}"
+      print -u2 "${yellow}switch with one of:${nc}"
+      print -u2 "  zigup ${required_zig}"
+      print -u2 "  zvm use ${required_zig}"
+      print -u2 "  anyzig use ${required_zig}"
+      return 1
+    fi
+  fi
+
+  print -- "clean"
+  rm -rf .zig-cache zig-out
+
+  print -- "link kernel8.elf first pass"
+  zig build
+
+  print -- "save first pass symbols"
+  "$nm_bin" -n "$kernel_elf" | sort | grep -v '\$' > nmfirstpass
+
+  print -- "generate symbol area and overwrite src/symbol_area.S"
+  zig build populate-syms
+
+  print -- "compile symbol area and link kernel8.elf second pass"
+  zig build
+
+  print -- "save second pass symbols"
+  "$nm_bin" -n "$kernel_elf" | sort | grep -v '\$' > nmsecondpass
+
+  print -- "show diff of symbols (should be nothing):"
+  local diff_status=0
+  diff nmfirstpass nmsecondpass || diff_status=$?
+  rm -f nmfirstpass nmsecondpass
+  if (( diff_status != 0 )); then
+    print -u2 "${red}error: symbol layout changed between passes${nc}"
+    return 1
+  fi
+
+  print -- "${yellow}deploy to sd card?${nc}"
+  local yn
+  select yn in "yes" "no"; do
+    case "$yn" in
+      yes) zig build deploy; break ;;
+      no)  return 0 ;;
+      *)   print -- "please choose 1 or 2." ;;
+    esac
+  done
+}

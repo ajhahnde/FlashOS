@@ -1,0 +1,24 @@
+.{
+    .name = .Flash,
+    .version = "0.1.0",
+    // Stable package identifier; do not regenerate when forking unless
+    // upstream is unmaintained, otherwise the fork takes over the
+    // original package's identity.
+    .fingerprint = 0x6e0f70077862da95,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "user_space",
+        "armstub",
+        "scripts",
+        "config.txt",
+        "build.sh",
+        "README.md",
+        "SETUP.md",
+        "DOCUMENTATION.md",
+        "MIGRATION.md",
+    },
+}

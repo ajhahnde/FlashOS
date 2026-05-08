@@ -1,0 +1,29 @@
+// Kernel entry root for the Zig build.
+//
+// The actual entry point is `_start` in src/boot.S, which calls into
+// `kernel_main` (defined in kernel.zig). Zig's executable target wants a
+// root module, so we use this file: every other kernel module is pulled
+// in here via comptime @import so all of its `export fn` decls land in
+// the final ELF.
+
+const board = @import("board.zig");
+
+comptime {
+    _ = @import("kernel.zig");
+    _ = board.uart;
+    _ = board.gpio;
+    _ = board.timer;
+    _ = @import("generic_timer.zig");
+    _ = board.irq;
+    _ = @import("sched.zig");
+    _ = @import("fork.zig");
+    _ = @import("sys.zig");
+    _ = @import("page_alloc.zig");
+    _ = @import("mm_user.zig");
+    _ = @import("utilc.zig");
+
+    _ = @import("trace/utils.zig");
+    _ = @import("trace/trace_main.zig");
+    _ = @import("trace/ksyms.zig");
+    _ = @import("trace/pl011_uart.zig");
+}
