@@ -15,7 +15,15 @@
 // The .S files (sched.S, entry.S, irq.S) consume these layouts through
 // raw offsets. If you reorder fields here, audit the asm side too.
 
-pub const MAX_PAGE_COUNT: usize = 16;
+// Per-task slot budget for both `mm.user_pages` (mapped UVA pages) and
+// `mm.kernel_pages` (PGD/PUD/PMD/PTE tables). 16 was tight enough that
+// the brk test (1 inherited UVA-0 page + 16 heap pages = 17) overflowed
+// user_pages on the 17th map_page call. 32 leaves headroom for future
+// tests without inflating TaskStruct beyond the 4 KiB kernel-stack page
+// (TaskStruct ≈ CoreContext + scalars + MmStruct = ~104 + 40 + (8 + 32*16
+// + 32*8 + 8) = ~920 bytes; KeRegs sits in the top 272 bytes of the same
+// page, leaving ~2.9 KiB of stack — still ample).
+pub const MAX_PAGE_COUNT: usize = 32;
 
 // Process state values (mirrored from sched.zig consumers).
 pub const TASK_RUNNING: i64 = 0;
@@ -51,6 +59,13 @@ pub const MmStruct = extern struct {
     pgd: u64 = 0,
     user_pages: [MAX_PAGE_COUNT]UserPage = [_]UserPage{.{}} ** MAX_PAGE_COUNT,
     kernel_pages: [MAX_PAGE_COUNT]u64 = [_]u64{0} ** MAX_PAGE_COUNT,
+    // Heap break — top of the demand-allocated heap region. Initial
+    // value (HEAP_BASE) is set by prepare_move_to_user / _elf so an
+    // empty heap is the legal `addr == brk` no-op state. Mutated by
+    // sys_brk / sys_sbrk; read by the region-aware do_data_abort
+    // dispatch (Phase-2.6). Field appended last so the .S consumers
+    // that key off CoreContext (offset 0) stay byte-identical.
+    brk: u64 = 0,
 };
 
 pub const TaskStruct = extern struct {

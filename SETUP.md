@@ -66,17 +66,25 @@ optionally runs `zig build deploy`.
 
 ## 3. Running under QEMU
 
+Two QEMU machines are wired up; pick by `-Dboard=`:
+
 ```bash
-zig build run
+zig build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
+zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
-This invokes
-`qemu-system-aarch64 -M raspi4b -serial null -serial stdio -kernel zig-out/kernel8.img`.
-The Mini-UART (UART1) is routed onto host stdio so the kernel's
+`run` invokes
+`qemu-system-aarch64 -M raspi4b -serial null -serial stdio -kernel zig-out/kernel8.img`
+— the Mini-UART (UART1) is routed onto host stdio so the kernel's
 output and the test harness's `[TEST]/[PASS]/[FAIL]` lines appear
-directly in your terminal. A full cycle takes ~10 s and is expected
-to finish with `3/3 passed`, 7 `0xbbff9` free-page checkpoints, and
-0 `ERROR CAUGHT`. The free-page invariants are documented in
+directly in your terminal. `run-virt` uses
+`-M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic`, with the
+PL011 routed onto host stdio.
+
+A green run on either board lands `8/8 passed`, twelve `0xbbff9`
+free-page checkpoints (one per scenario plus 1 PID-1 baseline +
+3 fork-stress rounds + 1 fork-stress final), and 0 `ERROR CAUGHT`.
+The free-page invariants are documented in
 [Documentation §8](DOCUMENTATION.md#free-page-invariants).
 
 QEMU is the authoritative inner-loop signal. The boot path matches
@@ -123,7 +131,7 @@ GPIO 14/15 is shared with the firmware on purpose. `config.txt`
 enables `uart_2ndstage=1` and `dtoverlay=miniuart-bt`, which routes
 the firmware's PL011_0 to GPIO 14/15 so the `MESS:…` lines from
 `start4.elf` are visible on the same cable. Once the kernel runs,
-`mini_uart_init` (`src/uart.zig`) reconfigures the pins to alt5
+`mini_uart_init` (`src/board/rpi4b/uart.zig`) reconfigures the pins to alt5
 (mini-UART) — last-write on the GPIO function selector wins, so the
 firmware-side PL011_0 routing is silently replaced. This is a
 sequential handoff, not a conflict.
@@ -218,7 +226,7 @@ zig build test
 Runs the host-side unit tests against pure-logic kernel modules.
 Each module that has tests is its own test root, linked against
 `tests/host_stubs.zig` (stubs for assembly-only externs). The
-current suite covers `src/page_alloc.zig` with seven tests; it
+current suite covers `src/page_alloc.zig` and `src/elf.zig`; it
 finishes in well under a second and is the fastest signal that
 core kernel logic still holds.
 

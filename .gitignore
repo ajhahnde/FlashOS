@@ -8,10 +8,5 @@ zig-out/
 # Private notes and tools
 ajhahnde/
 stats.zig
-lib/plan_lib.md
-
-# Captured serial logs from `picapture`. The repo keeps one curated
-# screenlog.0 at root as proof-of-green for the latest tagged release;
-# new captures are ignored by default to avoid clobbering it. Use
-# `git add -f screenlog.0` when intentionally rotating the proof.
-#screenlog.0
+screenlog.0
+scripts/render_logo.swift

@@ -142,7 +142,10 @@
 #define S_FRAME_SIZE            272
 
 /* ---- syscalls ---- */
-#define NR_SYSCALLS  7
+/* Highest user-facing slot id +1 (entry.S `b.hs` cap). Slots 7..11 are
+ * reserved file/console stubs that fall inside the dispatch range but
+ * return immediately; brk/sbrk live at 12/13 (lib/syscall_defs.zig). */
+#define NR_SYSCALLS  14
 
 /* ---- sched ---- */
 #define CORE_CONTEXT_OFFSET 0

@@ -22,18 +22,19 @@ comptime {
     }
 }
 
-// Native Zig build for the FlashOS kernel (RPi4, AArch64).
+// Native Zig build for the FlashOS kernel (AArch64; rpi4b + virt boards).
 //
 // Layout:
-//   * src/start.zig      — root that comptime-imports every kernel module
-//   * src/*.S            — boot/entry/sched/timer/etc. assembly
-//   * user_space/init.zig — user-space PID 1 image (linked into .text.user)
-//   * src/linker.ld      — link script wrapping the user image with
-//                          user_start / user_end
+//   * src/start.zig                   — root, comptime-imports every kernel module
+//   * src/*.S                         — boot/entry/sched/timer/etc. assembly
+//   * src/board/<board>/*             — per-board driver bag + linker script
+//   * user_space/init.zig             — user-space PID 1 image (linked into .text.user)
+//   * src/board/<board>/linker.ld     — per-board link script wrapping the
+//                                       user image with user_start / user_end
 //
 // The build produces:
-//   * kernel8.img — raw binary loaded by the GPU bootloader
-//   * armstub8.bin — small EL3→EL1 bootstrap shim
+//   * kernel8.img — raw binary loaded by the GPU bootloader (or QEMU `-kernel`)
+//   * armstub8.bin — small EL3→EL1 bootstrap shim (rpi4b only)
 //
 // Optional `populate-syms` step runs nm on the linked ELF, regenerates
 // src/symbol_area.S via scripts/generate_syms.zig, then relinks so the
@@ -64,15 +65,39 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     build_options.addOption(Board, "board", board);
 
+    // Shared syscall ID constants — single source of truth for the
+    // kernel-side dispatch table (src/sys.zig) and the user-side
+    // wrappers (user_space/kernel_tests.zig). Exposed as a named module
+    // because Zig 0.16 forbids `@import` reaching outside the importing
+    // module's root directory.
+    const syscall_defs_mod = b.createModule(.{
+        .root_source_file = b.path("lib/syscall_defs.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // User-space virtual address layout (text/data/heap/stack bases +
+    // per-region permission bits). Kernel-only consumer for now —
+    // src/fork.zig (prepare_move_to_user) and src/mm_user.zig
+    // (map_page, do_data_abort) share the constants. Same module-level
+    // exposure pattern as syscall_defs_mod.
+    const user_layout_mod = b.createModule(.{
+        .root_source_file = b.path("src/user_layout.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // ---- user-space image (compiled separately so we can match its
     // object file from the linker script as `*user_init*.o`) ----
+    const user_init_mod = b.createModule(.{
+        .root_source_file = b.path("user_space/init.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    user_init_mod.addImport("syscall_defs", syscall_defs_mod);
     const user_init = b.addObject(.{
         .name = "user_init",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("user_space/init.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = user_init_mod,
     });
 
     // ---- kernel executable ----
@@ -122,6 +147,129 @@ pub fn build(b: *std.Build) void {
 
     kernel_mod.addObject(user_init);
     kernel_mod.addOptions("build_options", build_options);
+    kernel_mod.addImport("syscall_defs", syscall_defs_mod);
+    kernel_mod.addImport("user_layout", user_layout_mod);
+
+    // ---- hello.elf — payload for [TEST] exec-elf ----
+    // Built as a standalone aarch64-freestanding ET_EXEC, embedded into
+    // the kernel image via .incbin in tools/hello_elf.S. The user-side
+    // harness reads its kernel-VA + size through bridge u64s baked into
+    // .text.user (see user_space/kernel_tests.zig _hello_elf_bridge),
+    // so the EL0 caller doesn't need to know the link-time layout.
+    const hello_mod = b.createModule(.{
+        .root_source_file = b.path("tools/hello_elf.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    const hello = b.addExecutable(.{
+        .name = "hello.elf",
+        .root_module = hello_mod,
+    });
+    hello.pie = false; // ET_EXEC, not ET_DYN — the loader rejects PIE.
+    hello.bundle_compiler_rt = false;
+    // Tiny p_align so LLD doesn't pad the file out to a page-sized
+    // offset — the ELF loader caps blob_size at PAGE_SIZE because it
+    // snapshots the blob into one kernel page. p_vaddr is still
+    // 0x1000-aligned via the linker script's `. = 0x100000`, which is
+    // what FlashOS's page-grain mapper actually requires; p_align only
+    // governs the ELF spec's `p_vaddr ≡ p_offset (mod p_align)` rule,
+    // and the kernel loader does not enforce p_align.
+    hello.link_z_max_page_size = 0x80;
+    hello.link_z_common_page_size = 0x80;
+    // Custom linker script: stock LLD output splits .eh_frame_hdr /
+    // .eh_frame into a separate LOAD segment ahead of .text, which
+    // pushes .text to a non-page-aligned VA. The script collapses to
+    // a single R+X PT_LOAD and discards the unwind / dyn metadata.
+    hello.setLinkerScript(b.path("tools/hello_linker.ld"));
+    hello.entry = .disabled; // ENTRY(_start) lives in the linker script
+
+    // Stage the built ELF into a directory the assembler can `-I` so
+    // tools/hello_elf.S's `.incbin "hello.elf"` resolves regardless of
+    // CWD. addWriteFiles + addIncludePath transitively schedules hello
+    // before kernel assembly, satisfying the build dependency without
+    // an explicit step ordering.
+    const hello_stage = b.addNamedWriteFiles("hello_elf_stage");
+    _ = hello_stage.addCopyFile(hello.getEmittedBin(), "hello.elf");
+    kernel_mod.addAssemblyFile(b.path("tools/hello_elf.S"));
+    kernel_mod.addIncludePath(hello_stage.getDirectory());
+
+    // ---- stackbomb.elf — payload for [TEST] stack-overflow ----
+    // Same recipe as hello.elf, swapping the source for a payload that
+    // recurses without termination. The kernel's do_data_abort detects
+    // the guard-zone fault, prints a kernel-side diagnostic and zombies
+    // the task; the parent's sys_wait reaps it so the per-process page
+    // balance returns to baseline (which is what the harness verifies).
+    const stackbomb_mod = b.createModule(.{
+        .root_source_file = b.path("tools/stackbomb_elf.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    const stackbomb = b.addExecutable(.{
+        .name = "stackbomb.elf",
+        .root_module = stackbomb_mod,
+    });
+    stackbomb.pie = false;
+    stackbomb.bundle_compiler_rt = false;
+    stackbomb.link_z_max_page_size = 0x80;
+    stackbomb.link_z_common_page_size = 0x80;
+    // The hello linker script is a generic single-PT_LOAD layout —
+    // reuse it verbatim. If the two payloads ever need different
+    // section discards or VA bases, fork into tools/stackbomb_linker.ld.
+    stackbomb.setLinkerScript(b.path("tools/hello_linker.ld"));
+    stackbomb.entry = .disabled;
+
+    const stackbomb_stage = b.addNamedWriteFiles("stackbomb_elf_stage");
+    _ = stackbomb_stage.addCopyFile(stackbomb.getEmittedBin(), "stackbomb.elf");
+    kernel_mod.addAssemblyFile(b.path("tools/stackbomb_elf.S"));
+    kernel_mod.addIncludePath(stackbomb_stage.getDirectory());
+
+    // ---- flibc — userland mini-libc, ELF-demo dependency ----
+    // Userland mini-libc: SVC wrappers, printf/puts on sys_writeConsole,
+    // bump allocator over sys_brk/sbrk, fork/wait/exit/execve. Exposed
+    // as a named module so ELF demos (and future Phase-4 fsh / coreutils
+    // payloads) can `addImport("flibc", flibc_mod)` and stay one
+    // `@import` deep. Pulls in syscall_defs for the SVC IDs — same
+    // module the kernel and the kernel_tests user-side wrappers consume.
+    const flibc_mod = b.createModule(.{
+        .root_source_file = b.path("user_space/lib/flibc/flibc.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    flibc_mod.addImport("syscall_defs", syscall_defs_mod);
+
+    // ---- flibc_demo.elf — payload for [TEST] flibc ----
+    // Same recipe as hello.elf / stackbomb.elf, swapping the source for
+    // a flibc-driven body: printf("flibc hello %d\n", 42), malloc 32 B,
+    // pattern write+verify, exit. The forked linker script
+    // (tools/flibc_demo_linker.ld) folds .rodata / .data / .bss into the
+    // single R+X PT_LOAD so flibc's state-free heap design carries
+    // through to a one-segment ELF that fits inside sys_exec's
+    // PAGE_SIZE snapshot cap.
+    const flibc_demo_mod = b.createModule(.{
+        .root_source_file = b.path("tools/flibc_demo_elf.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    flibc_demo_mod.addImport("flibc", flibc_mod);
+    const flibc_demo = b.addExecutable(.{
+        .name = "flibc_demo.elf",
+        .root_module = flibc_demo_mod,
+    });
+    flibc_demo.pie = false;
+    flibc_demo.bundle_compiler_rt = false;
+    flibc_demo.link_z_max_page_size = 0x80;
+    flibc_demo.link_z_common_page_size = 0x80;
+    flibc_demo.setLinkerScript(b.path("tools/flibc_demo_linker.ld"));
+    flibc_demo.entry = .disabled;
+
+    const flibc_demo_stage = b.addNamedWriteFiles("flibc_demo_elf_stage");
+    _ = flibc_demo_stage.addCopyFile(flibc_demo.getEmittedBin(), "flibc_demo.elf");
+    kernel_mod.addAssemblyFile(b.path("tools/flibc_demo_elf.S"));
+    kernel_mod.addIncludePath(flibc_demo_stage.getDirectory());
+
     kernel.setLinkerScript(b.path(b.fmt("src/board/{s}/linker.ld", .{@tagName(board)})));
     kernel.entry = .disabled; // _start lives in boot.S
     kernel.link_z_max_page_size = 0x1000;
@@ -256,6 +404,11 @@ pub fn build(b: *std.Build) void {
             "-serial", "stdio", // Mini-UART (UART1) → host stdio
             "-kernel", "zig-out/kernel8.img",
         });
+        // qemu reads zig-out/kernel8.img via a literal path string, so
+        // the install step must finish before qemu launches. Without
+        // this dependency, a clean tree (post `zig build clean`) races
+        // qemu against the install and qemu sees no kernel image.
+        qemu_cmd.step.dependOn(&install_kernel_img.step);
 
         const run_step = b.step("run", "Run Flash in QEMU (raspi4b)");
         run_step.dependOn(&install_kernel_img.step); // depends on kernel8.img
@@ -271,6 +424,8 @@ pub fn build(b: *std.Build) void {
             "-nographic", // PL011 → host stdio (no separate -serial needed)
             "-kernel",    "zig-out/kernel8.img",
         });
+        // Same install-before-launch ordering as the rpi4b branch.
+        qemu_virt_cmd.step.dependOn(&install_kernel_img.step);
 
         const run_virt_step = b.step("run-virt", "Run FlashOS in QEMU (virt)");
         run_virt_step.dependOn(&install_kernel_img.step);
@@ -315,6 +470,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run host-side unit tests");
     const tested_modules = [_][]const u8{
         "src/page_alloc.zig",
+        "src/elf.zig",
     };
     inline for (tested_modules) |src_path| {
         const test_mod = b.createModule(.{

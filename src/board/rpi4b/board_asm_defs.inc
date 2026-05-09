@@ -190,13 +190,19 @@
 .macro save_dtb_pa src
 .endm
 
-/* armstub8.S already writes CPACR_EL1 (FPEN + ZEN) before dropping
- * to EL1, and Pi's QEMU `-M raspi4b -kernel` path never executes
- * a NEON instruction (its Zig binary contains zero `movi`/`stp q*`
- * etc.), so re-writing CPACR here would be redundant on real HW
- * and a no-op risk on QEMU. Empty macro keeps boot.S byte-identical
- * to baseline. */
+/* On real HW armstub8.S already writes CPACR_EL1 (FPEN + ZEN) before
+ * dropping to EL1, but QEMU `-M raspi4b -kernel` skips armstub and
+ * lands directly in the kernel — leaving CPACR with FPEN trapping.
+ * Phase 2.3's ELF magic check (ehdr.e_ident[0..4]) lets the Zig
+ * compiler load 4 bytes via `ldr s0, [x0]`, which then traps with
+ * EC=0x07 on QEMU. Re-writing CPACR is idempotent on the HW path
+ * (armstub already set the same bits at EL3) and necessary on the
+ * QEMU path. */
 .macro enable_fp_simd_el1
+    mrs x0, CPACR_EL1
+    orr x0, x0, #(3 << 20)
+    msr CPACR_EL1, x0
+    isb
 .endm
 
 #endif /* BOARD_ASM_DEFS_INC */

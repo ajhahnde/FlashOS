@@ -59,7 +59,19 @@ pub fn main(init: std.process.Init) !void {
 
     const used_space = entry_size * count;
     if (used_space > pre_allocated_size) {
-        std.debug.panic("too many symbols! please expand the pre allocated size!\n", .{});
+        // Print actionable numbers: the bump must be at least the
+        // shortfall, rounded to a comfortable next power-of-two so
+        // the next few growth rounds don't re-trip this. The
+        // pre_allocated_size const lives at the top of this file
+        // (and the linker scripts reserve the same amount via
+        // KEEP(*(_symbols)) — bump those in lockstep).
+        std.debug.panic(
+            "too many symbols! used_space={d} > pre_allocated_size={d} " ++
+                "(shortfall {d} bytes, {d} symbols at {d} bytes each). " ++
+                "Bump pre_allocated_size in scripts/generate_syms.zig and " ++
+                "the matching .space reservation in src/board/<board>/linker.ld.\n",
+            .{ used_space, pre_allocated_size, used_space - pre_allocated_size, count, entry_size },
+        );
     }
 
     try writer.print(".space {d}\n", .{pre_allocated_size - used_space});

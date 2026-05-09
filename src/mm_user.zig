@@ -5,6 +5,12 @@ const layout = @import("task_layout.zig");
 const TaskStruct = layout.TaskStruct;
 const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
 
+// User VA regions + per-region permission bags. The ELF loader
+// (prepare_move_to_user_elf) chooses flags per PT_LOAD region; the
+// blob path (PID 1, non-ELF sys_exec fallback) keeps stamping the
+// combined-permission default bag.
+const user_layout = @import("user_layout");
+
 const PAGE_SHIFT: u6 = 12;
 const TABLE_SHIFT: u6 = 9;
 const PAGE_SIZE: u64 = 1 << PAGE_SHIFT;
@@ -16,15 +22,13 @@ const ENTRIES_PER_TABLE: u64 = 512;
 
 const LINEAR_MAP_BASE: u64 = 0xffff000000000000;
 
-// MMU descriptor flags (user)
+// MMU descriptor flags (user). Page-table internals only — the
+// per-leaf permission bag now lives in src/user_layout.zig
+// (TD_USER_PAGE_FLAGS_DEFAULT) so the future loader and the existing
+// blob path can share it.
 const TD_VALID: u64 = 1 << 0;
 const TD_TABLE: u64 = 1 << 1;
-const TD_PAGE: u64 = 1 << 1;
-const TD_ACCESS: u64 = 1 << 10;
-const TD_USER_PERMS: u64 = 1 << 6;
-const TD_INNER_SHARABLE: u64 = 3 << 8;
 const TD_USER_TABLE_FLAGS: u64 = TD_TABLE | TD_VALID;
-const TD_USER_PAGE_FLAGS: u64 = TD_ACCESS | TD_INNER_SHARABLE | TD_USER_PERMS | TD_PAGE | TD_VALID;
 
 fn paToKva(pa: u64) u64 {
     return pa + LINEAR_MAP_BASE;
@@ -33,7 +37,12 @@ fn paToKva(pa: u64) u64 {
 extern fn get_free_page() u64;
 extern fn free_page(p: u64) void;
 extern fn memcpy(dst: [*]u64, src: [*]const u64, bytes: u64) void;
+extern fn main_output(interface: i32, str: [*:0]const u8) void;
+extern fn main_output_u64(interface: i32, in: u64) void;
+extern fn exit_process() void;
 extern var current: *TaskStruct;
+
+const MU: i32 = 0;
 
 // Used by C code that links against KERNEL_PA_BASE.
 export var KERNEL_PA_BASE: u64 = 0;
@@ -74,15 +83,18 @@ export fn map_table(table: [*]u64, shift: u64, uva: u64, new_table: *i32) u64 {
     return table[index] & PAGE_MASK;
 }
 
-export fn map_table_entry(pte: [*]u64, uva: u64, phys_page: u64) void {
+export fn map_table_entry(pte: [*]u64, uva: u64, phys_page: u64, flags: u64) void {
     var index: u64 = uva >> PAGE_SHIFT;
     index = index & (ENTRIES_PER_TABLE - 1);
-    pte[index] = phys_page | TD_USER_PAGE_FLAGS;
+    pte[index] = phys_page | flags;
 }
 
-/// Map `phys_page` to user-virtual `uva` in `task`, allocating PUD/PMD/PTE
-/// pages as needed. Returns 0 on success, -1 if the task ran out of slots.
-export fn map_page(t: *TaskStruct, uva: u64, phys_page: u64) i32 {
+/// Map `phys_page` to user-virtual `uva` in `task` with permission `flags`,
+/// allocating PUD/PMD/PTE pages as needed. Returns 0 on success, -1 if the
+/// task ran out of slots. Pass `user_layout.TD_USER_PAGE_FLAGS_DEFAULT` for
+/// the historical combined-permission bag; the ELF loader will choose
+/// per-region values (text vs data/heap/stack).
+export fn map_page(t: *TaskStruct, uva: u64, phys_page: u64, flags: u64) i32 {
     if (t.mm.pgd == 0) {
         const kp_count = task_kp_count(t);
         if (kp_count == @as(i32, @intCast(MAX_PAGE_COUNT))) return -1;
@@ -122,7 +134,7 @@ export fn map_page(t: *TaskStruct, uva: u64, phys_page: u64) i32 {
         t.mm.kernel_pages[@intCast(kp_count)] = pte;
     }
 
-    map_table_entry(@ptrFromInt(paToKva(pte)), uva, phys_page);
+    map_table_entry(@ptrFromInt(paToKva(pte)), uva, phys_page, flags);
 
     const up_count = task_up_count(t);
     if (up_count == @as(i32, @intCast(MAX_PAGE_COUNT))) return -1;
@@ -130,35 +142,199 @@ export fn map_page(t: *TaskStruct, uva: u64, phys_page: u64) i32 {
     return 0;
 }
 
-/// Allocate a fresh physical page and map it at `uva` in `task`.
-/// Returns the kernel-virtual address of the page (linear map), or 0 on failure.
-export fn allocate_user_page(t: *TaskStruct, uva: u64) u64 {
+/// Allocate a fresh physical page and map it at `uva` in `task` with
+/// permission `flags`. Returns the kernel-virtual address of the page
+/// (linear map), or 0 on failure.
+export fn allocate_user_page(t: *TaskStruct, uva: u64, flags: u64) u64 {
     const phys_page = get_free_page();
-    if (map_page(t, uva, phys_page) < 0) return 0;
+    if (map_page(t, uva, phys_page, flags) < 0) return 0;
     return paToKva(phys_page);
 }
 
-/// Clone current's user-mapped pages into `dst`.
+/// Clone current's user-mapped pages into `dst`. Per-page region flags
+/// are not tracked on `mm.user_pages`, so every clone gets the default
+/// bag — adequate today because the only consumer of fork is the test
+/// harness's own scenarios, which fork before exec'ing the ELF demos
+/// (the child inherits the blob image briefly, then exec replaces it
+/// with per-region-flagged ELF mappings).
+///
+// TODO: add a per-page flag column on `mm.user_pages` so fork preserves
+// per-region permissions (text RX, data/heap/stack RW+UXN). Required
+// once a scenario fork's a process with already-RX text pages without
+// immediately exec'ing — until then the default-bag clone is fine.
+///
+/// The heap break (`mm.brk`) is inherited from the parent so a child
+/// that grew its heap pre-fork keeps a coherent break value — sys_brk
+/// in the child sees the same upper bound the parent had. The actual
+/// page contents come over via the user_pages copy above; an unwritten
+/// (post-grow, pre-touch) page in the parent simply isn't in
+/// user_pages yet and will demand-alloc on first touch in the child.
 export fn copy_virt_memory(dst: *TaskStruct) i32 {
     const cnt = task_up_count(current);
     var i: i32 = 0;
     while (i < cnt) : (i += 1) {
         const idx: usize = @intCast(i);
         const uva = current.mm.user_pages[idx].uva;
-        const kva = allocate_user_page(dst, uva);
+        const kva = allocate_user_page(dst, uva, user_layout.TD_USER_PAGE_FLAGS_DEFAULT);
         if (kva == 0) return -1;
         memcpy(@ptrFromInt(kva), @ptrFromInt(uva), PAGE_SIZE);
     }
+    dst.mm.brk = current.mm.brk;
     return 0;
 }
 
-/// Page-fault handler for level-3 translation faults — demand-allocates a page.
+/// Walk pgd→pud→pmd→pte for `uva` without allocating intermediate
+/// tables. Returns a pointer to the PTE slot if all four levels are
+/// present (so the caller can read or zero it), or null if any level
+/// is missing. Used by unmap_user_range to clear stale entries on
+/// brk-shrink — without this clearing, a shrink-then-grow inside the
+/// same process would re-touch the freed UVA, miss the demand-alloc
+/// fault path because the PTE still holds the (recycled) PA, and
+/// silently scribble onto whoever owns that page now.
+fn lookup_pte_slot(t: *TaskStruct, uva: u64) ?*u64 {
+    if (t.mm.pgd == 0) return null;
+    const pgd_table: [*]u64 = @ptrFromInt(paToKva(t.mm.pgd));
+    const pgd_idx: u64 = (uva >> PGD_SHIFT) & (ENTRIES_PER_TABLE - 1);
+    const pgd_entry = pgd_table[pgd_idx];
+    if (pgd_entry == 0) return null;
+
+    const pud_table: [*]u64 = @ptrFromInt(paToKva(pgd_entry & PAGE_MASK));
+    const pud_idx: u64 = (uva >> PUD_SHIFT) & (ENTRIES_PER_TABLE - 1);
+    const pud_entry = pud_table[pud_idx];
+    if (pud_entry == 0) return null;
+
+    const pmd_table: [*]u64 = @ptrFromInt(paToKva(pud_entry & PAGE_MASK));
+    const pmd_idx: u64 = (uva >> PMD_SHIFT) & (ENTRIES_PER_TABLE - 1);
+    const pmd_entry = pmd_table[pmd_idx];
+    if (pmd_entry == 0) return null;
+
+    const pte_table: [*]u64 = @ptrFromInt(paToKva(pmd_entry & PAGE_MASK));
+    const pte_idx: u64 = (uva >> PAGE_SHIFT) & (ENTRIES_PER_TABLE - 1);
+    return &pte_table[pte_idx];
+}
+
+/// Free every user page mapped in [start_uva, end_uva): clears the PTE,
+/// frees the physical page, and zeroes the matching `mm.user_pages`
+/// slot so the do_wait reap loop won't double-free. Page-table pages
+/// (pud/pmd/pte) are NOT freed — they keep mapping the surrounding
+/// regions (stack, text), and the slot accounting in
+/// `mm.kernel_pages` doesn't track per-VA ownership.
+///
+/// Caller MUST issue a TLB flush before resuming user execution
+/// (`set_pgd(t.mm.pgd)` is the existing big-hammer); otherwise stale
+/// TLB entries continue to translate the freed UVA to the (now
+/// recycled) PA. Used by sys_brk's shrink path.
+export fn unmap_user_range(t: *TaskStruct, start_uva: u64, end_uva: u64) void {
+    if (start_uva >= end_uva) return;
+    var i: usize = 0;
+    while (i < MAX_PAGE_COUNT) : (i += 1) {
+        const up = t.mm.user_pages[i];
+        if (up.pa == 0) continue;
+        if (up.uva < start_uva or up.uva >= end_uva) continue;
+        if (lookup_pte_slot(t, up.uva)) |pte_ref| {
+            pte_ref.* = 0;
+        }
+        free_page(up.pa);
+        t.mm.user_pages[i] = .{};
+    }
+}
+
+/// Phase-2.6 ELF-loaded marker. A blob-loaded task (PID 1 +
+/// [TEST] exec's inline blob path) maps a single page at UVA 0 and
+/// uses USER_SP_INIT_POS = 8 KiB as its stack — both inside the text
+/// range — so a text-range fault there is legitimate demand-alloc.
+/// An ELF-loaded task (prepare_move_to_user_elf) eagerly maps the top
+/// stack page at STACK_TOP - PAGE_SIZE, so the presence of any user
+/// page in the stack range is the single-bit signal we need to
+/// distinguish the two without growing TaskStruct.
+///
+// FIXME: this carve-out + the do_data_abort text-range demand-alloc
+// branch can be removed once Phase 3 (initramfs) makes PID 1
+// ELF-loaded — at that point every task is ELF and a text-range
+// fault is unconditionally a panic.
+fn is_blob_loaded(t: *TaskStruct) bool {
+    var i: usize = 0;
+    while (i < MAX_PAGE_COUNT) : (i += 1) {
+        const up = t.mm.user_pages[i];
+        if (up.pa == 0) continue;
+        if (up.uva >= user_layout.STACK_LOW) return false;
+    }
+    return true;
+}
+
+/// Page-fault handler for translation faults — dispatches by user VA
+/// region (Phase 2.6). Accepts DFSC 0x4..0x7 (translation fault at
+/// table levels 0..3) so a fault on a UVA whose PUD/PMD/PTE table is
+/// missing resolves the same way as a level-3-only fault: map_page
+/// allocates whatever intermediate tables are needed and stamps the
+/// PTE.
+///
+/// Region dispatch (matches src/user_layout.zig):
+///   * [HEAP_BASE, current.mm.brk) — legal heap, demand-allocate with
+///     RW+UXN flags. The brk test is the canonical exerciser; sys_brk's
+///     shrink path frees pages out of the same `mm.user_pages` slots
+///     this fills.
+///   * [STACK_LOW, STACK_TOP) — legal stack growth below the eagerly-
+///     mapped top page; demand-allocate with RW+UXN flags.
+///   * [STACK_GUARD_LOW, STACK_GUARD_HIGH) — stack overflow. Print
+///     `[KERN] stack overflow at 0x<hex>` then zombie the offending
+///     task via exit_process; the parent's sys_wait reaps as usual so
+///     the harness keeps running. exit_process never returns, so the
+///     `return -1` after it is unreachable.
+///   * [TEXT_BASE, DATA_BASE) — text. ELF-loaded tasks have every
+///     PT_LOAD page eagerly mapped, so a fault here is a jump into an
+///     unmapped hole; print `[KERN] text fault at 0x<hex>` and zombie.
+///     Blob-loaded tasks (is_blob_loaded → true) live entirely in this
+///     range — including the stack frame at USER_SP_INIT_POS = 8 KiB —
+///     so the lenient demand-alloc path is preserved for them until
+///     PID 1 becomes ELF-loaded in Phase 3.
+///   * everything else (data region, the 16 TiB heap-stack gap, any
+///     kernel-half VA) — wild pointer. Print `[KERN] invalid uva at
+///     0x<hex>` and zombie. The [TEST] wild-pointer scenario writes to
+///     0xDEADBEEF000 to exercise this branch.
 export fn do_data_abort(far: u64, esr: u64) i32 {
     const dfsc: u64 = esr & 0x3f;
-    if (dfsc == 0x7) {
+    if (dfsc < 0x4 or dfsc > 0x7) return -1;
+
+    const fault_uva: u64 = far & PAGE_MASK;
+    const rw_nx: u64 = user_layout.TD_USER_PAGE_FLAGS_DEFAULT | user_layout.TD_USER_XN;
+
+    if (fault_uva >= user_layout.HEAP_BASE and fault_uva < current.mm.brk) {
         const page = get_free_page();
-        if (map_page(current, far & PAGE_MASK, page) < 0) return -1;
+        if (map_page(current, fault_uva, page, rw_nx) < 0) return -1;
         return 0;
     }
+
+    if (fault_uva >= user_layout.STACK_LOW and fault_uva < user_layout.STACK_TOP) {
+        const page = get_free_page();
+        if (map_page(current, fault_uva, page, rw_nx) < 0) return -1;
+        return 0;
+    }
+
+    if (fault_uva >= user_layout.STACK_GUARD_LOW and fault_uva < user_layout.STACK_GUARD_HIGH) {
+        main_output(MU, "[KERN] stack overflow at 0x");
+        main_output_u64(MU, far);
+        main_output(MU, "\n");
+        exit_process();
+        return -1;
+    }
+
+    if (fault_uva >= user_layout.TEXT_BASE and fault_uva < user_layout.DATA_BASE) {
+        if (is_blob_loaded(current)) {
+            const page = get_free_page();
+            if (map_page(current, fault_uva, page, user_layout.TD_USER_PAGE_FLAGS_DEFAULT) < 0) return -1;
+            return 0;
+        }
+        main_output(MU, "[KERN] text fault at 0x");
+        main_output_u64(MU, far);
+        main_output(MU, "\n");
+        exit_process();
+        return -1;
+    }
+
+    main_output(MU, "[KERN] invalid uva at 0x");
+    main_output_u64(MU, far);
+    main_output(MU, "\n");
+    exit_process();
     return -1;
 }

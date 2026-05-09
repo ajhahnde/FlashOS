@@ -25,6 +25,25 @@ AArch64-assembly project. It is intended as a reproducible recipe:
 each phase lists the modules touched, the design choices made, and
 the gotchas encountered.
 
+> **Note (post-migration evolution).** This document captures the
+> *migration end-state*. Several files referenced below have since
+> moved during the Phase-A dual-target port:
+>
+> - `src/uart.zig`, `src/gpio.zig`, `src/timer.zig`, `src/irq.zig`
+>   were split into per-board copies under
+>   `src/board/{rpi4b,virt}/`.
+> - `src/asm_defs.inc` became a thin bridge header; the shared
+>   board-independent macros now live in `src/asm_defs_common.inc`,
+>   and per-board addresses live in
+>   `src/board/{rpi4b,virt}/board_asm_defs.inc`.
+> - `src/linker.ld` was likewise split into
+>   `src/board/{rpi4b,virt}/linker.ld`.
+>
+> See [Documentation §1](DOCUMENTATION.md#1-source-layout) for the
+> current source layout. The narrative below intentionally preserves
+> the original (pre-port) paths so the migration recipe still
+> reproduces against the rhythm16 baseline.
+
 ## Contents
 
 0. [Starting point](#0-starting-point)

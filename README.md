@@ -4,10 +4,10 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="420">
   </picture>
 
-  <h3>AArch64 bare-metal kernel for the Raspberry Pi 4 Model B.</h3>
+  <h3>AArch64 bare-metal kernel for the Raspberry Pi 4 Model B and QEMU <code>-M virt</code>.</h3>
 
   <p>
-    <img src="https://img.shields.io/badge/version-v0.1.0-blue" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.2.0-blue" alt="Version">
     <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
     <img src="https://img.shields.io/badge/zig-0.16.0-orange" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey" alt="aarch64-elf">
@@ -45,17 +45,40 @@ harness and a host-side unit test suite.
 | **Architecture** | AArch64 (ARMv8-A)                        |
 | **Languages**    | Zig + AArch64 assembly                   |
 | **Toolchain**    | Zig 0.16.0 + `aarch64-elf` binutils      |
-| **Targets**      | RPi 4B hardware *and* `qemu-system-aarch64 -M raspi4b` |
+| **Targets**      | RPi 4B hardware, `qemu-system-aarch64 -M raspi4b`, *and* `qemu-system-aarch64 -M virt` |
 
 ## Features
 
 - **Two-stage boot.** EL3 armstub configures the GIC and `eret`s into
-  the kernel at EL1.
+  the kernel at EL1 (Pi). On QEMU `-M virt`, `boot.S` does the EL3→EL1
+  drop itself.
+- **Dual-target build.** `-Dboard=rpi4b` or `-Dboard=virt` switches
+  the per-board driver bag (`uart`, `gpio`, `timer`, `irq`), the
+  linker script, and the boot quirks at comptime.
 - **Four-level MMU.** Identity map for early bring-up, linear-high
-  map for the kernel, demand-allocated user pages.
+  map for the kernel, demand-allocated user pages with per-region
+  flags (text RX, data/heap/stack RW+UXN).
 - **Priority round-robin scheduler** with timer-driven preemption.
 - **Process lifecycle.** `fork` / `exec` / `exit` / `wait` / `kill`,
   zombie reap path, leak-free across stress cycles.
+- **ELF64 loader.** `sys_exec` sniffs ELF magic and dispatches to a
+  PT_LOAD walker that maps each segment with the right permissions
+  and eagerly maps the top stack page; a non-ELF blob falls through
+  to the legacy single-page-at-UVA-0 path.
+- **Userland mini-libc (`flibc`).** SVC wrappers, `printf` over
+  `sys_writeConsole`, bump allocator over `brk` / `sbrk`,
+  `fork` / `wait` / `exit` / `execve`. Linked into ELF demos by the
+  build, kept under `user_space/lib/flibc/`.
+- **Heap via `sys_brk` / `sys_sbrk`.** Pages are demand-allocated by
+  the page-fault path inside `[HEAP_BASE, brk)`; shrinks unmap and
+  free.
+- **Region-aware page-fault dispatch.** `do_data_abort` classifies
+  by user VA region (heap / stack / stack-guard / text / wild) and
+  panics-and-zombies on out-of-region access; the parent's
+  `sys_wait` reaps the offender so the harness keeps running.
+- **Stack guard.** A 1-page unmapped region below the legal stack
+  range turns runaway recursion into a `[KERN] stack overflow`
+  diagnostic instead of memory corruption.
 - **Syscalls** dispatched via `svc` and an indexed table — see
   [Documentation §5](DOCUMENTATION.md#5-syscalls--exceptions).
 - **Two UARTs.** Mini-UART (UART1) for the console, dedicated PL011
@@ -64,8 +87,9 @@ harness and a host-side unit test suite.
   and consumed by the function-entry tracer (runtime intact, but
   currently inert — Zig has no `-fpatchable-function-entry=2`
   equivalent yet).
-- **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally) plus a
-  host-side `zig build test` suite.
+- **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 8
+  scenarios) plus a host-side `zig build test` suite covering
+  `page_alloc.zig` and `elf.zig`.
 
 ## Quick start
 
@@ -75,19 +99,27 @@ Install the toolchain:
 brew install zig aarch64-elf-binutils qemu
 ```
 
-Build everything (`kernel8.img` + `armstub8.bin` land in `zig-out/`):
+Build everything for the Pi (`kernel8.img` + `armstub8.bin` land in
+`zig-out/`):
 
 ```bash
-zig build
+zig build                   # default: -Dboard=rpi4b
+```
+
+Or build for QEMU `-M virt` (no armstub):
+
+```bash
+zig build -Dboard=virt
 ```
 
 Run the kernel under QEMU:
 
 ```bash
-zig build run
+zig build -Dboard=rpi4b run        # raspi4b machine (Pi 4 model)
+zig build -Dboard=virt  run-virt   # generic ARMv8 virt machine
 ```
 
-Run host-side unit tests (page allocator):
+Run host-side unit tests (page allocator + ELF parser):
 
 ```bash
 zig build test
@@ -105,16 +137,19 @@ serial-console setup.
 
 ## Build steps
 
-| Step                      | What it does                                                |
-| :------------------------ | :---------------------------------------------------------- |
-| `zig build`               | Default — `kernel8.img` + `armstub8.bin`                    |
-| `zig build kernel`        | Kernel image only                                           |
-| `zig build armstub`       | Armstub only                                                |
-| `zig build populate-syms` | Regenerate `src/symbol_area.S` from the linked ELF          |
-| `zig build deploy`        | Copy artefacts + RPi firmware to `$SD_BOOT`                 |
-| `zig build run`           | Boot under `qemu-system-aarch64 -M raspi4b`                 |
-| `zig build test`          | Host-side unit tests                                        |
-| `zig build clean`         | Remove `.zig-cache/` and `zig-out/`                         |
+| Step                                      | What it does                                                |
+| :---------------------------------------- | :---------------------------------------------------------- |
+| `zig build` (or `-Dboard=rpi4b`)          | Default — Pi: `kernel8.img` + `armstub8.bin`                |
+| `zig build -Dboard=virt`                  | virt: `kernel8.img` only (no armstub)                       |
+| `zig build kernel`                        | Kernel image only                                           |
+| `zig build armstub` (rpi4b only)          | Armstub only                                                |
+| `zig build populate-syms`                 | Regenerate `src/symbol_area.S` from the linked ELF          |
+| `zig build deploy` (rpi4b only)           | Copy artefacts + RPi firmware to `$SD_BOOT`                 |
+| `zig build -Dboard=rpi4b run`             | Boot under `qemu-system-aarch64 -M raspi4b`                 |
+| `zig build -Dboard=virt run-virt`         | Boot under `qemu-system-aarch64 -M virt`                    |
+| `zig build -Dboard=virt iso`              | Build a GRUB-EFI rescue ISO (virt only)                     |
+| `zig build test`                          | Host-side unit tests (page_alloc + elf)                     |
+| `zig build clean`                         | Remove `.zig-cache/` and `zig-out/`                         |
 
 The default optimisation mode is `ReleaseSmall`. Override with
 `-Doptimize=ReleaseSafe` (or `Debug`, `ReleaseFast`).
@@ -123,10 +158,14 @@ The default optimisation mode is `ReleaseSmall`. Override with
 
 ```text
 src/                kernel core (Zig + AArch64 assembly)
+src/board/<name>/   per-board driver bag (rpi4b / virt) + linker script
 user_space/         PID 1 image + in-kernel test harness
+user_space/lib/flibc/  userland mini-libc for ELF demos
+lib/                shared kernel↔user constants (syscall IDs)
+tools/              hand-rolled ELF demos (hello, stackbomb, flibc_demo)
 tests/              host-side unit tests
-armstub/            EL3 → EL1 bootstrap shim
-scripts/            symbol-table generation helpers
+armstub/            EL3 → EL1 bootstrap shim (Pi only)
+scripts/            symbol-table generation + iso helpers
 assets/             logo and visual assets
 build.zig           the only build entry point
 build.sh            two-pass build orchestrator + deploy prompt

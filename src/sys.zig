@@ -1,8 +1,12 @@
 // Syscall dispatch table and handlers
 // Layouts (TaskStruct etc.) come from src/task_layout.zig — the single
 // source of truth shared with sched.zig / fork.zig / mm_user.zig.
+// Syscall IDs come from lib/syscall_defs.zig — the single source of
+// truth shared with user_space/kernel_tests.zig.
 
 const layout = @import("task_layout.zig");
+const defs = @import("syscall_defs");
+const user_layout = @import("user_layout");
 const TaskStruct = layout.TaskStruct;
 const TASK_RUNNING = layout.TASK_RUNNING;
 const TASK_ZOMBIE = layout.TASK_ZOMBIE;
@@ -28,6 +32,9 @@ extern fn get_free_page() u64;
 extern fn free_page(p: u64) void;
 extern fn memcpy(dst: [*]u64, src: [*]const u64, bytes: u64) void;
 extern fn prepare_move_to_user(start_addr: u64, size: u64, fn_offset: u64) i32;
+extern fn prepare_move_to_user_elf(blob_addr_kva: u64, blob_size: u64) i32;
+extern fn unmap_user_range(t: *TaskStruct, start_uva: u64, end_uva: u64) void;
+extern fn set_pgd(pgd: u64) void;
 
 // Syscalls run at EL1h with TTBR0 holding the *user* pgd (set by
 // prepare_move_to_user). To survive the dispatch we route through TTBR1
@@ -42,21 +49,26 @@ export fn sys_fork() i32 {
     return copy_process(UTHREAD, 0, 0);
 }
 // Replace the current task's address space with `blob_size` bytes copied from
-// user-VA `blob_addr` (must reach into the OLD user pgd while it's still
-// installed in TTBR0). Steps:
+// `blob_addr` (must reach into either the OLD user pgd via TTBR0 for blob
+// callers, or TTBR1 for kernel-staged ELFs — both work because EL1 walks
+// both halves). Steps:
 //   1. Snapshot the blob into a kernel-owned page. get_free_page zeroes
 //      pages, so freeing first and reading later would race the new pgd's
 //      sub-table allocations clobbering the bytes we still need.
 //   2. Free old user_pages[*].pa and kernel_pages[*] (mirrors do_wait's
 //      cleanup). Zero current.mm so allocate_user_page rebuilds pgd + tables
 //      from scratch on the next call.
-//   3. prepare_move_to_user allocates a fresh user page at uva 0, memcpys
-//      the snapshot in, set_pgd's TTBR0 to the new pgd (with TLB flush),
-//      and overwrites the syscall's KeRegs frame so kernel_exit erets to
-//      elr=0 / pstate=EL0t / sp=USER_SP_INIT_POS in EL0.
+//   3. Sniff the snapshot for ELF magic. If present, dispatch to
+//      prepare_move_to_user_elf (parses + maps PT_LOAD segments + stack,
+//      sets elr=e_entry / sp=STACK_TOP). Otherwise fall through to the
+//      historical blob path (single page at uva 0, sp=USER_SP_INIT_POS).
+//      Either way set_pgd installs the new pgd in TTBR0 with a TLB flush
+//      and overwrites the syscall's KeRegs frame so kernel_exit erets
+//      into the new image.
 //   4. Free the snapshot page. Net page balance is identical to before exec.
 // Returns 0 on success (the caller's PC after svc is unreachable; eret jumps
-// to the new uva 0). Returns -1 on bad args or alloc failure.
+// to the new entry). Returns -1 on bad args, alloc failure, or ELF parse
+// rejection.
 export fn sys_exec(blob_addr: u64, blob_size: u64) i32 {
     if (blob_size == 0 or blob_size > PAGE_SIZE) return -1;
     const c = current orelse return -1;
@@ -80,7 +92,18 @@ export fn sys_exec(blob_addr: u64, blob_size: u64) i32 {
     }
     c.mm.pgd = 0;
 
-    const ret = prepare_move_to_user(buf_kva, blob_size, 0);
+    const buf_bytes: [*]const u8 = @ptrFromInt(buf_kva);
+    const is_elf = blob_size >= 4 and
+        buf_bytes[0] == 0x7f and
+        buf_bytes[1] == 'E' and
+        buf_bytes[2] == 'L' and
+        buf_bytes[3] == 'F';
+
+    const ret: i32 = if (is_elf)
+        prepare_move_to_user_elf(buf_kva, blob_size)
+    else
+        prepare_move_to_user(buf_kva, blob_size, 0);
+
     free_page(buf_pa);
     return ret;
 }
@@ -130,8 +153,59 @@ export fn sys_seek() void {}
 export fn sys_closeFile() void {}
 
 // MEMORY MANAGEMENT
-export fn sys_brk() void {}
-export fn sys_sbrk() void {}
+
+// Set the heap break to `addr` (rounded up to the next page boundary).
+// Returns the new break, or the current break if `addr == 0`. Returns
+// -1 on out-of-range requests (below HEAP_BASE, or above
+// STACK_TOP - STACK_BUDGET — the latter is the stack-budget upper
+// bound shared with mm_user.zig's do_data_abort guard logic).
+//
+// No pages are eagerly allocated on grow — touching a page in the new
+// range faults through do_data_abort and demand-allocates. On shrink
+// the released pages MUST be freed here (the per-process do_wait reap
+// loop only runs at process exit, so a long-lived process that grows
+// then shrinks would leak otherwise); unmap_user_range walks
+// `mm.user_pages` for entries in [new_brk, old_brk) and clears the
+// PTE + frees the PA + zeros the slot. set_pgd at the tail flushes the
+// TLB so a re-grow re-faults cleanly.
+export fn sys_brk(addr: u64) i64 {
+    const c = current orelse return -1;
+    if (addr == 0) return @bitCast(c.mm.brk);
+
+    const new_brk: u64 = (addr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    if (new_brk < user_layout.HEAP_BASE) return -1;
+    if (new_brk > user_layout.STACK_TOP - user_layout.STACK_BUDGET) return -1;
+
+    const old_brk: u64 = c.mm.brk;
+    if (new_brk < old_brk) {
+        unmap_user_range(c, new_brk, old_brk);
+        // Re-install the same pgd to drive the full-TLB-flush path
+        // in set_pgd (sched.S). Targeted `tlbi vae1is` would be the
+        // surgical option; the heap-shrink path is rare enough that
+        // the existing big hammer is fine.
+        set_pgd(c.mm.pgd);
+    }
+    c.mm.brk = new_brk;
+    return @bitCast(new_brk);
+}
+
+// Convenience wrapper: brk(current_break + delta), returns the previous
+// break. Negative `delta` shrinks. The sys_brk path itself enforces
+// bounds (HEAP_BASE / STACK_TOP - user_layout.STACK_BUDGET); sbrk only
+// guards against signed-overflow on the addition.
+export fn sys_sbrk(delta: i64) i64 {
+    const c = current orelse return -1;
+    const cur_brk: u64 = c.mm.brk;
+    const cur_signed: i64 = @bitCast(cur_brk);
+    const new_signed = @addWithOverflow(cur_signed, delta);
+    if (new_signed[1] != 0) return -1;
+    if (new_signed[0] < 0) return -1;
+    const target: u64 = @bitCast(new_signed[0]);
+    const ret = sys_brk(target);
+    if (ret < 0) return -1;
+    return @bitCast(cur_brk);
+}
+
 export fn sys_mmap() void {}
 export fn sys_munmap() void {}
 export fn sys_mlock() void {}
@@ -154,44 +228,52 @@ export fn sys_setConsoleMode() void {}
 export fn sys_closeConsole() void {}
 
 /// Syscall dispatch table — referenced from entry.S (`adr x27, sys_call_table`).
-/// Indices 0..6 are the user-space ABI (write/fork/exit/wait/dump_free/exec/kill)
-/// and must match SYS_*_NUM in user_space/init.zig and NR_SYSCALLS in
-/// src/asm_defs.inc. Anything past index 6 is unreachable today
-/// (NR_SYSCALLS=7 caps dispatch via `b.hs` in entry.S) and reserved for
-/// future syscalls.
-export var sys_call_table = [_]?*const anyopaque{
-    // User-space ABI (entry.S checks against NR_SYSCALLS)
-    @ptrCast(&sys_writeConsole), // 0 — SYS_WRITE_NUM
-    @ptrCast(&sys_fork),         // 1 — SYS_FORK_NUM
-    @ptrCast(&sys_exit),         // 2 — SYS_EXIT_NUM
-    @ptrCast(&sys_wait),         // 3 — SYS_WAIT_NUM
-    @ptrCast(&sys_dump_free),    // 4 — SYS_DUMP_FREE_NUM (debug instrumentation; powers the test harness's leak check)
-    @ptrCast(&sys_exec),         // 5 — SYS_EXEC_NUM
-    @ptrCast(&sys_kill),         // 6 — SYS_KILL_NUM
+/// Slots 0..6 are the user-facing ABI; their slot ↔ constant binding is
+/// compiler-enforced via the indexed `t[defs.SYS_*]` writes below — a
+/// renumbering in lib/syscall_defs.zig propagates here automatically and
+/// any duplicate id would overwrite (and any gap would leave a null that
+/// still traps cleanly through the unreachable kernel code path). The
+/// upper dispatch bound is NR_SYSCALLS in src/asm_defs_common.inc (`b.hs`
+/// in entry.S); keep it in lockstep with the highest user-facing id +1.
+/// Anything past index 6 is unreachable today and reserved for future
+/// syscalls — those slots stay positional until they get their own
+/// SYS_* constant in lib/syscall_defs.zig.
+export var sys_call_table = blk: {
+    var t = [_]?*const anyopaque{null} ** 27;
 
-    @ptrCast(&sys_openFile),
-    @ptrCast(&sys_readFile),
-    @ptrCast(&sys_writeFile),
-    @ptrCast(&sys_seek),
-    @ptrCast(&sys_closeFile),
+    t[defs.SYS_WRITE]     = @ptrCast(&sys_writeConsole);
+    t[defs.SYS_FORK]      = @ptrCast(&sys_fork);
+    t[defs.SYS_EXIT]      = @ptrCast(&sys_exit);
+    t[defs.SYS_WAIT]      = @ptrCast(&sys_wait);
+    t[defs.SYS_DUMP_FREE] = @ptrCast(&sys_dump_free);
+    t[defs.SYS_EXEC]      = @ptrCast(&sys_exec);
+    t[defs.SYS_KILL]      = @ptrCast(&sys_kill);
 
-    @ptrCast(&sys_brk),
-    @ptrCast(&sys_sbrk),
-    @ptrCast(&sys_mmap),
-    @ptrCast(&sys_munmap),
-    @ptrCast(&sys_mlock),
-    @ptrCast(&sys_munlock),
+    t[7]  = @ptrCast(&sys_openFile);
+    t[8]  = @ptrCast(&sys_readFile);
+    t[9]  = @ptrCast(&sys_writeFile);
+    t[10] = @ptrCast(&sys_seek);
+    t[11] = @ptrCast(&sys_closeFile);
 
-    @ptrCast(&sys_pipe),
-    @ptrCast(&sys_socket),
-    @ptrCast(&sys_msgget),
-    @ptrCast(&sys_semget),
-    @ptrCast(&sys_shmget),
+    t[defs.SYS_BRK]  = @ptrCast(&sys_brk);
+    t[defs.SYS_SBRK] = @ptrCast(&sys_sbrk);
+    t[14] = @ptrCast(&sys_mmap);
+    t[15] = @ptrCast(&sys_munmap);
+    t[16] = @ptrCast(&sys_mlock);
+    t[17] = @ptrCast(&sys_munlock);
 
-    @ptrCast(&sys_openConsole),
-    @ptrCast(&sys_readConsole),
-    @ptrCast(&sys_setConsoleMode),
-    @ptrCast(&sys_closeConsole),
+    t[18] = @ptrCast(&sys_pipe);
+    t[19] = @ptrCast(&sys_socket);
+    t[20] = @ptrCast(&sys_msgget);
+    t[21] = @ptrCast(&sys_semget);
+    t[22] = @ptrCast(&sys_shmget);
+
+    t[23] = @ptrCast(&sys_openConsole);
+    t[24] = @ptrCast(&sys_readConsole);
+    t[25] = @ptrCast(&sys_setConsoleMode);
+    t[26] = @ptrCast(&sys_closeConsole);
+
+    break :blk t;
 };
 
 const NR_SYSCALLS: usize = sys_call_table.len;
