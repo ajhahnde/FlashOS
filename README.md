@@ -17,7 +17,6 @@
 <p>
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="REFERENCE.md"><b>Reference</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>

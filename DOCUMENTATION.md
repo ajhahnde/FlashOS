@@ -4,13 +4,12 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
   </picture>
 
-  <h1>Documentation</h1>
+<h1>Documentation</h1>
 
-  <p>
+<p>
     <a href="README.md"><b>README</b></a> ·
     <b>Documentation</b> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="REFERENCE.md"><b>Reference</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
@@ -28,8 +27,8 @@ in the repository.
 1. [Source layout](#1-source-layout)
 2. [Boot path](#2-boot-path)
 3. [Memory management](#3-memory-management)
-4. [Process management & scheduling](#4-process-management--scheduling)
-5. [Syscalls & exceptions](#5-syscalls--exceptions)
+4. [Process management &amp; scheduling](#4-process-management--scheduling)
+5. [Syscalls &amp; exceptions](#5-syscalls--exceptions)
 6. [Kernel symbol table](#6-kernel-symbol-table-ksyms)
 7. [Tracing](#7-tracing)
 8. [Testing](#8-testing)
@@ -167,22 +166,22 @@ A four-level translation regime: PGD → PUD → PMD → PTE, 4 KiB pages.
 
 ### Physical layout (RPi 4, 4 GiB SKU)
 
-| Range                       | Region          | Usage                              |
-| :-------------------------- | :-------------- | :--------------------------------- |
-| `0x00000000`–`0x38400000`   | 0 – 948 MiB     | Free / kernel image at `0x80000`   |
-| `0x38400000`–`0x40000000`   | 948 – 1024 MiB  | VideoCore reserved                 |
-| `0x40000000`–`0xFC000000`   | 1 GiB – 3960 MiB | `get_free_page` pool              |
-| `0xFC000000`–`0x100000000`  | > 3960 MiB      | MMIO (GIC, UART, GPIO)             |
+| Range                           | Region            | Usage                              |
+| :------------------------------ | :---------------- | :--------------------------------- |
+| `0x00000000`–`0x38400000`  | 0 – 948 MiB      | Free / kernel image at `0x80000` |
+| `0x38400000`–`0x40000000`  | 948 – 1024 MiB   | VideoCore reserved                 |
+| `0x40000000`–`0xFC000000`  | 1 GiB – 3960 MiB | `get_free_page` pool             |
+| `0xFC000000`–`0x100000000` | > 3960 MiB        | MMIO (GIC, UART, GPIO)             |
 
 ### Kernel virtual layout (EL1)
 
-| Region        | Virtual base           | Physical base | Attributes        |
-| :------------ | :--------------------- | :------------ | :---------------- |
-| Identity map  | `0x0000000000000000`   | `0x00000000`  | Normal-NC (0–16 MiB) |
-| Linear high   | `0xffff000000000000`   | `0x00000000`  | Normal-NC         |
-| VC hole       | `0xffff00003B400000`   | `0x38400000`  | unmapped          |
-| RAM high      | `0xffff000040000000`   | `0x40000000`  | Normal-NC         |
-| Device high   | `0xffff0000FC000000`   | `0xFC000000`  | Device-nGnRnE     |
+| Region       | Virtual base           | Physical base  | Attributes            |
+| :----------- | :--------------------- | :------------- | :-------------------- |
+| Identity map | `0x0000000000000000` | `0x00000000` | Normal-NC (0–16 MiB) |
+| Linear high  | `0xffff000000000000` | `0x00000000` | Normal-NC             |
+| VC hole      | `0xffff00003B400000` | `0x38400000` | unmapped              |
+| RAM high     | `0xffff000040000000` | `0x40000000` | Normal-NC             |
+| Device high  | `0xffff0000FC000000` | `0xFC000000` | Device-nGnRnE         |
 
 Translation between physical and the linear-high mapping uses
 `PA_TO_KVA` / `KVA_TO_PA` from `src/mm_user.zig`.
@@ -192,12 +191,12 @@ Translation between physical and the linear-high mapping uses
 Constants are defined in `src/user_layout.zig` (Zig-authoritative,
 imported by both `src/fork.zig` and `src/mm_user.zig`).
 
-| Region | Virtual base           | Direction       | Attributes (post-loader) |
-| :----- | :--------------------- | :-------------- | :----------------------- |
-| Text   | `0x0000000000000000`   | static          | R-X (no UXN)             |
-| Data   | `0x0000000000100000`   | static          | RW- (UXN)                |
-| Heap   | `0x0000000000200000`   | grows up (brk)  | RW- (UXN)                |
-| Stack  | `0x00000FFFFFFFF000`   | grows down      | RW- (UXN), guard below   |
+| Region | Virtual base           | Direction      | Attributes (post-loader) |
+| :----- | :--------------------- | :------------- | :----------------------- |
+| Text   | `0x0000000000000000` | static         | R-X (no UXN)             |
+| Data   | `0x0000000000100000` | static         | RW- (UXN)                |
+| Heap   | `0x0000000000200000` | grows up (brk) | RW- (UXN)                |
+| Stack  | `0x00000FFFFFFFF000` | grows down     | RW- (UXN), guard below   |
 
 The 16 TiB gap between `HEAP_BASE` and `STACK_TOP` makes the heap/
 stack guard implicit — any access in that range is a wild pointer
@@ -229,13 +228,13 @@ fresh physical page from `get_free_page`. Translation faults
 (`dfsc == 0x4..0x7`) enter `do_data_abort`, which dispatches by
 region:
 
-| Fault UVA range                      | Action                                     |
-| :----------------------------------- | :----------------------------------------- |
-| `[HEAP_BASE, current.mm.brk)`        | Demand-allocate (RW+UXN)                   |
-| `[STACK_LOW, STACK_TOP)`             | Demand-allocate (RW+UXN)                   |
-| `[STACK_GUARD_LOW, STACK_GUARD_HIGH)`| Panic `stack overflow` + zombie task       |
-| `[TEXT_BASE, DATA_BASE)`             | ELF-loaded → panic `text fault`; blob-loaded (PID 1 + inline `[TEST] exec` blob) → demand-allocate (legacy) |
-| anything else                        | Panic `invalid uva` + zombie task          |
+| Fault UVA range                         | Action                                                                                                            |
+| :-------------------------------------- | :---------------------------------------------------------------------------------------------------------------- |
+| `[HEAP_BASE, current.mm.brk)`         | Demand-allocate (RW+UXN)                                                                                          |
+| `[STACK_LOW, STACK_TOP)`              | Demand-allocate (RW+UXN)                                                                                          |
+| `[STACK_GUARD_LOW, STACK_GUARD_HIGH)` | Panic `stack overflow` + zombie task                                                                            |
+| `[TEXT_BASE, DATA_BASE)`              | ELF-loaded → panic `text fault`; blob-loaded (PID 1 + inline `[TEST] exec` blob) → demand-allocate (legacy) |
+| anything else                           | Panic `invalid uva` + zombie task                                                                               |
 
 The blob-loaded special case keeps PID 1 working until initramfs
 (Phase 3) lets it boot via the ELF path; `is_blob_loaded` detects it
@@ -314,17 +313,17 @@ mapping rather than chasing into UVA space.
 
 ### Syscall reference
 
-| `x8` | Name        | Args                              | Returns | Notes |
-| :--: | :---------- | :-------------------------------- | :-----: | :---- |
-|  0   | `write`     | `x0 = const u8 *` (NUL-terminated) | void   | Print to mini-UART (delegates to `sys_writeConsole`) |
-|  1   | `fork`      | (none)                            | `i32` PID of child in parent, `0` in child | Standard fork semantics |
-|  2   | `exit`      | (none)                            | does not return | Marks the task `TASK_ZOMBIE`, reschedules |
-|  3   | `wait`      | (none)                            | `i32` PID of reaped child | Blocks on `TASK_INTERRUPTIBLE` until any child exits, then frees its pages and slot |
-|  4   | `dump_free` | (none)                            | `u64` count of free pages | Debug instrumentation. Prints + returns the page count. The in-kernel test harness uses the return value as its leak-detection signal |
-|  5   | `exec`      | `x0 = blob_addr`, `x1 = blob_size` | `i32` 0 on success, -1 on bad args / alloc failure | Snapshots the blob into a kernel page, sniffs ELF magic. ELF → `prepare_move_to_user_elf` (PT_LOAD walk + per-region flags + eager top-stack page, entry from `e_entry`). Non-ELF → blob path (single page at UVA `0`, sp = `USER_SP_INIT_POS`). Caller's PC after `svc` is unreachable on success — `eret` jumps to the new entry |
-|  6   | `kill`      | `x0 = pid`                        | `i32` 0 on hit, -1 on miss | Finds the task with matching `pid`, flips it to `TASK_ZOMBIE`, wakes the parent. **Self-kill is rejected** — use `exit` |
-|  12  | `brk`       | `x0 = addr` (or 0 to read)        | `i64` new break, or current break if `addr == 0`, `-1` on bad request | Sets the heap break (rounded up to PAGE_SIZE). Bounds: `[HEAP_BASE, STACK_TOP - STACK_BUDGET)`. Pages are demand-allocated by `do_data_abort`; shrinks unmap + free the released pages and TLB-flush via `set_pgd` |
-|  13  | `sbrk`      | `x0 = delta` (i64)                | `i64` previous break, `-1` on overflow / range | Convenience wrapper: `brk(current + delta)`. Returns the *previous* break |
+| `x8` | Name          | Args                                   |                                   Returns                                   | Notes                                                                                                                                                                                                                                                                                                                                            |
+| :----: | :------------ | :------------------------------------- | :-------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|   0   | `write`     | `x0 = const u8 *` (NUL-terminated)   |                                    void                                    | Print to mini-UART (delegates to `sys_writeConsole`)                                                                                                                                                                                                                                                                                           |
+|   1   | `fork`      | (none)                                 |               `i32` PID of child in parent, `0` in child               | Standard fork semantics                                                                                                                                                                                                                                                                                                                          |
+|   2   | `exit`      | (none)                                 |                               does not return                               | Marks the task `TASK_ZOMBIE`, reschedules                                                                                                                                                                                                                                                                                                      |
+|   3   | `wait`      | (none)                                 |                         `i32` PID of reaped child                         | Blocks on `TASK_INTERRUPTIBLE` until any child exits, then frees its pages and slot                                                                                                                                                                                                                                                            |
+|   4   | `dump_free` | (none)                                 |                         `u64` count of free pages                         | Debug instrumentation. Prints + returns the page count. The in-kernel test harness uses the return value as its leak-detection signal                                                                                                                                                                                                            |
+|   5   | `exec`      | `x0 = blob_addr`, `x1 = blob_size` |            `i32` 0 on success, -1 on bad args / alloc failure            | Snapshots the blob into a kernel page, sniffs ELF magic. ELF →`prepare_move_to_user_elf` (PT_LOAD walk + per-region flags + eager top-stack page, entry from `e_entry`). Non-ELF → blob path (single page at UVA `0`, sp = `USER_SP_INIT_POS`). Caller's PC after `svc` is unreachable on success — `eret` jumps to the new entry |
+|   6   | `kill`      | `x0 = pid`                           |                        `i32` 0 on hit, -1 on miss                        | Finds the task with matching `pid`, flips it to `TASK_ZOMBIE`, wakes the parent. **Self-kill is rejected** — use `exit`                                                                                                                                                                                                             |
+|   12   | `brk`       | `x0 = addr` (or 0 to read)           | `i64` new break, or current break if `addr == 0`, `-1` on bad request | Sets the heap break (rounded up to PAGE_SIZE). Bounds:`[HEAP_BASE, STACK_TOP - STACK_BUDGET)`. Pages are demand-allocated by `do_data_abort`; shrinks unmap + free the released pages and TLB-flush via `set_pgd`                                                                                                                          |
+|   13   | `sbrk`      | `x0 = delta` (i64)                   |             `i64` previous break, `-1` on overflow / range             | Convenience wrapper:`brk(current + delta)`. Returns the *previous* break                                                                                                                                                                                                                                                                     |
 
 `sys_dump_free` is a documented debug syscall, not part of the
 forward-stable ABI surface. It is retained because the in-kernel
@@ -348,8 +347,7 @@ part of the linked image, so the build is a two-pass process:
    `_symbols` section large enough to hold the populated table
    (`scripts/generate_syms.zig:pre_allocated_size`).
 2. **Extraction.** `zig build populate-syms` runs
-   `aarch64-elf-nm -n kernel8.elf | sort | grep -v '\$' |
-   zig run scripts/generate_syms.zig`, which overwrites
+   `aarch64-elf-nm -n kernel8.elf | sort | grep -v '\$' | zig run scripts/generate_syms.zig`, which overwrites
    `src/symbol_area.S` with `.quad` / `.string` / `.space` directives
    — one 64-byte entry per symbol, terminated by a zero-byte sentinel.
 3. **Pass 2.** Another `zig build` relinks with the populated section.
@@ -410,8 +408,8 @@ kernel state:
 - `flibc` — fork a child, `exec` `tools/flibc_demo.elf` (built against
   `user_space/lib/flibc/`), demo runs `printf("flibc hello %d\n", 42)`
   + 32-byte malloc + pattern verify + `exit`, parent reaps. Validates
-  flibc's printf / bump-allocator / exit layers end-to-end through the
-  ELF loader.
+    flibc's printf / bump-allocator / exit layers end-to-end through the
+    ELF loader.
 - `trace` — four sequential fork/exit/wait cycles, exercising the
   patched trampolines `copy_process` (fork), `do_wait` (wait), and
   `_schedule` (timer-tick + explicit yield). On Pi the trampolines'
@@ -467,28 +465,28 @@ checkpoint.
 
 ### Output markers
 
-| Marker                  | Meaning                                              |
-| :---------------------- | :--------------------------------------------------- |
-| `[TEST] <name>`         | Scenario started                                     |
-| `[PASS] <name>`         | Scenario finished with the expected free-page count  |
-| `[FAIL] <name>`         | Scenario ended with a leak or wrong return value     |
-| `X/Y passed`            | Final tally; `X == Y` is the green-run condition     |
-| `SUCCESS`               | Marker that `picapture` waits on to terminate the capture session |
-| `ERROR CAUGHT`          | Kernel-side fault (data abort, instruction abort, etc.) |
-| `kill ok`, `exec'd`     | Per-scenario progress prints                         |
+| Marker                  | Meaning                                                             |
+| :---------------------- | :------------------------------------------------------------------ |
+| `[TEST] <name>`       | Scenario started                                                    |
+| `[PASS] <name>`       | Scenario finished with the expected free-page count                 |
+| `[FAIL] <name>`       | Scenario ended with a leak or wrong return value                    |
+| `X/Y passed`          | Final tally;`X == Y` is the green-run condition                   |
+| `SUCCESS`             | Marker that `picapture` waits on to terminate the capture session |
+| `ERROR CAUGHT`        | Kernel-side fault (data abort, instruction abort, etc.)             |
+| `kill ok`, `exec'd` | Per-scenario progress prints                                        |
 
 Greens require: `X == Y`, all `[PASS]` no `[FAIL]`, 0 `ERROR CAUGHT`,
 thirteen `0xbbff9` checkpoints, and the `SUCCESS` marker present.
 
 ## 9. Build artefacts
 
-| File                       | Description                                                   |
-| :------------------------- | :------------------------------------------------------------ |
-| `zig-out/kernel8.img`      | Raw binary; firmware loads it to physical `0x80000`           |
-| `zig-out/armstub8.bin`     | EL3 bootstrap shim, loaded by the firmware                    |
-| `zig-out/bin/kernel8.elf`  | Unstripped ELF, retains debug info for `nm` / `objdump`       |
-| `zig-out/bin/armstub8.elf` | Unstripped armstub ELF                                        |
+| File                         | Description                                                 |
+| :--------------------------- | :---------------------------------------------------------- |
+| `zig-out/kernel8.img`      | Raw binary; firmware loads it to physical `0x80000`       |
+| `zig-out/armstub8.bin`     | EL3 bootstrap shim, loaded by the firmware                  |
+| `zig-out/bin/kernel8.elf`  | Unstripped ELF, retains debug info for `nm` / `objdump` |
+| `zig-out/bin/armstub8.elf` | Unstripped armstub ELF                                      |
 
 ---
 
-[← Prev: README](<README.md>) · [Next: Setup →](<SETUP.md>)
+[← Prev: README](README.md) · [Next: Setup →](SETUP.md)

@@ -4,13 +4,12 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
   </picture>
 
-  <h1>License</h1>
+<h1>License</h1>
 
-  <p>
+<p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="REFERENCE.md"><b>Reference</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
     <b>License</b>
   </p>
@@ -77,4 +76,4 @@ conditions:
 
 ---
 
-[← Prev: Migration](<MIGRATION.md>) · [Back to start (README) ↺](<README.md>)
+[← Prev: Migration](MIGRATION.md) · [Back to start (README) ↺](README.md)

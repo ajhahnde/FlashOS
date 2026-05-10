@@ -10,7 +10,6 @@
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <b>Setup</b> ·
-    <a href="REFERENCE.md"><b>Reference</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
@@ -249,4 +248,4 @@ core kernel logic still holds.
 
 ---
 
-[← Prev: Documentation](DOCUMENTATION.md) · [Next: Reference →](REFERENCE.md)
+[← Prev: Documentation](DOCUMENTATION.md) · [Next: Migration →](MIGRATION.md)

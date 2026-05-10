@@ -4,13 +4,12 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
   </picture>
 
-  <h1>Migration</h1>
+<h1>Migration</h1>
 
-  <p>
+<p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="REFERENCE.md"><b>Reference</b></a> ·
     <b>Migration</b> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
@@ -49,8 +48,8 @@ the gotchas encountered.
 0. [Starting point](#0-starting-point)
 1. [Phase 1 — C baseline as the reference](#1-phase-1--c-baseline-as-the-reference)
 2. [Phase 2 — Utilities, drivers, hardware glue](#2-phase-2--utilities-drivers-hardware-glue)
-3. [Phase 3 — Memory management & scheduling](#3-phase-3--memory-management--scheduling)
-4. [Phase 4 — Tracing & user space](#4-phase-4--tracing--user-space)
+3. [Phase 3 — Memory management &amp; scheduling](#3-phase-3--memory-management--scheduling)
+4. [Phase 4 — Tracing &amp; user space](#4-phase-4--tracing--user-space)
 5. [Phase 5 — Headers, linker script, build system](#5-phase-5--headers-linker-script-build-system)
 6. [Validation](#6-validation)
 
@@ -86,16 +85,16 @@ entry points unchanged so each step could be validated incrementally.
 
 Order: leaves first, then anything they pull in.
 
-| C source              | Zig replacement      | Notes                                                          |
-| :-------------------- | :------------------- | :------------------------------------------------------------- |
-| `src/utilc.c`         | `src/utilc.zig`      | `memcpy`/`memset`/`panic`, `main_output*` helpers              |
-| `src/uart.c`          | `src/uart.zig`       | mini-UART driver, MMIO via `*volatile` `extern struct` (now `src/board/{rpi4b,virt}/uart.zig`) |
-| `src/gpio.c`          | `src/gpio.zig`       | pin function/enable, replaces `GpioRegs` from `peripherals/gpio.h` (now `src/board/{rpi4b,virt}/gpio.zig`) |
-| `src/timer.c`         | `src/timer.zig`      | BCM2711 system timer 1 (now `src/board/{rpi4b,virt}/timer.zig`) |
-| `src/generic_timer.c` | `src/generic_timer.zig` | wraps `setup_CNTP_CTL`, `set_CNTP_TVAL`                     |
-| `src/irq.c`           | `src/irq.zig`        | GIC distributor + dispatcher (`handle_irq`) (now `src/board/{rpi4b,virt}/irq.zig`) |
-| `src/sys.c`           | `src/sys.zig`        | syscall table + handlers                                       |
-| `src/page_alloc.c`    | `src/page_alloc.zig` | physical page allocator (no scheduler dependency)              |
+| C source                | Zig replacement           | Notes                                                                                                            |
+| :---------------------- | :------------------------ | :--------------------------------------------------------------------------------------------------------------- |
+| `src/utilc.c`         | `src/utilc.zig`         | `memcpy`/`memset`/`panic`, `main_output*` helpers                                                        |
+| `src/uart.c`          | `src/uart.zig`          | mini-UART driver, MMIO via `*volatile` `extern struct` (now `src/board/{rpi4b,virt}/uart.zig`)             |
+| `src/gpio.c`          | `src/gpio.zig`          | pin function/enable, replaces `GpioRegs` from `peripherals/gpio.h` (now `src/board/{rpi4b,virt}/gpio.zig`) |
+| `src/timer.c`         | `src/timer.zig`         | BCM2711 system timer 1 (now `src/board/{rpi4b,virt}/timer.zig`)                                                |
+| `src/generic_timer.c` | `src/generic_timer.zig` | wraps `setup_CNTP_CTL`, `set_CNTP_TVAL`                                                                      |
+| `src/irq.c`           | `src/irq.zig`           | GIC distributor + dispatcher (`handle_irq`) (now `src/board/{rpi4b,virt}/irq.zig`)                           |
+| `src/sys.c`           | `src/sys.zig`           | syscall table + handlers                                                                                         |
+| `src/page_alloc.c`    | `src/page_alloc.zig`    | physical page allocator (no scheduler dependency)                                                                |
 
 Patterns adopted:
 
@@ -117,9 +116,9 @@ These modules have intricate dependencies on `task_struct`, the
 exception-frame layout, and the assembly-defined boundary symbols
 (`__start_patchable_functions`, `id_pg_dir`, `_start`).
 
-| C source                | Zig replacement                                                       |
-| :---------------------- | :-------------------------------------------------------------------- |
-| remainder of `src/mm.c` | `src/mm_user.zig` (`map_page`, `copy_virt_memory`, `do_data_abort`)   |
+| C source                  | Zig replacement                                                             |
+| :------------------------ | :-------------------------------------------------------------------------- |
+| remainder of `src/mm.c` | `src/mm_user.zig` (`map_page`, `copy_virt_memory`, `do_data_abort`) |
 | `src/sched.c`           | `src/sched.zig` (priority round-robin, `_schedule`, `switch_to`)      |
 | `src/fork.c`            | `src/fork.zig` (`copy_process`, `prepare_move_to_user`)               |
 | `src/kernel.c`          | `src/kernel.zig` (`kernel_main`, `kernel_process`)                    |
@@ -140,13 +139,13 @@ Key decisions:
 
 The tracing subsystem and the PID-1 user image were the last C islands.
 
-| C source                                            | Zig replacement                |
-| :-------------------------------------------------- | :----------------------------- |
-| `src/trace/utils.c`                                 | `src/trace/utils.zig`          |
-| `src/trace/trace_main.c` + `src/trace/traced_main.c` | `src/trace/trace_main.zig`    |
-| `src/trace/ksyms.c`                                 | `src/trace/ksyms.zig`          |
-| `src/trace/pl011_uart.c`                            | `src/trace/pl011_uart.zig`     |
-| `user_space/init.c` + `user_space/sys.S`            | `user_space/init.zig`          |
+| C source                                                 | Zig replacement              |
+| :------------------------------------------------------- | :--------------------------- |
+| `src/trace/utils.c`                                    | `src/trace/utils.zig`      |
+| `src/trace/trace_main.c` + `src/trace/traced_main.c` | `src/trace/trace_main.zig` |
+| `src/trace/ksyms.c`                                    | `src/trace/ksyms.zig`      |
+| `src/trace/pl011_uart.c`                               | `src/trace/pl011_uart.zig` |
+| `user_space/init.c` + `user_space/sys.S`             | `user_space/init.zig`      |
 
 Notes:
 
@@ -255,4 +254,4 @@ Each phase was validated with the same checks:
 
 ---
 
-[← Prev: Reference](<REFERENCE.md>) · [Next: License →](<LICENSE.md>)
+[← Prev: Setup](SETUP.md) · [Next: License →](LICENSE.md)
