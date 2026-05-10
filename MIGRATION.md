@@ -90,11 +90,11 @@ Order: leaves first, then anything they pull in.
 | C source              | Zig replacement      | Notes                                                          |
 | :-------------------- | :------------------- | :------------------------------------------------------------- |
 | `src/utilc.c`         | `src/utilc.zig`      | `memcpy`/`memset`/`panic`, `main_output*` helpers              |
-| `src/uart.c`          | `src/uart.zig`       | mini-UART driver, MMIO via `*volatile` `extern struct`         |
-| `src/gpio.c`          | `src/gpio.zig`       | pin function/enable, replaces `GpioRegs` from `peripherals/gpio.h` |
-| `src/timer.c`         | `src/timer.zig`      | BCM2711 system timer 1                                         |
+| `src/uart.c`          | `src/uart.zig`       | mini-UART driver, MMIO via `*volatile` `extern struct` (now `src/board/{rpi4b,virt}/uart.zig`) |
+| `src/gpio.c`          | `src/gpio.zig`       | pin function/enable, replaces `GpioRegs` from `peripherals/gpio.h` (now `src/board/{rpi4b,virt}/gpio.zig`) |
+| `src/timer.c`         | `src/timer.zig`      | BCM2711 system timer 1 (now `src/board/{rpi4b,virt}/timer.zig`) |
 | `src/generic_timer.c` | `src/generic_timer.zig` | wraps `setup_CNTP_CTL`, `set_CNTP_TVAL`                     |
-| `src/irq.c`           | `src/irq.zig`        | GIC distributor + dispatcher (`handle_irq`)                    |
+| `src/irq.c`           | `src/irq.zig`        | GIC distributor + dispatcher (`handle_irq`) (now `src/board/{rpi4b,virt}/irq.zig`) |
 | `src/sys.c`           | `src/sys.zig`        | syscall table + handlers                                       |
 | `src/page_alloc.c`    | `src/page_alloc.zig` | physical page allocator (no scheduler dependency)              |
 
@@ -179,6 +179,8 @@ For (1) the constants were consolidated into two assembler-only
 include files:
 
 - `src/asm_defs.inc` — used by `boot.S`, `entry.S`, `sched.S`, …
+  (now a thin bridge: shared macros live in `src/asm_defs_common.inc`,
+  per-board addresses in `src/board/{rpi4b,virt}/board_asm_defs.inc`)
 - `armstub/src/asm_defs.inc` — armstub-specific macros.
 
 The `.S` files had `#include "mm.h"` etc. rewritten to
@@ -196,7 +198,8 @@ fixes:
   `user_init`, so the resulting object file ends in `user_init.o`.
 - Each declaration in `user_space/init.zig` carries
   `linksection(".text.user")` / `.rodata.user` (defence in depth),
-  and the kernel link script (`src/linker.ld`) uses
+  and the kernel link script (`src/linker.ld`, now per-board under
+  `src/board/{rpi4b,virt}/linker.ld`) uses
   `EXCLUDE_FILE(*user_init*.o)` to keep the user image out of the
   kernel's `.text`/`.rodata`/`.data`/`.bss` and routes its sections
   into the wrapper between `user_start` and `user_end`.

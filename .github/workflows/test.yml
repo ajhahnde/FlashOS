@@ -1,0 +1,41 @@
+# Per-push CI: host unit tests + virt QEMU boot smoke. virt-only —
+# the rpi4b suite takes 5–8 min and is verified locally before tags.
+#
+# Toolchain note: build.zig hardcodes the `aarch64-elf-` binutils
+# prefix (matches the macOS Homebrew naming). Ubuntu's apt ships the
+# same tools under `aarch64-linux-gnu-`, so the install step below
+# symlinks them into PATH under the expected names.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: install qemu + aarch64 binutils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm binutils-aarch64-linux-gnu
+          # build.zig invokes `aarch64-elf-objcopy` and `aarch64-elf-nm`;
+          # Ubuntu's apt ships them as `aarch64-linux-gnu-*`. Symlinks
+          # bridge the prefix without touching build.zig (Pi byte-identity
+          # is sensitive to build.zig changes).
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-objcopy /usr/local/bin/aarch64-elf-objcopy
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-nm      /usr/local/bin/aarch64-elf-nm
+
+      - name: host unit tests
+        run: zig build test
+
+      - name: virt QEMU boot smoke
+        run: zig build -Dboard=virt test-virt

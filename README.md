@@ -7,7 +7,7 @@
   <h3>AArch64 bare-metal kernel for the Raspberry Pi 4 Model B and QEMU <code>-M virt</code>.</h3>
 
   <p>
-    <img src="https://img.shields.io/badge/version-v0.2.0-blue" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.2.1-blue" alt="Version">
     <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
     <img src="https://img.shields.io/badge/zig-0.16.0-orange" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey" alt="aarch64-elf">
@@ -147,6 +147,8 @@ serial-console setup.
 | `zig build deploy` (rpi4b only)           | Copy artefacts + RPi firmware to `$SD_BOOT`                 |
 | `zig build -Dboard=rpi4b run`             | Boot under `qemu-system-aarch64 -M raspi4b`                 |
 | `zig build -Dboard=virt run-virt`         | Boot under `qemu-system-aarch64 -M virt`                    |
+| `zig build -Dboard=virt test-virt`        | Boot virt, watchdog asserts `8/8 passed` (~1 s)             |
+| `zig build -Dboard=rpi4b test-rpi4b`      | Boot raspi4b, watchdog asserts `8/8 passed` (~5–8 min)      |
 | `zig build -Dboard=virt iso`              | Build a GRUB-EFI rescue ISO (virt only)                     |
 | `zig build test`                          | Host-side unit tests (page_alloc + elf)                     |
 | `zig build clean`                         | Remove `.zig-cache/` and `zig-out/`                         |
@@ -165,7 +167,8 @@ lib/                shared kernel↔user constants (syscall IDs)
 tools/              hand-rolled ELF demos (hello, stackbomb, flibc_demo)
 tests/              host-side unit tests
 armstub/            EL3 → EL1 bootstrap shim (Pi only)
-scripts/            symbol-table generation + iso helpers
+scripts/            symbol-table generation, iso, QEMU test watchdog,
+                    Pi-baseline verifier
 assets/             logo and visual assets
 build.zig           the only build entry point
 build.sh            two-pass build orchestrator + deploy prompt

@@ -413,6 +413,26 @@ pub fn build(b: *std.Build) void {
         const run_step = b.step("run", "Run Flash in QEMU (raspi4b)");
         run_step.dependOn(&install_kernel_img.step); // depends on kernel8.img
         run_step.dependOn(&qemu_cmd.step);
+
+        // Self-validating QEMU run: the watchdog tails the serial log,
+        // exits 0 on `8/8 passed` (with the expected free-page-checkpoint
+        // counts), exits 1 on `ERROR CAUGHT`, count drift, or timeout.
+        // Same QEMU args as `run`. raspi4b is slow (~5–8 min); the
+        // 720s timeout matches the historical bash-watchdog ceiling.
+        const test_rpi4b_cmd = b.addSystemCommand(&.{
+            "scripts/run_qemu_test.sh",
+            "720",
+            "qemu-system-aarch64",
+            "-M",       "raspi4b",
+            "-display", "none",
+            "-serial",  "null",
+            "-serial",  "stdio",
+            "-kernel",  "zig-out/kernel8.img",
+        });
+        test_rpi4b_cmd.step.dependOn(&install_kernel_img.step);
+
+        const test_rpi4b_step = b.step("test-rpi4b", "Boot raspi4b in QEMU and assert 8/8 passed");
+        test_rpi4b_step.dependOn(&test_rpi4b_cmd.step);
     }
 
     if (board == .virt) {
@@ -430,6 +450,23 @@ pub fn build(b: *std.Build) void {
         const run_virt_step = b.step("run-virt", "Run FlashOS in QEMU (virt)");
         run_virt_step.dependOn(&install_kernel_img.step);
         run_virt_step.dependOn(&qemu_virt_cmd.step);
+
+        // Self-validating QEMU run for virt — same contract as
+        // `test-rpi4b`. virt boots in seconds; 60s is generous.
+        const test_virt_cmd = b.addSystemCommand(&.{
+            "scripts/run_qemu_test.sh",
+            "60",
+            "qemu-system-aarch64",
+            "-M",         "virt,gic-version=3",
+            "-cpu",       "cortex-a72",
+            "-m",         "1G",
+            "-nographic",
+            "-kernel",    "zig-out/kernel8.img",
+        });
+        test_virt_cmd.step.dependOn(&install_kernel_img.step);
+
+        const test_virt_step = b.step("test-virt", "Boot virt in QEMU and assert 8/8 passed");
+        test_virt_step.dependOn(&test_virt_cmd.step);
     }
 
     // ---- iso: GRUB-EFI rescue ISO for VMware Fusion / UEFI hosts ----

@@ -34,11 +34,16 @@ fi
 echo "clean"
 rm -rf .zig-cache zig-out
 
+# Stage the nm dumps in a per-run tempdir so Ctrl-C / set -e aborts
+# don't leak nmfirstpass / nmsecondpass into the repo root.
+NM_TMPDIR=$(mktemp -d -t flashos_buildsh.XXXXXX)
+trap 'rm -rf "$NM_TMPDIR"' EXIT
+
 echo "link kernel8.elf first pass"
 zig build
 
 echo "save first pass symbols"
-"$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v '\$' > nmfirstpass
+"$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v '\$' > "$NM_TMPDIR/nmfirstpass"
 
 echo "generate symbol area and overwrite src/symbol_area.S"
 zig build populate-syms
@@ -47,11 +52,10 @@ echo "compile symbol area and link kernel8.elf second pass"
 zig build
 
 echo "save second pass symbols"
-"$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v '\$' > nmsecondpass
+"$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v '\$' > "$NM_TMPDIR/nmsecondpass"
 
 echo "show diff of symbols (should be nothing):"
-diff nmfirstpass nmsecondpass
-rm nmfirstpass nmsecondpass
+diff "$NM_TMPDIR/nmfirstpass" "$NM_TMPDIR/nmsecondpass"
 
 echo -e "${YELLOW}deploy to sd card?${NC}"
 select yn in "yes" "no"; do

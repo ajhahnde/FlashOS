@@ -1,6 +1,6 @@
 .{
     .name = .Flash,
-    .version = "0.1.0",
+    .version = "0.2.1",
     // Stable package identifier; do not regenerate when forking unless
     // upstream is unmaintained, otherwise the fork takes over the
     // original package's identity.
@@ -13,12 +13,17 @@
         "src",
         "user_space",
         "armstub",
+        "lib",
+        "tools",
         "scripts",
+        "assets",
         "config.txt",
         "build.sh",
         "README.md",
         "SETUP.md",
         "DOCUMENTATION.md",
+        "REFERENCE.md",
         "MIGRATION.md",
+        "LICENSE.md",
     },
 }

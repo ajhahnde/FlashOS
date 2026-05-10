@@ -73,6 +73,23 @@ zig build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
 zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
+For a self-validating run that exits 0 on `8/8 passed` and 1 on
+`ERROR CAUGHT`, count drift, or watchdog timeout — no manual
+QEMU babysitting:
+
+```bash
+zig build -Dboard=virt  test-virt   
+zig build -Dboard=rpi4b test-rpi4b  # (matches `run`)
+```
+
+To verify the Pi byte-identity baseline before flashing the SD card
+(stashes `src/symbol_area.S`, cleans, rebuilds, diffs against
+`scripts/pi_baseline.sha256`):
+
+```bash
+scripts/verify_pi_baseline.sh
+```
+
 `run` invokes
 `qemu-system-aarch64 -M raspi4b -serial null -serial stdio -kernel zig-out/kernel8.img`
 — the Mini-UART (UART1) is routed onto host stdio so the kernel's
