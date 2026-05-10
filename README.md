@@ -7,7 +7,8 @@
   <h3>AArch64 bare-metal kernel for the Raspberry Pi 4 Model B and QEMU <code>-M virt</code>.</h3>
 
   <p>
-    <img src="https://img.shields.io/badge/version-v0.2.1-blue" alt="Version">
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml/badge.svg?branch=main" alt="CI"></a>
+    <img src="https://img.shields.io/badge/version-v0.2.2-blue" alt="Version">
     <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
     <img src="https://img.shields.io/badge/zig-0.16.0-orange" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey" alt="aarch64-elf">

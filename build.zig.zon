@@ -1,6 +1,6 @@
 .{
     .name = .Flash,
-    .version = "0.2.1",
+    .version = "0.2.2",
     // Stable package identifier; do not regenerate when forking unless
     // upstream is unmaintained, otherwise the fork takes over the
     // original package's identity.
