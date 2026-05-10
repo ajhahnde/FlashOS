@@ -388,7 +388,7 @@ above-range PA bounds-check, and `get_kernel_page` round-trip — 7/7
 passing on host.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.zig`).
-PID 1 enters `run_all()`, which exercises eight scenarios on real
+PID 1 enters `run_all()`, which exercises nine scenarios on real
 kernel state:
 
 - `fork-stress` — 3 × 5 fork/reap rounds with per-round and final
@@ -412,12 +412,19 @@ kernel state:
   + 32-byte malloc + pattern verify + `exit`, parent reaps. Validates
   flibc's printf / bump-allocator / exit layers end-to-end through the
   ELF loader.
+- `trace` — four sequential fork/exit/wait cycles, exercising the
+  patched trampolines `copy_process` (fork), `do_wait` (wait), and
+  `_schedule` (timer-tick + explicit yield). On Pi the trampolines'
+  `bl hook` lands on PL011 (UART4) with each canonical name; on virt
+  `pl011_uart_send_string` is comptime-stubbed and the patch path
+  runs silently. Pass criterion mirrors the other reap-based
+  scenarios: free-page count after the loop equals the suite baseline.
 
 Each scenario emits `[TEST] name` … `[PASS] name` (or `[FAIL]`), and
 `run_all` prints a final `X/Y passed` tally. The harness runs
 identically under QEMU (`zig build -Dboard=virt run-virt` /
 `-Dboard=rpi4b run`) and on real hardware (`./build.sh` → SD-flash →
-`picapture`); a green run lands `8/8 passed` with 12 `0xbbff9`
+`picapture`); a green run lands `9/9 passed` with 13 `0xbbff9`
 checkpoints and 0 `ERROR CAUGHT` on both boards.
 
 ### Free-page invariants
@@ -433,10 +440,10 @@ leak-free:
   setup (user image + page-table chain + stack + bookkeeping). Every
   leak-free scenario must end at this same value.
 
-A full QEMU or Pi run prints 13 `free_pages:` lines: 1 kernel boot
+A full QEMU or Pi run prints 14 `free_pages:` lines: 1 kernel boot
 baseline + 1 user-space baseline + 1 checkpoint per fork-stress round
 (3 rounds) + 1 fork-stress final + 1 each for kill / exec / exec-elf
-/ brk / stack-overflow / wild-pointer / flibc.
+/ brk / stack-overflow / wild-pointer / flibc / trace.
 
 ```text
 free_pages: 00000000000bc000   (kernel boot baseline)
@@ -452,6 +459,7 @@ free_pages: 00000000000bbff9   (brk)
 free_pages: 00000000000bbff9   (stack-overflow)
 free_pages: 00000000000bbff9   (wild-pointer)
 free_pages: 00000000000bbff9   (flibc)
+free_pages: 00000000000bbff9   (trace)
 ```
 
 Any deviation indicates a leak in the scenario above the deviating
@@ -470,7 +478,7 @@ checkpoint.
 | `kill ok`, `exec'd`     | Per-scenario progress prints                         |
 
 Greens require: `X == Y`, all `[PASS]` no `[FAIL]`, 0 `ERROR CAUGHT`,
-twelve `0xbbff9` checkpoints, and the `SUCCESS` marker present.
+thirteen `0xbbff9` checkpoints, and the `SUCCESS` marker present.
 
 ## 9. Build artefacts
 

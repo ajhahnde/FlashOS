@@ -123,6 +123,7 @@ pub fn build(b: *std.Build) void {
         "src/generic_timer.S",
         "src/symbol_area.S",
         "src/trace/hook.S",
+        "src/trace/patchable_trampolines.S",
     };
     for (asm_files) |path| {
         kernel_mod.addAssemblyFile(b.path(path));
@@ -415,7 +416,7 @@ pub fn build(b: *std.Build) void {
         run_step.dependOn(&qemu_cmd.step);
 
         // Self-validating QEMU run: the watchdog tails the serial log,
-        // exits 0 on `8/8 passed` (with the expected free-page-checkpoint
+        // exits 0 on `9/9 passed` (with the expected free-page-checkpoint
         // counts), exits 1 on `ERROR CAUGHT`, count drift, or timeout.
         // Same QEMU args as `run`. raspi4b is slow (~5–8 min); the
         // 720s timeout matches the historical bash-watchdog ceiling.
@@ -431,7 +432,7 @@ pub fn build(b: *std.Build) void {
         });
         test_rpi4b_cmd.step.dependOn(&install_kernel_img.step);
 
-        const test_rpi4b_step = b.step("test-rpi4b", "Boot raspi4b in QEMU and assert 8/8 passed");
+        const test_rpi4b_step = b.step("test-rpi4b", "Boot raspi4b in QEMU and assert 9/9 passed");
         test_rpi4b_step.dependOn(&test_rpi4b_cmd.step);
     }
 
@@ -465,7 +466,7 @@ pub fn build(b: *std.Build) void {
         });
         test_virt_cmd.step.dependOn(&install_kernel_img.step);
 
-        const test_virt_step = b.step("test-virt", "Boot virt in QEMU and assert 8/8 passed");
+        const test_virt_step = b.step("test-virt", "Boot virt in QEMU and assert 9/9 passed");
         test_virt_step.dependOn(&test_virt_cmd.step);
     }
 

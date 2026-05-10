@@ -9,13 +9,25 @@ extern fn trace_output_u64(interface: i32, in: u64) void;
 
 extern var ksyms: u64;
 
+// Same constant as src/sys.zig / src/fork.zig / src/trace/trace_main.zig.
+// The compiler emits `&ksyms` through a literal-pool quad whose stored
+// value is the link-time low VA (e.g. 0x4009e648 on virt). Boot-time
+// callers of ksTable() are fine because TTBR0 still holds id_pg_dir,
+// which maps the low aliases. Once the first user process runs, TTBR0
+// is swapped to a user pgd that does not map kernel low VAs — and
+// ksym_name_from_addr is now reached from the trace hook fired by
+// patched copy_process / _schedule / do_wait under user context. ORing
+// LINEAR_MAP_BASE here promotes the low VA to its TTBR1 alias before
+// any per-entry load. Idempotent if &ksyms is already high.
+const LINEAR_MAP_BASE: u64 = 0xffff000000000000;
+
 const KernelSymbol = extern struct {
     address: u64,
     name: [56]u8,
 };
 
 fn ksTable() [*]KernelSymbol {
-    return @ptrCast(&ksyms);
+    return @ptrFromInt(@intFromPtr(&ksyms) | LINEAR_MAP_BASE);
 }
 
 var ksyms_count: u64 = 0;

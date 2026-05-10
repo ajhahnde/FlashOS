@@ -148,8 +148,8 @@ serial-console setup.
 | `zig build deploy` (rpi4b only)           | Copy artefacts + RPi firmware to `$SD_BOOT`                 |
 | `zig build -Dboard=rpi4b run`             | Boot under `qemu-system-aarch64 -M raspi4b`                 |
 | `zig build -Dboard=virt run-virt`         | Boot under `qemu-system-aarch64 -M virt`                    |
-| `zig build -Dboard=virt test-virt`        | Boot virt, watchdog asserts `8/8 passed` (~1 s)             |
-| `zig build -Dboard=rpi4b test-rpi4b`      | Boot raspi4b, watchdog asserts `8/8 passed` (~5–8 min)      |
+| `zig build -Dboard=virt test-virt`        | Boot virt, watchdog asserts `9/9 passed` (~1 s)             |
+| `zig build -Dboard=rpi4b test-rpi4b`      | Boot raspi4b, watchdog asserts `9/9 passed` (~5–8 min)      |
 | `zig build -Dboard=virt iso`              | Build a GRUB-EFI rescue ISO (virt only)                     |
 | `zig build test`                          | Host-side unit tests (page_alloc + elf)                     |
 | `zig build clean`                         | Remove `.zig-cache/` and `zig-out/`                         |

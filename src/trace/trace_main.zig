@@ -15,10 +15,14 @@ extern fn trace_output_u64(interface: i32, in: u64) void;
 extern fn trace_output_insn(interface: i32, addr: u64) void;
 extern fn ksym_name_from_addr(addr: u64) ?[*:0]const u8;
 
-extern var _start: u64;
 extern var __start_patchable_functions: u64;
 extern var __stop_patchable_functions: u64;
 extern var hook: u64;
+
+// Kernel high-mapping base. Same constant as src/sys.zig and src/fork.zig.
+// trace_relocate ORs this into each link-time low-VA entry to obtain the
+// runtime kernel-virtual alias the patch path needs.
+const LINEAR_MAP_BASE: u64 = 0xffff000000000000;
 
 /// Endless loop demonstrating the tracing functionality.
 export fn do_trace() noreturn {
@@ -56,19 +60,35 @@ export fn trace_generate_bl(offset_in: i32) u32 {
     return insn;
 }
 
-/// Writes a 32-bit instruction word at `addr`.
+/// Writes a 32-bit instruction word at `addr` and forces I-/D-cache
+/// coherency for self-modifying code on AArch64. Without the
+/// dc cvau / ic ivau / isb sequence the freshly written bytes remain
+/// invisible to the instruction-fetch path: the patched slot keeps
+/// reading as a NOP, the trace pipeline silently does nothing, and
+/// the bug is indistinguishable from a missing patch table. The
+/// recipe is straight out of the ARMv8 reference (B2.2.5,
+/// "Self-modifying code"). dsb ish completes the data-side push to
+/// PoU before ic ivau / isb starts the instruction-side flush.
 export fn trace_modify_code(addr: u64, insn: u32) void {
     const ptr: *volatile u32 = @ptrFromInt(addr);
     ptr.* = insn;
+    asm volatile (
+        \\dc cvau, %[a]
+        \\dsb ish
+        \\ic ivau, %[a]
+        \\dsb ish
+        \\isb
+        :
+        : [a] "r" (addr),
+        : .{ .memory = true });
 }
 
-/// Adds the kernel virtual base to each link-time function offset.
+/// Promotes each link-time low-VA entry to its kernel-virtual high alias.
 export fn trace_relocate(start: [*]u64, end: [*]u64) void {
     const count: usize = (@intFromPtr(end) - @intFromPtr(start)) / @sizeOf(u64);
-    const kernel_start: u64 = @intFromPtr(&_start);
     var i: usize = 0;
     while (i < count) : (i += 1) {
-        start[i] += kernel_start;
+        start[i] |= LINEAR_MAP_BASE;
     }
 }
 

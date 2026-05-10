@@ -53,7 +53,6 @@ the gotchas encountered.
 4. [Phase 4 — Tracing & user space](#4-phase-4--tracing--user-space)
 5. [Phase 5 — Headers, linker script, build system](#5-phase-5--headers-linker-script-build-system)
 6. [Validation](#6-validation)
-7. [What was *not* migrated](#7-what-was-not-migrated)
 
 End state of the migration:
 
@@ -156,8 +155,8 @@ Notes:
   explicit `i64`/`u64` casts; the signed offset is `@truncate`d to
   `i32` to fit the `bl` immediate.
 - `__start_patchable_functions` / `__stop_patchable_functions` /
-  `hook` / `_start` / `ksyms` are declared as `extern var u64` so the
-  linker script can supply their addresses.
+  `hook` / `ksyms` are declared as `extern var u64` so the linker
+  script can supply their addresses.
 - The user-space syscall ABI now lives directly in user-space Zig as
   inline assembly (`svc #0` with `x8` clobber). This eliminated
   `user_space/sys.S` entirely.
@@ -253,17 +252,6 @@ Each phase was validated with the same checks:
    match (i.e. the section size was reserved correctly).
 4. `build.sh` runs end-to-end without manual intervention and reports
    an empty diff between pass 1 and pass 2.
-
-### 7. What was *not* migrated
-
-- **`-fpatchable-function-entry=2`** has no Zig equivalent yet, so
-  the patchable-functions section is empty in the released build and
-  `trace_init` is effectively a no-op. The runtime machinery is
-  intact; it only needs entries to patch.
-- The `/opt/homebrew/bin/aarch64-elf-*` binutils are still used for
-  `objcopy` and `nm` — Zig's bundled tooling handles assembly and
-  linking, but the raw-binary conversion stays on the GNU side for
-  parity with the historical artefacts.
 
 ---
 

@@ -4,9 +4,9 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
   </picture>
 
-  <h1>Setup</h1>
+<h1>Setup</h1>
 
-  <p>
+<p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <b>Setup</b> ·
@@ -36,13 +36,13 @@ Reference:
 
 ## 1. Host toolchain
 
-| Tool                     | Minimum version | Purpose                                |
-| :----------------------- | :-------------- | :------------------------------------- |
-| Zig                      | 0.16.0          | Compile Zig + assembly, run `build.zig` |
-| `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                       |
-| `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`  |
-| `qemu-system-aarch64`    | 11.0.0+         | Run the kernel under QEMU              |
-| `screen` (or equivalent) | –               | Serial console for the Pi              |
+| Tool                       | Minimum version | Purpose                                   |
+| :------------------------- | :-------------- | :---------------------------------------- |
+| Zig                        | 0.16.0          | Compile Zig + assembly, run `build.zig` |
+| `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                         |
+| `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`   |
+| `qemu-system-aarch64`    | 11.0.0+         | Run the kernel under QEMU                 |
+| `screen` (or equivalent) | –              | Serial console for the Pi                 |
 
 On macOS:
 
@@ -73,7 +73,7 @@ zig build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
 zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
-For a self-validating run that exits 0 on `8/8 passed` and 1 on
+For a self-validating run that exits 0 on `9/9 passed` and 1 on
 `ERROR CAUGHT`, count drift, or watchdog timeout — no manual
 QEMU babysitting:
 
@@ -98,7 +98,7 @@ directly in your terminal. `run-virt` uses
 `-M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic`, with the
 PL011 routed onto host stdio.
 
-A green run on either board lands `8/8 passed`, twelve `0xbbff9`
+A green run on either board lands `9/9 passed`, thirteen `0xbbff9`
 free-page checkpoints (one per scenario plus 1 PID-1 baseline +
 3 fork-stress rounds + 1 fork-stress final), and 0 `ERROR CAUGHT`.
 The free-page invariants are documented in
@@ -132,10 +132,10 @@ SD_BOOT=/Volumes/FLASH FIRMWARE=$HOME/rpi_firmware zig build deploy
 
 The deploy step reads two environment variables:
 
-| Variable      | Default                  | Purpose                              |
-| :------------ | :----------------------- | :----------------------------------- |
-| `SD_BOOT`     | `/Volumes/FLASH`         | SD-card mount point on macOS         |
-| `FIRMWARE`    | `$HOME/rpi_firmware`     | Directory holding the official RPi firmware files |
+| Variable     | Default                | Purpose                                           |
+| :----------- | :--------------------- | :------------------------------------------------ |
+| `SD_BOOT`  | `/Volumes/FLASH`     | SD-card mount point on macOS                      |
+| `FIRMWARE` | `$HOME/rpi_firmware` | Directory holding the official RPi firmware files |
 
 ## 5. Serial console
 
@@ -155,11 +155,11 @@ sequential handoff, not a conflict.
 
 ### UART1 pinout (RPi 4 → USB-TTL adapter)
 
-| RPi pin | Function       | USB-TTL pin |
-| :------ | :------------- | :---------- |
-| Pin 6   | GND            | GND         |
-| Pin 8   | TXD (GPIO 14)  | RXD         |
-| Pin 10  | RXD (GPIO 15)  | TXD         |
+| RPi pin | Function      | USB-TTL pin |
+| :------ | :------------ | :---------- |
+| Pin 6   | GND           | GND         |
+| Pin 8   | TXD (GPIO 14) | RXD         |
+| Pin 10  | RXD (GPIO 15) | TXD         |
 
 Do **not** connect VCC if the Pi is powered independently.
 
@@ -214,7 +214,7 @@ multiple adapters plugged in.
 
 To load `.zsh_project` automatically whenever you enter `~/FlashOS`,
 append a `chpwd` hook to your `~/.zshrc`. The command below is
-idempotent — running it twice does nothing:
+idempotent:
 
 ```bash
 grep -q '_FLASHOS_LOADED' ~/.zshrc || cat >> ~/.zshrc <<'EOF'
@@ -249,4 +249,4 @@ core kernel logic still holds.
 
 ---
 
-[← Prev: Documentation](<DOCUMENTATION.md>) · [Next: Reference →](<REFERENCE.md>)
+[← Prev: Documentation](DOCUMENTATION.md) · [Next: Reference →](REFERENCE.md)

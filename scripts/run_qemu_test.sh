@@ -2,14 +2,14 @@
 # Self-validating QEMU runner for `zig build test-virt` / `test-rpi4b`.
 #
 # Spawns the supplied QEMU command, tails its serial log, and exits:
-#   * 0  on `8/8 passed` with the expected free-page-checkpoint counts
+#   * 0  on `9/9 passed` with the expected free-page-checkpoint counts
 #   * 1  on `ERROR CAUGHT`, drifted counts, or watchdog timeout
 #
 # Args: TIMEOUT_SECS QEMU_BINARY [QEMU_ARG ...]
 #
 # Expected success picture (verified against virt boot 2026-05-10):
-#   * `8/8 passed`
-#   * 12 × `free_pages: 00000000000bbff9`  (test free-page checkpoints)
+#   * `9/9 passed`
+#   * 13 × `free_pages: 00000000000bbff9`  (test free-page checkpoints)
 #   *  1 × `free_pages: 00000000000bc000`  (boot baseline)
 #   *  0 × `ERROR CAUGHT`
 # (`main_output_u64` prints u64 as 16-digit zero-padded hex.)
@@ -45,7 +45,7 @@ while kill -0 "$QEMU_PID" 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         break
     fi
-    if grep -qF "8/8 passed" "$LOG"; then
+    if grep -qF "9/9 passed" "$LOG"; then
         status=passed
         break
     fi
@@ -68,8 +68,8 @@ errors=$(grep -cF "ERROR CAUGHT" "$LOG" || true)
 ok_chk=$(grep -cF "free_pages: 00000000000bbff9" "$LOG" || true)
 ok_base=$(grep -cF "free_pages: 00000000000bc000" "$LOG" || true)
 
-if [ "$errors" -ne 0 ] || [ "$ok_chk" -ne 12 ] || [ "$ok_base" -ne 1 ]; then
-    echo "FAIL (counter drift): ERROR_CAUGHT=$errors 0xbbff9=$ok_chk (want 12) 0xbc000=$ok_base (want 1)" >&2
+if [ "$errors" -ne 0 ] || [ "$ok_chk" -ne 13 ] || [ "$ok_base" -ne 1 ]; then
+    echo "FAIL (counter drift): ERROR_CAUGHT=$errors 0xbbff9=$ok_chk (want 13) 0xbc000=$ok_base (want 1)" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

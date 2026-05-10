@@ -59,7 +59,7 @@ export fn task_ke_regs(tsk: *TaskStruct) *KeRegs {
     return @ptrFromInt(p);
 }
 
-export fn copy_process(clone_flags: u64, fn_addr: u64, arg: u64) i32 {
+export fn copy_process_impl(clone_flags: u64, fn_addr: u64, arg: u64) i32 {
     preempt_disable();
 
     const p: *TaskStruct = @ptrFromInt(get_kernel_page());

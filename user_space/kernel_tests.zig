@@ -127,6 +127,9 @@ const FAIL_WILD_POINTER: [*:0]const u8 linksection(".rodata.user") = "[FAIL] wil
 const TEST_FLIBC: [*:0]const u8 linksection(".rodata.user") = "[TEST] flibc\n";
 const PASS_FLIBC: [*:0]const u8 linksection(".rodata.user") = "[PASS] flibc\n";
 const FAIL_FLIBC: [*:0]const u8 linksection(".rodata.user") = "[FAIL] flibc\n";
+const TEST_TRACE: [*:0]const u8 linksection(".rodata.user") = "[TEST] trace\n";
+const PASS_TRACE: [*:0]const u8 linksection(".rodata.user") = "[PASS] trace\n";
+const FAIL_TRACE: [*:0]const u8 linksection(".rodata.user") = "[FAIL] trace\n";
 
 const SLASH: [*:0]const u8 linksection(".rodata.user") = "/";
 const PASSED_SUFFIX: [*:0]const u8 linksection(".rodata.user") = " passed\n";
@@ -139,6 +142,7 @@ const D5: [*:0]const u8 linksection(".rodata.user") = "5";
 const D6: [*:0]const u8 linksection(".rodata.user") = "6";
 const D7: [*:0]const u8 linksection(".rodata.user") = "7";
 const D8: [*:0]const u8 linksection(".rodata.user") = "8";
+const D9: [*:0]const u8 linksection(".rodata.user") = "9";
 const QMARK: [*:0]const u8 linksection(".rodata.user") = "?";
 
 // ---- Test parameters ----
@@ -667,6 +671,35 @@ fn run_wild_pointer(baseline: u64) linksection(".text.user") bool {
     return ok;
 }
 
+// Drives the patched trampolines (kernel_main/_schedule/do_wait/copy_process)
+// through their canonical user-visible call chain: fork enters copy_process,
+// exit/wait routes through do_wait, both legs cross _schedule via timer
+// ticks + explicit yields. Four sequential cycles is enough for each
+// patched entry to fire; the in-band trace markers land on PL011 (UART4
+// on Pi, no-op on virt where pl011_uart_send_string is comptime-stubbed).
+// Pass criterion mirrors the other reap-based scenarios: free-page count
+// after the loop equals the suite baseline.
+fn run_trace(baseline: u64) linksection(".text.user") bool {
+    sys_write(TEST_TRACE);
+    var ok = true;
+
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        const pid = sys_fork();
+        if (pid < 0) {
+            sys_write(FORK_ERR_MSG);
+            ok = false;
+            break;
+        }
+        if (pid == 0) sys_exit();
+        _ = sys_wait();
+    }
+
+    if (sys_dump_free() != baseline) ok = false;
+    sys_write(if (ok) PASS_TRACE else FAIL_TRACE);
+    return ok;
+}
+
 // ---- Runner ----
 
 pub const TestResult = struct {
@@ -677,7 +710,7 @@ pub const TestResult = struct {
 pub fn run_all() linksection(".text.user") TestResult {
     const baseline = sys_dump_free();
     var passed: u32 = 0;
-    const total: u32 = 8;
+    const total: u32 = 9;
     if (run_fork_stress(baseline)) passed += 1;
     if (run_kill(baseline)) passed += 1;
     if (run_exec(baseline)) passed += 1;
@@ -686,6 +719,7 @@ pub fn run_all() linksection(".text.user") TestResult {
     if (run_stack_overflow(baseline)) passed += 1;
     if (run_wild_pointer(baseline)) passed += 1;
     if (run_flibc(baseline)) passed += 1;
+    if (run_trace(baseline)) passed += 1;
     return .{ .passed = passed, .total = total };
 }
 
@@ -696,13 +730,13 @@ pub fn print_tally(passed: u32, total: u32) linksection(".text.user") void {
     sys_write(PASSED_SUFFIX);
 }
 
-// 0..8 cover the current 8-scenario suite; '?' guards against drift
+// 0..9 cover the current 9-scenario suite; '?' guards against drift
 // if new tests are added without updating this chain.
 //
 // Written as an if/else chain — NOT a switch and NOT an array index —
 // because the user image is copied to uva 0 at runtime; both a switch
 // jump table and a const array of pointers would bake in absolute
-// link-time addresses for D0..D8 and fault when dereferenced from
+// link-time addresses for D0..D9 and fault when dereferenced from
 // uva 0. Only PC-relative `adr` references survive the relocation,
 // which is what direct `sys_write(D_n)` produces.
 fn write_digit(n: u32) linksection(".text.user") void {
@@ -715,5 +749,6 @@ fn write_digit(n: u32) linksection(".text.user") void {
     else if (n == 6) sys_write(D6)
     else if (n == 7) sys_write(D7)
     else if (n == 8) sys_write(D8)
+    else if (n == 9) sys_write(D9)
     else sys_write(QMARK);
 }

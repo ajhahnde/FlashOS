@@ -20,6 +20,13 @@ extern fn irq_disable() void;
 extern fn free_page(p: u64) void;
 extern fn free_kernel_page(kp: u64) void;
 
+// Internal callers (schedule, timer_tick) reach _schedule_impl through
+// the patchable trampoline `_schedule` defined in
+// src/trace/patchable_trampolines.S. Routing in-file calls via the
+// trampoline is what allows tracing to fire on every scheduler entry,
+// not just from cross-module callers.
+extern fn _schedule() void;
+
 var init_task: TaskStruct = .{
     .priority = 1,
     .flags = KTHREAD,
@@ -39,7 +46,7 @@ export fn preempt_enable() void {
     current.?.preempt_count -= 1;
 }
 
-export fn _schedule() void {
+export fn _schedule_impl() void {
     preempt_disable();
     var next: usize = 0;
     var c: i64 = 0;
@@ -109,7 +116,7 @@ export fn exit_process() void {
 // Walk task[] for any child of `current`. If a zombie is found, free its
 // resources and return its pid. If children exist but none are zombies,
 // block (TASK_INTERRUPTIBLE) and retry on wake. Returns -1 if no children.
-export fn do_wait() i32 {
+export fn do_wait_impl() i32 {
     preempt_disable();
     while (true) {
         var have_children: bool = false;

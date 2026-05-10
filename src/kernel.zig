@@ -74,7 +74,7 @@ export fn kernel_process() void {
     }
 }
 
-export fn kernel_main(id: u64) void {
+export fn kernel_main_impl(id: u64) void {
     // core 0 initializes mini-uart and handles uart interrupts
     if (id == 0) {
         // Page allocator bitmap zeroed first so anything later in bring-up
