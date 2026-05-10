@@ -4,9 +4,9 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="420">
   </picture>
 
-  <h3>AArch64 bare-metal kernel for the Raspberry Pi 4 Model B and QEMU <code>-M virt</code>.</h3>
+<h3>AArch64 bare-metal kernel for the Raspberry Pi 4 Model B and QEMU <code>-M virt</code>.</h3>
 
-  <p>
+<p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml/badge.svg?branch=main" alt="CI"></a>
     <img src="https://img.shields.io/badge/version-v0.2.2-blue" alt="Version">
     <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
@@ -14,7 +14,7 @@
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey" alt="aarch64-elf">
   </p>
 
-  <p>
+<p>
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="REFERENCE.md"><b>Reference</b></a> ·
@@ -40,13 +40,13 @@ harness and a host-side unit test suite.
 
 ## Specifications
 
-|                  |                                          |
-| :--------------- | :--------------------------------------- |
-| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)         |
-| **Architecture** | AArch64 (ARMv8-A)                        |
-| **Languages**    | Zig + AArch64 assembly                   |
-| **Toolchain**    | Zig 0.16.0 + `aarch64-elf` binutils      |
-| **Targets**      | RPi 4B hardware, `qemu-system-aarch64 -M raspi4b`, *and* `qemu-system-aarch64 -M virt` |
+|                        |                                                                                             |
+| :--------------------- | :------------------------------------------------------------------------------------------ |
+| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                            |
+| **Architecture** | AArch64 (ARMv8-A)                                                                           |
+| **Languages**    | Zig + AArch64 assembly                                                                      |
+| **Toolchain**    | Zig 0.16.0 +`aarch64-elf` binutils                                                        |
+| **Targets**      | RPi 4B hardware,`qemu-system-aarch64 -M raspi4b`, *and* `qemu-system-aarch64 -M virt` |
 
 ## Features
 
@@ -138,21 +138,21 @@ serial-console setup.
 
 ## Build steps
 
-| Step                                      | What it does                                                |
-| :---------------------------------------- | :---------------------------------------------------------- |
-| `zig build` (or `-Dboard=rpi4b`)          | Default — Pi: `kernel8.img` + `armstub8.bin`                |
-| `zig build -Dboard=virt`                  | virt: `kernel8.img` only (no armstub)                       |
-| `zig build kernel`                        | Kernel image only                                           |
-| `zig build armstub` (rpi4b only)          | Armstub only                                                |
-| `zig build populate-syms`                 | Regenerate `src/symbol_area.S` from the linked ELF          |
-| `zig build deploy` (rpi4b only)           | Copy artefacts + RPi firmware to `$SD_BOOT`                 |
-| `zig build -Dboard=rpi4b run`             | Boot under `qemu-system-aarch64 -M raspi4b`                 |
-| `zig build -Dboard=virt run-virt`         | Boot under `qemu-system-aarch64 -M virt`                    |
-| `zig build -Dboard=virt test-virt`        | Boot virt, watchdog asserts `9/9 passed` (~1 s)             |
-| `zig build -Dboard=rpi4b test-rpi4b`      | Boot raspi4b, watchdog asserts `9/9 passed` (~5–8 min)      |
-| `zig build -Dboard=virt iso`              | Build a GRUB-EFI rescue ISO (virt only)                     |
-| `zig build test`                          | Host-side unit tests (page_alloc + elf)                     |
-| `zig build clean`                         | Remove `.zig-cache/` and `zig-out/`                         |
+| Step                                   | What it does                                         |
+| :------------------------------------- | :--------------------------------------------------- |
+| `zig build` (or `-Dboard=rpi4b`)   | Default — Pi:`kernel8.img` + `armstub8.bin`     |
+| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)               |
+| `zig build kernel`                   | Kernel image only                                    |
+| `zig build armstub` (rpi4b only)     | Armstub only                                         |
+| `zig build populate-syms`            | Regenerate `src/symbol_area.S` from the linked ELF |
+| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to `$SD_BOOT`        |
+| `zig build -Dboard=rpi4b run`        | Boot under `qemu-system-aarch64 -M raspi4b`        |
+| `zig build -Dboard=virt run-virt`    | Boot under `qemu-system-aarch64 -M virt`           |
+| `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts `9/9 passed`          |
+| `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts `9/9 passed`       |
+| `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)              |
+| `zig build test`                     | Host-side unit tests (page_alloc + elf)              |
+| `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`              |
 
 The default optimisation mode is `ReleaseSmall`. Override with
 `-Doptimize=ReleaseSafe` (or `Debug`, `ReleaseFast`).
@@ -192,4 +192,4 @@ Apache License, Version 2.0. See [License](LICENSE.md).
 
 ---
 
-[Next: Documentation →](<DOCUMENTATION.md>)
+[Next: Documentation →](DOCUMENTATION.md)

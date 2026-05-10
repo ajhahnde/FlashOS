@@ -1,5 +1,8 @@
-# Per-push CI: host unit tests + virt QEMU boot smoke. virt-only —
-# the rpi4b suite takes 5–8 min and is verified locally before tags.
+# Per-push CI: host unit tests + rpi4b build-only + virt QEMU boot
+# smoke. The rpi4b boot suite takes 5–8 min and is verified locally
+# before tags; the build-only step here catches link / cross-compile
+# breakage on the rpi4b path (board_asm_defs.inc, mini-uart, BCM2711
+# timer, armstub, …) for ~30 s of CI time without paying the boot cost.
 #
 # Toolchain note: build.zig hardcodes the `aarch64-elf-` binutils
 # prefix (matches the macOS Homebrew naming). Ubuntu's apt ships the
@@ -36,6 +39,9 @@ jobs:
 
       - name: host unit tests
         run: zig build test
+
+      - name: rpi4b build (compile + link only, no boot)
+        run: zig build -Dboard=rpi4b
 
       - name: virt QEMU boot smoke
         run: zig build -Dboard=virt test-virt

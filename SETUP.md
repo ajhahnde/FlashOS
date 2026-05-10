@@ -79,7 +79,7 @@ QEMU babysitting:
 
 ```bash
 zig build -Dboard=virt  test-virt   
-zig build -Dboard=rpi4b test-rpi4b  # (matches `run`)
+zig build -Dboard=rpi4b test-rpi4b  # (matches run)
 ```
 
 To verify the Pi byte-identity baseline before flashing the SD card
