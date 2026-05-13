@@ -121,6 +121,18 @@ pub fn build(b: *std.Build) void {
     pipe_mod.addImport("wait_queue", wait_queue_mod);
     pipe_mod.addImport("task_layout", task_layout_mod);
 
+    // Console RX layer (v0.3.0 step 1.3). 256-byte ring + WaitQueue
+    // backing sys_readConsole. Same named-module wiring as wait_queue
+    // / pipe so the kernel build and the host-test build share one
+    // task_layout Module instance.
+    const console_mod = b.createModule(.{
+        .root_source_file = b.path("src/console.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    console_mod.addImport("wait_queue", wait_queue_mod);
+    console_mod.addImport("task_layout", task_layout_mod);
+
     // ---- user-space image (compiled separately so we can match its
     // object file from the linker script as `*user_init*.o`) ----
     const user_init_mod = b.createModule(.{
@@ -187,6 +199,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("task_layout", task_layout_mod);
     kernel_mod.addImport("wait_queue", wait_queue_mod);
     kernel_mod.addImport("pipe", pipe_mod);
+    kernel_mod.addImport("console", console_mod);
 
     // ---- hello.elf — payload for [TEST] exec-elf ----
     // Built as a standalone aarch64-freestanding ET_EXEC, embedded into
@@ -453,7 +466,7 @@ pub fn build(b: *std.Build) void {
         run_step.dependOn(&qemu_cmd.step);
 
         // Self-validating QEMU run: the watchdog tails the serial log,
-        // exits 0 on `10/10 passed` (with the expected free-page-checkpoint
+        // exits 0 on `11/11 passed` (with the expected free-page-checkpoint
         // counts), exits 1 on `ERROR CAUGHT`, count drift, or timeout.
         // Same QEMU args as `run`. raspi4b is slow (~5–8 min); the
         // 720s timeout matches the historical bash-watchdog ceiling.
@@ -469,7 +482,7 @@ pub fn build(b: *std.Build) void {
         });
         test_rpi4b_cmd.step.dependOn(&install_kernel_img.step);
 
-        const test_rpi4b_step = b.step("test-rpi4b", "Boot raspi4b in QEMU and assert 10/10 passed");
+        const test_rpi4b_step = b.step("test-rpi4b", "Boot raspi4b in QEMU and assert 11/11 passed");
         test_rpi4b_step.dependOn(&test_rpi4b_cmd.step);
     }
 
@@ -503,7 +516,7 @@ pub fn build(b: *std.Build) void {
         });
         test_virt_cmd.step.dependOn(&install_kernel_img.step);
 
-        const test_virt_step = b.step("test-virt", "Boot virt in QEMU and assert 10/10 passed");
+        const test_virt_step = b.step("test-virt", "Boot virt in QEMU and assert 11/11 passed");
         test_virt_step.dependOn(&test_virt_cmd.step);
     }
 
@@ -605,4 +618,20 @@ pub fn build(b: *std.Build) void {
     pipe_test_mod.addImport("task_layout", task_layout_test_mod);
     const pipe_test = b.addTest(.{ .root_module = pipe_test_mod });
     test_step.dependOn(&b.addRunArtifact(pipe_test).step);
+
+    // console.zig — ring + WaitQueue host coverage (v0.3.0 step 1.3).
+    // Same wiring as pipe.zig: pull wait_queue + task_layout as named
+    // modules. No page allocator needed (the ring is BSS), so the
+    // shared stubs_obj alone satisfies the externs. stubs_obj is
+    // already pulled in transitively via wq_test_mod, so attaching it
+    // here too would double-define the host stubs.
+    const console_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/console.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    console_test_mod.addImport("wait_queue", wq_test_mod);
+    console_test_mod.addImport("task_layout", task_layout_test_mod);
+    const console_test = b.addTest(.{ .root_module = console_test_mod });
+    test_step.dependOn(&b.addRunArtifact(console_test).step);
 }

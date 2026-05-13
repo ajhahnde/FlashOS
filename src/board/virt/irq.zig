@@ -53,11 +53,12 @@ extern fn main_output(interface: i32, str: [*:0]const u8) void;
 extern fn main_output_u64(interface: i32, in: u64) void;
 extern fn main_output_char(interface: i32, ch: u8) void;
 extern fn main_output_process(interface: i32, p: *anyopaque) void;
-extern fn main_recv(interface: i32) u8;
 extern fn handle_generic_timer() void;
 extern fn timer_tick() void;
 extern fn get_core() u32;
 extern var current: *anyopaque;
+
+const console = @import("console");
 
 const entry_error_messages = [_][*:0]const u8{
     "SYNC_INVALID_EL1t",
@@ -173,9 +174,14 @@ export fn handle_irq() void {
             timer_tick();
         }
     } else if (intid == pl011_irq) {
-        main_output(MU, "PL011 Recv: ");
-        main_output_char(MU, main_recv(MU));
-        main_output(MU, "\n");
+        // Drain the PL011 RX FIFO in one IRQ slot. The line is
+        // level-triggered: while RXFE is clear and RXIM is set, the
+        // GIC keeps re-asserting — drain-to-empty quiesces it
+        // without an explicit ICR write. console_push ring-buffers
+        // the bytes and wakes the sys_readConsole waiter.
+        while (uart.pl011_rx_pending()) {
+            console.console_push(uart.mini_uart_recv());
+        }
         asm volatile ("msr S3_0_C12_C12_1, %[iar]"
             :
             : [iar] "r" (iar),

@@ -100,6 +100,18 @@ export fn mini_uart_recv() u8 {
     return @as(u8, @truncate(aux.mu_io));
 }
 
+/// True iff the mini-UART RX FIFO has at least one byte ready.
+/// mu_lsr bit 0 = "data ready" (BCM2837/2711 ARM-Peripherals §2.2.1).
+/// Non-blocking — feeds the IRQ-side drain loop in board/rpi4b/irq.zig
+/// so console_push can collect every queued byte in one IRQ slot
+/// instead of relying on the level-triggered AUX line re-firing.
+/// `export` (not `pub`) so irq.zig consumes it via the same
+/// `extern fn` discipline as the rest of the UART helpers.
+export fn mini_uart_rx_pending() bool {
+    const aux = getAuxRegs();
+    return (aux.mu_lsr & 1) != 0;
+}
+
 /// Send a null-terminated string via UART
 export fn mini_uart_send_string(str: [*:0]const u8) void {
     var i: usize = 0;

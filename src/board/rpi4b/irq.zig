@@ -37,12 +37,15 @@ extern fn main_output(interface: i32, str: [*:0]const u8) void;
 extern fn main_output_u64(interface: i32, in: u64) void;
 extern fn main_output_char(interface: i32, ch: u8) void;
 extern fn main_output_process(interface: i32, p: *anyopaque) void;
-extern fn main_recv(interface: i32) u8;
+extern fn mini_uart_recv() u8;
+extern fn mini_uart_rx_pending() bool;
 extern fn handle_sys_timer_1() void;
 extern fn handle_generic_timer() void;
 extern fn timer_tick() void;
 extern fn get_core() u32;
 extern var current: *anyopaque;
+
+const console = @import("console");
 
 const entry_error_messages = [_][*:0]const u8{
     "SYNC_INVALID_EL1t",
@@ -105,9 +108,15 @@ export fn handle_irq() void {
             eoirReg().* = iar;
         },
         VC_AUX_IRQ => {
-            main_output(MU, "Mini-UART Recv: ");
-            main_output_char(MU, main_recv(MU));
-            main_output(MU, "\n");
+            // Drain the entire RX FIFO in one IRQ slot. mini-UART FIFO
+            // is 8 bytes on BCM2711; popping just one per IRQ would
+            // lose bytes under sustained typing bursts since the level-
+            // triggered AUX line refires only once per CPU-mask/unmask
+            // round-trip. console_push ring-buffers + wakes the
+            // sys_readConsole waiter.
+            while (mini_uart_rx_pending()) {
+                console.console_push(mini_uart_recv());
+            }
             eoirReg().* = iar;
         },
         NS_PHYS_TIMER_IRQ => {

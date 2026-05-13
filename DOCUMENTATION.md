@@ -260,6 +260,13 @@ unclosed fds drop their refs cleanly. This is the only category of
 kernel page today whose lifetime is decoupled from the per-task
 mm sweep.
 
+The console RX layer (`src/console.zig`, v0.3.0 step 1.3) keeps a
+256-byte ring in BSS — no `get_free_page` allocation on the IRQ →
+syscall path. Single producer (IRQ-side `console_push`) / single
+consumer (`sys_readConsole`) by construction on single core; the
+per-ring `WaitQueue` blocks readers on the empty branch and wakes
+on each push.
+
 ## 4. Process management & scheduling
 
 - **Scheduler.** Priority round-robin in `src/sched.zig`. `_schedule`
@@ -298,7 +305,10 @@ indexed lookup in `sys_call_table` (`src/sys.zig`); data aborts call
 
 `enable_interrupt_gic` (`src/irq.zig`) wires interrupt IDs to a
 specific core. The kernel currently routes the auxiliary IRQ
-(mini-UART RX) and the non-secure physical timer.
+(mini-UART RX) and the non-secure physical timer. The mini-UART RX
+handler drains the FIFO to empty in a single IRQ slot and feeds each
+byte into the `console.zig` RX ring; the same pattern lives in the
+`virt` PL011 path. See `### Console subsystem` below.
 
 ### Syscall ABI
 
@@ -315,7 +325,7 @@ x0       return value
 
 The vector at `vbar_el1 + 0x400` (`el0_svc` in `src/entry.S`)
 indexes into `sys_call_table` (`src/sys.zig`) and `blr`s to the
-selected handler. `NR_SYSCALLS = 30` (in `src/asm_defs_common.inc`)
+selected handler. `NR_SYSCALLS = 31` (in `src/asm_defs_common.inc`)
 is enforced by a `b.hs` check on `x8`; out-of-range numbers fall
 through to the invalid-entry path.
 
@@ -341,20 +351,41 @@ mapping rather than chasing into UVA space.
 |   27   | `pipe_read` | `x0 = fd`, `x1 = u8 *buf`, `x2 = len` | `i64` bytes read (short read OK), `0` on EOF (last writer closed), `-1` on bad fd | Blocks (`TASK_INTERRUPTIBLE`) when the ring is empty and more writers exist; drains what's currently buffered on each call. FIXME(phase 4): no `copy_from_user`, bad pointers fault through `do_data_abort` |
 |   28   | `pipe_write` | `x0 = fd`, `x1 = const u8 *buf`, `x2 = len` | `i64` bytes pushed, `-1` on bad fd | Blocks when the ring is full and more readers exist. SIGPIPE territory (last reader closed) returns the short-write count for now; Phase 4 wires the signal path |
 |   29   | `pipe_close` | `x0 = fd`                            |                        `i32` 0 on hit, -1 on miss                        | Clears the fd slot, drops one ref on the Pipe; when `refs == 0` wakes both wait queues and frees the page |
+|   23   | `openConsole` | `x0 = mode` (0 = stdin, 1 = stdout) | `i32` 0/1 on success, -1 on bad mode | Synthetic fd, not installed in any fd-table. Pipe-fds and console-fds coexist separately until Phase 4 unifies them behind a single `read`/`write` dispatcher |
+|   24   | `readConsole` | `x0 = u8 *buf`, `x1 = len` | `i64` bytes read (short read OK), `0` on `len == 0` | Blocks on `console.rx_wq` when the ring is empty; drains up to `len` bytes per call. Phase 4 differentiates line vs raw via `O_NONBLOCK` and `sys_setConsoleMode` |
+|   25   | `setConsoleMode` | (none)                          | void                                                                        | Inert until Phase 4 (mode flips: line / raw / nonblocking) |
+|   26   | `closeConsole` | (none)                            | void                                                                        | Inert until Phase 4 (fd-table teardown) |
+|   30   | `console_inject` | `x0 = byte`                      | void                                                                        | **Debug only — not part of the stable ABI.** Pushes one byte into the kernel RX ring as if it had arrived on the UART. Powers deterministic `[TEST] console-echo` coverage on QEMU where there is no external input driver; symmetric to `sys_dump_free`. To be removed when Phase 4 lands a real host-input driver |
 
-`sys_dump_free` is a documented debug syscall, not part of the
-forward-stable ABI surface. It is retained because the in-kernel
-test harness depends on it.
+`sys_dump_free` and `sys_console_inject` are documented debug
+syscalls, not part of the forward-stable ABI surface. Both are
+retained because the in-kernel test harness depends on them.
 
-Slots `7..11` are reserved file/console stubs (`sys_openFile`,
+Slots `7..11` are reserved file stubs (`sys_openFile`,
 `sys_readFile`, `sys_writeFile`, `sys_seek`, `sys_closeFile`); they
 fall inside the dispatch range but return immediately with no effect.
 Slots `14..17` (`sys_mmap`, `sys_munmap`, `sys_mlock`, `sys_munlock`)
 and `19..22` (socket / IPC stubs) are present in `src/sys.zig` for
-forward compatibility but return immediately. Slots `23..26` are
-reserved for the Phase 1.3 console RX ABI. Slot `18` is the active
-`sys_pipe`; slots `27..29` carry the rest of the pipe ABI
-(`sys_pipe_read` / `_write` / `_close`).
+forward compatibility but return immediately. Slot `18` is the active
+`sys_pipe`; slots `23..26` carry the Phase 1.3 console RX ABI
+(`sys_openConsole` / `_readConsole` / `_setConsoleMode` /
+`_closeConsole`); slots `27..29` carry the rest of the pipe ABI
+(`sys_pipe_read` / `_write` / `_close`). Slot `30`
+(`sys_console_inject`) is the debug-only host-input shim.
+
+### Console subsystem (Phase 1.3)
+
+The board IRQ handler (`src/board/{rpi4b,virt}/irq.zig`) drains the
+UART RX FIFO on every IRQ slot and pushes each byte into a 256-byte
+BSS-resident ring in `src/console.zig` via `console_push`. The ring
+is single-producer (IRQ) / single-consumer (syscall) by construction
+on single core. `console_push` wakes the per-ring `WaitQueue`
+(`src/wait_queue.zig`); `sys_readConsole` blocks on it when the ring
+is empty and drains a short read on wake. Echo policy lives in
+user space — the kernel does *not* loop the byte back through the
+TX path. Phase 4 will unify `console_read` and `pipe_read` behind a
+single `sys_read(fd, buf, len)` once the fd-table grows tagged
+pointers.
 
 ## 6. Kernel symbol table (ksyms)
 
@@ -404,7 +435,7 @@ above-range PA bounds-check, and `get_kernel_page` round-trip — 7/7
 passing on host.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.zig`).
-PID 1 enters `run_all()`, which exercises nine scenarios on real
+PID 1 enters `run_all()`, which exercises eleven scenarios on real
 kernel state:
 
 - `fork-stress` — 3 × 5 fork/reap rounds with per-round and final
@@ -428,6 +459,18 @@ kernel state:
   + 32-byte malloc + pattern verify + `exit`, parent reaps. Validates
     flibc's printf / bump-allocator / exit layers end-to-end through the
     ELF loader.
+- `pipe` — fork a child, hand a 16-byte payload through an anonymous
+  pipe (parent reads, child writes), close both ends, parent reaps.
+  Validates `sys_pipe` allocation, `fork`-dup of `fd_table`,
+  `sys_pipe_read` / `_write` round-trip, and `sys_pipe_close` ref
+  drop + page free.
+- `console-echo` — `sys_openConsole(0/1)` ABI smoke, fork a child
+  that injects 8 deterministic bytes (`0xC0..0xC7`) via
+  `sys_console_inject` after a short delay, parent blocks in
+  `sys_readConsole` on the empty ring (covers the
+  `console.rx_wq.wait` path), drains via short reads until the
+  payload is collected, then byte-compare. Free-page baseline still
+  the [PASS] gate.
 - `trace` — four sequential fork/exit/wait cycles, exercising the
   patched trampolines `copy_process` (fork), `do_wait` (wait), and
   `_schedule` (timer-tick + explicit yield). On Pi the trampolines'
@@ -440,7 +483,7 @@ Each scenario emits `[TEST] name` … `[PASS] name` (or `[FAIL]`), and
 `run_all` prints a final `X/Y passed` tally. The harness runs
 identically under QEMU (`zig build -Dboard=virt run-virt` /
 `-Dboard=rpi4b run`) and on real hardware (`./build.sh` → SD-flash →
-`picapture`); a green run lands `9/9 passed` with 13 `0xbbff9`
+`picapture`); a green run lands `11/11 passed` with 15 `0xbbff9`
 checkpoints and 0 `ERROR CAUGHT` on both boards.
 
 ### Free-page invariants
@@ -456,10 +499,11 @@ leak-free:
   setup (user image + page-table chain + stack + bookkeeping). Every
   leak-free scenario must end at this same value.
 
-A full QEMU or Pi run prints 14 `free_pages:` lines: 1 kernel boot
+A full QEMU or Pi run prints 16 `free_pages:` lines: 1 kernel boot
 baseline + 1 user-space baseline + 1 checkpoint per fork-stress round
 (3 rounds) + 1 fork-stress final + 1 each for kill / exec / exec-elf
-/ brk / stack-overflow / wild-pointer / flibc / trace.
+/ brk / stack-overflow / wild-pointer / flibc / pipe / console-echo /
+trace.
 
 ```text
 free_pages: 00000000000bc000   (kernel boot baseline)
@@ -475,6 +519,8 @@ free_pages: 00000000000bbff9   (brk)
 free_pages: 00000000000bbff9   (stack-overflow)
 free_pages: 00000000000bbff9   (wild-pointer)
 free_pages: 00000000000bbff9   (flibc)
+free_pages: 00000000000bbff9   (pipe)
+free_pages: 00000000000bbff9   (console-echo)
 free_pages: 00000000000bbff9   (trace)
 ```
 
@@ -494,7 +540,7 @@ checkpoint.
 | `kill ok`, `exec'd` | Per-scenario progress prints                                        |
 
 Greens require: `X == Y`, all `[PASS]` no `[FAIL]`, 0 `ERROR CAUGHT`,
-thirteen `0xbbff9` checkpoints, and the `SUCCESS` marker present.
+fifteen `0xbbff9` checkpoints, and the `SUCCESS` marker present.
 
 ## 9. Build artefacts
 

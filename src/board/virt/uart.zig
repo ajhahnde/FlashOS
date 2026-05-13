@@ -80,10 +80,20 @@ export fn mini_uart_send(c: u8) void {
 }
 
 /// Receive a single character via PL011.
-export fn mini_uart_recv() u8 {
+/// `pub` (in addition to `export`) so board/virt/irq.zig can call it
+/// alongside `pl011_rx_pending` via the `uart` named import — matches
+/// the rest of the helpers reachable through that handle.
+pub export fn mini_uart_recv() u8 {
     const regs = getRegs();
     while ((regs.fr & FR_RXFE) != 0) {}
     return @as(u8, @truncate(regs.dr));
+}
+
+/// True iff PL011 has at least one RX byte available.
+/// FR bit 4 (RXFE = receive FIFO empty) clear → byte present.
+/// Non-blocking; feeds the IRQ-side drain loop in board/virt/irq.zig.
+pub fn pl011_rx_pending() bool {
+    return (getRegs().fr & FR_RXFE) == 0;
 }
 
 /// Send a null-terminated string via PL011, expanding LF to CRLF.

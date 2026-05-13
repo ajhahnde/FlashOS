@@ -12,7 +12,7 @@ const tests = @import("kernel_tests.zig");
 const PID1_MSG: [*:0]const u8 linksection(".rodata.user") = "pid 1 in user space\n";
 
 export fn user_process() linksection(".text.user") noreturn {
-    tests.sys_write(PID1_MSG);
+    tests.sys_writeConsole(PID1_MSG);
     const result = tests.run_all();
     tests.print_tally(result.passed, result.total);
     tests.sys_exit();

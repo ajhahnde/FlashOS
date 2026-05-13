@@ -8,6 +8,7 @@ const layout = @import("task_layout");
 const defs = @import("syscall_defs");
 const user_layout = @import("user_layout");
 const pipe_mod = @import("pipe");
+const console = @import("console");
 const TaskStruct = layout.TaskStruct;
 const TASK_RUNNING = layout.TASK_RUNNING;
 const TASK_ZOMBIE = layout.TASK_ZOMBIE;
@@ -271,13 +272,59 @@ export fn sys_semget() void {}
 export fn sys_shmget() void {}
 
 // Device Management
-export fn sys_openConsole() void {}
-export fn sys_readConsole() void {}
+//
+// Console ABI (v0.3.0 step 1.3). Pipe-fds and console-fds coexist
+// separately until phase 4 unifies both behind a single
+// read(fd,buf,len) / write(fd,buf,len) dispatcher backed by the
+// fd-table tagged-pointer scheme.
+//
+// FIXME(phase 4): collapse the parallel console / pipe ABI families
+// once the fd-table grows tagged pointers — sys_readConsole and
+// sys_pipe_read should fold into a single dispatch keyed on the
+// fd's type tag, same for write/close. Until then the user picks
+// the right wrapper by hand.
+//
+// sys_openConsole returns a synthetic fd: 0 = stdin, 1 = stdout,
+// negative on bad mode. Not installed in any fd_table — phase 4
+// unifies. Until then user code passes the returned fd straight
+// back into sys_readConsole / sys_writeConsole as a no-op hint
+// (the kernel-side handlers don't look at it).
+export fn sys_openConsole(mode: i32) i32 {
+    return switch (mode) {
+        0 => 0,
+        1 => 1,
+        else => -1,
+    };
+}
+
+// Blocks until at least one byte is available, then drains up to
+// `len` bytes (short reads — see src/console.zig:console_read).
+// Returns the count copied. i64 return matches sys_pipe_read so the
+// phase-4 unified `sys_read` can hand both ends through the same
+// signature.
+export fn sys_readConsole(buf: u64, len: u64) i64 {
+    return console.console_read(@ptrFromInt(buf), len);
+}
+
 export fn sys_writeConsole(buf: [*:0]const u8) void {
     main_output(MU, buf);
 }
+
+// Inert stubs — phase 4 wires real mode flips (line / raw / O_NONBLOCK)
+// and fd-table teardown once the unified read/write dispatcher lands.
 export fn sys_setConsoleMode() void {}
 export fn sys_closeConsole() void {}
+
+// FIXME(phase 4/8): debug-only — not part of the stable ABI.
+// Pushes one byte into the kernel RX ring as if it had arrived on
+// the UART. Powers deterministic [TEST] console-echo coverage on
+// QEMU where there is no external input driver, and remains
+// permanently mounted as a debug surface analogous to
+// sys_dump_free. Document as debug-only in DOCUMENTATION.md §5 and
+// remove when phase 4 lands a real host-input driver.
+export fn sys_console_inject(byte: u64) void {
+    console.console_test_push(@truncate(byte));
+}
 
 /// Syscall dispatch table — referenced from entry.S (`adr x27, sys_call_table`).
 /// Slots 0..6 are the user-facing ABI; their slot ↔ constant binding is
@@ -291,7 +338,7 @@ export fn sys_closeConsole() void {}
 /// syscalls — those slots stay positional until they get their own
 /// SYS_* constant in lib/syscall_defs.zig.
 export var sys_call_table = blk: {
-    var t = [_]?*const anyopaque{null} ** 30;
+    var t = [_]?*const anyopaque{null} ** 31;
 
     t[defs.SYS_WRITE]     = @ptrCast(&sys_writeConsole);
     t[defs.SYS_FORK]      = @ptrCast(&sys_fork);
@@ -320,14 +367,16 @@ export var sys_call_table = blk: {
     t[21] = @ptrCast(&sys_semget);
     t[22] = @ptrCast(&sys_shmget);
 
-    t[23] = @ptrCast(&sys_openConsole);
-    t[24] = @ptrCast(&sys_readConsole);
-    t[25] = @ptrCast(&sys_setConsoleMode);
-    t[26] = @ptrCast(&sys_closeConsole);
+    t[defs.SYS_OPEN_CONSOLE]      = @ptrCast(&sys_openConsole);
+    t[defs.SYS_READ_CONSOLE]      = @ptrCast(&sys_readConsole);
+    t[defs.SYS_SET_CONSOLE_MODE]  = @ptrCast(&sys_setConsoleMode);
+    t[defs.SYS_CLOSE_CONSOLE]     = @ptrCast(&sys_closeConsole);
 
     t[defs.SYS_PIPE_READ]  = @ptrCast(&sys_pipe_read);
     t[defs.SYS_PIPE_WRITE] = @ptrCast(&sys_pipe_write);
     t[defs.SYS_PIPE_CLOSE] = @ptrCast(&sys_pipe_close);
+
+    t[defs.SYS_CONSOLE_INJECT] = @ptrCast(&sys_console_inject);
 
     break :blk t;
 };

@@ -2,17 +2,21 @@
 # Self-validating QEMU runner for `zig build test-virt` / `test-rpi4b`.
 #
 # Spawns the supplied QEMU command, tails its serial log, and exits:
-#   * 0  on `10/10 passed` with the expected free-page-checkpoint counts
+#   * 0  on `11/11 passed` with the expected free-page-checkpoint counts
 #   * 1  on `ERROR CAUGHT`, drifted counts, or watchdog timeout
 #
 # Args: TIMEOUT_SECS QEMU_BINARY [QEMU_ARG ...]
 #
-# Expected success picture (verified against virt boot 2026-05-13 — the
-# v0.3.0 step 1.2 pipe scenario added one more reap checkpoint):
-#   * `10/10 passed`
-#   * 14 × `free_pages: 00000000000bbff9`  (test free-page checkpoints)
+# Expected success picture (v0.3.0 step 1.3 — console-echo scenario):
+#   * `11/11 passed`
+#   * N × `free_pages: 00000000000bbff9`  (test free-page checkpoints)
 #   *  1 × `free_pages: 00000000000bc000`  (boot baseline)
 #   *  0 × `ERROR CAUGHT`
+# The N for the bbff9 checkpoint is read from the first green run.
+# console_read uses a BSS-resident ring, so the scenario adds one
+# more bbff9 checkpoint (the run_console_echo
+# `sys_dump_free() != baseline` gate) on top of the 14 from step 1.2,
+# giving 15 in total.
 # (`main_output_u64` prints u64 as 16-digit zero-padded hex.)
 set -u
 
@@ -46,7 +50,7 @@ while kill -0 "$QEMU_PID" 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         break
     fi
-    if grep -qF "10/10 passed" "$LOG"; then
+    if grep -qF "11/11 passed" "$LOG"; then
         status=passed
         break
     fi
@@ -69,8 +73,8 @@ errors=$(grep -cF "ERROR CAUGHT" "$LOG" || true)
 ok_chk=$(grep -cF "free_pages: 00000000000bbff9" "$LOG" || true)
 ok_base=$(grep -cF "free_pages: 00000000000bc000" "$LOG" || true)
 
-if [ "$errors" -ne 0 ] || [ "$ok_chk" -ne 14 ] || [ "$ok_base" -ne 1 ]; then
-    echo "FAIL (counter drift): ERROR_CAUGHT=$errors 0xbbff9=$ok_chk (want 14) 0xbc000=$ok_base (want 1)" >&2
+if [ "$errors" -ne 0 ] || [ "$ok_chk" -ne 15 ] || [ "$ok_base" -ne 1 ]; then
+    echo "FAIL (counter drift): ERROR_CAUGHT=$errors 0xbbff9=$ok_chk (want 15) 0xbc000=$ok_base (want 1)" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

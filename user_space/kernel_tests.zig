@@ -20,11 +20,43 @@
 
 const defs = @import("syscall_defs");
 
-pub fn sys_write(buf: [*:0]const u8) linksection(".text.user") void {
+// Renamed from sys_write in v0.3.0 step 1.3 — slot 0 / SYS_WRITE
+// constant stay stable (phase 8 decides whether the slot becomes the
+// generic write(fd,buf,len)). The user-side rename is mechanical and
+// matches the kernel-side handler name (src/sys.zig:sys_writeConsole).
+pub fn sys_writeConsole(buf: [*:0]const u8) linksection(".text.user") void {
     asm volatile ("svc #0"
         :
         : [nr] "{x8}" (defs.SYS_WRITE),
           [buf] "{x0}" (buf),
+        : .{ .memory = true });
+}
+
+pub fn sys_openConsole(mode: i32) linksection(".text.user") i32 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i32),
+        : [nr] "{x8}" (defs.SYS_OPEN_CONSOLE),
+          [mode] "{x0}" (mode),
+        : .{ .memory = true });
+}
+
+pub fn sys_readConsole(buf: [*]u8, len: u64) linksection(".text.user") i64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i64),
+        : [nr] "{x8}" (defs.SYS_READ_CONSOLE),
+          [buf] "{x0}" (buf),
+          [len] "{x1}" (len),
+        : .{ .memory = true });
+}
+
+// FIXME(phase 4/8): debug-only — see lib/syscall_defs.zig
+// SYS_CONSOLE_INJECT note. Powers the QEMU-side deterministic
+// console-echo scenario.
+pub fn sys_console_inject(byte: u8) linksection(".text.user") void {
+    asm volatile ("svc #0"
+        :
+        : [nr] "{x8}" (defs.SYS_CONSOLE_INJECT),
+          [b] "{x0}" (byte),
         : .{ .memory = true });
 }
 
@@ -174,6 +206,11 @@ const PASS_PIPE: [*:0]const u8 linksection(".rodata.user") = "[PASS] pipe\n";
 const FAIL_PIPE: [*:0]const u8 linksection(".rodata.user") = "[FAIL] pipe\n";
 const PIPE_OK_MSG: [*:0]const u8 linksection(".rodata.user") = "pipe ok\n";
 const PIPE_BAD_MSG: [*:0]const u8 linksection(".rodata.user") = "pipe bad\n";
+const TEST_CONSOLE_ECHO: [*:0]const u8 linksection(".rodata.user") = "[TEST] console-echo\n";
+const PASS_CONSOLE_ECHO: [*:0]const u8 linksection(".rodata.user") = "[PASS] console-echo\n";
+const FAIL_CONSOLE_ECHO: [*:0]const u8 linksection(".rodata.user") = "[FAIL] console-echo\n";
+const ECHO_OK_MSG: [*:0]const u8 linksection(".rodata.user") = "echo ok\n";
+const ECHO_BAD_MSG: [*:0]const u8 linksection(".rodata.user") = "echo bad\n";
 
 const SLASH: [*:0]const u8 linksection(".rodata.user") = "/";
 const PASSED_SUFFIX: [*:0]const u8 linksection(".rodata.user") = " passed\n";
@@ -203,8 +240,8 @@ const CHILD_ITERS: u32 = 10;
 fn loop(str: [*:0]const u8, iters: u32) linksection(".text.user") noreturn {
     var i: u32 = 0;
     while (i < iters) : (i += 1) {
-        sys_write(str);
-        sys_write(NEWLINE);
+        sys_writeConsole(str);
+        sys_writeConsole(NEWLINE);
         var d: u32 = 100_000;
         while (d > 0) : (d -= 1) {}
     }
@@ -215,8 +252,8 @@ fn loop(str: [*:0]const u8, iters: u32) linksection(".text.user") noreturn {
 // reaches sys_exit; the parent's sys_kill is what flips it to TASK_ZOMBIE.
 fn loop_forever(str: [*:0]const u8) linksection(".text.user") noreturn {
     while (true) {
-        sys_write(str);
-        sys_write(NEWLINE);
+        sys_writeConsole(str);
+        sys_writeConsole(NEWLINE);
         var d: u32 = 100_000;
         while (d > 0) : (d -= 1) {}
     }
@@ -226,7 +263,7 @@ fn loop_forever(str: [*:0]const u8) linksection(".text.user") noreturn {
 //
 // Raw aarch64 instructions plus an inline string. On entry (post-exec)
 // PC = uva 0, x0..x30 = 0, sp = USER_SP_INIT_POS. Sequence:
-// sys_write(adr 1f) ; sys_exit. The label `1f` resolves PC-relative
+// sys_writeConsole(adr 1f) ; sys_exit. The label `1f` resolves PC-relative
 // inside the blob, so the new code page (the only thing mapped at
 // uva 0 after exec) is fully self-contained. `export` keeps the
 // optimizer from tree-shaking it; the symbol itself is never called,
@@ -415,7 +452,7 @@ fn flibc_demo_elf_kend_val() linksection(".text.user") u64 {
 // ---- Scenarios ----
 
 fn run_fork_stress(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_FORK_STRESS);
+    sys_writeConsole(TEST_FORK_STRESS);
     var ok = true;
 
     var round: u32 = 0;
@@ -424,41 +461,41 @@ fn run_fork_stress(baseline: u64) linksection(".text.user") bool {
         while (spawned < NUM_CHILDREN) : (spawned += 1) {
             const pid = sys_fork();
             if (pid < 0) {
-                sys_write(FORK_ERR_MSG);
+                sys_writeConsole(FORK_ERR_MSG);
                 ok = false;
                 break;
             }
             if (pid == 0) {
                 loop(CHILD_TAG, CHILD_ITERS);
             }
-            sys_write(PARENT_TAG);
-            sys_write(NEWLINE);
+            sys_writeConsole(PARENT_TAG);
+            sys_writeConsole(NEWLINE);
         }
 
         var reaped: u32 = 0;
         while (reaped < NUM_CHILDREN) : (reaped += 1) {
             _ = sys_wait();
-            sys_write(PARENT_TAG);
-            sys_write(NEWLINE);
+            sys_writeConsole(PARENT_TAG);
+            sys_writeConsole(NEWLINE);
         }
 
         if (sys_dump_free() != baseline) ok = false;
     }
 
-    sys_write(DONE_MSG);
+    sys_writeConsole(DONE_MSG);
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(if (ok) PASS_FORK_STRESS else FAIL_FORK_STRESS);
+    sys_writeConsole(if (ok) PASS_FORK_STRESS else FAIL_FORK_STRESS);
     return ok;
 }
 
 fn run_kill(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_KILL);
+    sys_writeConsole(TEST_KILL);
     var ok = true;
 
     const kill_pid = sys_fork();
     if (kill_pid < 0) {
-        sys_write(FORK_ERR_MSG);
-        sys_write(FAIL_KILL);
+        sys_writeConsole(FORK_ERR_MSG);
+        sys_writeConsole(FAIL_KILL);
         return false;
     }
     if (kill_pid == 0) {
@@ -471,19 +508,19 @@ fn run_kill(baseline: u64) linksection(".text.user") bool {
     _ = sys_wait();
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(KILL_OK_MSG);
-    sys_write(if (ok) PASS_KILL else FAIL_KILL);
+    sys_writeConsole(KILL_OK_MSG);
+    sys_writeConsole(if (ok) PASS_KILL else FAIL_KILL);
     return ok;
 }
 
 fn run_exec(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_EXEC);
+    sys_writeConsole(TEST_EXEC);
     var ok = true;
 
     const exec_pid = sys_fork();
     if (exec_pid < 0) {
-        sys_write(FORK_ERR_MSG);
-        sys_write(FAIL_EXEC);
+        sys_writeConsole(FORK_ERR_MSG);
+        sys_writeConsole(FAIL_EXEC);
         return false;
     }
     if (exec_pid == 0) {
@@ -496,8 +533,8 @@ fn run_exec(baseline: u64) linksection(".text.user") bool {
     _ = sys_wait();
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(EXEC_OK_MSG);
-    sys_write(if (ok) PASS_EXEC else FAIL_EXEC);
+    sys_writeConsole(EXEC_OK_MSG);
+    sys_writeConsole(if (ok) PASS_EXEC else FAIL_EXEC);
     return ok;
 }
 
@@ -509,13 +546,13 @@ fn run_exec(baseline: u64) linksection(".text.user") bool {
 // count returns to baseline — proving the loader's allocations were
 // fully cleaned up by do_wait.
 fn run_exec_elf(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_EXEC_ELF);
+    sys_writeConsole(TEST_EXEC_ELF);
     var ok = true;
 
     const exec_pid = sys_fork();
     if (exec_pid < 0) {
-        sys_write(FORK_ERR_MSG);
-        sys_write(FAIL_EXEC_ELF);
+        sys_writeConsole(FORK_ERR_MSG);
+        sys_writeConsole(FAIL_EXEC_ELF);
         return false;
     }
     if (exec_pid == 0) {
@@ -528,8 +565,8 @@ fn run_exec_elf(baseline: u64) linksection(".text.user") bool {
     _ = sys_wait();
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(EXEC_ELF_OK_MSG);
-    sys_write(if (ok) PASS_EXEC_ELF else FAIL_EXEC_ELF);
+    sys_writeConsole(EXEC_ELF_OK_MSG);
+    sys_writeConsole(if (ok) PASS_EXEC_ELF else FAIL_EXEC_ELF);
     return ok;
 }
 
@@ -551,13 +588,13 @@ const NUM_BRK_PAGES: u32 = 16;
 const PAGE_SIZE_USER: u64 = 4096;
 
 fn run_brk(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_BRK);
+    sys_writeConsole(TEST_BRK);
     var ok = true;
 
     const brk_pid = sys_fork();
     if (brk_pid < 0) {
-        sys_write(FORK_ERR_MSG);
-        sys_write(FAIL_BRK);
+        sys_writeConsole(FORK_ERR_MSG);
+        sys_writeConsole(FAIL_BRK);
         return false;
     }
     if (brk_pid == 0) {
@@ -588,7 +625,7 @@ fn run_brk(baseline: u64) linksection(".text.user") bool {
             const expected: u8 = @as(u8, @truncate(page)) +% 0x42;
             if (ptr.* != expected) read_ok = false;
         }
-        sys_write(if (read_ok) BRK_CHILD_OK_MSG else BRK_CHILD_BAD_MSG);
+        sys_writeConsole(if (read_ok) BRK_CHILD_OK_MSG else BRK_CHILD_BAD_MSG);
 
         // Shrink back to the original break — exercises
         // unmap_user_range so the per-process page balance returns to
@@ -601,8 +638,8 @@ fn run_brk(baseline: u64) linksection(".text.user") bool {
     _ = sys_wait();
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(BRK_OK_MSG);
-    sys_write(if (ok) PASS_BRK else FAIL_BRK);
+    sys_writeConsole(BRK_OK_MSG);
+    sys_writeConsole(if (ok) PASS_BRK else FAIL_BRK);
     return ok;
 }
 
@@ -622,13 +659,13 @@ fn run_brk(baseline: u64) linksection(".text.user") bool {
 // (UVA-0) blob mapping, sys_exec then frees it and rebuilds the
 // address space around the stackbomb ELF.
 fn run_stack_overflow(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_STACK_OVERFLOW);
+    sys_writeConsole(TEST_STACK_OVERFLOW);
     var ok = true;
 
     const ovf_pid = sys_fork();
     if (ovf_pid < 0) {
-        sys_write(FORK_ERR_MSG);
-        sys_write(FAIL_STACK_OVERFLOW);
+        sys_writeConsole(FORK_ERR_MSG);
+        sys_writeConsole(FAIL_STACK_OVERFLOW);
         return false;
     }
     if (ovf_pid == 0) {
@@ -641,7 +678,7 @@ fn run_stack_overflow(baseline: u64) linksection(".text.user") bool {
     _ = sys_wait();
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(if (ok) PASS_STACK_OVERFLOW else FAIL_STACK_OVERFLOW);
+    sys_writeConsole(if (ok) PASS_STACK_OVERFLOW else FAIL_STACK_OVERFLOW);
     return ok;
 }
 
@@ -656,13 +693,13 @@ fn run_stack_overflow(baseline: u64) linksection(".text.user") bool {
 // thin sys_* passthroughs already covered by run_fork_stress and
 // run_exec_elf via the kernel's syscall path.
 fn run_flibc(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_FLIBC);
+    sys_writeConsole(TEST_FLIBC);
     var ok = true;
 
     const flibc_pid = sys_fork();
     if (flibc_pid < 0) {
-        sys_write(FORK_ERR_MSG);
-        sys_write(FAIL_FLIBC);
+        sys_writeConsole(FORK_ERR_MSG);
+        sys_writeConsole(FAIL_FLIBC);
         return false;
     }
     if (flibc_pid == 0) {
@@ -675,7 +712,7 @@ fn run_flibc(baseline: u64) linksection(".text.user") bool {
     _ = sys_wait();
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(if (ok) PASS_FLIBC else FAIL_FLIBC);
+    sys_writeConsole(if (ok) PASS_FLIBC else FAIL_FLIBC);
     return ok;
 }
 
@@ -692,13 +729,13 @@ fn run_flibc(baseline: u64) linksection(".text.user") bool {
 // do_data_abort's region classification, which keys off mm.brk + the
 // static layout constants.
 fn run_wild_pointer(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_WILD_POINTER);
+    sys_writeConsole(TEST_WILD_POINTER);
     var ok = true;
 
     const wp_pid = sys_fork();
     if (wp_pid < 0) {
-        sys_write(FORK_ERR_MSG);
-        sys_write(FAIL_WILD_POINTER);
+        sys_writeConsole(FORK_ERR_MSG);
+        sys_writeConsole(FAIL_WILD_POINTER);
         return false;
     }
     if (wp_pid == 0) {
@@ -711,7 +748,7 @@ fn run_wild_pointer(baseline: u64) linksection(".text.user") bool {
     _ = sys_wait();
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(if (ok) PASS_WILD_POINTER else FAIL_WILD_POINTER);
+    sys_writeConsole(if (ok) PASS_WILD_POINTER else FAIL_WILD_POINTER);
     return ok;
 }
 
@@ -733,12 +770,12 @@ fn run_wild_pointer(baseline: u64) linksection(".text.user") bool {
 const PIPE_PAYLOAD_LEN: u64 = 16;
 
 fn run_pipe(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_PIPE);
+    sys_writeConsole(TEST_PIPE);
     var ok = true;
 
     const fds = sys_pipe();
     if (fds < 0) {
-        sys_write(FAIL_PIPE);
+        sys_writeConsole(FAIL_PIPE);
         return false;
     }
     const rfd: i32 = @intCast(fds & 0xffff_ffff);
@@ -748,8 +785,8 @@ fn run_pipe(baseline: u64) linksection(".text.user") bool {
     if (pid < 0) {
         _ = sys_pipe_close(rfd);
         _ = sys_pipe_close(wfd);
-        sys_write(FORK_ERR_MSG);
-        sys_write(FAIL_PIPE);
+        sys_writeConsole(FORK_ERR_MSG);
+        sys_writeConsole(FAIL_PIPE);
         return false;
     }
     if (pid == 0) {
@@ -788,13 +825,78 @@ fn run_pipe(baseline: u64) linksection(".text.user") bool {
         const expected: u8 = 0xA0 +% @as(u8, @intCast(ci));
         if (in[ci] != expected) ok = false;
     }
-    sys_write(if (ok) PIPE_OK_MSG else PIPE_BAD_MSG);
+    sys_writeConsole(if (ok) PIPE_OK_MSG else PIPE_BAD_MSG);
 
     _ = sys_pipe_close(rfd);
     _ = sys_wait();
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(if (ok) PASS_PIPE else FAIL_PIPE);
+    sys_writeConsole(if (ok) PASS_PIPE else FAIL_PIPE);
+    return ok;
+}
+
+// Drives the console RX path end-to-end (v0.3.0 step 1.3). Forks one
+// child that injects ECHO_LEN bytes via SYS_CONSOLE_INJECT after a
+// short delay; the parent blocks in sys_readConsole on the empty
+// ring, the WaitQueue wake fires on each push, and the parent loops
+// because console_read short-returns. The injected pattern
+// (0xC0..0xC7) is distinct enough that a truncation or out-of-order
+// drain shows up immediately in the byte compare. sys_openConsole(0)
+// / (1) are exercised to lock in the ABI even though the returned fd
+// is purely synthetic until phase 4 unifies fd-tables.
+//
+// Test free-page baseline gate matches the other reap-based
+// scenarios; the ring buffer lives in BSS, so the baseline must be
+// fully restored after the child is reaped.
+const ECHO_LEN: u64 = 8;
+
+fn run_console_echo(baseline: u64) linksection(".text.user") bool {
+    sys_writeConsole(TEST_CONSOLE_ECHO);
+    var ok = true;
+
+    if (sys_openConsole(0) != 0) ok = false;
+    if (sys_openConsole(1) != 1) ok = false;
+
+    const pid = sys_fork();
+    if (pid < 0) {
+        sys_writeConsole(FAIL_CONSOLE_ECHO);
+        return false;
+    }
+    if (pid == 0) {
+        // Delay so the parent reaches sys_readConsole and hits the
+        // empty-ring branch first — that's the WaitQueue path we
+        // want to cover. The same loop length is used by run_kill;
+        // single-core scheduling makes that an upper bound for the
+        // parent to enter wait state.
+        var d: u32 = 500_000;
+        while (d > 0) : (d -= 1) {}
+        var i: u32 = 0;
+        while (i < ECHO_LEN) : (i += 1) {
+            sys_console_inject(0xC0 +% @as(u8, @intCast(i)));
+        }
+        sys_exit();
+    }
+
+    var in: [8]u8 = undefined;
+    var got: u64 = 0;
+    while (got < ECHO_LEN) {
+        const n = sys_readConsole(@ptrCast(&in[got]), ECHO_LEN - got);
+        if (n <= 0) {
+            ok = false;
+            break;
+        }
+        got += @intCast(n);
+    }
+    var i: u32 = 0;
+    while (i < ECHO_LEN) : (i += 1) {
+        const expected: u8 = 0xC0 +% @as(u8, @intCast(i));
+        if (in[i] != expected) ok = false;
+    }
+    sys_writeConsole(if (ok) ECHO_OK_MSG else ECHO_BAD_MSG);
+    _ = sys_wait();
+
+    if (sys_dump_free() != baseline) ok = false;
+    sys_writeConsole(if (ok) PASS_CONSOLE_ECHO else FAIL_CONSOLE_ECHO);
     return ok;
 }
 
@@ -807,14 +909,14 @@ fn run_pipe(baseline: u64) linksection(".text.user") bool {
 // Pass criterion mirrors the other reap-based scenarios: free-page count
 // after the loop equals the suite baseline.
 fn run_trace(baseline: u64) linksection(".text.user") bool {
-    sys_write(TEST_TRACE);
+    sys_writeConsole(TEST_TRACE);
     var ok = true;
 
     var i: u32 = 0;
     while (i < 4) : (i += 1) {
         const pid = sys_fork();
         if (pid < 0) {
-            sys_write(FORK_ERR_MSG);
+            sys_writeConsole(FORK_ERR_MSG);
             ok = false;
             break;
         }
@@ -823,7 +925,7 @@ fn run_trace(baseline: u64) linksection(".text.user") bool {
     }
 
     if (sys_dump_free() != baseline) ok = false;
-    sys_write(if (ok) PASS_TRACE else FAIL_TRACE);
+    sys_writeConsole(if (ok) PASS_TRACE else FAIL_TRACE);
     return ok;
 }
 
@@ -837,7 +939,7 @@ pub const TestResult = struct {
 pub fn run_all() linksection(".text.user") TestResult {
     const baseline = sys_dump_free();
     var passed: u32 = 0;
-    const total: u32 = 10;
+    const total: u32 = 11;
     if (run_fork_stress(baseline)) passed += 1;
     if (run_kill(baseline)) passed += 1;
     if (run_exec(baseline)) passed += 1;
@@ -847,6 +949,7 @@ pub fn run_all() linksection(".text.user") TestResult {
     if (run_wild_pointer(baseline)) passed += 1;
     if (run_flibc(baseline)) passed += 1;
     if (run_pipe(baseline)) passed += 1;
+    if (run_console_echo(baseline)) passed += 1;
     if (run_trace(baseline)) passed += 1;
     return .{ .passed = passed, .total = total };
 }
@@ -860,12 +963,12 @@ pub fn print_tally(passed: u32, total: u32) linksection(".text.user") void {
         write_digit(passed / 10);
         write_digit(passed % 10);
     } else write_digit(passed);
-    sys_write(SLASH);
+    sys_writeConsole(SLASH);
     if (total >= 10) {
         write_digit(total / 10);
         write_digit(total % 10);
     } else write_digit(total);
-    sys_write(PASSED_SUFFIX);
+    sys_writeConsole(PASSED_SUFFIX);
 }
 
 // 0..9 cover the current 9-scenario suite; '?' guards against drift
@@ -876,17 +979,17 @@ pub fn print_tally(passed: u32, total: u32) linksection(".text.user") void {
 // jump table and a const array of pointers would bake in absolute
 // link-time addresses for D0..D9 and fault when dereferenced from
 // uva 0. Only PC-relative `adr` references survive the relocation,
-// which is what direct `sys_write(D_n)` produces.
+// which is what direct `sys_writeConsole(D_n)` produces.
 fn write_digit(n: u32) linksection(".text.user") void {
-    if (n == 0) sys_write(D0)
-    else if (n == 1) sys_write(D1)
-    else if (n == 2) sys_write(D2)
-    else if (n == 3) sys_write(D3)
-    else if (n == 4) sys_write(D4)
-    else if (n == 5) sys_write(D5)
-    else if (n == 6) sys_write(D6)
-    else if (n == 7) sys_write(D7)
-    else if (n == 8) sys_write(D8)
-    else if (n == 9) sys_write(D9)
-    else sys_write(QMARK);
+    if (n == 0) sys_writeConsole(D0)
+    else if (n == 1) sys_writeConsole(D1)
+    else if (n == 2) sys_writeConsole(D2)
+    else if (n == 3) sys_writeConsole(D3)
+    else if (n == 4) sys_writeConsole(D4)
+    else if (n == 5) sys_writeConsole(D5)
+    else if (n == 6) sys_writeConsole(D6)
+    else if (n == 7) sys_writeConsole(D7)
+    else if (n == 8) sys_writeConsole(D8)
+    else if (n == 9) sys_writeConsole(D9)
+    else sys_writeConsole(QMARK);
 }
