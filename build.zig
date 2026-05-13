@@ -87,6 +87,40 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // TaskStruct/CoreContext/etc. layout module. Already implicitly
+    // imported by kernel-root modules via `@import("task_layout.zig")`,
+    // but the v0.3.0 step 1.2 named modules (wait_queue, pipe) need
+    // an explicit named import to keep task_layout.zig from being
+    // pulled into two sibling named modules through relative paths
+    // (which Zig 0.16 rejects as "file exists in two modules").
+    const task_layout_mod = b.createModule(.{
+        .root_source_file = b.path("src/task_layout.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // WaitQueue API (v0.3.0 step 1.2). Named module so both kernel and
+    // host-test builds reach it via `@import("wait_queue")` — the host
+    // test wiring at the bottom of this file mirrors this for the
+    // pipe.zig test root.
+    const wait_queue_mod = b.createModule(.{
+        .root_source_file = b.path("src/wait_queue.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    wait_queue_mod.addImport("task_layout", task_layout_mod);
+
+    // Anonymous-pipe module (v0.3.0 step 1.2). Pulls in wait_queue for
+    // the blocking read/write paths; kernel-only for now (Phase 4
+    // generalises to a tagged ?*File once the FS lands).
+    const pipe_mod = b.createModule(.{
+        .root_source_file = b.path("src/pipe.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pipe_mod.addImport("wait_queue", wait_queue_mod);
+    pipe_mod.addImport("task_layout", task_layout_mod);
+
     // ---- user-space image (compiled separately so we can match its
     // object file from the linker script as `*user_init*.o`) ----
     const user_init_mod = b.createModule(.{
@@ -150,6 +184,9 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addOptions("build_options", build_options);
     kernel_mod.addImport("syscall_defs", syscall_defs_mod);
     kernel_mod.addImport("user_layout", user_layout_mod);
+    kernel_mod.addImport("task_layout", task_layout_mod);
+    kernel_mod.addImport("wait_queue", wait_queue_mod);
+    kernel_mod.addImport("pipe", pipe_mod);
 
     // ---- hello.elf — payload for [TEST] exec-elf ----
     // Built as a standalone aarch64-freestanding ET_EXEC, embedded into
@@ -416,7 +453,7 @@ pub fn build(b: *std.Build) void {
         run_step.dependOn(&qemu_cmd.step);
 
         // Self-validating QEMU run: the watchdog tails the serial log,
-        // exits 0 on `9/9 passed` (with the expected free-page-checkpoint
+        // exits 0 on `10/10 passed` (with the expected free-page-checkpoint
         // counts), exits 1 on `ERROR CAUGHT`, count drift, or timeout.
         // Same QEMU args as `run`. raspi4b is slow (~5–8 min); the
         // 720s timeout matches the historical bash-watchdog ceiling.
@@ -432,7 +469,7 @@ pub fn build(b: *std.Build) void {
         });
         test_rpi4b_cmd.step.dependOn(&install_kernel_img.step);
 
-        const test_rpi4b_step = b.step("test-rpi4b", "Boot raspi4b in QEMU and assert 9/9 passed");
+        const test_rpi4b_step = b.step("test-rpi4b", "Boot raspi4b in QEMU and assert 10/10 passed");
         test_rpi4b_step.dependOn(&test_rpi4b_cmd.step);
     }
 
@@ -466,7 +503,7 @@ pub fn build(b: *std.Build) void {
         });
         test_virt_cmd.step.dependOn(&install_kernel_img.step);
 
-        const test_virt_step = b.step("test-virt", "Boot virt in QEMU and assert 9/9 passed");
+        const test_virt_step = b.step("test-virt", "Boot virt in QEMU and assert 10/10 passed");
         test_virt_step.dependOn(&test_virt_cmd.step);
     }
 
@@ -506,6 +543,8 @@ pub fn build(b: *std.Build) void {
     });
 
     const test_step = b.step("test", "Run host-side unit tests");
+
+    // Vanilla single-module test targets — no named imports needed.
     const tested_modules = [_][]const u8{
         "src/page_alloc.zig",
         "src/elf.zig",
@@ -520,4 +559,50 @@ pub fn build(b: *std.Build) void {
         const t = b.addTest(.{ .root_module = test_mod });
         test_step.dependOn(&b.addRunArtifact(t).step);
     }
+
+    // Shared task_layout module — see kernel-build comment above for
+    // why the v0.3.0 named modules must share a single Module instance.
+    const task_layout_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/task_layout.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+
+    // wait_queue is its own test target AND the named module pipe.zig
+    // imports — share the single Module instance.
+    const wq_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/wait_queue.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    wq_test_mod.addObject(stubs_obj);
+    wq_test_mod.addImport("task_layout", task_layout_test_mod);
+    const wq_test = b.addTest(.{ .root_module = wq_test_mod });
+    test_step.dependOn(&b.addRunArtifact(wq_test).step);
+
+    // pipe.zig pulls in wait_queue + task_layout as named modules + its
+    // own page-allocator stub so it doesn't double-define
+    // get_free_page / free_page against the page_alloc test target.
+    const pipe_stubs_obj = b.addObject(.{
+        .name = "host_stubs_pipe",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/host_stubs_pipe.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    });
+    const pipe_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/pipe.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    // stubs_obj is already pulled in transitively via wq_test_mod —
+    // adding it again here would double-define the host stubs. Only
+    // the pipe-specific stubs (get_free_page / free_page) need to be
+    // attached at this level.
+    pipe_test_mod.addObject(pipe_stubs_obj);
+    pipe_test_mod.addImport("wait_queue", wq_test_mod);
+    pipe_test_mod.addImport("task_layout", task_layout_test_mod);
+    const pipe_test = b.addTest(.{ .root_module = pipe_test_mod });
+    test_step.dependOn(&b.addRunArtifact(pipe_test).step);
 }

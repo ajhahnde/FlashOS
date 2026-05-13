@@ -1,7 +1,7 @@
 // Kernel utility functions
 // Layouts come from src/task_layout.zig.
 
-const layout = @import("task_layout.zig");
+const layout = @import("task_layout");
 const TaskStruct = layout.TaskStruct;
 const KeRegs = layout.KeRegs;
 

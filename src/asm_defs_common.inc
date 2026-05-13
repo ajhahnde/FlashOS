@@ -144,8 +144,10 @@
 /* ---- syscalls ---- */
 /* Highest user-facing slot id +1 (entry.S `b.hs` cap). Slots 7..11 are
  * reserved file/console stubs that fall inside the dispatch range but
- * return immediately; brk/sbrk live at 12/13 (lib/syscall_defs.zig). */
-#define NR_SYSCALLS  14
+ * return immediately; brk/sbrk live at 12/13. The pipe ABI (v0.3.0
+ * step 1.2) lives at 18 + 27..29, past the console reservation, so the
+ * cap is 30. See lib/syscall_defs.zig. */
+#define NR_SYSCALLS  30
 
 /* ---- sched ---- */
 #define CORE_CONTEXT_OFFSET 0

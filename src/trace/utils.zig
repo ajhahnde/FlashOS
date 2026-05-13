@@ -1,7 +1,7 @@
 // Trace I/O helpers — output via PL011 UART for tracing.
 // Layouts come from src/task_layout.zig.
 
-const layout = @import("../task_layout.zig");
+const layout = @import("task_layout");
 const TaskStruct = layout.TaskStruct;
 
 pub const PL: i32 = 1;

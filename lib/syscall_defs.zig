@@ -27,3 +27,12 @@ pub const SYS_KILL: u64 = 6;
 // the table so the existing slot ↔ id mapping stays stable.
 pub const SYS_BRK: u64 = 12;
 pub const SYS_SBRK: u64 = 13;
+// Slots 14..17 stay reserved mm stubs (mmap/munmap/mlock/munlock).
+// Slot 18 = SYS_PIPE; the other end-of-pipe ABI sits past the console
+// reservation (slots 23..26) so phase-1.3 can fill the console slots
+// without touching the pipe IDs. NR_SYSCALLS in src/asm_defs_common.inc
+// must stay one past SYS_PIPE_CLOSE.
+pub const SYS_PIPE: u64 = 18;
+pub const SYS_PIPE_READ: u64 = 27;
+pub const SYS_PIPE_WRITE: u64 = 28;
+pub const SYS_PIPE_CLOSE: u64 = 29;

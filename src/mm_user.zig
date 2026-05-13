@@ -1,7 +1,7 @@
 // User-page mapping and page-table walk.
 // Layouts come from src/task_layout.zig.
 
-const layout = @import("task_layout.zig");
+const layout = @import("task_layout");
 const TaskStruct = layout.TaskStruct;
 const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
 

@@ -3,13 +3,19 @@
 // KeRegs) live in src/task_layout.zig as the single source of truth.
 // The .S files (sched.S, entry.S) consume those layouts via raw offsets.
 
-const layout = @import("task_layout.zig");
+const layout = @import("task_layout");
 const TaskStruct = layout.TaskStruct;
 const TASK_RUNNING = layout.TASK_RUNNING;
 const TASK_ZOMBIE = layout.TASK_ZOMBIE;
 const TASK_INTERRUPTIBLE = layout.TASK_INTERRUPTIBLE;
 const KTHREAD = layout.KTHREAD;
 const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
+
+// Pipe fd-table cleanup on reap. Kernel-only consumer; do_wait_impl
+// calls pipe.closeAll(zombie) before the mm-page free loop so that
+// any fds the zombie didn't close itself drop their refs and free
+// their backing pages.
+const pipe_mod = @import("pipe");
 
 const NR_TASKS: usize = 64;
 
@@ -127,6 +133,15 @@ export fn do_wait_impl() i32 {
                     have_children = true;
                     if (c.state == TASK_ZOMBIE) {
                         const pid: i32 = c.pid;
+                        // Close any fds the zombie left open. unref
+                        // drops the refcount on each Pipe and frees
+                        // the backing page when refs hits zero. Runs
+                        // BEFORE the mm-page sweep so a Pipe page
+                        // (refcounted, not in user/kernel_pages) is
+                        // never accidentally freed twice and so the
+                        // free-page baseline reflects both legs of
+                        // the per-process resource lifecycle.
+                        pipe_mod.closeAll(c);
                         // Free user-mapped physical pages.
                         var j: usize = 0;
                         while (j < MAX_PAGE_COUNT) : (j += 1) {

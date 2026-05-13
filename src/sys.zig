@@ -4,9 +4,10 @@
 // Syscall IDs come from lib/syscall_defs.zig — the single source of
 // truth shared with user_space/kernel_tests.zig.
 
-const layout = @import("task_layout.zig");
+const layout = @import("task_layout");
 const defs = @import("syscall_defs");
 const user_layout = @import("user_layout");
+const pipe_mod = @import("pipe");
 const TaskStruct = layout.TaskStruct;
 const TASK_RUNNING = layout.TASK_RUNNING;
 const TASK_ZOMBIE = layout.TASK_ZOMBIE;
@@ -212,7 +213,58 @@ export fn sys_mlock() void {}
 export fn sys_munlock() void {}
 
 // Interprocess Communication
-export fn sys_pipe() void {}
+//
+// Anonymous-pipe ABI (v0.3.0 step 1.2). Slot map in lib/syscall_defs.zig.
+// `sys_pipe` returns both fds in a single i64: low 32 bits = read fd,
+// high 32 bits = write fd. Negative on out-of-fds / alloc-failure.
+// Compact ABI keeps the user-side wrapper to one register and avoids
+// a copy_to_user for the pair.
+//
+// FIXME(phase 4): no copy_from_user / copy_to_user yet — `buf` is
+// dereferenced as a kernel-walkable user pointer (current TTBR0). A
+// bad pointer faults through do_data_abort and zombies the task,
+// which the parent's sys_wait reaps as usual; same behaviour as the
+// other byte-level syscalls (sys_write etc.).
+export fn sys_pipe() i64 {
+    const c = current orelse return -1;
+    const p = pipe_mod.alloc() orelse return -1;
+    p.refs = 2; // one ref per fd installed below
+
+    const rfd = pipe_mod.fdAlloc(c, p);
+    if (rfd < 0) {
+        // Two unrefs because we bumped refs to 2 above before either
+        // fd was actually installed; the page leaks otherwise.
+        pipe_mod.unref(p);
+        pipe_mod.unref(p);
+        return -1;
+    }
+    const wfd = pipe_mod.fdAlloc(c, p);
+    if (wfd < 0) {
+        c.fd_table[@intCast(rfd)] = null;
+        pipe_mod.unref(p);
+        pipe_mod.unref(p);
+        return -1;
+    }
+    return (@as(i64, wfd) << 32) | (@as(i64, rfd) & 0xffff_ffff);
+}
+
+export fn sys_pipe_read(fd: i32, buf: u64, len: u64) i64 {
+    const c = current orelse return -1;
+    const p = pipe_mod.fdGet(c, fd) orelse return -1;
+    return pipe_mod.read(p, @ptrFromInt(buf), len);
+}
+
+export fn sys_pipe_write(fd: i32, buf: u64, len: u64) i64 {
+    const c = current orelse return -1;
+    const p = pipe_mod.fdGet(c, fd) orelse return -1;
+    return pipe_mod.write(p, @ptrFromInt(buf), len);
+}
+
+export fn sys_pipe_close(fd: i32) i32 {
+    const c = current orelse return -1;
+    return pipe_mod.fdClose(c, fd);
+}
+
 export fn sys_socket() void {}
 export fn sys_msgget() void {}
 export fn sys_semget() void {}
@@ -239,7 +291,7 @@ export fn sys_closeConsole() void {}
 /// syscalls — those slots stay positional until they get their own
 /// SYS_* constant in lib/syscall_defs.zig.
 export var sys_call_table = blk: {
-    var t = [_]?*const anyopaque{null} ** 27;
+    var t = [_]?*const anyopaque{null} ** 30;
 
     t[defs.SYS_WRITE]     = @ptrCast(&sys_writeConsole);
     t[defs.SYS_FORK]      = @ptrCast(&sys_fork);
@@ -262,7 +314,7 @@ export var sys_call_table = blk: {
     t[16] = @ptrCast(&sys_mlock);
     t[17] = @ptrCast(&sys_munlock);
 
-    t[18] = @ptrCast(&sys_pipe);
+    t[defs.SYS_PIPE] = @ptrCast(&sys_pipe);
     t[19] = @ptrCast(&sys_socket);
     t[20] = @ptrCast(&sys_msgget);
     t[21] = @ptrCast(&sys_semget);
@@ -272,6 +324,10 @@ export var sys_call_table = blk: {
     t[24] = @ptrCast(&sys_readConsole);
     t[25] = @ptrCast(&sys_setConsoleMode);
     t[26] = @ptrCast(&sys_closeConsole);
+
+    t[defs.SYS_PIPE_READ]  = @ptrCast(&sys_pipe_read);
+    t[defs.SYS_PIPE_WRITE] = @ptrCast(&sys_pipe_write);
+    t[defs.SYS_PIPE_CLOSE] = @ptrCast(&sys_pipe_close);
 
     break :blk t;
 };

@@ -1,13 +1,17 @@
 // Process creation — fork() / move-to-user setup.
 // Layouts (TaskStruct, KeRegs, ...) come from src/task_layout.zig.
 
-const layout = @import("task_layout.zig");
+const layout = @import("task_layout");
 const TaskStruct = layout.TaskStruct;
 const CoreContext = layout.CoreContext;
 const KeRegs = layout.KeRegs;
 const TASK_RUNNING = layout.TASK_RUNNING;
 const KTHREAD = layout.KTHREAD;
 const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
+
+// Pipe fd-table duplication on UTHREAD fork. Kernel-only consumer of
+// the named module; keeps fork.zig agnostic of the Pipe layout.
+const pipe_mod = @import("pipe");
 
 // User VA layout + default permission bag. The blob path stamps the
 // historical combined-permission flags; the ELF loader chooses per-
@@ -81,6 +85,13 @@ export fn copy_process_impl(clone_flags: u64, fn_addr: u64, arg: u64) i32 {
             free_kernel_page(@intFromPtr(p));
             return -1;
         }
+        // Dup the parent's fd table: each installed slot is a shared
+        // reference to the same kernel-resident Pipe, and the refcount
+        // bumps once per inherited slot. POSIX-equivalent without
+        // CLOEXEC for now (Phase 4 wires CLOEXEC + close-on-exec).
+        // KTHREAD branch skips this — kernel threads cannot reach the
+        // EL0 syscall path that fills fd_table.
+        pipe_mod.dupAll(current, p);
     }
 
     p.flags = clone_flags;

@@ -20,10 +20,18 @@
 // the brk test (1 inherited UVA-0 page + 16 heap pages = 17) overflowed
 // user_pages on the 17th map_page call. 32 leaves headroom for future
 // tests without inflating TaskStruct beyond the 4 KiB kernel-stack page
-// (TaskStruct ≈ CoreContext + scalars + MmStruct = ~104 + 40 + (8 + 32*16
-// + 32*8 + 8) = ~920 bytes; KeRegs sits in the top 272 bytes of the same
-// page, leaving ~2.9 KiB of stack — still ample).
+// (TaskStruct ≈ CoreContext + scalars + MmStruct + parent + pid +
+// wq_next + fd_table = ~104 + 40 + (8 + 32*16 + 32*8 + 8) + 8 + 4 +
+// 8 + 8*8 = ~992 bytes; KeRegs sits in the top 272 bytes of the same
+// page, leaving ~2.8 KiB of stack — still ample).
 pub const MAX_PAGE_COUNT: usize = 32;
+
+// Per-task fd-table slot count for the anonymous-pipe ABI introduced in
+// v0.3.0 step 1.2. Eight is the minimum Linux guarantees and matches
+// the budget the kernel-harness pipe scenario needs (one read + one
+// write end, plus headroom). Phase 4 generalizes the slot type to a
+// tagged ?*File once the FS lands.
+pub const FD_TABLE_SIZE: usize = 8;
 
 // Process state values (mirrored from sched.zig consumers).
 pub const TASK_RUNNING: i64 = 0;
@@ -85,6 +93,16 @@ pub const TaskStruct = extern struct {
     // sys_kill(pid) can't race a reap+reuse and target the wrong
     // process.
     pid: i32 = 0,
+    // Singly-linked-list pointer for WaitQueue chains. Null = not on
+    // any queue. Per-task because a task can only be on one queue at
+    // a time (mirrors Linux's task.wq_node). Appended after `pid` so
+    // the .S consumers that key off CoreContext (offset 0) stay
+    // byte-identical.
+    wq_next: ?*TaskStruct = null,
+    // Anonymous-pipe fd table. `?*anyopaque` instead of `?*Pipe` to
+    // keep task_layout.zig free of a circular import on src/pipe.zig
+    // — pipe.zig @ptrCast's at the lookup site. Null slots are free.
+    fd_table: [FD_TABLE_SIZE]?*anyopaque = [_]?*anyopaque{null} ** FD_TABLE_SIZE,
 };
 
 pub const KeRegs = extern struct {

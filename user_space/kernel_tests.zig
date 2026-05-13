@@ -89,6 +89,45 @@ pub fn sys_brk(addr: u64) linksection(".text.user") i64 {
         : .{ .memory = true });
 }
 
+// sys_pipe returns both fds packed into one i64: low 32 bits = read fd,
+// high 32 bits = write fd. Negative on failure. Compact ABI matches
+// src/sys.zig:sys_pipe — single-register return keeps the wrapper
+// trivial and avoids any copy_to_user dance.
+pub fn sys_pipe() linksection(".text.user") i64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i64),
+        : [nr] "{x8}" (defs.SYS_PIPE),
+        : .{ .memory = true });
+}
+
+pub fn sys_pipe_read(fd: i32, buf: [*]u8, len: u64) linksection(".text.user") i64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i64),
+        : [nr] "{x8}" (defs.SYS_PIPE_READ),
+          [fd] "{x0}" (fd),
+          [buf] "{x1}" (buf),
+          [len] "{x2}" (len),
+        : .{ .memory = true });
+}
+
+pub fn sys_pipe_write(fd: i32, buf: [*]const u8, len: u64) linksection(".text.user") i64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i64),
+        : [nr] "{x8}" (defs.SYS_PIPE_WRITE),
+          [fd] "{x0}" (fd),
+          [buf] "{x1}" (buf),
+          [len] "{x2}" (len),
+        : .{ .memory = true });
+}
+
+pub fn sys_pipe_close(fd: i32) linksection(".text.user") i32 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i32),
+        : [nr] "{x8}" (defs.SYS_PIPE_CLOSE),
+          [fd] "{x0}" (fd),
+        : .{ .memory = true });
+}
+
 // ---- Strings (.rodata.user — must be reachable from user-space) ----
 
 const FORK_ERR_MSG: [*:0]const u8 linksection(".rodata.user") = "fork error\n";
@@ -130,6 +169,11 @@ const FAIL_FLIBC: [*:0]const u8 linksection(".rodata.user") = "[FAIL] flibc\n";
 const TEST_TRACE: [*:0]const u8 linksection(".rodata.user") = "[TEST] trace\n";
 const PASS_TRACE: [*:0]const u8 linksection(".rodata.user") = "[PASS] trace\n";
 const FAIL_TRACE: [*:0]const u8 linksection(".rodata.user") = "[FAIL] trace\n";
+const TEST_PIPE: [*:0]const u8 linksection(".rodata.user") = "[TEST] pipe\n";
+const PASS_PIPE: [*:0]const u8 linksection(".rodata.user") = "[PASS] pipe\n";
+const FAIL_PIPE: [*:0]const u8 linksection(".rodata.user") = "[FAIL] pipe\n";
+const PIPE_OK_MSG: [*:0]const u8 linksection(".rodata.user") = "pipe ok\n";
+const PIPE_BAD_MSG: [*:0]const u8 linksection(".rodata.user") = "pipe bad\n";
 
 const SLASH: [*:0]const u8 linksection(".rodata.user") = "/";
 const PASSED_SUFFIX: [*:0]const u8 linksection(".rodata.user") = " passed\n";
@@ -671,6 +715,89 @@ fn run_wild_pointer(baseline: u64) linksection(".text.user") bool {
     return ok;
 }
 
+// Forks one child, hands a deterministic 16-byte payload through an
+// anonymous pipe (parent reads, child writes), reaps the child, and
+// asserts the per-process free-page baseline holds. Coverage spans:
+//   * sys_pipe → page allocation + fd-table install for both ends
+//   * fork-dup of fd_table (parent and child see the same Pipe object)
+//   * child sys_pipe_close on the read end → refcount 2 → 1
+//   * sys_pipe_write of full payload → reader wake
+//   * parent sys_pipe_read → drains pipe
+//   * child sys_pipe_close on the write end + sys_exit → reap
+//   * parent sys_pipe_close on the read end → unref → page freed
+//
+// The pattern is 0xA0..0xAF (16 bytes) — distinct enough that a
+// truncation or out-of-order delivery shows up immediately in the
+// byte compare. Free-page baseline is the [PASS] gate, matching
+// every other reap-based scenario.
+const PIPE_PAYLOAD_LEN: u64 = 16;
+
+fn run_pipe(baseline: u64) linksection(".text.user") bool {
+    sys_write(TEST_PIPE);
+    var ok = true;
+
+    const fds = sys_pipe();
+    if (fds < 0) {
+        sys_write(FAIL_PIPE);
+        return false;
+    }
+    const rfd: i32 = @intCast(fds & 0xffff_ffff);
+    const wfd: i32 = @intCast((fds >> 32) & 0xffff_ffff);
+
+    const pid = sys_fork();
+    if (pid < 0) {
+        _ = sys_pipe_close(rfd);
+        _ = sys_pipe_close(wfd);
+        sys_write(FORK_ERR_MSG);
+        sys_write(FAIL_PIPE);
+        return false;
+    }
+    if (pid == 0) {
+        // Child writer: close read end, push payload, close write end.
+        _ = sys_pipe_close(rfd);
+        var out: [16]u8 = undefined;
+        var oi: u32 = 0;
+        while (oi < PIPE_PAYLOAD_LEN) : (oi += 1) {
+            out[oi] = 0xA0 +% @as(u8, @intCast(oi));
+        }
+        _ = sys_pipe_write(wfd, &out, PIPE_PAYLOAD_LEN);
+        _ = sys_pipe_close(wfd);
+        sys_exit();
+    }
+
+    // Parent reader: drop write end first so the EOF short-circuit
+    // becomes reachable for the child if it ever short-writes.
+    _ = sys_pipe_close(wfd);
+
+    // pipe.read short-reads to whatever's currently buffered; loop
+    // until we either collect the full payload or hit EOF (child
+    // closed the write end). The child writes a single 16-byte burst,
+    // but a future short-write semantics change shouldn't break the
+    // test.
+    var in: [16]u8 = undefined;
+    var got: u64 = 0;
+    while (got < PIPE_PAYLOAD_LEN) {
+        const n = sys_pipe_read(rfd, @ptrCast(&in[got]), PIPE_PAYLOAD_LEN - got);
+        if (n <= 0) break;
+        got += @intCast(n);
+    }
+    if (got != PIPE_PAYLOAD_LEN) ok = false;
+
+    var ci: u32 = 0;
+    while (ci < PIPE_PAYLOAD_LEN) : (ci += 1) {
+        const expected: u8 = 0xA0 +% @as(u8, @intCast(ci));
+        if (in[ci] != expected) ok = false;
+    }
+    sys_write(if (ok) PIPE_OK_MSG else PIPE_BAD_MSG);
+
+    _ = sys_pipe_close(rfd);
+    _ = sys_wait();
+
+    if (sys_dump_free() != baseline) ok = false;
+    sys_write(if (ok) PASS_PIPE else FAIL_PIPE);
+    return ok;
+}
+
 // Drives the patched trampolines (kernel_main/_schedule/do_wait/copy_process)
 // through their canonical user-visible call chain: fork enters copy_process,
 // exit/wait routes through do_wait, both legs cross _schedule via timer
@@ -710,7 +837,7 @@ pub const TestResult = struct {
 pub fn run_all() linksection(".text.user") TestResult {
     const baseline = sys_dump_free();
     var passed: u32 = 0;
-    const total: u32 = 9;
+    const total: u32 = 10;
     if (run_fork_stress(baseline)) passed += 1;
     if (run_kill(baseline)) passed += 1;
     if (run_exec(baseline)) passed += 1;
@@ -719,14 +846,25 @@ pub fn run_all() linksection(".text.user") TestResult {
     if (run_stack_overflow(baseline)) passed += 1;
     if (run_wild_pointer(baseline)) passed += 1;
     if (run_flibc(baseline)) passed += 1;
+    if (run_pipe(baseline)) passed += 1;
     if (run_trace(baseline)) passed += 1;
     return .{ .passed = passed, .total = total };
 }
 
+// Tens-digit unrolling: write_digit only covers 0..9 directly. The
+// suite now reports 10/10, so decompose two-digit values into
+// `(n / 10)` then `(n % 10)`. Single-digit values stay unchanged.
+// Up to 99/99 — phase 5 can revisit if the suite ever overflows.
 pub fn print_tally(passed: u32, total: u32) linksection(".text.user") void {
-    write_digit(passed);
+    if (passed >= 10) {
+        write_digit(passed / 10);
+        write_digit(passed % 10);
+    } else write_digit(passed);
     sys_write(SLASH);
-    write_digit(total);
+    if (total >= 10) {
+        write_digit(total / 10);
+        write_digit(total % 10);
+    } else write_digit(total);
     sys_write(PASSED_SUFFIX);
 }
 

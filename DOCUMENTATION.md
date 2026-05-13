@@ -247,6 +247,19 @@ link time — switch jump tables and arrays-of-pointers fault when the
 image is relocated to UVA `0`. Only PC-relative `adr` references
 survive. See `user_space/kernel_tests.zig` for a documented example.
 
+### Kernel-resident IPC pages
+
+Anonymous pipes (`src/pipe.zig`, v0.3.0 step 1.2) allocate one
+4 KiB page per `Pipe`: header (refs + head/tail + readers/writers
+wait queues) at the front, byte ring filling the rest. The page is
+**not** tracked in `mm.user_pages` or `mm.kernel_pages` — its
+lifetime is owned by `Pipe.refs`. Fork dups the per-task fd table
+(refcount bump per inherited slot); `do_wait` calls
+`pipe.closeAll(zombie)` before sweeping the mm pages so any
+unclosed fds drop their refs cleanly. This is the only category of
+kernel page today whose lifetime is decoupled from the per-task
+mm sweep.
+
 ## 4. Process management & scheduling
 
 - **Scheduler.** Priority round-robin in `src/sched.zig`. `_schedule`
@@ -302,7 +315,7 @@ x0       return value
 
 The vector at `vbar_el1 + 0x400` (`el0_svc` in `src/entry.S`)
 indexes into `sys_call_table` (`src/sys.zig`) and `blr`s to the
-selected handler. `NR_SYSCALLS = 14` (in `src/asm_defs_common.inc`)
+selected handler. `NR_SYSCALLS = 30` (in `src/asm_defs_common.inc`)
 is enforced by a `b.hs` check on `x8`; out-of-range numbers fall
 through to the invalid-entry path.
 
@@ -324,6 +337,10 @@ mapping rather than chasing into UVA space.
 |   6   | `kill`      | `x0 = pid`                           |                        `i32` 0 on hit, -1 on miss                        | Finds the task with matching `pid`, flips it to `TASK_ZOMBIE`, wakes the parent. **Self-kill is rejected** — use `exit`                                                                                                                                                                                                             |
 |   12   | `brk`       | `x0 = addr` (or 0 to read)           | `i64` new break, or current break if `addr == 0`, `-1` on bad request | Sets the heap break (rounded up to PAGE_SIZE). Bounds:`[HEAP_BASE, STACK_TOP - STACK_BUDGET)`. Pages are demand-allocated by `do_data_abort`; shrinks unmap + free the released pages and TLB-flush via `set_pgd`                                                                                                                          |
 |   13   | `sbrk`      | `x0 = delta` (i64)                   |             `i64` previous break, `-1` on overflow / range             | Convenience wrapper:`brk(current + delta)`. Returns the *previous* break                                                                                                                                                                                                                                                                     |
+|   18   | `pipe`      | (none)                                 | `i64` packed (`(wfd << 32) \| rfd`), `-1` on alloc or fd-table failure | Allocates a 4 KiB Pipe page (header + ring). Two fds installed in `current.fd_table`, `refs = 2`. Single-producer / single-consumer per end; multi-reader/writer deferred to Phase 4 |
+|   27   | `pipe_read` | `x0 = fd`, `x1 = u8 *buf`, `x2 = len` | `i64` bytes read (short read OK), `0` on EOF (last writer closed), `-1` on bad fd | Blocks (`TASK_INTERRUPTIBLE`) when the ring is empty and more writers exist; drains what's currently buffered on each call. FIXME(phase 4): no `copy_from_user`, bad pointers fault through `do_data_abort` |
+|   28   | `pipe_write` | `x0 = fd`, `x1 = const u8 *buf`, `x2 = len` | `i64` bytes pushed, `-1` on bad fd | Blocks when the ring is full and more readers exist. SIGPIPE territory (last reader closed) returns the short-write count for now; Phase 4 wires the signal path |
+|   29   | `pipe_close` | `x0 = fd`                            |                        `i32` 0 on hit, -1 on miss                        | Clears the fd slot, drops one ref on the Pipe; when `refs == 0` wakes both wait queues and frees the page |
 
 `sys_dump_free` is a documented debug syscall, not part of the
 forward-stable ABI surface. It is retained because the in-kernel
@@ -332,11 +349,12 @@ test harness depends on it.
 Slots `7..11` are reserved file/console stubs (`sys_openFile`,
 `sys_readFile`, `sys_writeFile`, `sys_seek`, `sys_closeFile`); they
 fall inside the dispatch range but return immediately with no effect.
-Slots `14..` (`sys_mmap`, `sys_pipe`, console RX, …) are present in
-`src/sys.zig` for forward compatibility but sit *above* the
-`NR_SYSCALLS = 14` cap, so they trap through the invalid-entry path
-until promoted by bumping `NR_SYSCALLS` and adding a `SYS_*` constant
-in `lib/syscall_defs.zig`.
+Slots `14..17` (`sys_mmap`, `sys_munmap`, `sys_mlock`, `sys_munlock`)
+and `19..22` (socket / IPC stubs) are present in `src/sys.zig` for
+forward compatibility but return immediately. Slots `23..26` are
+reserved for the Phase 1.3 console RX ABI. Slot `18` is the active
+`sys_pipe`; slots `27..29` carry the rest of the pipe ABI
+(`sys_pipe_read` / `_write` / `_close`).
 
 ## 6. Kernel symbol table (ksyms)
 
