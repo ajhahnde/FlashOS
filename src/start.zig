@@ -15,7 +15,7 @@ comptime {
     _ = board.timer;
     _ = @import("generic_timer.zig");
     _ = board.irq;
-    _ = @import("sched.zig");
+    _ = @import("sched");
     _ = @import("fork.zig");
     _ = @import("sys.zig");
     _ = @import("page_alloc.zig");

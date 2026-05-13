@@ -9,10 +9,8 @@ const defs = @import("syscall_defs");
 const user_layout = @import("user_layout");
 const pipe_mod = @import("pipe");
 const console = @import("console");
+const sched = @import("sched");
 const TaskStruct = layout.TaskStruct;
-const TASK_RUNNING = layout.TASK_RUNNING;
-const TASK_ZOMBIE = layout.TASK_ZOMBIE;
-const TASK_INTERRUPTIBLE = layout.TASK_INTERRUPTIBLE;
 const UTHREAD = layout.UTHREAD;
 const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
 
@@ -131,10 +129,7 @@ export fn sys_kill(pid: i32) i32 {
     while (i < NR_TASKS) : (i += 1) {
         if (task[i]) |t| {
             if (t.pid == pid) {
-                t.state = TASK_ZOMBIE;
-                if (t.parent) |p| {
-                    if (p.state == TASK_INTERRUPTIBLE) p.state = TASK_RUNNING;
-                }
+                sched.zombify_and_wake_parent(t);
                 preempt_enable();
                 return 0;
             }

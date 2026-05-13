@@ -133,6 +133,20 @@ pub fn build(b: *std.Build) void {
     console_mod.addImport("wait_queue", wait_queue_mod);
     console_mod.addImport("task_layout", task_layout_mod);
 
+    // Scheduler module (v0.3.0 step 1.4). Promoted from a relative-path
+    // import to a named module so sys.zig can `@import("sched")` and call
+    // the pure helpers (pick_next_running / refill_counters /
+    // zombify_and_wake_parent) without re-declaring extern signatures.
+    // Imports pipe + task_layout because sched.zig consumes both
+    // (pipe.closeAll in do_wait_impl; TaskStruct from task_layout).
+    const sched_mod = b.createModule(.{
+        .root_source_file = b.path("src/sched.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sched_mod.addImport("task_layout", task_layout_mod);
+    sched_mod.addImport("pipe", pipe_mod);
+
     // ---- user-space image (compiled separately so we can match its
     // object file from the linker script as `*user_init*.o`) ----
     const user_init_mod = b.createModule(.{
@@ -200,6 +214,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("wait_queue", wait_queue_mod);
     kernel_mod.addImport("pipe", pipe_mod);
     kernel_mod.addImport("console", console_mod);
+    kernel_mod.addImport("sched", sched_mod);
 
     // ---- hello.elf — payload for [TEST] exec-elf ----
     // Built as a standalone aarch64-freestanding ET_EXEC, embedded into
@@ -634,4 +649,45 @@ pub fn build(b: *std.Build) void {
     console_test_mod.addImport("task_layout", task_layout_test_mod);
     const console_test = b.addTest(.{ .root_module = console_test_mod });
     test_step.dependOn(&b.addRunArtifact(console_test).step);
+
+    // sched.zig — pure-helper host coverage (v0.3.0 step 1.4). sched.zig
+    // itself exports current / preempt_disable / preempt_enable /
+    // schedule, so the shared stubs_obj would double-define those at
+    // link time. Dedicated sched-stub object plugs only the HW-side gap
+    // (core_switch_to, set_pgd, irq_*, free_page*, _schedule) plus a
+    // null get_free_page for the transitively-imported pipe module.
+    const sched_stubs_obj = b.addObject(.{
+        .name = "host_stubs_sched",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/host_stubs_sched.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    });
+    // Dedicated wait_queue / pipe Modules for the sched test target —
+    // can't reuse wq_test_mod / pipe_test_mod because those carry
+    // stubs_obj (which would re-introduce the same-symbol collision).
+    const wq_sched_mod = b.createModule(.{
+        .root_source_file = b.path("src/wait_queue.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    wq_sched_mod.addImport("task_layout", task_layout_test_mod);
+    const pipe_sched_mod = b.createModule(.{
+        .root_source_file = b.path("src/pipe.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    pipe_sched_mod.addImport("wait_queue", wq_sched_mod);
+    pipe_sched_mod.addImport("task_layout", task_layout_test_mod);
+    const sched_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/sched.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    sched_test_mod.addImport("task_layout", task_layout_test_mod);
+    sched_test_mod.addImport("pipe", pipe_sched_mod);
+    sched_test_mod.addObject(sched_stubs_obj);
+    const sched_test = b.addTest(.{ .root_module = sched_test_mod });
+    test_step.dependOn(&b.addRunArtifact(sched_test).step);
 }

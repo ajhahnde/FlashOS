@@ -270,8 +270,10 @@ on each push.
 ## 4. Process management & scheduling
 
 - **Scheduler.** Priority round-robin in `src/sched.zig`. `_schedule`
-  picks the runnable task with the largest counter; if every counter
-  is zero it refills them as `(counter >> 1) + priority`.
+  picks the runnable task with the largest counter via
+  `pick_next_running`; if that task's counter is zero (round end) it
+  invokes `refill_counters`, which rewrites every non-null slot as
+  `(counter >> 1) + priority`. Both helpers are pure and host-tested.
 - **Tick.** `timer_tick` decrements `current.counter`. When it hits
   zero (and preemption is enabled) it calls `_schedule`.
 - **Task states.** `TASK_RUNNING`, `TASK_INTERRUPTIBLE`, `TASK_ZOMBIE`.
@@ -281,12 +283,12 @@ on each push.
 - **Fork.** `copy_process` allocates a kernel page for the new task,
   copies the parent's exception-frame regs, clones the user page
   table via `copy_virt_memory`, and links it into `task[]`.
-- **Exit / wait.** `exit_process` flips the task to `TASK_ZOMBIE` and
-  wakes any `TASK_INTERRUPTIBLE` parent. `do_wait` reaps the zombie's
-  user pages, kernel pages, and slot — the page balance is the test
-  harness's leak signal.
-- **Kill.** `sys_kill(pid)` walks `task[]` for a matching `.pid`,
-  flips it to `TASK_ZOMBIE`, and wakes the parent. Self-kill is
+- **Exit / wait.** `exit_process` calls `zombify_and_wake_parent` on
+  `current` (flip to `TASK_ZOMBIE`, wake any `TASK_INTERRUPTIBLE`
+  parent). `do_wait` reaps the zombie's user pages, kernel pages, and
+  slot — the page balance is the test harness's leak signal.
+- **Kill.** `sys_kill(pid)` walks `task[]` for a matching `.pid` and
+  applies the same `zombify_and_wake_parent` helper. Self-kill is
   rejected — the running task is its own kernel page; `sys_exit` is
   the safe self-cancel path.
 - **Exec.** `sys_exec(blob_addr, blob_size)` snapshots the blob into
@@ -426,13 +428,16 @@ FlashOS ships two complementary test surfaces.
 
 **Host-side unit tests** (`zig build test`).
 Pure-logic kernel modules can be tested without the AArch64 runtime.
-Each kernel module that has tests is its own test root, linked
-against `tests/host_stubs.zig`, which stubs out the assembly-only
-externs (`memzero`, `panic`, `main_output*`). The current suite
-covers the page allocator: PA↔KVA round-trip, `mem_map_init`
-zeroing, sequential allocation, free-and-reuse, free-page tracking,
-above-range PA bounds-check, and `get_kernel_page` round-trip — 7/7
-passing on host.
+Each tested kernel module is its own test root, linked against a
+host-stub object that fills in the assembly-only externs (`memzero`,
+`panic`, `main_output*`, `core_switch_to`, `set_pgd`, the IRQ
+masking pair, the page-allocator entry points). The shared stub set
+lives in `tests/host_stubs.zig`; `pipe.zig` and `sched.zig` get
+dedicated per-target stub objects (`tests/host_stubs_pipe.zig`,
+`tests/host_stubs_sched.zig`) to avoid double-defining symbols that
+the module under test already exports. The current suite totals
+**52 host tests** across six modules — see the coverage matrix
+below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.zig`).
 PID 1 enters `run_all()`, which exercises eleven scenarios on real
@@ -526,6 +531,33 @@ free_pages: 00000000000bbff9   (trace)
 
 Any deviation indicates a leak in the scenario above the deviating
 checkpoint.
+
+### Coverage matrix
+
+The Host column counts inline `test "…"` blocks in each module (run
+via `zig build test`). The Kernel-harness column lists the `[TEST]`
+scenarios in `user_space/kernel_tests.zig` that exercise the module
+end-to-end on QEMU + Pi 4.
+
+| Module                       | Host tests | Kernel-harness scenarios                  | Reason if host-untested |
+|------------------------------|-----------:|-------------------------------------------|-------------------------|
+| `src/page_alloc.zig`         |          7 | every (free-page baseline)                | — |
+| `src/elf.zig`                |         14 | `exec-elf`, `stack-overflow`, `flibc`     | — |
+| `src/wait_queue.zig`         |          4 | `pipe`, `console-echo`                    | — |
+| `src/pipe.zig`               |          9 | `pipe`                                    | — |
+| `src/console.zig`            |          7 | `console-echo`                            | — |
+| `src/sched.zig`              |         11 | every fork/kill/wait scenario             | — |
+| `src/sys.zig`                |          0 | every syscall scenario                    | extern-heavy dispatch; logic ≈ argument forwarding |
+| `src/fork.zig`               |          0 | `fork-stress`, `exec`, `exec-elf`, `brk`  | depends on MMU + page-table state |
+| `src/mm_user.zig`            |          0 | `brk`, `stack-overflow`, `wild-pointer`   | depends on real PTW + LINEAR_MAP alias |
+| `src/utilc.zig`              |          0 | every (every print path)                  | u64-hex helper is trivial; the print helpers are UART-stub-bound |
+| `src/trace/*`                |          0 | `trace`                                   | runtime code patching; no ICache sync host-side |
+| `src/board/*/irq.zig`        |          0 | timer ticks, `console-echo` RX            | pure MMIO; stubs would identity-read |
+| `src/board/*/uart.zig`       |          0 | every print                                | pure MMIO |
+
+Totals: **52 host tests** (`zig build test`) + **11 in-kernel
+scenarios** (`run-virt` / `run`). A CI sniff that the table's host
+counts match the `zig build test` summary is deferred to v0.3.1+.
 
 ### Output markers
 
