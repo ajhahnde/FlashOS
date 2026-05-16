@@ -1,5 +1,5 @@
 // Minimum-viable wait queue for blocking syscalls — single source of
-// truth for the v0.3.0 IPC and (Phase 5) signal/do_wait migration.
+// truth for the v0.3.0 IPC and the future signal/do_wait migration.
 //
 // Discipline:
 //   * Wait-side links the running task at head, flips state to
@@ -8,12 +8,12 @@
 //   * `wq_next` lives in TaskStruct (src/task_layout.zig) — a task can
 //     only be on one queue at a time, mirroring Linux's wq_node.
 //   * Single-core: `preempt_disable` around the head mutation is enough
-//     because no two callers can race on the same queue. Phase 5
+//     because no two callers can race on the same queue. Future work
 //     migrates wake/wait to spinlocks (which disable IRQs on acquire);
 //     the API surface stays identical.
-//   * IRQ callers (Schritt 1.3 mini-UART RX) are fine on single-core
-//     because the entry path masks IRQs and there is no concurrent
-//     mutator from EL1h.
+//   * IRQ callers (mini-UART RX) are fine on single-core because the
+//     entry path masks IRQs and there is no concurrent mutator from
+//     EL1h.
 
 // Named module — see build.zig (`task_layout_mod`). Required because
 // wait_queue.zig is itself a named module; if it pulled task_layout.zig

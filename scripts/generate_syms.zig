@@ -1,6 +1,12 @@
 const std = @import("std");
 
-const pre_allocated_size = 65536;
+// Total reserved size of the `_symbols` section. The section is
+// self-contained: symbol_area.S emits its entries followed by a
+// `.space` fill up to exactly this size, and the linker scripts just
+// `KEEP(*(_symbols))` with no separate reservation — so this constant
+// is the only knob. Bumped 65536 -> 98304 once the v0.4.0 symbol count
+// (compiler-rt + the FS modules) pushed used_space past 64 KiB.
+const pre_allocated_size = 98304;
 const symbol_area_file = "src/symbol_area.S";
 const entry_size = 64;
 const max_sym_name_len = entry_size - 8 - 1;
@@ -60,16 +66,16 @@ pub fn main(init: std.process.Init) !void {
     const used_space = entry_size * count;
     if (used_space > pre_allocated_size) {
         // Print actionable numbers: the bump must be at least the
-        // shortfall, rounded to a comfortable next power-of-two so
-        // the next few growth rounds don't re-trip this. The
-        // pre_allocated_size const lives at the top of this file
-        // (and the linker scripts reserve the same amount via
-        // KEEP(*(_symbols)) — bump those in lockstep).
+        // shortfall, rounded to a comfortable size so the next few
+        // growth rounds don't re-trip this. pre_allocated_size at the
+        // top of this file is the only knob — the `_symbols` section
+        // is self-sized (this script's trailing `.space` fill) and the
+        // linker scripts just `KEEP(*(_symbols))`, so nothing else
+        // needs touching in lockstep.
         std.debug.panic(
             "too many symbols! used_space={d} > pre_allocated_size={d} " ++
                 "(shortfall {d} bytes, {d} symbols at {d} bytes each). " ++
-                "Bump pre_allocated_size in scripts/generate_syms.zig and " ++
-                "the matching .space reservation in src/board/<board>/linker.ld.\n",
+                "Bump pre_allocated_size in scripts/generate_syms.zig.\n",
             .{ used_space, pre_allocated_size, used_space - pre_allocated_size, count, entry_size },
         );
     }

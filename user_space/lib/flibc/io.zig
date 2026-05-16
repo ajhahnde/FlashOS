@@ -4,7 +4,7 @@
 // until '\0'), so `printf` builds its formatted output into a
 // stack-resident 256-byte buffer, terminates with '\0', then makes a
 // single syscall. Output longer than 255 bytes is silently truncated;
-// the demo programs Phase 2 ships are well below that bound.
+// the demo programs ship are well below that bound.
 //
 // Format spec is a deliberate subset of C printf:
 //   %%       — literal '%'
@@ -14,7 +14,7 @@
 //   %x       — lowercase hex (any int that fits in u64)
 //   %c       — single byte
 // Width / precision / padding are not supported — this is demoware-
-// grade by design; richer formatting belongs to the Phase-4 fsh /
+// grade by design; richer formatting belongs to future fsh /
 // coreutils work once a real userland exercises it.
 
 const sys = @import("syscalls.zig");

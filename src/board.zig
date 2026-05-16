@@ -28,3 +28,11 @@ pub const irq = switch (build_options.board) {
     .rpi4b => @import("board/rpi4b/irq.zig"),
     .virt => @import("board/virt/irq.zig"),
 };
+
+// emmc2: BCM2711 SDHCI driver on rpi4b, memory-backed fake on virt
+// (QEMU `-M virt` exposes no SDHCI peripheral; see
+// src/board/virt/emmc2.zig).
+pub const emmc2 = switch (build_options.board) {
+    .rpi4b => @import("board/rpi4b/emmc2.zig"),
+    .virt => @import("board/virt/emmc2.zig"),
+};

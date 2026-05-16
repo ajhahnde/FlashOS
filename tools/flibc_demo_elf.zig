@@ -1,5 +1,5 @@
-// Payload for [TEST] flibc — exercises the three flibc layers that
-// land new in Phase 2: printf (comptime format + sys_writeConsole flush),
+// Payload for [TEST] flibc — exercises three flibc layers:
+// printf (comptime format + sys_writeConsole flush),
 // malloc (bump-over-sbrk), and exit (sys_exit). fork/wait/execve are
 // covered indirectly by the existing fork-stress / exec-elf scenarios
 // running through their flibc-equivalent SVC wrappers, so the demo
@@ -8,7 +8,7 @@
 // Build: aarch64-freestanding ET_EXEC via build.zig (pie=false, strip,
 // ReleaseSmall, hello-style page caps). Embedded in the kernel image
 // via .incbin in tools/flibc_demo_elf.S so the harness can hand its
-// bytes to sys_exec without an initramfs (Phase 3).
+// bytes to sys_exec without an initramfs.
 //
 // Trace contract verified by the test scenario in
 // user_space/kernel_tests.zig:

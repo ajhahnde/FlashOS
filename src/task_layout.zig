@@ -21,16 +21,15 @@
 // user_pages on the 17th map_page call. 32 leaves headroom for future
 // tests without inflating TaskStruct beyond the 4 KiB kernel-stack page
 // (TaskStruct ≈ CoreContext + scalars + MmStruct + parent + pid +
-// wq_next + fd_table = ~104 + 40 + (8 + 32*16 + 32*8 + 8) + 8 + 4 +
-// 8 + 8*8 = ~992 bytes; KeRegs sits in the top 272 bytes of the same
-// page, leaving ~2.8 KiB of stack — still ample).
+// wq_next + fd_table + open_files = ~104 + 40 + (8 + 32*16 + 32*8 + 8)
+// + 8 + 4 + 8 + 8*8 + 8*8 = ~1056 bytes; KeRegs sits in the top 272
+// bytes of the same page, leaving ~2.7 KiB of stack — still ample).
 pub const MAX_PAGE_COUNT: usize = 32;
 
-// Per-task fd-table slot count for the anonymous-pipe ABI introduced in
-// v0.3.0 step 1.2. Eight is the minimum Linux guarantees and matches
-// the budget the kernel-harness pipe scenario needs (one read + one
-// write end, plus headroom). Phase 4 generalizes the slot type to a
-// tagged ?*File once the FS lands.
+// Per-task fd-table slot count. Covers both `fd_table` (anonymous-pipe
+// slots, v0.3.0) and `open_files` (initramfs/FAT32 file slots,
+// v0.4.0). The two tables are parallel and indexed independently;
+// future work unifies them behind a single tagged-pointer fd-table.
 pub const FD_TABLE_SIZE: usize = 8;
 
 // Process state values (mirrored from sched.zig consumers).
@@ -71,7 +70,7 @@ pub const MmStruct = extern struct {
     // value (HEAP_BASE) is set by prepare_move_to_user / _elf so an
     // empty heap is the legal `addr == brk` no-op state. Mutated by
     // sys_brk / sys_sbrk; read by the region-aware do_data_abort
-    // dispatch (Phase-2.6). Field appended last so the .S consumers
+    // dispatch. Field appended last so the .S consumers
     // that key off CoreContext (offset 0) stay byte-identical.
     brk: u64 = 0,
 };
@@ -103,6 +102,39 @@ pub const TaskStruct = extern struct {
     // keep task_layout.zig free of a circular import on src/pipe.zig
     // — pipe.zig @ptrCast's at the lookup site. Null slots are free.
     fd_table: [FD_TABLE_SIZE]?*anyopaque = [_]?*anyopaque{null} ** FD_TABLE_SIZE,
+    // Initramfs/FAT32 file fd table. Parallel to `fd_table` until
+    // both are unified behind a single tagged-pointer fd-table.
+    // `File` is the layout-only struct above; src/file.zig owns the
+    // lifetime helpers. Null slots are free.
+    open_files: [FD_TABLE_SIZE]?*File = [_]?*File{null} ** FD_TABLE_SIZE,
+};
+
+// Open-file handle. Layout-only declaration; the lifetime helpers
+// (alloc / unref / fdAlloc / fdGet / fdClose / dupAll / closeAll) and
+// the FType tag enum live in src/file.zig. Defined here so TaskStruct
+// can carry a typed `?*File` slot without a circular import on
+// file.zig (file.zig imports task_layout for TaskStruct + File).
+//
+// `ftype = 0` is INITRAMFS_FILE — the only ftype populated today;
+// FType in file.zig owns the tag→backend binding for future slots
+// (FAT32, unified pipe).
+pub const File = extern struct {
+    ftype: u8 = 0,
+    _pad: [3]u8 = .{ 0, 0, 0 },
+    refs: u32 = 0,
+    offset: u64 = 0,
+    // INITRAMFS_FILE: kernel-VA pointer to the entry's data bytes
+    // (already TTBR1-mapped via the .initramfs section).
+    private: u64 = 0,
+    // Cached file size; saves re-walking the cpio on every read.
+    size: u64 = 0,
+    // Backing superblock for VFS vtable dispatch (v0.4.0).
+    // `?*anyopaque`, not `?*vfs.SuperBlock`, to break the import
+    // cycle: vfs.zig imports file/task_layout for the File type, so
+    // task_layout.zig must not import vfs. sys.zig @ptrCast's this
+    // back to *vfs.SuperBlock at the read/seek/close dispatch sites —
+    // the same opaque-pointer pattern as the `fd_table` slot above.
+    sb: ?*anyopaque = null,
 };
 
 pub const KeRegs = extern struct {

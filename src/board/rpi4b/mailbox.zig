@@ -1,0 +1,99 @@
+// BCM2711 VideoCore mailbox — MMIO doorbell for the property channel.
+//
+// Pairs with the pure src/mailbox.zig (message layout + parsing). The
+// EMMC2 driver uses it twice during bring-up: to read the firmware-
+// set EMMC2 base clock, and to drop the SD card's 1.8 V supply so the
+// card re-inits at 3.3 V (v0.4.0).
+//
+// The property buffer lives in .bss. The kernel runs with the data
+// cache off and all RAM mapped Normal-Non-Cacheable (see MAIR_EL1 /
+// SCTLR in src/asm_defs_common.inc), so ARM writes hit RAM directly
+// and the VideoCore sees them without any cache maintenance. The
+// buffer sits in the low <16 MiB identity-mapped window, so its
+// virtual address equals its physical address — exactly what the
+// doorbell wants.
+
+const mailbox = @import("mailbox");
+
+const LINEAR_MAP_BASE: u64 = 0xffff000000000000;
+const DEVICE_BASE: u64 = 0xFE000000;
+const MBOX_BASE: u64 = DEVICE_BASE + 0xB880 + LINEAR_MAP_BASE;
+
+const MboxRegs = extern struct {
+    read: u32, //       0x00
+    _reserved: [3]u32, // 0x04..0x0F
+    peek: u32, //       0x10
+    sender: u32, //     0x14
+    status: u32, //     0x18
+    config: u32, //     0x1C
+    write: u32, //      0x20
+};
+
+inline fn regs() *volatile MboxRegs {
+    return @ptrFromInt(MBOX_BASE);
+}
+
+const STATUS_FULL: u32 = 0x8000_0000;
+const STATUS_EMPTY: u32 = 0x4000_0000;
+
+// Property-tag message buffer. 16-byte aligned so the doorbell's low
+// nibble is free for the channel id.
+var prop_buf: mailbox.Msg align(16) = undefined;
+
+// Generous spin bound — a property call answers in microseconds on
+// real hardware; the bound only exists so a wedged VideoCore turns
+// into a clean failure instead of a hang.
+const SPIN: u32 = 1_000_000;
+
+// Post `prop_buf` on the property channel and wait for the matching
+// response. Returns false on a spin-bound timeout. Callers inspect
+// the buffer afterwards for the per-tag result.
+fn transact() bool {
+    const r = regs();
+    // .bss in the id-mapped low window → VA == PA, fits in u32.
+    const msg: u32 = mailbox.doorbell(@intCast(@intFromPtr(&prop_buf)), mailbox.CHANNEL_PROP);
+
+    var spin: u32 = 0;
+    while ((r.status & STATUS_FULL) != 0) : (spin += 1) {
+        if (spin >= SPIN) return false;
+    }
+    r.write = msg;
+
+    spin = 0;
+    while (true) : (spin += 1) {
+        if (spin >= SPIN) return false;
+        if ((r.status & STATUS_EMPTY) != 0) continue;
+        if (r.read == msg) break;
+    }
+    return true;
+}
+
+// Query a VideoCore clock rate in Hz. Returns 0 on any failure
+// (mailbox wedged, bad response) — callers treat 0 as "unknown" and
+// degrade gracefully.
+pub fn getClockRate(clock_id: u32) u32 {
+    mailbox.buildGetClockRate(&prop_buf, clock_id);
+    if (!transact()) return 0;
+    return mailbox.parseClockRate(&prop_buf, clock_id) catch 0;
+}
+
+// Set a firmware-managed GPIO (e.g. the Pi 4 expander lines). Returns
+// false on any failure.
+pub fn setGpioState(gpio: u32, state: u32) bool {
+    mailbox.buildSetGpioState(&prop_buf, gpio, state);
+    if (!transact()) return false;
+    mailbox.checkResponse(&prop_buf) catch return false;
+    return true;
+}
+
+// Drive a firmware-managed power rail (e.g. the SD-card VDD on Pi 4).
+// `state` is the bitwise OR of `POWER_STATE_ON`/`OFF` with optionally
+// `POWER_STATE_WAIT`. Returns false on any mailbox or device failure;
+// when ON was requested, also returns false if the rail did not come up.
+pub fn setPowerState(device_id: u32, state: u32) bool {
+    mailbox.buildSetPowerState(&prop_buf, device_id, state);
+    if (!transact()) return false;
+    const want_on = (state & mailbox.POWER_STATE_ON) != 0;
+    mailbox.parsePowerState(&prop_buf, device_id, want_on) catch return false;
+    return true;
+}

@@ -4,12 +4,15 @@
 // Syscall IDs come from lib/syscall_defs.zig — the single source of
 // truth shared with user_space/kernel_tests.zig.
 
+const std = @import("std");
 const layout = @import("task_layout");
 const defs = @import("syscall_defs");
 const user_layout = @import("user_layout");
 const pipe_mod = @import("pipe");
 const console = @import("console");
 const sched = @import("sched");
+const vfs = @import("vfs");
+const file_mod = @import("file");
 const TaskStruct = layout.TaskStruct;
 const UTHREAD = layout.UTHREAD;
 const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
@@ -143,11 +146,86 @@ export fn sys_dump_free() u64 {
 }
 
 // SYS CALL FILE SYSTEM
-export fn sys_openFile() void {}
-export fn sys_readFile() void {}
-export fn sys_writeFile() void {}
-export fn sys_seek() void {}
-export fn sys_closeFile() void {}
+//
+// All four handlers dispatch through the VFS shim (v0.4.0):
+// sys_openFile resolves the path via vfs.vfs_open and stashes the
+// backing superblock in File.sb; read/seek/close re-cast that opaque
+// pointer and call through the backend vtable. The per-backend
+// arithmetic (initramfs's pointer walk, FAT32's cluster chains) lives
+// in the backend modules — these handlers are thin dispatchers.
+//
+// FIXME: no copy_from_user yet — same posture as
+// sys_pipe_write (path/buf are dereferenced as kernel-walkable user
+// pointers). A bad pointer faults into do_data_abort and zombies the
+// task.
+
+// Re-type File.sb (an `?*anyopaque`, opaque to break the vfs<->file
+// import cycle) back to `*vfs.SuperBlock` for vtable dispatch.
+inline fn vfsSb(f: *file_mod.File) ?*vfs.SuperBlock {
+    const raw = f.sb orelse return null;
+    return @ptrCast(@alignCast(raw));
+}
+
+export fn sys_openFile(path_ptr: u64) i32 {
+    const c = current orelse return -1;
+
+    const path_bytes: [*:0]const u8 = @ptrFromInt(path_ptr);
+    // SMP-audit: slice borrows EL0 memory; no yield between span()
+    // and the final use, so on single-core the backing UVA can't be
+    // freed mid-walk. Revisit for the future SMP audit.
+    const path = std.mem.span(path_bytes);
+
+    var open_result: vfs.OpenResult = .{};
+    const sb = vfs.vfs_open(path, &open_result) orelse return -1;
+
+    const f = file_mod.alloc() orelse return -1;
+    f.refs = 1;
+    f.private = open_result.private;
+    f.size = open_result.size;
+    f.offset = 0;
+    f.sb = sb;
+
+    const fd = file_mod.fdAlloc(c, f);
+    if (fd < 0) {
+        file_mod.unref(f);
+        return -1;
+    }
+    return fd;
+}
+
+export fn sys_readFile(fd: i32, buf: u64, len: u64) i64 {
+    const c = current orelse return -1;
+    const f = file_mod.fdGet(c, fd) orelse return -1;
+    const sb = vfsSb(f) orelse return -1;
+    return vfs.vfs_read(sb, f, @ptrFromInt(buf), len);
+}
+
+// FAT32 write — stable ABI (v0.4.0). Mirrors
+// sys_readFile: resolve fd -> SuperBlock -> vfs.vfs_write. The
+// backend's writeBack does the cluster-allocate / FAT-update /
+// dir-entry-update / FSInfo-update; initramfs's vtable returns -1
+// (EROFS). Returns bytes written, or -1 on bad fd / no backend /
+// I/O error.
+export fn sys_writeFile(fd: i32, buf: u64, len: u64) i64 {
+    const c = current orelse return -1;
+    const f = file_mod.fdGet(c, fd) orelse return -1;
+    const sb = vfsSb(f) orelse return -1;
+    return vfs.vfs_write(sb, f, @ptrFromInt(buf), len);
+}
+
+export fn sys_seek(fd: i32, off: i64, whence: i32) i64 {
+    const c = current orelse return -1;
+    const f = file_mod.fdGet(c, fd) orelse return -1;
+    const sb = vfsSb(f) orelse return -1;
+    return vfs.vfs_seek(sb, f, off, whence);
+}
+
+export fn sys_closeFile(fd: i32) i32 {
+    const c = current orelse return -1;
+    const f = file_mod.fdGet(c, fd) orelse return -1;
+    if (vfsSb(f)) |sb| vfs.vfs_close(sb, f);
+    return file_mod.fdClose(c, fd);
+}
 
 // MEMORY MANAGEMENT
 
@@ -210,13 +288,13 @@ export fn sys_munlock() void {}
 
 // Interprocess Communication
 //
-// Anonymous-pipe ABI (v0.3.0 step 1.2). Slot map in lib/syscall_defs.zig.
+// Anonymous-pipe ABI (v0.3.0). Slot map in lib/syscall_defs.zig.
 // `sys_pipe` returns both fds in a single i64: low 32 bits = read fd,
 // high 32 bits = write fd. Negative on out-of-fds / alloc-failure.
 // Compact ABI keeps the user-side wrapper to one register and avoids
 // a copy_to_user for the pair.
 //
-// FIXME(phase 4): no copy_from_user / copy_to_user yet — `buf` is
+// FIXME: no copy_from_user / copy_to_user yet — `buf` is
 // dereferenced as a kernel-walkable user pointer (current TTBR0). A
 // bad pointer faults through do_data_abort and zombies the task,
 // which the parent's sys_wait reaps as usual; same behaviour as the
@@ -268,22 +346,22 @@ export fn sys_shmget() void {}
 
 // Device Management
 //
-// Console ABI (v0.3.0 step 1.3). Pipe-fds and console-fds coexist
-// separately until phase 4 unifies both behind a single
+// Console ABI (v0.3.0). Pipe-fds and console-fds coexist
+// separately until they're unified behind a single
 // read(fd,buf,len) / write(fd,buf,len) dispatcher backed by the
 // fd-table tagged-pointer scheme.
 //
-// FIXME(phase 4): collapse the parallel console / pipe ABI families
+// FIXME: collapse the parallel console / pipe ABI families
 // once the fd-table grows tagged pointers — sys_readConsole and
 // sys_pipe_read should fold into a single dispatch keyed on the
 // fd's type tag, same for write/close. Until then the user picks
 // the right wrapper by hand.
 //
 // sys_openConsole returns a synthetic fd: 0 = stdin, 1 = stdout,
-// negative on bad mode. Not installed in any fd_table — phase 4
-// unifies. Until then user code passes the returned fd straight
-// back into sys_readConsole / sys_writeConsole as a no-op hint
-// (the kernel-side handlers don't look at it).
+// negative on bad mode. Not installed in any fd_table — future
+// work unifies. Until then user code passes the returned fd
+// straight back into sys_readConsole / sys_writeConsole as a no-op
+// hint (the kernel-side handlers don't look at it).
 export fn sys_openConsole(mode: i32) i32 {
     return switch (mode) {
         0 => 0,
@@ -294,8 +372,8 @@ export fn sys_openConsole(mode: i32) i32 {
 
 // Blocks until at least one byte is available, then drains up to
 // `len` bytes (short reads — see src/console.zig:console_read).
-// Returns the count copied. i64 return matches sys_pipe_read so the
-// phase-4 unified `sys_read` can hand both ends through the same
+// Returns the count copied. i64 return matches sys_pipe_read so a
+// future unified `sys_read` can hand both ends through the same
 // signature.
 export fn sys_readConsole(buf: u64, len: u64) i64 {
     return console.console_read(@ptrFromInt(buf), len);
@@ -305,18 +383,19 @@ export fn sys_writeConsole(buf: [*:0]const u8) void {
     main_output(MU, buf);
 }
 
-// Inert stubs — phase 4 wires real mode flips (line / raw / O_NONBLOCK)
-// and fd-table teardown once the unified read/write dispatcher lands.
+// Inert stubs — future work wires real mode flips (line / raw /
+// O_NONBLOCK) and fd-table teardown once the unified read/write
+// dispatcher lands.
 export fn sys_setConsoleMode() void {}
 export fn sys_closeConsole() void {}
 
-// FIXME(phase 4/8): debug-only — not part of the stable ABI.
+// FIXME: debug-only — not part of the stable ABI.
 // Pushes one byte into the kernel RX ring as if it had arrived on
 // the UART. Powers deterministic [TEST] console-echo coverage on
 // QEMU where there is no external input driver, and remains
 // permanently mounted as a debug surface analogous to
 // sys_dump_free. Document as debug-only in DOCUMENTATION.md §5 and
-// remove when phase 4 lands a real host-input driver.
+// remove once a real host-input driver lands.
 export fn sys_console_inject(byte: u64) void {
     console.console_test_push(@truncate(byte));
 }
@@ -343,11 +422,11 @@ export var sys_call_table = blk: {
     t[defs.SYS_EXEC]      = @ptrCast(&sys_exec);
     t[defs.SYS_KILL]      = @ptrCast(&sys_kill);
 
-    t[7]  = @ptrCast(&sys_openFile);
-    t[8]  = @ptrCast(&sys_readFile);
-    t[9]  = @ptrCast(&sys_writeFile);
-    t[10] = @ptrCast(&sys_seek);
-    t[11] = @ptrCast(&sys_closeFile);
+    t[defs.SYS_OPEN_FILE]  = @ptrCast(&sys_openFile);
+    t[defs.SYS_READ_FILE]  = @ptrCast(&sys_readFile);
+    t[defs.SYS_WRITE_FILE] = @ptrCast(&sys_writeFile);
+    t[defs.SYS_SEEK]       = @ptrCast(&sys_seek);
+    t[defs.SYS_CLOSE_FILE] = @ptrCast(&sys_closeFile);
 
     t[defs.SYS_BRK]  = @ptrCast(&sys_brk);
     t[defs.SYS_SBRK] = @ptrCast(&sys_sbrk);

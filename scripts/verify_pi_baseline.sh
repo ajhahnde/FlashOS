@@ -15,7 +15,7 @@ if [ ! -f "$BASELINE" ]; then
 fi
 
 STASHED=0
-if ! git diff --quiet -- src/symbol_area.S; then
+if ! git diff --quiet HEAD -- src/symbol_area.S; then
     git stash push --quiet -m "verify_pi_baseline" -- src/symbol_area.S
     STASHED=1
 fi

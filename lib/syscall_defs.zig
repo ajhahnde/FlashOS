@@ -21,24 +21,32 @@ pub const SYS_WAIT: u64 = 3;
 pub const SYS_DUMP_FREE: u64 = 4;
 pub const SYS_EXEC: u64 = 5;
 pub const SYS_KILL: u64 = 6;
-// Slots 7..11 are unused file/openConsole stubs in sys_call_table —
-// they keep their positional binding without a SYS_* constant until
-// implemented. brk/sbrk land at the historical positions reserved by
-// the table so the existing slot ↔ id mapping stays stable.
+// File-system ABI (v0.4.0). Slots 7..11 are symbolic
+// constants so the dispatch-table writes in src/sys.zig become
+// compiler-enforced (a renumber here propagates automatically).
+//
+// SYS_WRITE_FILE went live in v0.4.0 (FAT32 writeBack);
+// the slot is now a stable ABI — (fd, buf, len) i64, bytes written
+// or -1. The handler dispatches through vfs.vfs_write.
+pub const SYS_OPEN_FILE: u64 = 7;
+pub const SYS_READ_FILE: u64 = 8;
+pub const SYS_WRITE_FILE: u64 = 9;
+pub const SYS_SEEK: u64 = 10;
+pub const SYS_CLOSE_FILE: u64 = 11;
 pub const SYS_BRK: u64 = 12;
 pub const SYS_SBRK: u64 = 13;
 // Slots 14..17 stay reserved mm stubs (mmap/munmap/mlock/munlock).
 // Slot 18 = SYS_PIPE; the other end-of-pipe ABI sits past the console
-// reservation (slots 23..26) so phase-1.3 can fill the console slots
+// reservation (slots 23..26) so the console can fill its slots
 // without touching the pipe IDs. NR_SYSCALLS in src/asm_defs_common.inc
 // must stay one past the highest slot.
 pub const SYS_PIPE: u64 = 18;
 // Slots 19..22 stay reserved IPC stubs (socket/msgget/semget/shmget).
-// Console ABI (v0.3.0 step 1.3): slots 23..26.
+// Console ABI (v0.3.0): slots 23..26.
 //   * SYS_OPEN_CONSOLE      — synthetic fd for stdin/stdout
 //   * SYS_READ_CONSOLE      — blocking, short reads, drains rx_ring
-//   * SYS_SET_CONSOLE_MODE  — inert until phase 4
-//   * SYS_CLOSE_CONSOLE     — inert until phase 4
+//   * SYS_SET_CONSOLE_MODE  — inert (mode flips not yet wired)
+//   * SYS_CLOSE_CONSOLE     — inert (fd-table teardown not yet wired)
 pub const SYS_OPEN_CONSOLE: u64 = 23;
 pub const SYS_READ_CONSOLE: u64 = 24;
 pub const SYS_SET_CONSOLE_MODE: u64 = 25;
@@ -46,10 +54,10 @@ pub const SYS_CLOSE_CONSOLE: u64 = 26;
 pub const SYS_PIPE_READ: u64 = 27;
 pub const SYS_PIPE_WRITE: u64 = 28;
 pub const SYS_PIPE_CLOSE: u64 = 29;
-// FIXME(phase 4/8): debug-only — not part of the stable ABI.
+// FIXME: debug-only — not part of the stable ABI.
 // Pushes one byte into the kernel RX ring as if it had arrived on
 // the UART. Powers deterministic console-echo coverage on QEMU
 // where there is no external input driver. Symmetric to
-// sys_dump_free in posture; remove when phase 4 lands a real
-// host-input driver.
+// sys_dump_free in posture; remove once a real host-input driver
+// lands.
 pub const SYS_CONSOLE_INJECT: u64 = 30;

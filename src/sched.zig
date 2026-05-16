@@ -16,6 +16,12 @@ const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
 // any fds the zombie didn't close itself drop their refs and free
 // their backing pages.
 const pipe_mod = @import("pipe");
+// File fd-table cleanup on reap (v0.4.0). Same posture as
+// pipe_mod.closeAll above — initramfs fds the zombie left open drop
+// their refs and return the File page to the allocator before the
+// mm-page sweep so the free-page baseline reflects both legs of the
+// per-process resource lifecycle.
+const file_mod = @import("file");
 
 const NR_TASKS: usize = 64;
 
@@ -169,6 +175,7 @@ export fn do_wait_impl() i32 {
                         // free-page baseline reflects both legs of
                         // the per-process resource lifecycle.
                         pipe_mod.closeAll(c);
+                        file_mod.closeAll(c);
                         // Free user-mapped physical pages.
                         var j: usize = 0;
                         while (j < MAX_PAGE_COUNT) : (j += 1) {
@@ -208,7 +215,7 @@ export fn sched_init() void {
 }
 
 // ---------------------------------------------------------------------
-// Host tests (v0.3.0 step 1.4). The pure helpers run against caller-
+// Host tests (v0.3.0). The pure helpers run against caller-
 // owned TaskStruct fixtures + a local `tasks` slice, so the global
 // `task` / `current` state is never touched and tests stay hermetic.
 // ---------------------------------------------------------------------
@@ -230,7 +237,7 @@ test "refill_counters: null slots are skipped" {
 
 test "refill_counters: negative counter halves via arithmetic shift" {
     // counter is i64 — `>>` on signed types is arithmetic in Zig. Guards
-    // the phase-2-era assumption that an over-decremented counter (e.g.
+    // the long-standing assumption that an over-decremented counter (e.g.
     // a kill racing the timer tick) still refills sanely.
     var t: TaskStruct = .{ .priority = 5, .counter = -3 };
     var tasks: [1]?*TaskStruct = .{&t};

@@ -1,11 +1,11 @@
-// Anonymous pipes (v0.3.0 step 1.2).
+// Anonymous pipes (v0.3.0).
 //
 // One get_free_page per `Pipe`. The header lives at the start of the
 // page; the byte ring fills the rest (4 KiB - sizeof(Pipe)). `head`
 // and `tail` are monotone u32 byte counters — indexing happens via
 // modulo RING_CAP — so `is_full` vs. `is_empty` is trivially
-// distinguishable without burning a slot. FIXME(Phase 4): the u32
-// counters wrap after 4 GiB of pipe traffic; widen to u64 or roll the
+// distinguishable without burning a slot. FIXME: the u32 counters
+// wrap after 4 GiB of pipe traffic; widen to u64 or roll the
 // counters modulo (2 * RING_CAP) before then.
 //
 // The page is **not** tracked in mm.user_pages / mm.kernel_pages — the
@@ -14,8 +14,8 @@
 // the page allocator is unref().
 //
 // Single-producer / single-consumer per pipe end. Multi-reader /
-// multi-writer is deferred to Phase 4 along with the rest of the
-// POSIX read(2)/write(2)/close(2) ABI.
+// multi-writer is deferred along with the rest of the POSIX
+// read(2)/write(2)/close(2) ABI.
 
 const builtin = @import("builtin");
 // Named module — see wait_queue.zig for the rationale.
@@ -154,8 +154,8 @@ pub fn write(p: *Pipe, buf: [*]const u8, len: u64) i64 {
         preempt_disable();
         if (p.isFull()) {
             // Last-reader-closed: SIGPIPE territory in POSIX; for
-            // v0.3.0 step 1.2 a short-write with the bytes pushed so
-            // far is enough — phase 4 wires the signal path.
+            // now a short-write with the bytes pushed so far is
+            // enough — signal path TBD.
             if (p.refs <= 1) {
                 preempt_enable();
                 break;

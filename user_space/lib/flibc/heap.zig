@@ -9,7 +9,7 @@
 // allocator wastes (PAGE_SIZE - aligned_n) bytes per call when the
 // caller asks for less than a page. That's intentional for the demo-
 // scale userland flibc targets today; a proper free-list / per-page
-// sub-allocator is Phase-4 work once `fsh` and the demo programs need
+// sub-allocator is future work once `fsh` and the demo programs need
 // many small allocations.
 
 const sys = @import("syscalls.zig");

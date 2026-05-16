@@ -1,0 +1,259 @@
+// SDHCI command construction + response parsing.
+//
+// Pure-data module + host tests. The board-side driver
+// (src/board/<board>/emmc2.zig) owns the MMIO pokes and the
+// wait-for-completion loop; this module owns the bit layouts and
+// the CSD parser.
+//
+// CMDTM register layout (BCM2711 EMMC2 — "BCM2711 ARM Peripherals" §5,
+// identical to the SD Host Controller 3.00 TRANSFER_MODE + COMMAND
+// register pair: TRANSFER_MODE in the low half, COMMAND in the high
+// half. Verified against u-boot/Linux sdhci-iproc plus the jncronin
+// rpi-boot and bztsrc raspi3-tutorial bare-metal drivers):
+//   bit   1      TM_BLKCNT_EN
+//   bit   4      TM_DAT_DIR      0=host→card (write), 1=card→host (read)
+//   bit   5      TM_MULTI_BLOCK  unused (single-block only)
+//   bits 16..17  CMD_RSPNS_TYPE  0=none, 1=136-bit, 2=48-bit, 3=48-bit+busy
+//   bit  19      CMD_CRCCHK_EN
+//   bit  20      CMD_IXCHK_EN
+//   bit  21      CMD_ISDATA
+//   bits 22..23  CMD_TYPE        unused (0=normal)
+//   bits 24..29  CMD_INDEX       0..63
+//
+// Single-block reads/writes only; multi-block (CMD18 / CMD25) and
+// DMA are future optimisations.
+
+const std = @import("std");
+
+// Hardware-level response shape — the value the controller needs in
+// CMD_RSPNS_TYPE plus whether to enable the CRC check. The SD-spec
+// semantic names collapse: R1/R5/R6/R7 are all `.r1` (48-bit, CRC
+// checked); R3/R4 are `.r3` (48-bit, no CRC — the OCR has no CRC).
+// `.r1b` is the busy variant (CMD7) the controller must wait out on
+// DAT0 — CMD_RSPNS_TYPE=3 instead of 2.
+//
+// CMD_IXCHK_EN (bit 20) is never set: the BCM2711 EMMC2 silently
+// drops responses when IXCHK is enabled instead of latching
+// CMD_INDEX_ERR — the CMD8 timeout root cause. Circle
+// (rsta2/circle addon/SDCard/emmc.cpp), u-boot sdhci-iproc, and Linux
+// sdhci-iproc all leave bit 20 clear on BCM-family controllers.
+pub const CmdResp = enum {
+    none, // no response               — CMD0
+    r1, //   48-bit + CRC + IDX         — CMD3 / CMD8 / CMD17 / CMD24 / CMD55
+    r1b, //  48-bit + CRC + IDX + busy  — CMD7
+    r2, //   136-bit                    — CMD2 / CMD9 / CMD10
+    r3, //   48-bit, no CRC, no IDX     — ACMD41 (also R4)
+};
+
+pub const CmdDir = enum(u1) { write = 0, read = 1 };
+
+pub fn encode(idx: u6, resp: CmdResp, is_data: bool, dir: CmdDir) u32 {
+    var v: u32 = 0;
+    // CMD_RSPNS_TYPE: 0=none, 1=136-bit, 2=48-bit, 3=48-bit+busy.
+    const rspns_type: u32 = switch (resp) {
+        .none => 0,
+        .r2 => 1,
+        .r1, .r3 => 2,
+        .r1b => 3,
+    };
+    v |= rspns_type << 16; //                                      CMD_RSPNS_TYPE
+    if (resp == .r1 or resp == .r1b or resp == .r2) v |= (1 << 19); // CRC check — IXCHK never set (BCM2711 quirk)
+    if (is_data) v |= (1 << 21); //                                CMD_ISDATA
+    v |= @as(u32, idx) << 24; //                                   CMD_INDEX
+    if (is_data) {
+        v |= (1 << 1); //                                          TM_BLKCNT_EN
+        v |= @as(u32, @intFromEnum(dir)) << 4; //                  TM_DAT_DIR
+    }
+    return v;
+}
+
+pub const CMD0_GO_IDLE: u32           = encode(0,  .none, false, .write);
+pub const CMD2_ALL_SEND_CID: u32      = encode(2,  .r2,   false, .write);
+pub const CMD3_SEND_REL_ADDR: u32     = encode(3,  .r1,   false, .write); // R6
+pub const CMD7_SELECT_CARD: u32       = encode(7,  .r1b,  false, .write); // R1b
+pub const CMD8_SEND_IF_COND: u32      = encode(8,  .r1,   false, .write); // R7
+pub const CMD9_SEND_CSD: u32          = encode(9,  .r2,   false, .write);
+pub const CMD17_READ_SINGLE: u32      = encode(17, .r1,   true,  .read);
+pub const CMD24_WRITE_SINGLE: u32     = encode(24, .r1,   true,  .write);
+pub const CMD55_APP_CMD: u32          = encode(55, .r1,   false, .write);
+pub const ACMD41_SD_SEND_OP_COND: u32 = encode(41, .r3,   false, .write);
+
+// CMD8 argument: VHS=1 (2.7-3.6 V supplied) + check pattern 0xAA. The
+// card echoes the pattern in R7; mismatch means a v1.x card or a bad
+// voltage rail.
+pub const CMD8_ARG_VHS_27_36_CHECK_AA: u32 = 0x000001AA;
+
+// ACMD41 argument: HCS (bit 30, host supports SDHC/SDXC) + OCR voltage
+// window 3.0-3.4 V (bits 20..23 set). XPC and S18R left clear.
+pub const ACMD41_ARG_HCS_AND_VOLT: u32 = 0x40FF8000;
+
+// CSD v2.0 capacity parser (SDHC / SDXC).
+//
+// BCM2711 EMMC2 loads R2 (CMD9) into RESP0..RESP3 with the CRC byte
+// stripped, so the four 32-bit words hold:
+//   resp[0] = CSD[39:8]   resp[1] = CSD[71:40]
+//   resp[2] = CSD[103:72] resp[3] = CSD[135:104]   (top 8 bits unused)
+//
+// CSD_STRUCTURE is CSD[127:126]. After the -8 shift, that lands at
+// resp[3] bits [23:22]. SDHC requires CSD_STRUCTURE = 1; v1.0 cards
+// (CSD_STRUCTURE = 0) are pre-2006 SDSC and the driver rejects them.
+//
+// C_SIZE for v2.0 is CSD[69:48] (22 bits). After the -8 shift it
+// straddles resp[1] high (low 6 bits at resp[1][21:16]) and resp[2]
+// low (high 16 bits at resp[2][15:0]). Capacity in 512 B blocks is
+// (C_SIZE + 1) * 1024 per the SD Physical Layer Simplified Spec.
+
+pub const Csd = struct {
+    capacity_blocks: u64,
+};
+
+pub fn parseCsdV2(resp: [4]u32) error{UnsupportedCsdVersion}!Csd {
+    const csd_structure = (resp[3] >> 22) & 0x3;
+    if (csd_structure != 1) return error.UnsupportedCsdVersion;
+    const c_size_lo: u32 = (resp[1] >> 16) & 0x3F;
+    const c_size_hi: u32 = (resp[2] & 0xFFFF) << 6;
+    const c_size: u32 = c_size_lo | c_size_hi;
+    return .{ .capacity_blocks = (@as(u64, c_size) + 1) * 1024 };
+}
+
+// ---- SDHCI clock divider ----
+//
+// The card clock is base_hz / (2 * N) where N is the 10-bit divisor
+// programmed into CONTROL1. The base clock is firmware-set and must
+// be read at runtime (the board side queries the VideoCore mailbox);
+// hardcoding a divisor was the CMD8-timeout bug,
+// since the BCM2711 SDHCI core hangs commands when the card clock
+// runs too far below the base clock (Linux sdhci-iproc enforces a
+// 200 kHz floor for the same reason).
+
+// Smallest power-of-two divisor that keeps the card clock at or below
+// `target_hz`. Used for the SD identification phase (~400 kHz) and the
+// transfer phase (~25 MHz). The BCM2711 EMMC2 requires a power-of-two
+// divisor even in SDHCI 3.0 10-bit divided-clock mode (Circle's
+// GetClockDivider rounds up the same way); clamped to the largest
+// power of two the 10-bit CONTROL1 field can hold.
+pub fn clockDivisor(base_hz: u32, target_hz: u32) u32 {
+    if (base_hz == 0 or target_hz == 0) return 1;
+    const denom: u32 = 2 * target_hz;
+    const min_n: u32 = (base_hz + denom - 1) / denom; // ceil(base / 2*target)
+    var n: u32 = 1;
+    while (n < min_n and n < 512) n <<= 1;
+    return n;
+}
+
+// Pack a 10-bit divisor into CONTROL1's split SDCLK-frequency-select
+// field: low 8 bits at [15:8], high 2 bits at [7:6] (SD Host
+// Controller 3.00 "10-bit Divided Clock Mode").
+pub fn control1ClockBits(n: u32) u32 {
+    const lo = (n & 0xFF) << 8;
+    const hi = ((n >> 8) & 0x3) << 6;
+    return lo | hi;
+}
+
+// ---- Host tests ----
+//
+// Pure data; no externs, no fixture state. The freestanding kernel
+// build links the same source unchanged.
+
+const testing = std.testing;
+
+test "CMD0_GO_IDLE is all-zero (no response, no data, no flags)" {
+    try testing.expectEqual(@as(u32, 0), CMD0_GO_IDLE);
+}
+
+test "CMD17 encodes idx=17, R1, data, read direction" {
+    const v = CMD17_READ_SINGLE;
+    try testing.expectEqual(@as(u32, 17), (v >> 24) & 0x3F);
+    try testing.expectEqual(@as(u32, 2),  (v >> 16) & 0x3);  // RESP_TYPE = r1 (48-bit)
+    try testing.expect((v & (1 << 19)) != 0);                // CRC check
+    try testing.expect((v & (1 << 20)) == 0);                // IXCHK never set (BCM2711 quirk)
+    try testing.expect((v & (1 << 21)) != 0);                // ISDATA
+    try testing.expect((v & (1 << 1)) != 0);                 // BLKCNT_EN
+    try testing.expectEqual(@as(u32, 1), (v >> 4) & 1);      // DIR = read
+}
+
+test "CMD24 encodes idx=24 + write direction (DIR bit clear)" {
+    const v = CMD24_WRITE_SINGLE;
+    try testing.expectEqual(@as(u32, 24), (v >> 24) & 0x3F);
+    try testing.expect((v & (1 << 19)) != 0);                // CRC check
+    try testing.expect((v & (1 << 20)) == 0);                // IXCHK never set (BCM2711 quirk)
+    try testing.expect((v & (1 << 21)) != 0);                // ISDATA
+    try testing.expectEqual(@as(u32, 0), (v >> 4) & 1);      // DIR = write
+}
+
+test "CMD8_SEND_IF_COND encodes R7-shape (CRC, no IXCHK), not data" {
+    const v = CMD8_SEND_IF_COND;
+    try testing.expectEqual(@as(u32, 8), (v >> 24) & 0x3F);
+    try testing.expectEqual(@as(u32, 2), (v >> 16) & 0x3);   // RESP_TYPE = r1 (48-bit)
+    try testing.expect((v & (1 << 19)) != 0);                // CRC check
+    try testing.expect((v & (1 << 20)) == 0);                // IXCHK never set (BCM2711 quirk)
+    try testing.expect((v & (1 << 21)) == 0);                // not data
+}
+
+test "CMD7_SELECT_CARD encodes R1b (busy response, CRC, no IXCHK)" {
+    const v = CMD7_SELECT_CARD;
+    try testing.expectEqual(@as(u32, 7), (v >> 24) & 0x3F);
+    try testing.expectEqual(@as(u32, 3), (v >> 16) & 0x3);   // RESP_TYPE = 48-bit+busy
+    try testing.expect((v & (1 << 19)) != 0);                // CRC check
+    try testing.expect((v & (1 << 20)) == 0);                // IXCHK never set (BCM2711 quirk)
+}
+
+test "CMD55_APP_CMD encodes idx=55" {
+    try testing.expectEqual(@as(u32, 55), (CMD55_APP_CMD >> 24) & 0x3F);
+}
+
+test "ACMD41 encodes R3 (no CRC, no IDX check)" {
+    const v = ACMD41_SD_SEND_OP_COND;
+    try testing.expectEqual(@as(u32, 41), (v >> 24) & 0x3F);
+    try testing.expectEqual(@as(u32, 2),  (v >> 16) & 0x3);  // RESP_TYPE = r3
+    try testing.expect((v & (1 << 19)) == 0);
+    try testing.expect((v & (1 << 20)) == 0);
+}
+
+test "CMD2 encodes R2 (136-bit, CRC, no IXCHK) for CID retrieval" {
+    const v = CMD2_ALL_SEND_CID;
+    try testing.expectEqual(@as(u32, 2), (v >> 24) & 0x3F);
+    try testing.expectEqual(@as(u32, 1), (v >> 16) & 0x3);   // RESP_TYPE = r2 (136-bit)
+    try testing.expect((v & (1 << 19)) != 0);                // CRC check (R2 has CRC)
+    try testing.expect((v & (1 << 20)) == 0);                // IXCHK never set (BCM2711 quirk)
+    try testing.expect((v & (1 << 21)) == 0);                // not data
+}
+
+test "parseCsdV2 decodes C_SIZE = 7647 to ~3.7 GiB" {
+    // Synthetic SDHC CSD with CSD_STRUCTURE = 1 and C_SIZE = 0x1DDF.
+    // c_size_lo = 0x1F (low 6 bits)  → resp[1][21:16]
+    // c_size_hi = 0x77 (high 16 bits) → resp[2][15:0]
+    var resp: [4]u32 = .{ 0, 0, 0, 0 };
+    resp[3] = 1 << 22;
+    resp[1] = 0x1F << 16;
+    resp[2] = 0x77;
+    const csd = try parseCsdV2(resp);
+    try testing.expectEqual(@as(u64, (7647 + 1) * 1024), csd.capacity_blocks);
+}
+
+test "parseCsdV2 rejects CSD v1 (CSD_STRUCTURE = 0)" {
+    const resp: [4]u32 = .{ 0, 0, 0, 0 };
+    try testing.expectError(error.UnsupportedCsdVersion, parseCsdV2(resp));
+}
+
+test "clockDivisor rounds up to a power-of-two divisor" {
+    // 100 MHz base, 400 kHz target → min 125 → next pow2 128.
+    try testing.expectEqual(@as(u32, 128), clockDivisor(100_000_000, 400_000));
+    // 200 MHz base, 400 kHz target → min 250 → next pow2 256.
+    try testing.expectEqual(@as(u32, 256), clockDivisor(200_000_000, 400_000));
+    // 100 MHz base, 25 MHz transfer target → min 2 → pow2 2.
+    try testing.expectEqual(@as(u32, 2), clockDivisor(100_000_000, 25_000_000));
+}
+
+test "clockDivisor stays a power of two inside [1, 512]" {
+    try testing.expectEqual(@as(u32, 1), clockDivisor(0, 400_000));
+    try testing.expectEqual(@as(u32, 1), clockDivisor(100_000_000, 400_000_000));
+    try testing.expectEqual(@as(u32, 512), clockDivisor(4_000_000_000, 1));
+}
+
+test "control1ClockBits splits the divisor into the CONTROL1 layout" {
+    // N = 250 → low byte 0xFA at [15:8], high bits clear.
+    try testing.expectEqual(@as(u32, 0xFA00), control1ClockBits(250));
+    // N = 0x2A8 → low 0xA8 at [15:8], high 0b10 at [7:6].
+    try testing.expectEqual(@as(u32, 0xA880), control1ClockBits(0x2A8));
+}

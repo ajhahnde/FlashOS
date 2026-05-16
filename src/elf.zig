@@ -1,13 +1,13 @@
 // ELF64 header + program-header parser. Pure data structures — no
 // externs, no allocation, no kernel state — so this module is host-
-// testable. The Phase-2.3 ELF loader (sys_exec → prepare_move_to_user_elf
+// testable. The ELF loader (sys_exec → prepare_move_to_user_elf
 // in src/fork.zig) uses parseEhdr + iteratePhdrs to walk PT_LOAD
 // segments before mapping them with map_page.
 //
 // Scope is deliberately narrow:
 //   * ELF64, little-endian, AArch64, ET_EXEC only.
 //   * Validation rejects ET_DYN — dynamic relocations / PIE land
-//     post-Phase-2 if at all.
+//     later if at all.
 //   * No section-header parsing. The loader does not need section
 //     names; segments are enough.
 

@@ -11,10 +11,11 @@
 //   0x0000_0000_0020_0000  heap    (RW-, grows up via brk)
 //   0x0000_0FFF_FFFF_F000  stack   (RW-, grows down, guard below)
 //
-// Phase 2.1 documented the layout and plumbed region flags through
-// map_page; the blob path (PID 1 / non-ELF sys_exec inline) keeps
-// stamping the combined-permission default bag, while ELF-loaded tasks
-// get per-region attributes via prepare_move_to_user_elf (Phase 2.3).
+// The layout is documented above and region flags are plumbed
+// through map_page; the blob path (PID 1 / non-ELF sys_exec inline)
+// keeps stamping the combined-permission default bag, while
+// ELF-loaded tasks get per-region attributes via
+// prepare_move_to_user_elf.
 
 pub const PAGE_SIZE: u64 = 1 << 12;
 
@@ -56,7 +57,7 @@ const TD_ACCESS: u64 = 1 << 10;
 // TD_USER_PAGE_FLAGS from src/mm_user.zig. Used by every existing call
 // site (blob path, demand-allocation in do_data_abort, copy_virt_memory)
 // until the ELF loader starts choosing per-region flags. Identical
-// value to the pre-2.1 constant — Phase 2.1 acceptance is "blob path
+// value to the pre-existing constant — acceptance is "blob path
 // keeps working unchanged".
 pub const TD_USER_PAGE_FLAGS_DEFAULT: u64 =
     TD_ACCESS | TD_INNER_SHARABLE | TD_USER_PERMS | TD_PAGE | TD_VALID;

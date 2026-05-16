@@ -12,6 +12,11 @@ const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
 // Pipe fd-table duplication on UTHREAD fork. Kernel-only consumer of
 // the named module; keeps fork.zig agnostic of the Pipe layout.
 const pipe_mod = @import("pipe");
+// File fd-table duplication on UTHREAD fork (v0.4.0). Same
+// posture as pipe_mod.dupAll: each installed open_files slot is a
+// shared reference to the same File, refcount bumps once per
+// inherited slot.
+const file_mod = @import("file");
 
 // User VA layout + default permission bag. The blob path stamps the
 // historical combined-permission flags; the ELF loader chooses per-
@@ -27,7 +32,6 @@ const elf = @import("elf.zig");
 const NR_TASKS: usize = 64;
 const PAGE_SIZE: u64 = 1 << 12;
 const THREAD_SIZE: u64 = PAGE_SIZE;
-const USER_SP_INIT_POS: u64 = 2 * PAGE_SIZE;
 const SPSR_EL1_MODE_EL0t: u64 = 0;
 const MU: i32 = 0;
 
@@ -88,10 +92,11 @@ export fn copy_process_impl(clone_flags: u64, fn_addr: u64, arg: u64) i32 {
         // Dup the parent's fd table: each installed slot is a shared
         // reference to the same kernel-resident Pipe, and the refcount
         // bumps once per inherited slot. POSIX-equivalent without
-        // CLOEXEC for now (Phase 4 wires CLOEXEC + close-on-exec).
+        // CLOEXEC for now (future work wires CLOEXEC + close-on-exec).
         // KTHREAD branch skips this — kernel threads cannot reach the
         // EL0 syscall path that fills fd_table.
         pipe_mod.dupAll(current, p);
+        file_mod.dupAll(current, p);
     }
 
     p.flags = clone_flags;
@@ -151,12 +156,24 @@ export fn prepare_move_to_user(start_addr: u64, size: u64, fn_addr: u64) i32 {
     memzero(@intFromPtr(regs), @sizeOf(KeRegs));
     regs.elr = fn_addr;
     regs.pstate = SPSR_EL1_MODE_EL0t;
-    regs.sp = USER_SP_INIT_POS;
 
-    const code_page = allocate_user_page(current, 0, user_layout.TD_USER_PAGE_FLAGS_DEFAULT);
-    if (code_page == 0) return -1;
+    // The blob image spans ceil(size / PAGE_SIZE) pages — eagerly mapped
+    // at UVA 0, 0x1000, … with the initial stack pointer parked one page
+    // above the image. Post-S7 the only caller is sys_exec's non-ELF
+    // fallback for the [TEST] exec inline blob (24 bytes, single page,
+    // svc-only — never touches the stack frame at sp = 2 * PAGE_SIZE).
+    const num_pages: u64 = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    var i: u64 = 0;
+    while (i < num_pages) : (i += 1) {
+        const uva = i * PAGE_SIZE;
+        const page_kva = allocate_user_page(current, uva, user_layout.TD_USER_PAGE_FLAGS_DEFAULT);
+        if (page_kva == 0) return -1;
+        const remaining = size - uva;
+        const copy_bytes: u64 = if (remaining > PAGE_SIZE) PAGE_SIZE else remaining;
+        memcpy(@ptrFromInt(page_kva), @ptrFromInt(start_addr + uva), copy_bytes);
+    }
+    regs.sp = (num_pages + 1) * PAGE_SIZE;
 
-    memcpy(@ptrFromInt(code_page), @ptrFromInt(start_addr), size);
     // Heap starts empty at HEAP_BASE for blob-loaded tasks too — keeps
     // sys_brk's bounds check uniform across the blob and ELF paths so
     // children forked from the (blob-loaded) PID 1 can also exercise

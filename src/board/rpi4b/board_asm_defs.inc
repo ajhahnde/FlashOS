@@ -193,7 +193,7 @@
 /* On real HW armstub8.S already writes CPACR_EL1 (FPEN + ZEN) before
  * dropping to EL1, but QEMU `-M raspi4b -kernel` skips armstub and
  * lands directly in the kernel — leaving CPACR with FPEN trapping.
- * Phase 2.3's ELF magic check (ehdr.e_ident[0..4]) lets the Zig
+ * The ELF magic check (ehdr.e_ident[0..4]) lets the Zig
  * compiler load 4 bytes via `ldr s0, [x0]`, which then traps with
  * EC=0x07 on QEMU. Re-writing CPACR is idempotent on the HW path
  * (armstub already set the same bits at EL3) and necessary on the

@@ -1,0 +1,38 @@
+// PID 1 ELF root (v0.4.0).
+//
+// Built as a standalone aarch64-freestanding ET_EXEC (`pid1.elf`),
+// staged into the initramfs at `/sbin/init`. The kernel's
+// `kernel_process` locates that entry and hands its bytes to
+// `prepare_move_to_user_elf` — the same ELF path the exec-elf /
+// stackbomb / flibc test payloads already travel.
+//
+// Replaces the v0.3.0 `user_space/init.zig` wrapper. That file's
+// `linksection(".text.user")` / `.rodata.user` decorations and the
+// `linker.ld` `user_start` / `user_end` blob wrapping retire with the
+// ELF flip: the loader honours `e_entry` + `p_vaddr`, so section
+// placement is the linker script's job (`tools/pid1_linker.ld`,
+// single PT_LOAD at 0x100000) — no manual section pinning.
+
+const tests = @import("kernel_tests.zig");
+
+const PID1_MSG: [*:0]const u8 = "pid 1 in user space\n";
+
+// ELF entry. Naked: the loader zeroes x0..x30, sets SP = STACK_TOP
+// (top stack page eagerly mapped) and jumps here. `bl pid1_main`
+// gives `pid1_main` a normal prologue against that stack; the
+// trailing `mov x8,#2 ; svc #0` (SYS_EXIT) is the safety net for the
+// should-never-happen `pid1_main` return.
+export fn _start() callconv(.naked) noreturn {
+    asm volatile (
+        \\bl pid1_main
+        \\mov x8, #2
+        \\svc #0
+    );
+}
+
+export fn pid1_main() noreturn {
+    tests.sys_writeConsole(PID1_MSG);
+    const result = tests.run_all();
+    tests.print_tally(result.passed, result.total);
+    tests.sys_exit();
+}

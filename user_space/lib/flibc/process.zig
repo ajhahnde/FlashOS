@@ -6,7 +6,7 @@
 //
 // All four wrappers run from EL0 in an ELF-loaded process — the only
 // context flibc supports. PID 1 (still blob-loaded) cannot link against
-// flibc until initramfs (Phase 3); for now PID 1 keeps using the
+// flibc until initramfs lands; for now PID 1 keeps using the
 // `sys_*` wrappers in user_space/kernel_tests.zig.
 
 const sys = @import("syscalls.zig");

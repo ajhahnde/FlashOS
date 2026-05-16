@@ -1,7 +1,7 @@
 /*
  * QEMU virt has no Pi-style spin-table. Secondary cores are brought
- * up via PSCI `CPU_ON` SMC calls (Phase C, Schritt 16), so for the
- * single-core baseline `wake_up_cores` is a no-op.
+ * up via PSCI `CPU_ON` SMC calls, so for the single-core baseline
+ * `wake_up_cores` is a no-op.
  *
  * Section is ".text.boot" — keeps the function in the same output
  * section the rpi4b boot_quirks contributes to, so boot.S's

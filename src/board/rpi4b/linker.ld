@@ -1,10 +1,11 @@
 /*
  * Kernel link script (RPi4, AArch64).
- * The user-space image is identified by its object file name
- * (user_init.o). Everything from that object lands in the
- * .text.user / .rodata.user / .data.user / .bss.user wrapper sections
- * between `user_start` and `user_end`, which the kernel copies into a
- * user page when dropping PID 1 to EL0.
+ * PID 1 is ELF-loaded from the embedded initramfs (v0.4.0):
+ * `/sbin/init` is the standalone `pid1.elf` artifact, and
+ * the kernel's `prepare_move_to_user_elf` maps it page-grain. The
+ * v0.3.0 `user_init.o` blob — wrapped here in `.text.user` /
+ * `.rodata.user` / `.data.user` / `.bss.user` between `user_start`
+ * and `user_end` — is retired.
  */
 
 SECTIONS
@@ -22,16 +23,16 @@ SECTIONS
 
     .text.boot : { *(.text.boot) *(.text.boot.late) *(.text.boot.literals) }
     .text : {
-        *(EXCLUDE_FILE(*user_init*.o) .text)
-        *(EXCLUDE_FILE(*user_init*.o) .text.*)
+        *(.text)
+        *(.text.*)
     }
     .rodata : {
-        *(EXCLUDE_FILE(*user_init*.o) .rodata)
-        *(EXCLUDE_FILE(*user_init*.o) .rodata.*)
+        *(.rodata)
+        *(.rodata.*)
     }
     .data : {
-        *(EXCLUDE_FILE(*user_init*.o) .data)
-        *(EXCLUDE_FILE(*user_init*.o) .data.*)
+        *(.data)
+        *(.data.*)
     }
 
     . = ALIGN(0x8);
@@ -50,23 +51,26 @@ SECTIONS
     . = ALIGN(0x8);
     bss_begin = .;
     .bss : {
-        *(EXCLUDE_FILE(*user_init*.o) .bss)
-        *(EXCLUDE_FILE(*user_init*.o) .bss.*)
-        *(EXCLUDE_FILE(*user_init*.o) COMMON)
+        *(.bss)
+        *(.bss.*)
+        *(COMMON)
     }
     bss_end = .;
+
+    /* Embedded initramfs (v0.4.0). Placed between bss_end and
+     * id_pg_dir; the kernel reads it through a TTBR1 linear-map
+     * alias in src/initramfs.zig. Size shifts everything past it
+     * (id_pg_dir, high_pg_dir), so the cpio bytes must be a
+     * deterministic function of the source tree (see
+     * scripts/build_initramfs.zig for the deterministic encoder). */
+    . = ALIGN(0x4);
+    .initramfs : {
+        KEEP(*(.initramfs))
+    }
 
     . = ALIGN(0x1000);
     id_pg_dir = .;
     .data.id_pg_dir : { . += (3 * (1 << 12)); }
     high_pg_dir = .;
     .data.high_pg_dir : { . += (6 * (1 << 12)); }
-
-    user_start = .;
-    .text.user : { *user_init*.o(.text .text.*) }
-    .rodata.user : { *user_init*.o(.rodata .rodata.*) }
-    .data.user : { *user_init*.o(.data .data.*) }
-    .bss.user : { *user_init*.o(.bss .bss.* COMMON) }
-    . = ALIGN(0x1000);
-    user_end = .;
 }

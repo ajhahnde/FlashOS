@@ -6,9 +6,7 @@ const TaskStruct = layout.TaskStruct;
 const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
 
 // User VA regions + per-region permission bags. The ELF loader
-// (prepare_move_to_user_elf) chooses flags per PT_LOAD region; the
-// blob path (PID 1, non-ELF sys_exec fallback) keeps stamping the
-// combined-permission default bag.
+// (prepare_move_to_user_elf) chooses flags per PT_LOAD region.
 const user_layout = @import("user_layout");
 
 const PAGE_SHIFT: u6 = 12;
@@ -239,31 +237,8 @@ export fn unmap_user_range(t: *TaskStruct, start_uva: u64, end_uva: u64) void {
     }
 }
 
-/// Phase-2.6 ELF-loaded marker. A blob-loaded task (PID 1 +
-/// [TEST] exec's inline blob path) maps a single page at UVA 0 and
-/// uses USER_SP_INIT_POS = 8 KiB as its stack — both inside the text
-/// range — so a text-range fault there is legitimate demand-alloc.
-/// An ELF-loaded task (prepare_move_to_user_elf) eagerly maps the top
-/// stack page at STACK_TOP - PAGE_SIZE, so the presence of any user
-/// page in the stack range is the single-bit signal we need to
-/// distinguish the two without growing TaskStruct.
-///
-// FIXME: this carve-out + the do_data_abort text-range demand-alloc
-// branch can be removed once Phase 3 (initramfs) makes PID 1
-// ELF-loaded — at that point every task is ELF and a text-range
-// fault is unconditionally a panic.
-fn is_blob_loaded(t: *TaskStruct) bool {
-    var i: usize = 0;
-    while (i < MAX_PAGE_COUNT) : (i += 1) {
-        const up = t.mm.user_pages[i];
-        if (up.pa == 0) continue;
-        if (up.uva >= user_layout.STACK_LOW) return false;
-    }
-    return true;
-}
-
 /// Page-fault handler for translation faults — dispatches by user VA
-/// region (Phase 2.6). Accepts DFSC 0x4..0x7 (translation fault at
+/// region. Accepts DFSC 0x4..0x7 (translation fault at
 /// table levels 0..3) so a fault on a UVA whose PUD/PMD/PTE table is
 /// missing resolves the same way as a level-3-only fault: map_page
 /// allocates whatever intermediate tables are needed and stamps the
@@ -284,10 +259,6 @@ fn is_blob_loaded(t: *TaskStruct) bool {
 ///   * [TEXT_BASE, DATA_BASE) — text. ELF-loaded tasks have every
 ///     PT_LOAD page eagerly mapped, so a fault here is a jump into an
 ///     unmapped hole; print `[KERN] text fault at 0x<hex>` and zombie.
-///     Blob-loaded tasks (is_blob_loaded → true) live entirely in this
-///     range — including the stack frame at USER_SP_INIT_POS = 8 KiB —
-///     so the lenient demand-alloc path is preserved for them until
-///     PID 1 becomes ELF-loaded in Phase 3.
 ///   * everything else (data region, the 16 TiB heap-stack gap, any
 ///     kernel-half VA) — wild pointer. Print `[KERN] invalid uva at
 ///     0x<hex>` and zombie. The [TEST] wild-pointer scenario writes to
@@ -320,11 +291,6 @@ export fn do_data_abort(far: u64, esr: u64) i32 {
     }
 
     if (fault_uva >= user_layout.TEXT_BASE and fault_uva < user_layout.DATA_BASE) {
-        if (is_blob_loaded(current)) {
-            const page = get_free_page();
-            if (map_page(current, fault_uva, page, user_layout.TD_USER_PAGE_FLAGS_DEFAULT) < 0) return -1;
-            return 0;
-        }
         main_output(MU, "[KERN] text fault at 0x");
         main_output_u64(MU, far);
         main_output(MU, "\n");

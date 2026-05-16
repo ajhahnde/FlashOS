@@ -1,4 +1,4 @@
-// Board-agnostic console RX layer (v0.3.0 step 1.3).
+// Board-agnostic console RX layer (v0.3.0).
 //
 // 256-byte single-producer / single-consumer ring buffered between the
 // board IRQ handler (mini-UART RX on Pi, PL011 RX on virt) and the
@@ -10,17 +10,17 @@
 //
 // Push/read are single-producer / single-consumer by construction on
 // single core: only the entry path enters console_push, only EL1
-// syscall context enters console_read. Phase 5 will bracket both sides
-// in spinlocks once SMP and nested IRQs land; the API surface stays
-// stable.
+// syscall context enters console_read. Future work will bracket
+// both sides in spinlocks once SMP and nested IRQs land; the API
+// surface stays stable.
 //
 // Counter discipline mirrors src/pipe.zig: monotone u32 byte counters
 // with modulo-indexed slot access, so is_full vs. is_empty are
-// distinguishable without burning a slot. FIXME(phase 4): u32 wraps
-// after 4 GiB of RX traffic; the test injects KiB at most so the
-// wrap is unreachable today.
+// distinguishable without burning a slot. FIXME: u32 wraps after
+// 4 GiB of RX traffic; the test injects KiB at most so the wrap is
+// unreachable today.
 //
-// Echo policy lives in user space (phase 4 fsh) — console_push does
+// Echo policy lives in user space (future fsh) — console_push does
 // NOT loop the byte back through the TX path.
 
 const layout = @import("task_layout");
@@ -48,9 +48,9 @@ fn is_full() bool {
 }
 
 // Called from board/{rpi4b,virt}/irq.zig with IRQs masked at the CPU
-// level by the exception entry. Drops the byte silently if the ring is
-// full — phase 4's shell keeps up at human typing rate; the burst /
-// stress case lands in phase 5 once spinlocks discriminate the
+// level by the exception entry. Drops the byte silently if the ring
+// is full — a future shell keeps up at human typing rate; the burst
+// / stress case is future work once spinlocks discriminate the
 // wait-side from the wake-side properly.
 pub fn console_push(byte: u8) void {
     if (is_full()) return;
@@ -62,8 +62,8 @@ pub fn console_push(byte: u8) void {
 // Block until at least one byte is available, then drain up to `len`
 // bytes (no waiting for the full `len` — short reads are fine, the
 // user wrapper loops if it wants more). Returns the number of bytes
-// copied. POSIX TTY-style semantics: line / char-mode flags arrive in
-// phase 4.
+// copied. POSIX TTY-style semantics: line / char-mode flags are
+// future work.
 pub fn console_read(buf: [*]u8, len: u64) i64 {
     if (len == 0) return 0;
     var copied: u64 = 0;
@@ -84,7 +84,7 @@ pub fn console_read(buf: [*]u8, len: u64) i64 {
     return @intCast(copied);
 }
 
-// FIXME(phase 4/8): debug-only sibling of console_push, reachable from
+// FIXME: debug-only sibling of console_push, reachable from
 // EL1 syscall context (no IRQ-masking assumption). Identical wake
 // path. Powers deterministic console-echo coverage on QEMU where
 // there is no external input driver. Symmetric to sys_dump_free —

@@ -1,6 +1,6 @@
 .{
     .name = .Flash,
-    .version = "0.2.2",
+    .version = "0.4.0",
     // Stable package identifier; do not regenerate when forking unless
     // upstream is unmaintained, otherwise the fork takes over the
     // original package's identity.
@@ -22,7 +22,6 @@
         "README.md",
         "SETUP.md",
         "DOCUMENTATION.md",
-        "REFERENCE.md",
         "MIGRATION.md",
         "LICENSE.md",
     },

@@ -2,7 +2,7 @@
 // Built as a separate executable in build.zig (pie=false, strip,
 // ReleaseSmall) and embedded into the kernel image via .incbin in
 // tools/hello_elf.S so the in-kernel test harness can hand its bytes to
-// sys_exec without an initramfs (Phase 3) or filesystem (Phase 4).
+// sys_exec without an initramfs or filesystem.
 //
 // Body is pure inline asm with the syscall numbers from
 // lib/syscall_defs.zig hard-coded (SYS_WRITE=0, SYS_EXIT=2). The
