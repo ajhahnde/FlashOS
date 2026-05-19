@@ -1,4 +1,4 @@
-// Board-agnostic console RX layer (v0.3.0).
+// console: board-agnostic console RX layer (v0.3.0).
 //
 // 256-byte single-producer / single-consumer ring buffered between the
 // board IRQ handler (mini-UART RX on Pi, PL011 RX on virt) and the
@@ -8,15 +8,14 @@
 // bytes — matching POSIX TTY-read semantics and keeping the WaitQueue
 // discipline spurious-wake-free in one edge.
 //
-// Push/read are single-producer / single-consumer by construction on
-// single core: only the entry path enters console_push, only EL1
-// syscall context enters console_read. Future work will bracket
-// both sides in spinlocks once SMP and nested IRQs land; the API
-// surface stays stable.
+// Push/read are single-producer / single-consumer on single core:
+// only the entry path enters console_push, only EL1 syscall context
+// enters console_read. Future work brackets both sides in spinlocks
+// once SMP and nested IRQs land; the API surface stays stable.
 //
 // Counter discipline mirrors src/pipe.zig: monotone u32 byte counters
 // with modulo-indexed slot access, so is_full vs. is_empty are
-// distinguishable without burning a slot. FIXME: u32 wraps after
+// distinguishable without a reserved slot. FIXME: u32 wraps after
 // 4 GiB of RX traffic; the test injects KiB at most so the wrap is
 // unreachable today.
 //
@@ -104,7 +103,7 @@ pub fn console_test_push(byte: u8) void {
 // The blocking path through `console_read` exercises the WaitQueue
 // `wait`; `schedule` is a host-side no-op (tests/host_stubs.zig), so
 // blocking is not host-testable. Coverage lives in the kernel-side
-// run_console_echo scenario. Here we drive push/read directly and
+// run_console_echo scenario. These drive push/read directly and
 // assert ring bookkeeping + wake-side wq state transitions.
 
 const std = @import("std");

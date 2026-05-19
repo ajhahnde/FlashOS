@@ -19,16 +19,12 @@ const block_dev = @import("block_dev");
 const SCRATCH_BLOCKS: u32 = 128 * 1024; // 64 MiB / 512 B per block
 
 // `linksection(".sdscratch")`: keep this 64 MiB fake disk OUT of
-// `.bss`. Before the FAT32 backend landed, nothing read
-// `block_dev.sd_dev`, so LLVM dead-code-eliminated `scratch` and
-// `.bss` stayed ~755 KiB —
-// inside boot.S's `adr x1, bss_end` ±1 MiB PC-relative range. The
-// FAT32 backend is the first real `sd_dev` reader; with `scratch`
-// alive in `.bss`, `bss_end` lands 64 MiB out and the
-// R_AARCH64_ADR_PREL_LO21 reloc overflows. Its own NOLOAD section
-// (placed outside bss_begin..bss_end in src/board/virt/linker.ld)
-// keeps bss_end reachable. init() @memsets the buffer itself, so it
-// does not need boot.S's bss memzero — safe to exclude.
+// `.bss`. With `scratch` alive in `.bss`, `bss_end` lands 64 MiB past
+// `bss_begin` and boot.S's `adr x1, bss_end` overflows the
+// R_AARCH64_ADR_PREL_LO21 ±1 MiB PC-relative range. Its own NOLOAD
+// section (placed outside bss_begin..bss_end in src/board/virt/
+// linker.ld) keeps bss_end reachable. init() @memsets the buffer
+// itself, so it does not need boot.S's bss memzero — safe to exclude.
 var scratch: [@as(usize, SCRATCH_BLOCKS) * 512]u8 linksection(".sdscratch") = undefined;
 
 // Init signature mirrors the rpi4b counterpart's i32 return

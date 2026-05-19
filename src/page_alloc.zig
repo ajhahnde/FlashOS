@@ -1,4 +1,4 @@
-// Physical Page Allocator for Kernel Memory Management
+// page_alloc: physical page allocator for kernel memory.
 // Isolated from scheduler state — no dependency on task_struct.
 
 // Constants
@@ -33,9 +33,8 @@ export fn mem_map_init() void {
     }
 }
 
-/// Allocate a physical page and return its physical address
-/// Returns the physical address of the allocated page
-/// Panics (no error handling in kernel) if out of memory
+/// Allocate a physical page; returns its physical address.
+/// Panics if out of memory (no in-kernel error handling).
 export fn get_free_page() u64 {
     for (0..MALLOC_PAGES) |i| {
         if (mem_map[i] == 0) {
@@ -43,7 +42,7 @@ export fn get_free_page() u64 {
 
             const ret: u64 = MALLOC_START + @as(u64, @intCast(i)) * PAGE_SIZE;
 
-            // Zero the page (memzero call to C function)
+            // Zero the page before handing it out.
             memzero(pa_to_kva(ret), PAGE_SIZE);
 
             return ret;
@@ -55,8 +54,7 @@ export fn get_free_page() u64 {
     return 0;
 }
 
-/// Free a physical page
-/// Arguments must be a physical address returned by get_free_page
+/// Free a physical page. Argument must be a PA from get_free_page.
 export fn free_page(p: u64) void {
     const index: usize = @intCast((p - MALLOC_START) / PAGE_SIZE);
     if (index < MALLOC_PAGES) {
@@ -64,15 +62,13 @@ export fn free_page(p: u64) void {
     }
 }
 
-/// Get a kernel virtual page (allocates and maps to kernel space)
-/// Returns kernel virtual address (KVA) of the page
+/// Allocate a page and return its kernel virtual address.
 export fn get_kernel_page() u64 {
     const phys_page = get_free_page();
     return pa_to_kva(phys_page);
 }
 
-/// Free a kernel virtual page
-/// Argument must be a kernel virtual address returned by get_kernel_page
+/// Free a kernel page. Argument must be a KVA from get_kernel_page.
 export fn free_kernel_page(kp: u64) void {
     const pa = kva_to_pa(kp);
     free_page(pa);

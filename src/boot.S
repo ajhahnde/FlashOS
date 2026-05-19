@@ -13,7 +13,7 @@
 .endm
 
 /* changes vstart, vend, pa, tmp1 */
-/* vstart and vend should not point to the same block! */
+/* vstart and vend must differ by at least one block. */
 /* `flags_label` is a PC-relative label in .text.boot.literals — the
  * literal table is kept out of .text.boot.late so that section stays
  * 4-byte aligned and the linker does not pad before it. */
@@ -55,7 +55,7 @@ _start_real:
      * is `_start` itself. Both labels alias the same instruction so
      * Pi kernel8.img stays byte-identical. */
     b master
-    /* shouldn't come here */
+    /* unreachable */
     b proc_hang
 
 master: /* entry point of the primary core */
@@ -81,7 +81,6 @@ master: /* entry point of the primary core */
     adr x1, bss_end
     sub x1, x1, x0
     /* clear out the bss section */
-    /* branch and link, x30 is set to the address of the next instruction */
     bl memzero
     bl map_identity
     bl map_high
@@ -121,11 +120,11 @@ master: /* entry point of the primary core */
     add sp, sp, x2
     adr x1, kernel_main
     add x1, x1, x2
-    /* we are core 0 */
+    /* core 0 */
     mov x0, #0
     /* jump to high mem */
     blr x1
-    /* shouldn't get here */
+    /* unreachable */
     b proc_hang
 
 .globl app
@@ -157,7 +156,7 @@ drop_to_el1:
     b.eq drop_from_el2
 
     /* EL3 path: armstub already wrote SPSR_EL3 / HCR_EL2 / SCR_EL3
-     * etc. Just eret with our entry address. */
+     * etc. Eret to el1_entry. */
     adr x0, el1_entry
     msr ELR_EL3, x0
     eret
@@ -217,7 +216,7 @@ map_high:
     adrp x0, high_pg_dir
     /* x1 = address of high map pud */
     add x1, x0, #PAGE_SIZE
-    /* x4 = address of va we map (pgd) */
+    /* x4 = address of the mapped va (pgd) */
     ldr x4, =LINEAR_MAP_BASE
     /* install PGD entry */
     create_table_entry x0, x1, x4, PGD_SHIFT, TD_KERNEL_TABLE_FLAGS, x2, x3

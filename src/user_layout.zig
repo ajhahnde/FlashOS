@@ -1,8 +1,9 @@
-// User-space virtual address layout — single source of truth for the
-// regions the ELF loader will populate and the page-fault path will
-// classify. Imported by src/fork.zig (prepare_move_to_user) and
-// src/mm_user.zig (do_data_abort + map_page) so both sides agree on
-// where text/data/heap/stack live.
+// user_layout: user-space virtual address layout.
+//
+// Single source of truth for the regions the ELF loader populates and
+// the page-fault path classifies. Imported by src/fork.zig
+// (prepare_move_to_user) and src/mm_user.zig (do_data_abort,
+// map_page) so both sides agree on text/data/heap/stack.
 //
 // Region map (matches DOCUMENTATION.md §3 "User virtual layout"):
 //
@@ -11,10 +12,9 @@
 //   0x0000_0000_0020_0000  heap    (RW-, grows up via brk)
 //   0x0000_0FFF_FFFF_F000  stack   (RW-, grows down, guard below)
 //
-// The layout is documented above and region flags are plumbed
-// through map_page; the blob path (PID 1 / non-ELF sys_exec inline)
-// keeps stamping the combined-permission default bag, while
-// ELF-loaded tasks get per-region attributes via
+// Region flags are plumbed through map_page; the blob path (PID 1 /
+// non-ELF sys_exec inline) stamps the combined-permission default
+// bag, while ELF-loaded tasks get per-region attributes via
 // prepare_move_to_user_elf.
 
 pub const PAGE_SIZE: u64 = 1 << 12;

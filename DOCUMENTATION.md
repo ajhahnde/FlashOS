@@ -11,6 +11,7 @@
     <b>Documentation</b> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
+    <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
 </div>
@@ -93,7 +94,7 @@ src/                       Kernel core (Zig + AArch64 assembly)
     hook.S                 Trace hook stub (saves regs, calls 'traced')
 
 user_space/
-  init.zig                 PID 1 entry shim
+  init_main.zig            PID 1 ELF root (staged at /sbin/init)
   kernel_tests.zig         In-kernel test harness ([TEST]/[PASS]/[FAIL])
   lib/flibc/               Userland mini-libc for ELF-loaded programs
     flibc.zig              Root re-exports (printf, malloc, fork, ...)
@@ -113,7 +114,11 @@ tools/
   flibc_demo_linker.ld     Single-PT_LOAD layout with .rodata folded in
 
 tests/
-  host_stubs.zig           Linker stubs for 'zig build test'
+  host_stubs.zig           Shared linker stubs for 'zig build test'
+  host_stubs_pipe.zig      Pipe-test page-alloc stub
+  host_stubs_sched.zig     Sched-test HW-side stubs
+  host_stubs_initramfs.zig File/initramfs stubs (typed `current`)
+  host_stubs_vfs.zig       VFS-test stubs
 
 armstub/src/
   armstub8.S               EL3→EL1 bootstrap shim
@@ -141,7 +146,7 @@ flowchart TD
     B -->|configures GIC, ERET| C[boot.S · _start · EL1]
     C -->|builds page tables, enables MMU, jumps to high VA| D[kernel_main · src/kernel.zig]
     D -->|inits UARTs, GIC, ksyms, syscall table, generic timer| E[forks PID 1]
-    E -->|prepare_move_to_user, ERET| F[user_space/init.zig · EL0]
+    E -->|reads /sbin/init from initramfs, prepare_move_to_user_elf, ERET| F[pid1.elf · init_main.zig · EL0]
     F -->|run_all| G[kernel_tests harness · EL0]
 ```
 
@@ -160,12 +165,15 @@ flowchart TD
    PL011 trace UART, the GIC, the kernel symbol table, the syscall
    table, and the generic timer, then forks PID 1 and enters the
    scheduler loop.
-5. PID 1 (`kernel_process`) drops to EL0 by copying the linker-wrapped
-   user image (`user_start … user_end`) into a user page and `eret`ing
-   to `user_process` in `user_space/init.zig`.
-6. `user_space/init.zig` is a thin shim that calls `run_all()` from
-   `kernel_tests.zig`. The harness exercises fork-stress / kill /
-   exec, prints a `X/Y passed` tally, and exits.
+5. PID 1 (`kernel_process`) reads `/sbin/init` — the `pid1.elf`
+   image staged in the embedded initramfs — and hands its bytes to
+   `prepare_move_to_user_elf`, which walks the PT_LOAD segments,
+   maps each with per-region permissions, eagerly maps the top
+   stack page, and `eret`s to the ELF entry point.
+6. `user_space/init_main.zig` is the `pid1.elf` root: `_start`
+   calls `pid1_main`, which runs `run_all()` from
+   `kernel_tests.zig`. The harness runs the fourteen scenarios,
+   prints an `X/Y passed` tally, and exits.
 
 ## 3. Memory management
 
@@ -278,7 +286,9 @@ section between `bss_end` and `id_pg_dir` in both board linker
 scripts. `tools/initramfs.S` carries a `.incbin "initramfs.cpio"`
 between `__initramfs_start` / `__initramfs_end` labels; the build
 stages `pid1.elf` at `/sbin/init` and `hello.elf` / `stackbomb.elf`
-/ `flibc_demo.elf` at `/test/*.elf` via a `cpio -o -H newc --reproducible` invocation on a sorted file list. `src/initramfs.zig`
+/ `flibc_demo.elf` at `/test/*.elf` via the hand-rolled `scripts/build_initramfs.zig` encoder over a
+sorted arc list (fixed mtime/uid/gid/ino so the archive is a pure
+function of contents + name list). `src/initramfs.zig`
 exposes an `Iterator` + `locate(path)` walker over the newc bytes
 through the TTBR1 alias of the section, host-tested against
 synthetic fixtures. PID 1 (`kernel_process`) reads `/sbin/init` from
@@ -715,7 +725,7 @@ end-to-end on QEMU + Pi 4.
 Totals: **117 host tests** (`zig build test`) + **14 in-kernel
 EL0 scenarios** + **1 pre-PID-1 EL1 scenario** (`emmc2-block`,
 `run-virt` / `run`). A CI sniff that the table's host counts match
-the `zig build test` summary is deferred to v0.3.1+.
+the `zig build test` summary is deferred.
 
 ### Output markers
 

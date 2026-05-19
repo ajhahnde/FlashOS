@@ -1,4 +1,4 @@
-// Process creation — fork() / move-to-user setup.
+// fork: process creation, fork() and move-to-user setup.
 // Layouts (TaskStruct, KeRegs, ...) come from src/task_layout.zig.
 
 const layout = @import("task_layout");

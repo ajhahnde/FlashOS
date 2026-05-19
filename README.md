@@ -18,6 +18,7 @@
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
+    <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
 </div>
@@ -87,9 +88,9 @@ harness and a host-side unit test suite.
   and consumed by the function-entry tracer (runtime intact, but
   currently inert — Zig has no `-fpatchable-function-entry=2`
   equivalent yet).
-- **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 8
-  scenarios) plus a host-side `zig build test` suite covering
-  `page_alloc.zig` and `elf.zig`.
+- **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 14
+  scenarios) plus a host-side `zig build test` suite (117 host
+  tests across 12 modules).
 
 ## Quick start
 
@@ -147,10 +148,10 @@ serial-console setup.
 | `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to `$SD_BOOT`        |
 | `zig build -Dboard=rpi4b run`        | Boot under `qemu-system-aarch64 -M raspi4b`        |
 | `zig build -Dboard=virt run-virt`    | Boot under `qemu-system-aarch64 -M virt`           |
-| `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts `9/9 passed`          |
-| `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts `9/9 passed`       |
+| `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts `14/14 passed`        |
+| `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts `14/14 passed`     |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)              |
-| `zig build test`                     | Host-side unit tests (page_alloc + elf)              |
+| `zig build test`                     | Host-side unit tests (117 tests, 12 modules)         |
 | `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`              |
 
 The default optimisation mode is `ReleaseSmall`. Override with
@@ -177,6 +178,14 @@ config.txt          RPi 4 firmware configuration
 
 A deeper walk-through of each subsystem is in
 [Documentation](DOCUMENTATION.md).
+
+## AI assistance
+
+Source comments and the top-level documentation pages (README,
+DOCUMENTATION, SETUP, MIGRATION, CHANGELOG) were drafted with the
+help of AI coding assistants.
+All source code — Zig, AArch64 assembly, linker scripts, and
+`build.zig` — was hand-written.
 
 ## Versioning
 

@@ -19,8 +19,8 @@
     stp x28, x29, [sp, #16 * 14]
 
     /*
-     * we have to save sp_el0 on the kernel stack because
-     * we may context switch
+     * Save sp_el0 on the kernel stack: a context switch may swap
+     * stacks before kernel_exit restores it.
      */
     .if  \el == 0
     mrs x21, sp_el0
@@ -40,8 +40,8 @@
     ldp x30, x21, [sp, #16 * 15]
 
     /*
-     * we don't have to restore sp if el == 1 because
-     * core_switch_to helps us with that
+     * Skip sp restore at el == 1: core_switch_to handles the
+     * kernel-stack swap on context switch.
      */
     .if  \el == 0
     msr sp_el0, x21
@@ -201,8 +201,8 @@ invalid_syscall_num:
 ret_from_syscall:
     bl irq_disable
     /*
-     * store the return value of the syscall on the stack so
-     * kernel_exit will pop it back to x0
+     * Store the syscall return value into the saved-x0 slot so
+     * kernel_exit pops it back to x0.
      */
     str x0, [sp, 0]
     kernel_exit 0
@@ -222,7 +222,7 @@ el0_da:
 .globl ret_from_fork
 ret_from_fork:
     bl preempt_enable
-    /* x19 == 0 means we're cloning */
+    /* x19 == 0: clone path */
     cbz x19, ret_to_user
     mov x0, x20
     blr x19
@@ -244,9 +244,8 @@ err_hang: b err_hang
  * Writes one line — "E <typ:16h> <esr:16h> <elr:16h>\r\n" — to the
  * Mini-UART by direct MMIO and falls through to `err_hang`. No stack
  * use beyond what `kernel_entry` already pushed; no `bl`; no memory
- * loads other than the MMIO LSR poll. Goal: one fault produces one
- * complete readable line, eliminating the recursive ERROR-CAUGHT
- * loop that was hiding the real EL1h fault.
+ * loads other than the MMIO LSR poll. One fault yields one complete
+ * line; no path re-enters the fault handler.
  *
  * MMIO addresses in the kernel's high-mem linear map are board-
  * specific:
@@ -261,7 +260,7 @@ err_hang: b err_hang
  * The address materialisation and TX-ready polling are abstracted
  * behind three macros (err_uart_load_io / err_uart_load_lsr /
  * err_uart_wait_tx_ready) defined per-board in board_asm_defs.inc.
- * Pi expansion is byte-identical to the previous hard-coded form.
+ * Pi expansion is byte-identical to the hard-coded form.
  */
 .globl show_invalid_entry_raw
 show_invalid_entry_raw:

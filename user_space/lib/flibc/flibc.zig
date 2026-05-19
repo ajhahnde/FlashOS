@@ -15,8 +15,8 @@
 //
 // Re-exports below are the userland-facing surface; demo programs can
 // `@import("flibc")` and stay one module deep. The sub-modules are
-// public too for callers that want, say, raw `flibc.sys.dump_free`
-// without going through a higher abstraction.
+// public too for callers that need raw `flibc.sys.dump_free`
+// directly.
 
 pub const sys = @import("syscalls.zig");
 pub const io = @import("io.zig");

@@ -1,4 +1,4 @@
-// Syscall dispatch table and handlers
+// sys: syscall dispatch table and handlers.
 // Layouts (TaskStruct etc.) come from src/task_layout.zig — the single
 // source of truth shared with sched.zig / fork.zig / mm_user.zig.
 // Syscall IDs come from lib/syscall_defs.zig — the single source of
@@ -40,11 +40,10 @@ extern fn unmap_user_range(t: *TaskStruct, start_uva: u64, end_uva: u64) void;
 extern fn set_pgd(pgd: u64) void;
 
 // Syscalls run at EL1h with TTBR0 holding the *user* pgd (set by
-// prepare_move_to_user). To survive the dispatch we route through TTBR1
-// by ORing each function pointer with LINEAR_MAP_BASE so the `blr` in
-// el0_svc lands in the kernel's high-mem mapping. This replaces the
-// previous (broken) `cur + &_start` formula, which doubled the address
-// off into .bss.
+// prepare_move_to_user). Each function pointer is ORed with
+// LINEAR_MAP_BASE so the `blr` in el0_svc lands in the kernel's
+// high-mem mapping. Replaces the earlier broken `cur + &_start`
+// formula, which doubled the address into .bss.
 const LINEAR_MAP_BASE: u64 = 0xffff000000000000;
 
 // SYS CALL PROCESS CONTROL
@@ -57,7 +56,7 @@ export fn sys_fork() i32 {
 // both halves). Steps:
 //   1. Snapshot the blob into a kernel-owned page. get_free_page zeroes
 //      pages, so freeing first and reading later would race the new pgd's
-//      sub-table allocations clobbering the bytes we still need.
+//      sub-table allocations clobbering bytes still needed.
 //   2. Free old user_pages[*].pa and kernel_pages[*] (mirrors do_wait's
 //      cleanup). Zero current.mm so allocate_user_page rebuilds pgd + tables
 //      from scratch on the next call.
@@ -254,10 +253,9 @@ export fn sys_brk(addr: u64) i64 {
     const old_brk: u64 = c.mm.brk;
     if (new_brk < old_brk) {
         unmap_user_range(c, new_brk, old_brk);
-        // Re-install the same pgd to drive the full-TLB-flush path
-        // in set_pgd (sched.S). Targeted `tlbi vae1is` would be the
-        // surgical option; the heap-shrink path is rare enough that
-        // the existing big hammer is fine.
+        // Re-install the same pgd to drive the full-TLB-flush path in
+        // set_pgd (sched.S). Targeted `tlbi vae1is` would be surgical;
+        // the heap-shrink path is rare enough that a full flush is fine.
         set_pgd(c.mm.pgd);
     }
     c.mm.brk = new_brk;
@@ -306,8 +304,8 @@ export fn sys_pipe() i64 {
 
     const rfd = pipe_mod.fdAlloc(c, p);
     if (rfd < 0) {
-        // Two unrefs because we bumped refs to 2 above before either
-        // fd was actually installed; the page leaks otherwise.
+        // Two unrefs: refs was set to 2 above before either fd was
+        // installed; the page leaks otherwise.
         pipe_mod.unref(p);
         pipe_mod.unref(p);
         return -1;

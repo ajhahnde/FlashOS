@@ -1,4 +1,4 @@
-// Per-process open-file handle helpers (v0.4.0).
+// file: per-process open-file handle helpers (v0.4.0).
 //
 // The `File` struct itself lives in src/task_layout.zig — TaskStruct's
 // `open_files: [FD_TABLE_SIZE]?*File` slot is typed against the layout
@@ -46,8 +46,8 @@ inline fn pageKva(pa: u64) u64 {
     return if (builtin.target.os.tag == .freestanding) pa | LINEAR_MAP_BASE else pa;
 }
 
-// Allocate + zero-initialise. Caller sets refs (typically to 1) before
-// installing the File in any fd slot. Returns null on allocator failure.
+// Allocate and zero a File. Returns null on allocator failure.
+// refs starts at 0; the installer sets it (typically to 1).
 pub fn alloc() ?*File {
     const pa = get_free_page();
     if (pa == 0) return null;
@@ -57,9 +57,9 @@ pub fn alloc() ?*File {
     return f;
 }
 
-// Decrement the reference count. On the last drop, return the page to
-// the allocator. No wake side: File has no wait queues (read on
-// initramfs is non-blocking; FAT32 readahead is future work).
+// Drop one ref. On the last drop, free the page. No wake side: File
+// has no wait queues (initramfs read is non-blocking; FAT32 readahead
+// is future work).
 pub fn unref(f: *File) void {
     preempt_disable();
     f.refs -= 1;
@@ -205,7 +205,7 @@ test "closeAll clears every slot and drops refs" {
     f.refs = 2;
     _ = fdAlloc(&t, f);
     _ = fdAlloc(&t, f);
-    f.refs = 2; // override the fdAlloc-unaware refs we set above
+    f.refs = 2; // override the fdAlloc-unaware refs set above
     closeAll(&t);
     var i: usize = 0;
     while (i < FD_TABLE_SIZE) : (i += 1) {

@@ -613,7 +613,7 @@ pub fn build(b: *std.Build) void {
     // ---- optional: regenerate symbol_area.S from the linked kernel ELF ----
     // Two-pass workflow: build kernel once, run nm | generate_syms.zig to
     // overwrite src/symbol_area.S, then re-run `zig build` to relink with
-    // the populated table. We expose this as its own step so the default
+    // the populated table. Exposed as its own step so the default
     // build stays single-pass.
     // `grep -v 'compiler_rt\.'` drops the namespaced compiler-rt aliases
     // (e.g. `compiler_rt.aarch64_outline_atomics.__aarch64_cas16_acq_rel`,

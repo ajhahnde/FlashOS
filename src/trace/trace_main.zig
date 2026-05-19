@@ -36,7 +36,7 @@ export fn do_trace() noreturn {
     }
 }
 
-/// Stub: ideally sends IPIs so all cores spin while we patch code.
+/// Stub: ideally sends IPIs to spin all cores during code patching.
 export fn gather_cores() void {}
 
 /// Stub: releases gathered cores.
@@ -61,14 +61,13 @@ export fn trace_generate_bl(offset_in: i32) u32 {
 }
 
 /// Writes a 32-bit instruction word at `addr` and forces I-/D-cache
-/// coherency for self-modifying code on AArch64. Without the
-/// dc cvau / ic ivau / isb sequence the freshly written bytes remain
-/// invisible to the instruction-fetch path: the patched slot keeps
-/// reading as a NOP, the trace pipeline silently does nothing, and
-/// the bug is indistinguishable from a missing patch table. The
-/// recipe is straight out of the ARMv8 reference (B2.2.5,
-/// "Self-modifying code"). dsb ish completes the data-side push to
-/// PoU before ic ivau / isb starts the instruction-side flush.
+/// coherency for self-modifying code on AArch64. The dc cvau /
+/// ic ivau / isb sequence is required: without it the freshly
+/// written bytes stay invisible to the instruction-fetch path and
+/// the patched slot keeps reading as a NOP. Recipe from the ARMv8
+/// reference (B2.2.5, "Self-modifying code"). dsb ish completes the
+/// data-side push to PoU before ic ivau / isb starts the
+/// instruction-side flush.
 export fn trace_modify_code(addr: u64, insn: u32) void {
     const ptr: *volatile u32 = @ptrFromInt(addr);
     ptr.* = insn;

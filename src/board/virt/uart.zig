@@ -12,9 +12,8 @@
 //   * FR @ +0x018 — flag register; bit 4 = RXFE (RX empty),
 //     bit 5 = TXFF (TX full)
 // `mini_uart_init` does not configure the UART — UEFI / QEMU set
-// baud, line control and FIFO state — it just emits a "\r\n\n"
-// heartbeat so the serial console can show the kernel reached this
-// point.
+// baud, line control and FIFO state — it emits a "\r\n\n" heartbeat
+// so the serial console can show the kernel reached this point.
 
 const std = @import("std");
 const Dtb = @import("dtb.zig").Dtb;

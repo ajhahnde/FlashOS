@@ -11,6 +11,7 @@
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <b>Migration</b> ·
+    <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
 </div>
@@ -254,4 +255,4 @@ Each phase was validated with the same checks:
 
 ---
 
-[← Prev: Setup](SETUP.md) · [Next: License →](LICENSE.md)
+[← Prev: Setup](SETUP.md) · [Next: Changelog →](CHANGELOG.md)

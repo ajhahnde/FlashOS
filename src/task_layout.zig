@@ -1,19 +1,17 @@
-// Canonical extern-struct layouts shared between kernel modules.
+// task_layout: canonical extern-struct layouts shared across kernel
+// modules.
 //
-// Before this file existed, TaskStruct / CoreContext / MmStruct / UserPage /
-// KeRegs were duplicated as private mirrors across sched.zig, sys.zig,
-// fork.zig, mm_user.zig, utilc.zig, and trace/utils.zig. The mirrors had
-// already drifted (mm_user/utilc/trace were missing the `parent` and
-// `pid` fields), which is exactly the silent layout-drift bug the
-// per-file `extern struct` discipline was meant to prevent.
+// Single source of truth. These structs were previously duplicated as
+// per-file mirrors that drifted (mm_user / utilc / trace lacked the
+// `parent` and `pid` fields) — the layout-drift bug the per-file
+// `extern struct` discipline failed to prevent.
 //
-// This module is the single source of truth. Every kernel module that
-// needs any of these layouts `@import`s and aliases — never redeclares.
-// Default values are set so `Foo{}` literals work; consumers that need
-// non-default fields override at the construction site.
+// Every kernel module that needs a layout `@import`s and aliases it,
+// never redeclares. Defaults are set so `Foo{}` literals work;
+// consumers override non-default fields at the construction site.
 //
-// The .S files (sched.S, entry.S, irq.S) consume these layouts through
-// raw offsets. If you reorder fields here, audit the asm side too.
+// The .S files (sched.S, entry.S, irq.S) consume these layouts via
+// raw offsets. Reordering fields here requires auditing the asm side.
 
 // Per-task slot budget for both `mm.user_pages` (mapped UVA pages) and
 // `mm.kernel_pages` (PGD/PUD/PMD/PTE tables). 16 was tight enough that

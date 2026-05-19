@@ -1,5 +1,5 @@
 #! /usr/bin/env bash
-# Two-pass kernel build orchestrator. Wraps `zig build` so we can:
+# Two-pass kernel build orchestrator. Wraps `zig build` to:
 #   1. link an initial kernel ELF,
 #   2. regenerate src/symbol_area.S from its symbol table,
 #   3. relink with the populated table,
@@ -17,8 +17,8 @@ KERNEL_ELF="zig-out/bin/kernel8.elf"
 NM_BIN="aarch64-elf-nm"
 
 # Pre-flight: Zig version must match the pin. The hard lock lives in
-# build.zig (comptime check); this is the friendly early-exit so users
-# don't see a Zig compile error from build.zig itself.
+# build.zig (comptime check); this is the early-exit so users don't
+# hit a raw Zig compile error from build.zig itself.
 REQUIRED_ZIG_VERSION="$(cat .zigversion)"
 ACTUAL_ZIG_VERSION="$(zig version)"
 if [ "$ACTUAL_ZIG_VERSION" != "$REQUIRED_ZIG_VERSION" ]; then

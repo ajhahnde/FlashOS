@@ -1,5 +1,5 @@
-// Minimum-viable wait queue for blocking syscalls — single source of
-// truth for the v0.3.0 IPC and the future signal/do_wait migration.
+// wait_queue: blocking-syscall wait queue (v0.3.0 IPC).
+// Single source of truth; future signal / do_wait migration reuses it.
 //
 // Discipline:
 //   * Wait-side links the running task at head, flips state to
@@ -71,10 +71,9 @@ pub const WaitQueue = extern struct {
 
 // ---- Host tests ----
 //
-// `schedule` is a no-op stub on the host (see tests/host_stubs.zig); we
-// build the queue and exercise the wake-side directly instead of routing
-// through `WaitQueue.wait`. Coverage of the wait-side blocking path comes
-// from the in-kernel pipe scenario.
+// schedule is a no-op stub on the host (see tests/host_stubs.zig).
+// These exercise the wake-side directly; the wait-side blocking path
+// is covered by the in-kernel pipe scenario.
 
 const std = @import("std");
 
@@ -84,8 +83,7 @@ test "wake_one pops in LIFO order (head-insert)" {
     var t3: TaskStruct = .{};
     var q: WaitQueue = .{};
 
-    // Manual head-insert mirrors what WaitQueue.wait does, just without
-    // the schedule round-trip.
+    // Manual head-insert mirrors WaitQueue.wait without the schedule round-trip.
     t1.wq_next = null;
     q.head = &t1;
     t2.wq_next = q.head;

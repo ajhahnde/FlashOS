@@ -1,4 +1,4 @@
-// Generic ARM timer driver
+// generic_timer: generic ARM timer driver.
 
 const SYS_FREQ: u32 = 54_000_000;
 

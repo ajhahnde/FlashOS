@@ -11,6 +11,7 @@
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
+    <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <b>License</b>
   </p>
 </div>
@@ -76,4 +77,4 @@ conditions:
 
 ---
 
-[← Prev: Migration](MIGRATION.md) · [Back to start (README) ↺](README.md)
+[← Prev: Changelog](CHANGELOG.md) · [Back to start (README) ↺](README.md)

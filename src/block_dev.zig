@@ -1,4 +1,4 @@
-// Block-device abstraction (v0.4.0).
+// block_dev: block-device abstraction (v0.4.0).
 //
 // The FAT32 backend talks to this; the board layer
 // (src/board/<board>/emmc2.zig) populates the vtable post-init.
@@ -16,6 +16,6 @@ pub const BlockDev = extern struct {
 };
 
 // Wired at boot by board.emmc2.init() — undefined before that point.
-// Reading it before init is a kernel bug; the post_mortem trace-
-// init smoke check (kernel_main_impl) ensures init runs first.
+// Reading it before init is a kernel bug; the smoke check in
+// kernel_main_impl ensures init runs first.
 pub var sd_dev: BlockDev = undefined;

@@ -276,7 +276,7 @@ const FAIL_MAGIC: [*:0]const u8 = "[FAIL] fs-roundtrip (magic corrupted)\n";
 const MAG_INBOOT_OK: [*:0]const u8 = "[DBG] mag-inboot=01 (1-byte writeBack OK)\n";
 const MAG_INBOOT_BAD: [*:0]const u8 = "[DBG] mag-inboot=00 (1-byte writeBack REGRESSION)\n";
 // 8.3-safe basenames (<=8 chars): fat32.encode8_3 rejects a
-// basename longer than 8, so the plan's literal roundtrip.dat /
+// basename longer than 8, so a literal roundtrip.dat /
 // roundtrip.mag (9-char base) would make every open return -1.
 const ROUNDTRIP_DAT_PATH: [*:0]const u8 = "/mnt/roundtr.dat";
 const ROUNDTRIP_MAG_PATH: [*:0]const u8 = "/mnt/roundtr.mag";
@@ -605,8 +605,8 @@ fn run_brk(baseline: u64) bool {
         // Shrink back to the original break — exercises
         // unmap_user_range so the per-process page balance returns to
         // zero before do_wait. Without this the test would still pass
-        // (do_wait reaps the leftover heap pages), so we don't bail
-        // even if the shrink itself reports failure.
+        // (do_wait reaps the leftover heap pages), so a failing shrink
+        // is not treated as fatal here.
         _ = sys_brk(initial_u);
         sys_exit();
     }
@@ -742,8 +742,8 @@ fn run_wild_pointer(baseline: u64) bool {
     if (wp_pid == 0) {
         const wild: *volatile u8 = @ptrFromInt(0xDEADBEEF000);
         wild.* = 0x42;
-        // Only reached if do_data_abort failed to zombie the task —
-        // shouldn't happen, but exit cleanly so the parent can wait.
+        // Only reached if do_data_abort did not zombie the task;
+        // exit cleanly so the parent can still wait.
         sys_exit();
     }
     _ = sys_wait();
@@ -808,10 +808,9 @@ fn run_pipe(baseline: u64) bool {
     _ = sys_pipe_close(wfd);
 
     // pipe.read short-reads to whatever's currently buffered; loop
-    // until we either collect the full payload or hit EOF (child
-    // closed the write end). The child writes a single 16-byte burst,
-    // but a future short-write semantics change shouldn't break the
-    // test.
+    // until the full payload arrives or EOF (child closed the write
+    // end). The child writes a single 16-byte burst; looping keeps
+    // the test robust to a future short-write semantics change.
     var in: [16]u8 = undefined;
     prefault_buf(&in);
     var got: u64 = 0;
@@ -866,10 +865,10 @@ fn run_console_echo(baseline: u64) bool {
     }
     if (pid == 0) {
         // Delay so the parent reaches sys_readConsole and hits the
-        // empty-ring branch first — that's the WaitQueue path we
-        // want to cover. The same loop length is used by run_kill;
-        // single-core scheduling makes that an upper bound for the
-        // parent to enter wait state.
+        // empty-ring branch first — that's the WaitQueue path under
+        // test. The same loop length is used by run_kill; single-core
+        // scheduling makes that an upper bound for the parent to
+        // enter wait state.
         var d: u32 = 500_000;
         while (d > 0) : (d -= 1) {}
         var i: u32 = 0;
@@ -930,8 +929,8 @@ fn run_initramfs_open(baseline: u64) bool {
     return ok;
 }
 
-// Exercises the VFS dispatch layer's two legs end-to-end (v0.4.0
-// v0.4.0). Positive: /sbin/init resolves through the initramfs
+// Exercises the VFS dispatch layer's two legs end-to-end (v0.4.0).
+// Positive: /sbin/init resolves through the initramfs
 // backend — the same path run_initramfs_open takes, but here the
 // assertion is "fd >= 0 and closes clean", not a content read.
 // Negative-but-routed: /mnt/this-does-not-exist lands on the FAT32
@@ -1032,8 +1031,9 @@ fn run_fs_roundtrip(baseline: u64) bool {
     // drifts the post-warmup free-page baseline for the whole suite.
     var payload: [4096]u8 = undefined;
 
-    // Read the magic byte to decide which phase we're in. A negative
-    // fd here means /mnt is unmounted (virt) -> SKIP, not FAIL.
+    // Read the magic byte to decide which phase this boot is in. A
+    // negative fd here means /mnt is unmounted (virt) -> SKIP, not
+    // FAIL.
     const fd_mag = sys_openFile(ROUNDTRIP_MAG_PATH);
     if (fd_mag < 0) {
         _ = sys_dump_free(); // checkpoint-count parity with real branches
@@ -1087,7 +1087,7 @@ fn run_fs_roundtrip(baseline: u64) bool {
                 return false;
             }
             // Sub-sector writeBack regression probe: re-read the
-            // 1-byte magic we just wrote, same boot. Catches the
+            // 1-byte magic just written, same boot. Catches the
             // v0.4.0 FAT32 splice reorder bug
             // (mag-inboot=00 = REGRESSION; the explicit byte loop in
             // fat32_backend.writeBack would have to break for this
@@ -1183,8 +1183,8 @@ pub fn run_all() TestResult {
     // resulting demand-allocation into the steady state captured here,
     // so per-scenario baseline checks see the same free-page count
     // every iteration. Without the warm-up, the first scenario that
-    // pre-faults would drift the baseline by one page for the rest of
-    // the suite (without the warm-up, every subsequent test [FAIL]ed).
+    // pre-faults drifts the baseline by one page for the rest of the
+    // suite and every subsequent scenario fails.
     // The 4096-byte size matches the largest scenario buf (the ELF
     // payload reads in run_exec_elf / run_stack_overflow / run_flibc);
     // smaller buffers reuse the same pages within run_all's single

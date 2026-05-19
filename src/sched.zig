@@ -1,4 +1,4 @@
-// Scheduler — round-robin with priority counters.
+// sched: round-robin scheduler with priority counters.
 // All extern-struct layouts (TaskStruct, CoreContext, MmStruct, UserPage,
 // KeRegs) live in src/task_layout.zig as the single source of truth.
 // The .S files (sched.S, entry.S) consume those layouts via raw offsets.
@@ -17,10 +17,9 @@ const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
 // their backing pages.
 const pipe_mod = @import("pipe");
 // File fd-table cleanup on reap (v0.4.0). Same posture as
-// pipe_mod.closeAll above — initramfs fds the zombie left open drop
+// pipe_mod.closeAll above: initramfs fds the zombie left open drop
 // their refs and return the File page to the allocator before the
-// mm-page sweep so the free-page baseline reflects both legs of the
-// per-process resource lifecycle.
+// mm-page sweep.
 const file_mod = @import("file");
 
 const NR_TASKS: usize = 64;
@@ -33,10 +32,9 @@ extern fn free_page(p: u64) void;
 extern fn free_kernel_page(kp: u64) void;
 
 // Internal callers (schedule, timer_tick) reach _schedule_impl through
-// the patchable trampoline `_schedule` defined in
-// src/trace/patchable_trampolines.S. Routing in-file calls via the
-// trampoline is what allows tracing to fire on every scheduler entry,
-// not just from cross-module callers.
+// the patchable trampoline `_schedule` in
+// src/trace/patchable_trampolines.S, so tracing fires on every
+// scheduler entry, not only cross-module callers.
 extern fn _schedule() void;
 
 var init_task: TaskStruct = .{
@@ -166,14 +164,11 @@ export fn do_wait_impl() i32 {
                     have_children = true;
                     if (c.state == TASK_ZOMBIE) {
                         const pid: i32 = c.pid;
-                        // Close any fds the zombie left open. unref
-                        // drops the refcount on each Pipe and frees
-                        // the backing page when refs hits zero. Runs
-                        // BEFORE the mm-page sweep so a Pipe page
-                        // (refcounted, not in user/kernel_pages) is
-                        // never accidentally freed twice and so the
-                        // free-page baseline reflects both legs of
-                        // the per-process resource lifecycle.
+                        // Close fds the zombie left open. unref drops
+                        // each Pipe/File refcount and frees the backing
+                        // page at refs == 0. Runs before the mm-page
+                        // sweep: a refcounted Pipe/File page (not in
+                        // user/kernel_pages) must not be double-freed.
                         pipe_mod.closeAll(c);
                         file_mod.closeAll(c);
                         // Free user-mapped physical pages.
@@ -237,8 +232,8 @@ test "refill_counters: null slots are skipped" {
 
 test "refill_counters: negative counter halves via arithmetic shift" {
     // counter is i64 — `>>` on signed types is arithmetic in Zig. Guards
-    // the long-standing assumption that an over-decremented counter (e.g.
-    // a kill racing the timer tick) still refills sanely.
+    // the assumption that an over-decremented counter (e.g. a kill
+    // racing the timer tick) still refills sanely.
     var t: TaskStruct = .{ .priority = 5, .counter = -3 };
     var tasks: [1]?*TaskStruct = .{&t};
     refill_counters(&tasks);

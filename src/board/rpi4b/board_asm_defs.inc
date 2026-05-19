@@ -162,10 +162,10 @@
 .endm
 
 /* Crash-stamp UART macros for entry.S `show_invalid_entry_raw`.
- * Pi expands them to the exact movz/movk/ldr/tbz sequences that the
- * pre-port routine had hard-coded against the BCM2711 mini-UART
- * (AUX_MU_IO_REG=0xfe215040, AUX_MU_LSR_REG=0xfe215054, LSR bit 5 =
- * TX-empty → poll until set with `tbz`). Byte-identity preserved. */
+ * Pi expansion is the movz/movk/ldr/tbz sequence for the BCM2711
+ * mini-UART (AUX_MU_IO_REG=0xfe215040, AUX_MU_LSR_REG=0xfe215054,
+ * LSR bit 5 = TX-empty → poll until set with `tbz`). Byte-identical
+ * to the hard-coded reference form. */
 .macro err_uart_load_io reg
     movz \reg,  #0x5040
     movk \reg,  #0xfe21, lsl #16

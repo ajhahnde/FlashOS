@@ -10,9 +10,9 @@
 // `current` is typed against layout.TaskStruct here (instead of
 // `?*anyopaque` as in tests/host_stubs.zig) because future
 // initramfs/file host tests reach into `current.open_files` directly,
-// and the per-target stub keeps task_layout out of the shared stub TU
-// — see post_mortem_v0.3.0.md for the advance-risks rationale. The
-// link-time symbol is a single 8-byte pointer slot either way;
+// and the per-target stub keeps task_layout out of the shared stub
+// TU (one stub file per test target). The link-time symbol is a
+// single 8-byte pointer slot either way;
 // file.zig only declares the externs it actually consumes (no
 // `current` decl), so the typed shape stays a host-test-only concern.
 

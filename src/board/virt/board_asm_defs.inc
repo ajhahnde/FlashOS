@@ -63,10 +63,10 @@
 #define FOURTH_END    RAM_END
 
 /* QEMU sets CNTFRQ_EL0 itself before kernel entry, so virt does
- * not need a board-supplied oscillator constant.  We define
- * BOOT_OSC_FREQ to 0 so any common code that references it (today
- * nothing does, but the symbol is part of the rpi4b API surface)
- * still assembles. */
+ * not need a board-supplied oscillator constant. BOOT_OSC_FREQ is
+ * defined to 0 so any common code that references it (today nothing
+ * does, but the symbol is part of the rpi4b API surface) still
+ * assembles. */
 #define BOOT_OSC_FREQ          0
 
 /* QEMU `-M virt -kernel` enters the kernel directly at EL1, so

@@ -1,4 +1,4 @@
-// VideoCore mailbox — property-tag message construction + parsing.
+// mailbox: VideoCore property-tag message construction and parsing.
 //
 // Three firmware services are needed to bring up EMMC2:
 //   * "set power state" — defensively enable the SD-card VDD rail

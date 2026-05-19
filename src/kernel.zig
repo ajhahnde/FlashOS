@@ -1,4 +1,4 @@
-// Kernel boot and main loop
+// kernel: boot and main loop.
 
 const board = @import("board.zig");
 const initramfs = @import("initramfs");
@@ -57,11 +57,10 @@ export var state: u32 = 0;
 
 /// Run by PID 1; returns to entry.S and does a kernel_exit 0.
 ///
-/// PID 1 is ELF-loaded (v0.4.0): `/sbin/init` is the
-/// `pid1.elf` artifact baked into the embedded initramfs. We locate
-/// it and hand its bytes — already TTBR1-mapped, no allocation — to
-/// `prepare_move_to_user_elf`, the same loader the exec-elf / flibc
-/// test payloads use.
+/// PID 1 is ELF-loaded (v0.4.0): `/sbin/init` is the `pid1.elf`
+/// artifact baked into the embedded initramfs. Its bytes (already
+/// TTBR1-mapped, no allocation) go to `prepare_move_to_user_elf`,
+/// the same loader the exec-elf / flibc test payloads use.
 export fn kernel_process() void {
     main_output(MU, "pid 1 started in EL");
     main_output_char(MU, @intCast(get_el() + '0'));

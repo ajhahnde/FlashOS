@@ -1,4 +1,4 @@
-// Kernel utility functions
+// utilc: kernel utility functions.
 // Layouts come from src/task_layout.zig.
 
 const layout = @import("task_layout");

@@ -18,8 +18,8 @@
 # v0.3.0 blob layout) and added a stack warm-up at run_all entry that
 # maps the second EL0 stack page eagerly — without that, sys_readFile's
 # EL1 store into an unmapped stack page traps to sync_invalid_el1h
-# (kernel-mode user-VA faults bypass do_data_abort, see kernel_tests.zig
-# §prefault_buf). v0.4.0's [TEST] vfs-dispatch added one sys_dump_free
+# (kernel-mode user-VA faults bypass do_data_abort, see
+# user_space/kernel_tests.zig prefault_buf). v0.4.0's [TEST] vfs-dispatch added one sys_dump_free
 # checkpoint (→ 17). v0.4.0's [TEST] fs-roundtrip adds exactly
 # one more — every branch (write / verify / skip) calls sys_dump_free
 # once, so the count is board-independent (rpi4b runs the real Variant-B

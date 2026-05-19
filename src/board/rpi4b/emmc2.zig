@@ -28,16 +28,12 @@
 // removed. `[PASS] fs-roundtrip` two-boot acceptance on the same
 // card — write 1-byte ROUNDTR.MAG + 4-KiB ROUNDTR.DAT on boot 1,
 // power-cycle, read back + verify on boot 2 (14/14 tally, 0 ERROR).
-// emmc2-block exposed one genuine bug — write_block/read_block were
-// polling BUFFER_WRITE_READY / BUFFER_READ_READY before every 32-bit
-// word, but those interrupts fire once per block (not per word) on
-// the BCM2711 Arasan controller. The canonical SDHCI single-block
-// PIO pattern — wait once for BUFFER_*_RDY, burst all 128 words
-// through DATAPORT, wait once for DATA_DONE — is what Linux's
-// sdhci.c and Circle do, and is what the loop runs now. The
-// diagnostic logging on every failure return site (`log_io_fail`)
-// stays in place: it adds no hot-path overhead and is what made the
-// per-word/per-block bug visible in a single log line.
+// SDHCI single-block PIO: poll BUFFER_*_RDY once per block, burst all
+// 128 words through DATAPORT, then poll DATA_DONE once. The BCM2711
+// Arasan controller fires BUFFER_*_RDY per block (not per word), so
+// per-word polling drops bytes; the once-per-block pattern matches
+// Linux sdhci.c and Circle. `log_io_fail` runs on every failure
+// return — zero hot-path overhead and one log line per wedged op.
 
 const std = @import("std");
 const sdhci = @import("sdhci_cmd");
@@ -146,10 +142,9 @@ inline fn emmc_write(reg: *volatile u32, val: u32) void {
 pub fn init() i32 {
     const r = regs();
 
-    // Diagnostic dump before any controller poke — proves the MMIO
-    // address is right (SLOTISR_VER reads back a sane vendor/version,
-    // not 0xFFFFFFFF) and tells us what the controller actually
-    // advertises before we touch any quirky state.
+    // Diagnostic dump before any controller poke. Proves the MMIO
+    // address is right (SLOTISR_VER reads a sane vendor/version, not
+    // 0xFFFFFFFF) and records the controller's pre-init state.
     main_output(MU, "[Debug] EMMC2 diag SLOTISR_VER=0x");
     main_output_u64(MU, reg_at(0xFC).*);
     main_output(MU, " CAPS_LO=0x");
@@ -195,13 +190,11 @@ pub fn init() i32 {
     }
     delay_us(5_000);
 
-    // 1. Software reset of the host controller. SRST_HC alone resets
-    //    the host-controller state machine, but the first Pi-hardware
-    //    run showed cmdtm writes producing zero effect after just
-    //    SRST_HC — the CMD/DAT sub-state machines stayed in a limbo
-    //    state. The full triple-reset (SRST_HC | SRST_CMD | SRST_DAT)
-    //    matches Linux's drivers/mmc/host/sdhci.c
-    //    sdhci_reset(host, SDHCI_RESET_ALL).
+    // 1. Software reset of the host controller. SRST_HC alone leaves
+    //    the CMD/DAT sub-state machines in limbo — cmdtm writes have
+    //    no effect on real hardware after SRST_HC alone. Triple-reset
+    //    (SRST_HC | SRST_CMD | SRST_DAT) matches Linux's
+    //    drivers/mmc/host/sdhci.c sdhci_reset(host, SDHCI_RESET_ALL).
     main_output(MU, "[Debug] EMMC2 step 1 SRST_ALL\n");
     emmc_write(&r.control1, r.control1 | CTRL1_SRST_ALL);
     if (!busy_wait_clear(&r.control1, CTRL1_SRST_ALL, 100_000)) return -1;
@@ -284,7 +277,7 @@ pub fn init() i32 {
     //    command settle is not guaranteed to traverse the state machine
     //    back to Idle when the card was warm-handed-off. Three sends
     //    with 5 ms gaps gives the card-side state machine time to
-    //    actually transition, per SD PLSS §4.4 NCC + post-reset settle.
+    //    transition, per SD PLSS §4.4 NCC + post-reset settle.
     main_output(MU, "[Debug] EMMC2 step 3 CMD0 (x3)\n");
     var cmd0_try: u32 = 0;
     while (cmd0_try < 3) : (cmd0_try += 1) {
@@ -330,9 +323,9 @@ pub fn init() i32 {
     }
     if (tries == 100) return -1;
 
-    // 6. CMD2 — ALL_SEND_CID. R2 lands in resp0..resp3; we don't use
-    //    the CID past init but the card must transition through this
-    //    state to accept CMD3.
+    // 6. CMD2 — ALL_SEND_CID. R2 lands in resp0..resp3; the CID is
+    //    not consumed past init, but the card must transition through
+    //    this state to accept CMD3.
     main_output(MU, "[Debug] EMMC2 step 6 CMD2\n");
     if (send_cmd(sdhci.CMD2_ALL_SEND_CID, 0, BLKSIZECNT_NONE) < 0) return -1;
 
@@ -387,9 +380,10 @@ pub fn init() i32 {
 
 // Programmed into BLKSIZECNT for non-data commands. Circle writes
 // BLKSIZECNT before *every* command (m_block_size | (m_blocks_to_transfer
-// << 16); both fields are 0 outside of a data transfer), so we do the
-// same defensively — some BCM2711 EMMC2 firmware revisions reportedly
-// hang CMD8 when stale BLKSIZECNT bits leak in from a prior data op.
+// << 16); both fields are 0 outside a data transfer); this driver
+// follows defensively — some BCM2711 EMMC2 firmware revisions
+// reportedly hang CMD8 when stale BLKSIZECNT bits leak in from a
+// prior data op.
 const BLKSIZECNT_NONE: u32 = 0;
 const BLKSIZECNT_512x1: u32 = (@as(u32, 1) << 16) | 512;
 
@@ -452,7 +446,7 @@ pub fn read_block(lba: u32, buf: *[512]u8) callconv(.c) i32 {
     // SDHCI single-block PIO: READ_RDY fires once when the block buffer
     // has the full 512 bytes ready; the host then drains it word-by-word
     // without re-polling. Per-word polling is wrong — the interrupt only
-    // re-fires for the next block (we have one).
+    // re-fires for the next block (this driver issues one).
     if (!busy_wait_set(&r.interrupt, INTERRUPT_READ_RDY | INTERRUPT_ERR_MASK, SPIN_DATA)) {
         log_io_fail("read READ_RDY timeout", 0xFFFFFFFF);
         return -1;
@@ -501,7 +495,7 @@ pub fn write_block(lba: u32, buf: *const [512]u8) callconv(.c) i32 {
     // SDHCI single-block PIO: WRITE_RDY fires once when the block buffer
     // is ready to accept 512 bytes; the host then pushes the full block
     // word-by-word without re-polling. Per-word polling is wrong — the
-    // interrupt only re-fires for the next block (we have one).
+    // interrupt only re-fires for the next block (this driver issues one).
     if (!busy_wait_set(&r.interrupt, INTERRUPT_WRITE_RDY | INTERRUPT_ERR_MASK, SPIN_DATA)) {
         log_io_fail("write WRITE_RDY timeout", 0xFFFFFFFF);
         return -1;

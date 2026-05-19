@@ -23,8 +23,8 @@
 // Drivers fall back to their hard-coded constants when the lookup
 // returns null, so a missing / malformed DTB doesn't break boot.
 //
-// All multi-byte FDT fields are big-endian; on AArch64 (LE) we
-// decode via @byteSwap. The parser does no allocation.
+// All multi-byte FDT fields are big-endian; decode via @byteSwap on
+// AArch64 (LE). The parser does no allocation.
 
 const std = @import("std");
 

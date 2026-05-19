@@ -10,8 +10,7 @@
 #       Homebrew does not ship a working `grub` formula on Apple
 #       Silicon. Build GRUB 2.12 from source against the aarch64-elf
 #       cross toolchain and install under $HOME/.local/grub-aarch64-efi.
-#       Quick recipe (see ajhahnde/notes/port_workflow_claude_code.md
-#       for the full background):
+#       Quick recipe:
 #
 #         brew install autoconf automake libtool gettext gawk \
 #                      help2man pkg-config xorriso mtools
@@ -37,8 +36,8 @@
 #   zig-out/iso/         staging tree (boot/flashos, boot/grub/grub.cfg)
 #   zig-out/flashos.iso  the resulting bootable ISO9660 image
 #
-# Override the GRUB install location with FLASHOS_GRUB_PREFIX if you
-# put it somewhere other than $HOME/.local/grub-aarch64-efi.
+# Override the GRUB install location with FLASHOS_GRUB_PREFIX if it is
+# installed elsewhere than $HOME/.local/grub-aarch64-efi.
 
 set -euo pipefail
 

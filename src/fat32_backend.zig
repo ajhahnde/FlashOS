@@ -1,5 +1,5 @@
-// FAT32 VFS backend (v0.4.0). Replaces the earlier fat32_stub.zig —
-// wraps src/fat32.zig's on-disk decode in the real VfsOps vtable.
+// fat32_backend: FAT32 VFS backend (v0.4.0). Wraps src/fat32.zig's
+// on-disk decode in the VfsOps vtable.
 //
 // open / read / seek / close / write do live cluster-chain I/O
 // against block_dev.sd_dev. write (writeBack) extends-or-overwrites
@@ -170,7 +170,7 @@ fn write(_: *vfs.SuperBlock, f: *File, buf: [*]const u8, len: u64) callconv(.c) 
     var cluster_offset: u64 = f.offset;
 
     // Step 1: walk to the cluster covering f.offset, extending the
-    // chain via allocCluster when we hit end-of-chain mid-walk.
+    // chain via allocCluster when the walk hits end-of-chain.
     while (cluster_offset >= mount_info.bytes_per_cluster) {
         var next = fat32.readFatEntry(&mount_info, cluster) catch return -1;
         if (next >= fat32.FAT_EOC_MIN) {
@@ -221,14 +221,14 @@ fn write(_: *vfs.SuperBlock, f: *File, buf: [*]const u8, len: u64) callconv(.c) 
         }
     }
 
-    // Step 3: grow file_size on disk if we wrote past EOF.
+    // Step 3: grow file_size on disk if the write went past EOF.
     const new_offset = f.offset + copied;
     if (new_offset > f.size) {
         // Can't reconstruct the encoded 8.3 name from File state
-        // (it's not stashed on open — would need 11 bytes and the
-        // private word is 8). Re-walk root for the entry whose
-        // first cluster matches ours. v0.4.0's small root dir makes
-        // the re-walk trivial; future work caches FoundEntry on open.
+        // (not stashed on open — needs 11 bytes, the private word is
+        // 8). Re-walk root for the entry whose first cluster matches.
+        // v0.4.0's small root dir makes the re-walk trivial; future
+        // work caches FoundEntry on open.
         const first_clus_u32: u32 = @intCast(f.private & 0xFFFF_FFFF);
         if (findEntryByFirstCluster(first_clus_u32)) |found| {
             fat32.updateDirEntrySize(&mount_info, found, @intCast(new_offset)) catch return -1;

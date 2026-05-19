@@ -3,7 +3,7 @@ const Io = std.Io;
 
 // Deterministic newc cpio encoder (v0.4.0).
 //
-// build.zig invokes us as
+// build.zig invokes it as
 //   build_initramfs <output.cpio> <stage_dir> <arc1> <arc2> ...
 // where the <arcN> list is pre-sorted lexicographically by build.zig.
 // For each arc the encoder reads <stage_dir>/<arc> and emits one newc

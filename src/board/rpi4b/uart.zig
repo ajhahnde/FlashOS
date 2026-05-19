@@ -50,7 +50,7 @@ export fn mini_uart_init() void {
     gpio_pin_set_func(TXD0, GFAlt5);
     gpio_pin_set_func(RXD0, GFAlt5);
 
-    // Clear the pud resistors (initialize them)
+    // Clear pull-up/pull-down resistors.
     gpio_pin_enable(TXD0);
     gpio_pin_enable(RXD0);
 

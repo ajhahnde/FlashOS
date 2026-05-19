@@ -99,8 +99,8 @@ export fn enable_interrupt_gic(intid: u32, core: u32) void {
 
 export fn handle_irq() void {
     const iar: u32 = iarReg().*;
-    // GICv2 GICC_IAR INTID is bits[9:0]; mask must be 0x3FF, not 0x2FF
-    // (bit 8 was being silently cleared, masking any IRQ ID in 256..511).
+    // GICv2 GICC_IAR INTID is bits[9:0]; mask is 0x3FF. A 0x2FF mask
+    // silently clears bit 8 and drops IRQ IDs 256..511.
     const intid: u32 = iar & 0x3FF;
     switch (intid) {
         VC_TIMER_IRQ_1 => {

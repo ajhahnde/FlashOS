@@ -1,9 +1,9 @@
 /*
  * Pi-4 SMP wake-up via the BCM2711 spin-table at PA 0xe0/0xe8/0xf0.
  * Each secondary core spins on its slot until a non-zero value is
- * written, then jumps to that address. We point all three at `app`
- * (defined in src/boot.S). On QEMU `-M raspi4b` the same convention
- * is honoured by the machine model.
+ * written, then jumps to that address. All three slots are pointed
+ * at `app` (defined in src/boot.S). On QEMU `-M raspi4b` the same
+ * convention is honoured by the machine model.
  *
  * Section is ".text.boot" — the linker stitches this object's
  * contribution between boot.S's ".text.boot" (early prologue,

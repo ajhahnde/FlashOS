@@ -1,5 +1,5 @@
-// Initramfs VFS backend — turns src/initramfs.zig's newc cpio parser
-// into a VfsOps vtable (v0.4.0).
+// initramfs_backend: src/initramfs.zig newc cpio parser as a
+// VfsOps vtable (v0.4.0).
 //
 // Lives separately from src/initramfs.zig on purpose: the parser stays
 // VFS-agnostic and host-testable in isolation (it imports neither

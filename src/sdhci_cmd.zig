@@ -1,4 +1,4 @@
-// SDHCI command construction + response parsing.
+// sdhci_cmd: SDHCI command construction and response parsing.
 //
 // Pure-data module + host tests. The board-side driver
 // (src/board/<board>/emmc2.zig) owns the MMIO pokes and the

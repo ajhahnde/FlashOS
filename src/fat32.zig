@@ -1,8 +1,8 @@
-// FAT32 — single source of truth for on-disk layout (v0.4.0).
+// fat32: single source of truth for on-disk layout (v0.4.0).
 //
 // All field offsets / sizes follow Microsoft's "FAT: General Overview
 // of On-Disk Format" v1.03. Implements:
-//   * BPB parse (only the fields we need: BytsPerSec, SecPerClus,
+//   * BPB parse (only the fields used: BytsPerSec, SecPerClus,
 //     RsvdSecCnt, NumFATs, FATSz32, RootClus, FSInfo)
 //   * FAT table read/write (cluster -> next cluster, allocate fresh)
 //   * Directory entry decode (8.3 only, no VFAT/LFN)
@@ -18,8 +18,8 @@
 // host-testable against an in-memory fake without a freestanding
 // dependency.
 //
-// Layout decision: `packed struct` for the two on-disk types we
-// actually access by field (Bpb + DirEntry). Zig's `extern struct`
+// Layout decision: `packed struct` for the two on-disk types
+// accessed by field (Bpb + DirEntry). Zig's `extern struct`
 // follows the C ABI and inserts alignment padding (u16 @ 0x0B
 // bumps to 0x0C), which silently breaks every @offsetOf assumption
 // against the FAT32 spec. Packed structs preserve bit-exact layout
@@ -28,7 +28,7 @@
 // FSInfo is decoded/encoded via std.mem.readInt / writeInt against
 // the 512-byte sector buffer — a packed struct would need a u3712
 // gap field that pushes some Zig versions over an internal size
-// limit, and the only three fields we touch (lead/struc/free_count
+// limit, and the only three fields touched (lead/struc/free_count
 // + next_free) are easier read byte-wise.
 
 const std = @import("std");

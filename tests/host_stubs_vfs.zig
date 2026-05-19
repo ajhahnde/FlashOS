@@ -7,8 +7,7 @@
 // page helpers; the VFS tests never exercise those paths, but the
 // symbols still have to resolve at link. This stub provides them — a
 // bump allocator mirroring tests/host_stubs_initramfs.zig, kept as
-// its own single-purpose file per the post-mortem's "one stub file
-// per test target" convention.
+// its own single-purpose file: one stub file per test target.
 //
 // No `current` export here (unlike host_stubs_initramfs.zig): nothing
 // in the VFS link graph references it — vfs.zig dispatches over data,

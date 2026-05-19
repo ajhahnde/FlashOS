@@ -10,3 +10,4 @@ ajhahnde/
 stats.zig
 screenlog.0
 scripts/render_logo.swift
+scripts/check_comment_hygiene.sh

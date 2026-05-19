@@ -1,24 +1,17 @@
-// Anonymous pipes (v0.3.0).
+// pipe: anonymous SPSC byte pipe (v0.3.0).
 //
-// One get_free_page per `Pipe`. The header lives at the start of the
-// page; the byte ring fills the rest (4 KiB - sizeof(Pipe)). `head`
-// and `tail` are monotone u32 byte counters — indexing happens via
-// modulo RING_CAP — so `is_full` vs. `is_empty` is trivially
-// distinguishable without burning a slot. FIXME: the u32 counters
-// wrap after 4 GiB of pipe traffic; widen to u64 or roll the
-// counters modulo (2 * RING_CAP) before then.
+// One page per Pipe: header at offset 0, byte ring fills the rest
+// (PAGE_SIZE - sizeof(Pipe)). head/tail are monotone u32 byte
+// counters indexed modulo RING_CAP, so full vs. empty is
+// distinguishable without a reserved slot. Page lifetime is owned by
+// Pipe.refs, not mm.*_pages; unref() is the only path back to the
+// allocator. Single-producer / single-consumer per end.
 //
-// The page is **not** tracked in mm.user_pages / mm.kernel_pages — the
-// Pipe.refs counter owns the page lifetime. do_wait_impl frees only
-// the address-space resources, so the only path from refs==0 back to
-// the page allocator is unref().
-//
-// Single-producer / single-consumer per pipe end. Multi-reader /
-// multi-writer is deferred along with the rest of the POSIX
-// read(2)/write(2)/close(2) ABI.
+// FIXME: u32 counters wrap after 4 GiB of traffic; widen to u64 or
+// take counters modulo (2 * RING_CAP) before then.
 
 const builtin = @import("builtin");
-// Named module — see wait_queue.zig for the rationale.
+// Named module; see src/wait_queue.zig.
 const layout = @import("task_layout");
 const wq_mod = @import("wait_queue");
 
@@ -73,8 +66,8 @@ inline fn ringBase(p: *Pipe) [*]u8 {
     return @ptrFromInt(base);
 }
 
-// Allocate + initialise. Caller bumps `refs` before installing the
-// pipe in any fd slot. Returns null on allocator failure.
+// Allocate and zero a Pipe. Returns null on allocator failure.
+// refs starts at 0; the installer takes the first ref.
 pub fn alloc() ?*Pipe {
     const pa = get_free_page();
     if (pa == 0) return null;
@@ -90,19 +83,16 @@ pub fn ref(p: *Pipe) void {
     preempt_enable();
 }
 
-// Decrement the reference count. On the last drop, wake everyone
-// blocked on either end (they'll see the refs==0 short-circuit on
-// re-entry) and return the page to the allocator.
+// Drop one ref. On the last drop, wake both wait queues (woken tasks
+// observe refs == 0 on re-entry) and free the page.
 pub fn unref(p: *Pipe) void {
     preempt_disable();
     p.refs -= 1;
     const last = p.refs == 0;
     preempt_enable();
     if (!last) return;
-    // Wake-side runs without holding the page; the woken tasks observe
-    // the (now zeroed) refs == 0 / closed state on their next read or
-    // write iteration. No one can race us to free the page because
-    // there are by construction no other refs.
+    // Wake runs after the refs == 0 decision. No other ref exists, so
+    // no concurrent reader or writer can race the free.
     p.readers_wq.wake_all();
     p.writers_wq.wake_all();
     const kva: u64 = @intFromPtr(p);
@@ -113,10 +103,9 @@ pub fn unref(p: *Pipe) void {
     free_page(pa);
 }
 
-// Block until at least one byte is available, then drain what is
-// present (up to `len`). Returns 0 on EOF (refs == 1 && empty —
-// caller holds the only fd, no writers can wake us). Negative is
-// reserved for future short-read error paths.
+// Block until a byte is available, then drain up to len bytes.
+// Returns 0 on EOF (refs <= 1 and empty: no writer can wake the
+// reader). Negative is reserved for future short-read errors.
 pub fn read(p: *Pipe, buf: [*]u8, len: u64) i64 {
     var written: u64 = 0;
     while (written < len) {
@@ -139,8 +128,7 @@ pub fn read(p: *Pipe, buf: [*]u8, len: u64) i64 {
         }
         preempt_enable();
         p.writers_wq.wake_one();
-        // Break after one drain: short-read is fine, matches
-        // POSIX read(2) for pipes — caller loops if it needs more.
+        // One drain per call: short read is POSIX-conformant for pipes.
         break;
     }
     return @intCast(written);
@@ -153,9 +141,8 @@ pub fn write(p: *Pipe, buf: [*]const u8, len: u64) i64 {
     while (pushed < len) {
         preempt_disable();
         if (p.isFull()) {
-            // Last-reader-closed: SIGPIPE territory in POSIX; for
-            // now a short-write with the bytes pushed so far is
-            // enough — signal path TBD.
+            // Last reader closed. Short write of bytes pushed so far.
+            // TODO: SIGPIPE / signal delivery not implemented.
             if (p.refs <= 1) {
                 preempt_enable();
                 break;
@@ -178,10 +165,9 @@ pub fn write(p: *Pipe, buf: [*]const u8, len: u64) i64 {
 
 // ---- fd-table helpers ----
 //
-// Live on pipe.zig (not sys.zig) so the dispatch layer stays a thin
-// shim. The fd_table slot type is `?*anyopaque` — see task_layout.zig
-// for why the layout module deliberately keeps Pipe-typedness out of
-// TaskStruct.
+// Here, not in sys.zig, so the dispatch layer stays a thin shim.
+// fd_table slots are ?*anyopaque; see src/task_layout.zig for why
+// TaskStruct stays Pipe-agnostic.
 
 pub fn fdAlloc(t: *TaskStruct, p: *Pipe) i32 {
     var i: usize = 0;
@@ -333,7 +319,7 @@ test "closeAll clears every slot and drops refs" {
     p.refs = 2;
     _ = fdAlloc(&t, p);
     _ = fdAlloc(&t, p);
-    p.refs = 2; // override the fdAlloc-unaware refs we set above
+    p.refs = 2; // override the fdAlloc-unaware refs set above
     closeAll(&t);
     var i: usize = 0;
     while (i < FD_TABLE_SIZE) : (i += 1) {

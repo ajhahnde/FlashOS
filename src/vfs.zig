@@ -1,4 +1,4 @@
-// Tiny VFS dispatch layer keyed off a 1-bit superblock tag.
+// vfs: dispatch layer keyed off a 1-bit superblock tag.
 //
 // v0.4.0. The shape is deliberately small: a two-slot fixed mount
 // table, prefix-based path dispatch, one vtable per backend. No
@@ -10,9 +10,8 @@
 // FAT32 mounts at `/mnt`. Dispatch is "starts-with `/mnt/`" ->
 // FAT32 slot, anything else -> initramfs slot.
 //
-// The vtable carries a single `open` entry (not the plan sketch's
-// open_fn/open_out pair) — the sketch's open_fn was its own "unused
-// stub", and the post-mortem's "don't sprawl" rule says cut it.
+// The vtable carries a single `open` entry; the separate
+// open_fn/open_out pair was unused and removed.
 
 const std = @import("std");
 const builtin = @import("builtin");

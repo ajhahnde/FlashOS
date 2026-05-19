@@ -20,8 +20,8 @@ const PID1_MSG: [*:0]const u8 = "pid 1 in user space\n";
 // ELF entry. Naked: the loader zeroes x0..x30, sets SP = STACK_TOP
 // (top stack page eagerly mapped) and jumps here. `bl pid1_main`
 // gives `pid1_main` a normal prologue against that stack; the
-// trailing `mov x8,#2 ; svc #0` (SYS_EXIT) is the safety net for the
-// should-never-happen `pid1_main` return.
+// trailing `mov x8,#2 ; svc #0` (SYS_EXIT) is the fallback for an
+// unexpected `pid1_main` return.
 export fn _start() callconv(.naked) noreturn {
     asm volatile (
         \\bl pid1_main

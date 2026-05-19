@@ -11,6 +11,7 @@
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <b>Setup</b> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
+    <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
 </div>
@@ -72,9 +73,9 @@ zig build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
 zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
-For a self-validating run that exits 0 on `9/9 passed` and 1 on
-`ERROR CAUGHT`, count drift, or watchdog timeout — no manual
-QEMU babysitting:
+For a self-validating run that exits 0 on `14/14 passed` and 1 on
+`ERROR CAUGHT`, count drift, or watchdog timeout (no manual
+QEMU supervision):
 
 ```bash
 zig build -Dboard=virt  test-virt   
@@ -93,13 +94,13 @@ scripts/verify_pi_baseline.sh
 `qemu-system-aarch64 -M raspi4b -serial null -serial stdio -kernel zig-out/kernel8.img`
 — the Mini-UART (UART1) is routed onto host stdio so the kernel's
 output and the test harness's `[TEST]/[PASS]/[FAIL]` lines appear
-directly in your terminal. `run-virt` uses
+directly on the controlling terminal. `run-virt` uses
 `-M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic`, with the
 PL011 routed onto host stdio.
 
-A green run on either board lands `9/9 passed`, thirteen `0xbbff9`
-free-page checkpoints (one per scenario plus 1 PID-1 baseline +
-3 fork-stress rounds + 1 fork-stress final), and 0 `ERROR CAUGHT`.
+A green run on either board lands `14/14 passed`, eighteen `0xbbff4`
+free-page checkpoints plus the `0xbc000` boot baseline, and 0
+`ERROR CAUGHT`.
 The free-page invariants are documented in
 [Documentation §8](DOCUMENTATION.md#free-page-invariants).
 
@@ -181,9 +182,9 @@ a detached `picapture` session from a second terminal, run `piquit`
 
 ## 6. Helper shell functions
 
-The repo ships [`.zsh_project`](.zsh_project) with a handful of
+The repo ships [`.env`](.env) with a handful of
 helpers. Source it from `~/.zshrc`
-(`source ~/FlashOS/.zsh_project`) to make them available in every
+(`source ~/FlashOS/.env`) to make them available in every
 shell.
 
 - **`picapture [seconds]`** — runs the canonical capture flow:
@@ -201,19 +202,19 @@ shell.
   `./build.sh`): clean, link pass 1, `populate-syms`, link pass 2,
   diff-check the symbol layout, optionally `deploy`.
 - **`showfns`** — lists the shell helpers defined in
-  [`.zsh_project`](.zsh_project), the `zig build` steps, and the
-  top-level functions in [`build.zig`](build.zig). Useful for
-  "what targets exist again?".
+  [`.env`](.env), the `zig build` steps, and the
+  top-level functions in [`build.zig`](build.zig). A quick
+  inventory of available targets.
 
 The serial device is auto-detected from `/dev/cu.usbserial-*`;
-override with `PI_SERIAL_DEVICE=/dev/cu.usbserial-XXXX` if you have
-multiple adapters plugged in.
+override with `PI_SERIAL_DEVICE=/dev/cu.usbserial-XXXX` if multiple
+adapters are connected.
 
 ### Auto-source on `cd` (optional)
 
-To load `.zsh_project` automatically whenever you enter `~/FlashOS`,
-append a `chpwd` hook to your `~/.zshrc`. The command below is
-idempotent:
+To load `.env` automatically whenever the shell enters
+`~/FlashOS`, append a `chpwd` hook to `~/.zshrc`. The command below
+is idempotent:
 
 ```bash
 grep -q '_FLASHOS_LOADED' ~/.zshrc || cat >> ~/.zshrc <<'EOF'
@@ -222,7 +223,7 @@ grep -q '_FLASHOS_LOADED' ~/.zshrc || cat >> ~/.zshrc <<'EOF'
 autoload -Uz add-zsh-hook
 load_flashos_env() {
   if [[ "$PWD" == "$HOME/FlashOS"* && -z "$_FLASHOS_LOADED" ]]; then
-    [[ -f "$HOME/FlashOS/.zsh_project" ]] && source "$HOME/FlashOS/.zsh_project" && typeset -g _FLASHOS_LOADED=1
+    [[ -f "$HOME/FlashOS/.env" ]] && source "$HOME/FlashOS/.env" && typeset -g _FLASHOS_LOADED=1
   fi
 }
 add-zsh-hook chpwd load_flashos_env
@@ -242,7 +243,7 @@ zig build test
 Runs the host-side unit tests against pure-logic kernel modules.
 Each module that has tests is its own test root, linked against
 `tests/host_stubs.zig` (stubs for assembly-only externs). The
-current suite covers `src/page_alloc.zig` and `src/elf.zig`; it
+current suite covers 12 kernel modules (117 host tests); it
 finishes in well under a second and is the fastest signal that
 core kernel logic still holds.
 

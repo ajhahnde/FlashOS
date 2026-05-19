@@ -1,4 +1,4 @@
-// Embedded initramfs — newc cpio parser.
+// initramfs: embedded newc cpio parser.
 //
 // Pure parser + host tests. Kernel-side integration lives in
 // src/sys.zig (sys_openFile / sys_readFile) and src/kernel.zig

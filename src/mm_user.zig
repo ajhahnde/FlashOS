@@ -1,4 +1,4 @@
-// User-page mapping and page-table walk.
+// mm_user: user-page mapping and page-table walk.
 // Layouts come from src/task_layout.zig.
 
 const layout = @import("task_layout");
@@ -149,24 +149,21 @@ export fn allocate_user_page(t: *TaskStruct, uva: u64, flags: u64) u64 {
     return paToKva(phys_page);
 }
 
-/// Clone current's user-mapped pages into `dst`. Per-page region flags
-/// are not tracked on `mm.user_pages`, so every clone gets the default
-/// bag — adequate today because the only consumer of fork is the test
-/// harness's own scenarios, which fork before exec'ing the ELF demos
-/// (the child inherits the blob image briefly, then exec replaces it
-/// with per-region-flagged ELF mappings).
+/// Clone current's user-mapped pages into `dst`. Per-page region
+/// flags are not tracked on `mm.user_pages`, so every clone uses the
+/// default bag. Acceptable because fork's only consumer (the test
+/// harness) exec's an ELF immediately after, re-mapping with
+/// per-region flags.
 ///
-// TODO: add a per-page flag column on `mm.user_pages` so fork preserves
-// per-region permissions (text RX, data/heap/stack RW+UXN). Required
-// once a scenario fork's a process with already-RX text pages without
-// immediately exec'ing — until then the default-bag clone is fine.
+// TODO: add a per-page flag column on `mm.user_pages` so fork
+// preserves per-region permissions (text RX, data/heap/stack RW+UXN).
+// Needed once a scenario forks a process with RX text pages without
+// an immediate exec.
 ///
-/// The heap break (`mm.brk`) is inherited from the parent so a child
-/// that grew its heap pre-fork keeps a coherent break value — sys_brk
-/// in the child sees the same upper bound the parent had. The actual
-/// page contents come over via the user_pages copy above; an unwritten
-/// (post-grow, pre-touch) page in the parent simply isn't in
-/// user_pages yet and will demand-alloc on first touch in the child.
+/// `mm.brk` is inherited from the parent so a child that grew its
+/// heap pre-fork keeps a coherent break. Page contents come via the
+/// user_pages copy above; a post-grow, pre-touch page is not yet in
+/// user_pages and demand-allocates on first touch in the child.
 export fn copy_virt_memory(dst: *TaskStruct) i32 {
     const cnt = task_up_count(current);
     var i: i32 = 0;
@@ -182,13 +179,11 @@ export fn copy_virt_memory(dst: *TaskStruct) i32 {
 }
 
 /// Walk pgd→pud→pmd→pte for `uva` without allocating intermediate
-/// tables. Returns a pointer to the PTE slot if all four levels are
-/// present (so the caller can read or zero it), or null if any level
-/// is missing. Used by unmap_user_range to clear stale entries on
-/// brk-shrink — without this clearing, a shrink-then-grow inside the
-/// same process would re-touch the freed UVA, miss the demand-alloc
-/// fault path because the PTE still holds the (recycled) PA, and
-/// silently scribble onto whoever owns that page now.
+/// tables. Returns the PTE slot if all four levels are present, else
+/// null. Used by unmap_user_range to clear stale entries on
+/// brk-shrink: without clearing, a shrink-then-grow re-touches the
+/// freed UVA, misses the demand-alloc fault (the PTE still holds the
+/// recycled PA), and corrupts the page's new owner.
 fn lookup_pte_slot(t: *TaskStruct, uva: u64) ?*u64 {
     if (t.mm.pgd == 0) return null;
     const pgd_table: [*]u64 = @ptrFromInt(paToKva(t.mm.pgd));
@@ -211,17 +206,17 @@ fn lookup_pte_slot(t: *TaskStruct, uva: u64) ?*u64 {
     return &pte_table[pte_idx];
 }
 
-/// Free every user page mapped in [start_uva, end_uva): clears the PTE,
-/// frees the physical page, and zeroes the matching `mm.user_pages`
-/// slot so the do_wait reap loop won't double-free. Page-table pages
-/// (pud/pmd/pte) are NOT freed — they keep mapping the surrounding
-/// regions (stack, text), and the slot accounting in
-/// `mm.kernel_pages` doesn't track per-VA ownership.
+/// Free every user page in [start_uva, end_uva): clear the PTE, free
+/// the physical page, and zero the matching `mm.user_pages` slot so
+/// the do_wait reap loop won't double-free. Page-table pages
+/// (pud/pmd/pte) are not freed — they still map the surrounding
+/// regions (stack, text), and `mm.kernel_pages` accounting is not
+/// per-VA.
 ///
-/// Caller MUST issue a TLB flush before resuming user execution
-/// (`set_pgd(t.mm.pgd)` is the existing big-hammer); otherwise stale
-/// TLB entries continue to translate the freed UVA to the (now
-/// recycled) PA. Used by sys_brk's shrink path.
+/// Precondition: caller issues a TLB flush before resuming user
+/// execution (`set_pgd(t.mm.pgd)` suffices); otherwise stale TLB
+/// entries keep translating the freed UVA to the recycled PA. Used by
+/// sys_brk's shrink path.
 export fn unmap_user_range(t: *TaskStruct, start_uva: u64, end_uva: u64) void {
     if (start_uva >= end_uva) return;
     var i: usize = 0;

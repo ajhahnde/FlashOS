@@ -8,7 +8,7 @@
  *                                       loader_start + 0x80000 =
  *                                       0x40000000 + 0x80000 = 0x40080000;
  *                                       Linux uses 0 here only because it
- *                                       relocates at runtime, which we don't)
+ *                                       relocates at runtime, which FlashOS does not)
  *   0x10  8B   image_size             (`_image_size`, set by linker.ld
  *                                       to `_end - _image_start`)
  *   0x18  8B   flags = 0xa            (bit1=LE, bit3=4K pages)

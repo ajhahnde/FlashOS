@@ -1,10 +1,9 @@
-// Kernel entry root for the Zig build.
+// start: kernel entry root for the Zig build.
 //
-// The actual entry point is `_start` in src/boot.S, which calls into
-// `kernel_main` (defined in kernel.zig). Zig's executable target wants a
-// root module, so we use this file: every other kernel module is pulled
-// in here via comptime @import so all of its `export fn` decls land in
-// the final ELF.
+// The entry point is `_start` in src/boot.S, which calls `kernel_main`
+// (kernel.zig). Zig's executable target needs a root module; this file
+// is it: every other kernel module is pulled in here via comptime
+// @import so all `export fn` decls land in the final ELF.
 
 const board = @import("board.zig");
 
