@@ -1,0 +1,73 @@
+// Freestanding C-ABI mem* providers for flibc-linked payloads.
+//
+// The flibc payloads build with `bundle_compiler_rt = false` (single R+X
+// PT_LOAD, no compiler-rt baggage), so the C runtime helpers LLVM emits
+// for certain patterns are not supplied. Most payloads dodge this: their
+// loops do work per iteration and never match a libcall idiom. But once
+// a program actually exercises flibc's `@memcpy`-backed builders (e.g.
+// execvp's path-copy) or a bare `while (p[n] != 0)` length scan, LLVM's
+// loop-idiom recognizer lowers them to `memcpy` / `strlen` calls and the
+// link fails with "undefined symbol". fsh is the first such consumer
+// (it calls execvp and tokenizes lines); echo / cat will be next.
+//
+// This mirrors the kernel's own hand-rolled providers in src/utilc.zig.
+// The functions are named exactly `memcpy` / `memset` / `strlen`: LLVM's
+// LoopIdiomRecognize pass refuses to rewrite a recognized idiom into a
+// call to the very function being compiled, so the byte loops below are
+// self-recursion-safe (the kernel's `memcpy` relies on the same guard).
+//
+// Opt-in like start.zig: a payload pulls these symbols in by importing
+// this module as `flibc_mem` and forcing emission with
+// `comptime { _ = @import("flibc_mem"); }`. It lives outside flibc's
+// always-imported graph so payloads that don't need it (argv_echo,
+// flibc_demo) are not bloated by kept-as-root exports.
+
+/// memset(dst, c, n) — fill `n` bytes of `dst` with byte `c`. Byte
+/// granular; the C ABI returns `dst`.
+export fn memset(dst: [*]u8, c: i32, n_in: u64) [*]u8 {
+    var n = n_in;
+    var p = dst;
+    const byte: u8 = @truncate(@as(u32, @bitCast(c)));
+    while (n != 0) : (n -= 1) {
+        p[0] = byte;
+        p += 1;
+    }
+    return dst;
+}
+
+/// memcpy(dst, src, bytes) — copy `bytes` bytes from `src` to `dst`
+/// (non-overlapping). Copies 8 bytes at a time when both operands are
+/// 8-aligned, then drains the tail byte-wise. The C ABI returns `dst`.
+export fn memcpy(dst: *anyopaque, src: *const anyopaque, bytes: u64) *anyopaque {
+    var d: [*]u8 = @ptrCast(dst);
+    var s: [*]const u8 = @ptrCast(src);
+    var n = bytes;
+
+    if (@intFromPtr(d) % 8 == 0 and @intFromPtr(s) % 8 == 0) {
+        var d64: [*]u64 = @ptrCast(@alignCast(d));
+        var s64: [*]const u64 = @ptrCast(@alignCast(s));
+        while (n >= 8) : (n -= 8) {
+            d64[0] = s64[0];
+            d64 += 1;
+            s64 += 1;
+        }
+        d = @ptrCast(d64);
+        s = @ptrCast(s64);
+    }
+
+    while (n > 0) : (n -= 1) {
+        d[0] = s[0];
+        d += 1;
+        s += 1;
+    }
+    return dst;
+}
+
+/// strlen(s) — length of the NUL-terminated string at `s`, excluding the
+/// terminator. The lone scan the idiom recognizer would otherwise route
+/// to an external `strlen`; defining it here closes the loop.
+export fn strlen(s: [*:0]const u8) u64 {
+    var n: u64 = 0;
+    while (s[n] != 0) : (n += 1) {}
+    return n;
+}

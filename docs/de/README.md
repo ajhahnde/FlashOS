@@ -1,0 +1,263 @@
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../assets/flashos_logo_dark.png">
+    <img src="../../assets/flashos_logo_light.png" alt="FlashOS" width="420">
+  </picture>
+
+<h3>AArch64-Bare-Metal-Kernel für den Raspberry Pi 4B und QEMU <code>-M virt</code></h3>
+
+<p>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml/badge.svg?branch=main" alt="CI"></a>
+    <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://codecov.io/gh/ajhahnde/FlashOS/branch/main/graph/badge.svg" alt="Coverage"></a>
+    <img src="https://img.shields.io/badge/version-v0.1.0-blue" alt="Version">
+    <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
+    <img src="https://img.shields.io/badge/zig-0.16.0-orange" alt="Zig 0.16.0">
+    <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey" alt="aarch64-elf">
+  </p>
+
+<p>
+    <a href="DOCUMENTATION.md"><b>Dokumentation</b></a> ·
+    <a href="SETUP.md"><b>Setup</b></a> ·
+    <a href="../../MIGRATION.md"><b>Migration</b></a> ·
+    <a href="../../VERSIONING.md"><b>Versionierung</b></a> ·
+    <a href="../../CHANGELOG.md"><b>Changelog</b></a> ·
+    <a href="../../LICENSE.md"><b>Lizenz</b></a>
+  </p>
+
+<p>
+    <a href="../../README.md">English</a> ·
+    <b>Deutsch</b>
+  </p>
+</div>
+
+---
+
+<p align="center">
+  <img src="../../assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi" width="780">
+</p>
+
+> Diese Animation ist eine echte Serial-Console-Aufnahme von FlashOS
+> beim Booten auf echter Hardware — der Boot durchläuft das
+> kernelinterne Test-Harness und endet an einem interaktiven
+> `fsh`-Prompt.
+
+## About
+
+FlashOS ist ein Bare-Metal-AArch64-Kernel, der auf Raspberry-Pi-4B-
+Hardware und unter QEMU bootet. Der Kernel ist in Zig geschrieben;
+der Boot-Pfad, die Exception-Vektoren und der Context Switch sind
+AArch64-Assembly. Der Build wird vollständig von `build.zig` gesteuert.
+Der aktuelle Release liefert einen vollständigen Uniprozessor-
+Lebenszyklus (`fork`, `exec`, `exit`, `wait`, `kill`), leckfrei über
+Stress-Zyklen hinweg, geprüft durch ein kernelinternes
+`[TEST]/[PASS]/[FAIL]`-Harness und eine host-seitige Unit-Test-Suite.
+
+## Spezifikationen
+
+|                 |                                                                                       |
+| :-------------- | :------------------------------------------------------------------------------------ |
+| **Hardware**    | Raspberry Pi 4 Model B (BCM2711)                                                      |
+| **Architektur** | AArch64 (ARMv8-A)                                                                     |
+| **Sprachen**    | Zig + AArch64-Assembly                                                                |
+| **Toolchain**   | Zig 0.16.0 +`aarch64-elf`-binutils                                                    |
+| **Targets**     | RPi 4B-Hardware,`qemu-system-aarch64 -M raspi4b`, _und_ `qemu-system-aarch64 -M virt` |
+
+## Features
+
+- **Zweistufiger Boot.** Der EL3-armstub konfiguriert die GIC und
+  `eret` in den Kernel auf EL1 (Pi). Auf QEMU `-M virt` führt `boot.S`
+  den EL3→EL1-Drop selbst aus.
+- **Dual-Target-Build.** `-Dboard=rpi4b` oder `-Dboard=virt` schaltet
+  zur Compile-Zeit das pro-Board-Treiberbündel (`uart`, `gpio`,
+  `timer`, `irq`), das Linker-Skript und die Boot-Eigenheiten um.
+- **Vierstufige MMU.** Identity Map für das frühe Bring-up, lineare
+  High Map für den Kernel, bedarfsweise allozierte User-Pages mit
+  pro-Region-Flags (text RX, data/heap/stack RW+UXN).
+- **Priority-Round-Robin-Scheduler** mit timergesteuerter Preemption.
+- **Prozess-Lebenszyklus.** `fork` / `exec` / `exit` / `wait` / `kill`,
+  Zombie-Reap-Pfad, leckfrei über Stress-Zyklen hinweg.
+- **ELF64-Loader.** `sys_execve` löst einen Pfad über das VFS auf,
+  streamt jedes PT_LOAD-Segment mit den richtigen Berechtigungen in
+  einen frisch gebauten Adressraum und mappt eifrig die oberste
+  Stack-Page, bevor der argv-Block auf den neuen User-Stack kopiert
+  wird.
+- **Userland-Mini-libc (`flibc`).** SVC-Wrapper, `printf` über
+  `sys_writeConsole`, Bump-Allocator über `brk` / `sbrk`,
+  `fork` / `wait` / `exit` / `execve`. Vom Build in die ELF-Demos
+  gelinkt, abgelegt unter `user_space/lib/flibc/`.
+- **Heap über `sys_brk` / `sys_sbrk`.** Pages werden vom
+  Page-Fault-Pfad innerhalb von `[HEAP_BASE, brk)` bedarfsweise
+  alloziert; ein Schrumpfen unmappt und gibt frei.
+- **Regionsbewusstes Page-Fault-Dispatch.** `do_data_abort`
+  klassifiziert nach User-VA-Region (heap / stack / stack-guard / text
+  / wild) und panict-und-zombiet bei Zugriff außerhalb der Region; das
+  `sys_wait` des Elternteils reapt den Übeltäter, sodass das Harness
+  weiterläuft.
+- **Stack Guard.** Eine 1-Page große ungemappte Region unterhalb des
+  legalen Stack-Bereichs verwandelt eine außer Kontrolle geratene
+  Rekursion in eine `[KERN] stack overflow`-Diagnose statt in
+  Speicherkorruption.
+- **Vereinheitlichte File Descriptors.** Eine einzige getaggte
+  `fds`-Tabelle pro Task (`console` / `pipe` / `file`) hinter einer
+  einzigen `read` / `write` / `close` / `dup2`-ABI; fd 0/1/2 sind
+  vorinstallierte Console-Slots, `fork` erbt die Tabelle und `execve`
+  bewahrt sie, sodass eine Shell einem Kind umgeleitetes stdio
+  übergeben kann. Anonyme Pipes (`sys_pipe`) nutzen dieselbe Tabelle.
+- **Interaktive Shell (`fsh`).** Eine Userland-REPL unter `/bin/fsh`
+  über einer Mini-libc (`flibc`): ein roher `readline`-Zeileneditor,
+  ein Tokenizer mit einer einzelnen `|`-Pipe-Stufe, In-Process-
+  Built-ins (`cd` / `exit` / `help` / `free` / `whoami`), ein
+  Unix-artiger `#`/`$`-Privileg-Prompt und `fork` + `execvp`
+  (`/bin/<name>`-Auflösung) für externe Programme — dazu `/bin/echo`,
+  `/bin/cat`, `/bin/ls` (der zustandslose `sys_readdir`-Konsument),
+  `/bin/meminfo`, `/bin/forkbomb` (eine gedeckelte Leak-Probe) und
+  `/bin/passwd`. Liest beim Start `/etc/fshrc`; `sys_chdir` gibt jedem
+  Task ein Arbeitsverzeichnis. Noch kein Userland-Allocator — jeder
+  Puffer ist fest dimensioniert, stack/static.
+- **Prozess-Identität, Login & Berechtigungen.** Jeder Task
+  trägt reale + effektive uid/gid (über `fork` vererbt, über `execve`
+  bewahrt) hinter einer ABI der `getuid`/`setuid`-Familie, und jede
+  Datei trägt mode/uid/gid-Metadaten, die an der open/write/exec-
+  Syscall-Grenze durchgesetzt werden (`-EACCES`, root umgeht sie). Der
+  Boot führt `/bin/login` als Session-Supervisor aus: der Kernel
+  verifiziert das Passwort mit PBKDF2-HMAC-SHA256 + einem
+  konstant-zeitigen Vergleich (`sys_authenticate` — die KDF verlässt
+  nie den Kernel), dann forkt login ein Kind, das Privilegien ablegt und
+  die Shell des Users per exec startet; `exit` kehrt zum `login:`-Prompt zurück.
+  Passwörter liegen in einem beschreibbaren `/mnt/shadow` auf der
+  SD-Karte (durch ein FAT32-Permission-Overlay auf `0600 root:root`
+  geschützt, mit dem read-only-initramfs-Seed als stets bootfähigem
+  Fallback) und werden mit `passwd` / `sys_passwd` geändert — frisch
+  kernel-generiertes Salt, splice-sicheres In-Place-Rewrite. Der
+  Passwort-Echo wird über `SYS_SET_CONSOLE_MODE` unterdrückt. Die
+  Seed-Accounts nutzen feste öffentliche Salts (Build-
+  Reproduzierbarkeit); rotierte Records bekommen zufällige Salts.
+- **Syscalls** werden über `svc` und eine indizierte Tabelle dispatcht
+  — siehe
+  [Dokumentation §5](DOCUMENTATION.md#5-syscalls--ausnahmen).
+- **USB-C-Gadget-Konsole.** Der USB-C-Port des Pi enumeriert als
+  CDC-ACM-Serial-Gerät (BCM2711 DWC2 OTG — Full-Speed, polled,
+  Slave/PIO): ein einzelnes C-zu-C-Kabel zu einem Mac überträgt sowohl
+  Strom als auch die interaktive `fsh`-Konsole
+  (`/dev/tty.usbmodem…`, keine Treiberinstallation). Die User-/Shell-
+  Ausgabe wechselt zu USB, sobald enumeriert, und fällt andernfalls
+  auf die Mini-UART zurück.
+- **Zwei UARTs.** Mini-UART (UART1) für den Console-Fallback +
+  Kernel-Diagnose, dedizierte PL011 für einen Out-of-Band-Trace-Kanal.
+- **Kernel-Symboltabelle**, generiert durch einen zweiphasigen
+  `populate-syms`-Schritt und konsumiert vom Function-Entry-Tracer
+  (Laufzeit intakt, aber derzeit inert — Zig hat noch kein Äquivalent
+  zu `-fpatchable-function-entry=2`).
+- **Kernelinternes Test-Harness** (`[TEST]/[PASS]/[FAIL]` + Bilanz, 27
+  Szenarien) plus eine host-seitige `zig build test`-Suite (361
+  Host-Tests über 35 Module).
+
+## Schnellstart
+
+Die Toolchain installieren:
+
+```bash
+brew install zig aarch64-elf-binutils qemu
+```
+
+Alles für den Pi bauen (`kernel8.img` + `armstub8.bin` landen in
+`zig-out/`):
+
+```bash
+zig build                   # default: -Dboard=rpi4b
+```
+
+Oder für QEMU `-M virt` bauen (kein armstub):
+
+```bash
+zig build -Dboard=virt
+```
+
+Den Kernel unter QEMU ausführen:
+
+```bash
+zig build -Dboard=rpi4b run        # raspi4b machine (Pi 4 model)
+```
+
+```bash
+zig build -Dboard=virt  run-virt   # generic ARMv8 virt machine
+```
+
+Host-seitige Unit-Tests ausführen (Page Allocator + ELF-Parser):
+
+```bash
+zig build test
+```
+
+Für den vollständigen Hardware-Ablauf (zweiphasiger Build mit
+Symboltabellen-Befüllung und einem interaktiven `deploy`-Prompt):
+
+```bash
+./build.sh
+```
+
+Siehe [Setup](SETUP.md) für das SD-Karten-Layout, die Firmware-Dateien
+und das Setup der seriellen Konsole.
+
+## Build-Schritte
+
+| Schritt                              | Was er tut                                                            |
+| :----------------------------------- | :-------------------------------------------------------------------- |
+| `zig build` (oder `-Dboard=rpi4b`)   | Default — Pi:`kernel8.img` + `armstub8.bin`                           |
+| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                                  |
+| `zig build kernel`                   | Nur Kernel-Image                                                      |
+| `zig build armstub` (rpi4b only)     | Nur Armstub                                                           |
+| `zig build populate-syms`            | `src/symbol_area.S` aus der gelinkten ELF neu generieren              |
+| `zig build deploy` (rpi4b only)      | Artefakte + RPi-Firmware nach `$SD_BOOT` kopieren                     |
+| `zig build -Dboard=rpi4b run`        | Boot unter `qemu-system-aarch64 -M raspi4b`                           |
+| `zig build -Dboard=virt run-virt`    | Boot unter `qemu-system-aarch64 -M virt`                              |
+| `zig build -Dboard=virt test-virt`   | virt booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht    |
+| `zig build -Dboard=rpi4b test-rpi4b` | raspi4b booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht |
+| `zig build -Dboard=virt iso`         | Eine GRUB-EFI-Rescue-ISO bauen (nur virt)                            |
+| `zig build test`                     | Host-seitige Unit-Tests (361 tests, 35 modules)                      |
+| `zig build clean`                    | `.zig-cache/` und `zig-out/` entfernen                                |
+
+Der Standard-Optimierungsmodus ist `ReleaseSmall`. Mit
+`-Doptimize=ReleaseSafe` (oder `Debug`, `ReleaseFast`) überschreiben.
+
+## Repository-Layout
+
+```text
+src/                kernel core (Zig + AArch64 assembly)
+src/board/<name>/   per-board driver bag (rpi4b / virt) + linker script
+user_space/         PID 1 image + in-kernel test harness
+user_space/lib/flibc/  userland mini-libc for ELF demos
+lib/                shared kernel↔user constants (syscall IDs)
+tools/              hand-rolled ELF demos (hello, stackbomb, flibc_demo)
+tests/              host-side unit tests
+armstub/            EL3 → EL1 bootstrap shim (Pi only)
+scripts/            symbol-table generation, iso, QEMU test watchdog,
+                    Pi-baseline verifier
+assets/             logo and visual assets
+build.zig           the only build entry point
+build.sh            two-pass build orchestrator + deploy prompt
+config.txt          RPi 4 firmware configuration
+```
+
+Ein tieferer Durchgang durch jedes Subsystem findet sich in der
+[Dokumentation](DOCUMENTATION.md).
+
+## Versionierung
+
+`v[MAJOR].[MINOR].[PATCH]`. Pro-Tag-Notizen finden sich auf der
+[Releases-Seite](https://github.com/ajhahnde/FlashOS/releases).
+
+## Lizenz
+
+Apache License, Version 2.0. Siehe [Lizenz](../../LICENSE.md).
+
+## Siehe auch
+
+- [eeco](https://github.com/ajhahnde/eeco) — self-maintaining workflow ecosystem.
+- [the-way-out](https://github.com/ajhahnde/the-way-out) — top-down pixel-art escape-room shooter.
+
+---
+
+[Als Nächstes: Dokumentation →](DOCUMENTATION.md)
+
+<!-- sync-ref: README.md @ 6e5815d3d21a43d1c9c98f7a4dfc4cb2b4d724de | synced 2026-06-05 -->

@@ -1,0 +1,18 @@
+# FlashOS FAT32 permission overlay (PERMS.TAB)
+#
+# Format: NAME MODE UID GID
+#   NAME — 8.3 basename in the FAT32 root (matched case-insensitively)
+#   MODE — octal permission word (low 9 bits)
+#   UID / GID — decimal owner ids
+#
+# Parsed once at mount time by the kernel (src/overlay.zig wired through
+# src/fat32_backend.zig). Un-annotated files keep the 0666 root:root
+# default; the shadow file floors at 0600 even without this overlay.
+# This file protects itself through its own entry.
+#
+# Seeded onto the QEMU SD image by scripts/make_test_disk.sh and onto a
+# real card by `zig build deploy`.
+PERMS.TAB 0600 0 0
+SHADOW 0600 0 0
+ROUNDTR.DAT 0666 0 0
+ROUNDTR.MAG 0666 0 0

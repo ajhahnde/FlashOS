@@ -1,0 +1,418 @@
+// usb_descriptors: byte-exact USB descriptor set + SETUP-packet decode
+// for the DWC2 gadget. Pure data + pure functions — no MMIO, no extern —
+// so it host-unit-tests with no hardware (mirrors src/mailbox.zig and
+// src/sdhci_cmd.zig). The rpi4b driver (src/board/rpi4b/usb.zig) imports
+// this as the named module "usb_descriptors"; the host-test build runs
+// the tests at the bottom.
+//
+// CDC-ACM: the descriptor set below describes a CDC-ACM serial
+// function — a Communications interface (class 2 / subclass ACM 2) carrying
+// the Header / Call-Management / ACM / Union functional descriptors + an
+// interrupt-IN notification endpoint, and a Data interface (class 0x0A) with
+// bulk IN + bulk OUT. macOS binds AppleUSBCDCACM by interface class and
+// creates /dev/tty.usbmodem<serial>. The bulk/interrupt endpoints are
+// declared here but only hardware-configured by the data-path code in
+// usb.zig; this module covers enumeration + the EP0 class requests.
+
+const std = @import("std");
+
+// --- Descriptor type codes (USB 2.0 §9.4, table 9-5). ---
+pub const DESC_DEVICE: u8 = 1;
+pub const DESC_CONFIG: u8 = 2;
+pub const DESC_STRING: u8 = 3;
+pub const DESC_INTERFACE: u8 = 4;
+pub const DESC_ENDPOINT: u8 = 5;
+pub const DESC_DEVICE_QUALIFIER: u8 = 6;
+pub const DESC_OTHER_SPEED: u8 = 7;
+// CDC class-specific descriptor type (USB CDC 1.1 §5.2.3): the functional
+// descriptors carried inside the Communications interface.
+pub const CS_INTERFACE: u8 = 0x24;
+
+// --- Standard device requests (USB 2.0 §9.4, table 9-4). ---
+pub const REQ_GET_STATUS: u8 = 0x00;
+pub const REQ_CLEAR_FEATURE: u8 = 0x01;
+pub const REQ_SET_FEATURE: u8 = 0x03;
+pub const REQ_SET_ADDRESS: u8 = 0x05;
+pub const REQ_GET_DESCRIPTOR: u8 = 0x06;
+pub const REQ_SET_DESCRIPTOR: u8 = 0x07;
+pub const REQ_GET_CONFIGURATION: u8 = 0x08;
+pub const REQ_SET_CONFIGURATION: u8 = 0x09;
+
+// --- CDC-ACM class-specific requests (USB CDC PSTN 1.2 §6.3). macOS issues
+// these when an app opens the tty; the device must ACK them. ---
+pub const REQ_SET_LINE_CODING: u8 = 0x20;
+pub const REQ_GET_LINE_CODING: u8 = 0x21;
+pub const REQ_SET_CONTROL_LINE_STATE: u8 = 0x22;
+pub const REQ_SEND_BREAK: u8 = 0x23;
+
+// Pinned identity: pid.codes vendor 0x1209, a throwaway test product id.
+// macOS binds by class, so the exact pair is irrelevant for enumeration;
+// any non-colliding pair works for the spike.
+pub const VID: u16 = 0x1209;
+pub const PID: u16 = 0x0001;
+
+// Full-Speed EP0 max packet.
+pub const EP0_MPS: u16 = 64;
+
+// CDC line coding (USB CDC PSTN §6.3.11): dwDTERate (LE u32) + bCharFormat
+// (stop bits) + bParityType + bDataBits. Default 115200 8N1 — cosmetic over
+// USB (there is no real UART), but macOS reads it back via GET_LINE_CODING.
+pub const line_coding_default = [7]u8{ 0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08 };
+
+// Device descriptor (18 bytes). bcdUSB 0x0200; CDC (Communications) class at
+// the device level so macOS binds AppleUSBCDCACM via the comms interface;
+// FS EP0 = 64.
+pub const device_descriptor = [18]u8{
+    0x12,        DESC_DEVICE,
+    0x00,        0x02, // bcdUSB = 0x0200
+    0x02,        0x00, // bDeviceClass = CDC (Communications); bDeviceSubClass = 0
+    0x00,        0x40, // bDeviceProtocol = 0; bMaxPacketSize0 = 64
+    0x09,        0x12, // idVendor  = 0x1209 (little-endian)
+    0x01,        0x00, // idProduct = 0x0001 (little-endian)
+    0x00,        0x01, // bcdDevice = 0x0100
+    0x01,        0x02,
+    0x03,        0x01, // iManufacturer/iProduct/iSerial = 1/2/3; bNumConfigurations = 1
+};
+
+// CDC-ACM configuration block (67 bytes): config (9) + comms interface (9) +
+// Header/Call-Mgmt/ACM/Union functional descriptors (5+5+4+5) + notify EP (7)
+// + data interface (9) + bulk OUT (7) + bulk IN (7). Two interfaces; bus-
+// powered, 100 mA. Endpoint map: EP1 IN = interrupt notify, EP2 IN/OUT = bulk.
+pub const config_descriptor = [67]u8{
+    // configuration descriptor (9)
+    0x09, DESC_CONFIG,
+    0x43, 0x00, // wTotalLength = 67 (little-endian)
+    0x02, // bNumInterfaces = comms + data
+    0x01, // bConfigurationValue
+    0x00, // iConfiguration
+    0x80, // bmAttributes = bus-powered, no remote wakeup
+    0x32, // bMaxPower = 0x32 * 2 mA = 100 mA
+
+    // interface 0: Communications class (9)
+    0x09, DESC_INTERFACE,
+    0x00, // bInterfaceNumber = 0
+    0x00, // bAlternateSetting
+    0x01, // bNumEndpoints = 1 (interrupt-IN notification)
+    0x02, // bInterfaceClass = CDC (Communications)
+    0x02, // bInterfaceSubClass = Abstract Control Model
+    0x01, // bInterfaceProtocol = AT/V.25ter (0x00 also binds on macOS)
+    0x00, // iInterface
+
+    // CDC Header functional descriptor (5)
+    0x05, CS_INTERFACE,
+    0x00, // bDescriptorSubtype = Header
+    0x10, 0x01, // bcdCDC = 0x0110 (little-endian)
+
+    // CDC Call-Management functional descriptor (5)
+    0x05, CS_INTERFACE,
+    0x01, // bDescriptorSubtype = Call Management
+    0x00, // bmCapabilities = device does not handle call management
+    0x01, // bDataInterface = 1
+
+    // CDC Abstract-Control-Management functional descriptor (4)
+    0x04, CS_INTERFACE,
+    0x02, // bDescriptorSubtype = ACM
+    0x02, // bmCapabilities = Set/Get_Line_Coding + Set_Control_Line_State
+
+    // CDC Union functional descriptor (5)
+    0x05, CS_INTERFACE,
+    0x06, // bDescriptorSubtype = Union
+    0x00, // bControlInterface = 0 (comms)
+    0x01, // bSubordinateInterface0 = 1 (data)
+
+    // endpoint: notification (interrupt IN, EP1) (7)
+    0x07, DESC_ENDPOINT,
+    0x81, // bEndpointAddress = EP1 IN
+    0x03, // bmAttributes = interrupt
+    0x10, 0x00, // wMaxPacketSize = 16 (little-endian)
+    0x10, // bInterval = 16 (FS frames)
+
+    // interface 1: Data class (9)
+    0x09, DESC_INTERFACE,
+    0x01, // bInterfaceNumber = 1
+    0x00, // bAlternateSetting
+    0x02, // bNumEndpoints = 2 (bulk IN + bulk OUT)
+    0x0A, // bInterfaceClass = CDC Data
+    0x00, // bInterfaceSubClass
+    0x00, // bInterfaceProtocol
+    0x00, // iInterface
+
+    // endpoint: bulk OUT (EP2) (7)
+    0x07, DESC_ENDPOINT,
+    0x02, // bEndpointAddress = EP2 OUT
+    0x02, // bmAttributes = bulk
+    0x40, 0x00, // wMaxPacketSize = 64 (little-endian)
+    0x00, // bInterval
+
+    // endpoint: bulk IN (EP2) (7)
+    0x07, DESC_ENDPOINT,
+    0x82, // bEndpointAddress = EP2 IN
+    0x02, // bmAttributes = bulk
+    0x40, 0x00, // wMaxPacketSize = 64 (little-endian)
+    0x00, // bInterval
+};
+
+// String index 0 = supported-LANGID list. macOS requests index 0 during
+// enumeration; a missing index 0 trips the whole enum. Single LANGID =
+// 0x0409 (en-US).
+pub const str_langid = [4]u8{ 0x04, DESC_STRING, 0x09, 0x04 };
+
+// Build a UTF-16LE string descriptor at comptime from an ASCII literal.
+fn utf16leStringDesc(comptime s: []const u8) [2 + 2 * s.len]u8 {
+    var buf: [2 + 2 * s.len]u8 = undefined;
+    buf[0] = @intCast(buf.len); // bLength
+    buf[1] = DESC_STRING;
+    inline for (s, 0..) |c, i| {
+        buf[2 + i * 2] = c;
+        buf[2 + i * 2 + 1] = 0x00;
+    }
+    return buf;
+}
+
+pub const str_manufacturer = utf16leStringDesc("FlashOS");
+pub const str_product = utf16leStringDesc("FlashOS Serial");
+// Fixed serial → a deterministic /dev/tty.usbmodem node once CDC lands.
+pub const str_serial = utf16leStringDesc("0001");
+
+// Resolve a GET_DESCRIPTOR request to its byte slice, or null when the
+// device should STALL EP0 (unknown type, unknown string index, and the
+// HS-only DEVICE_QUALIFIER / OTHER_SPEED descriptors a Full-Speed-only
+// device must reject).
+pub fn getDescriptor(desc_type: u8, index: u8) ?[]const u8 {
+    return switch (desc_type) {
+        DESC_DEVICE => &device_descriptor,
+        DESC_CONFIG => &config_descriptor,
+        DESC_STRING => switch (index) {
+            0 => &str_langid,
+            1 => &str_manufacturer,
+            2 => &str_product,
+            3 => &str_serial,
+            else => null,
+        },
+        else => null,
+    };
+}
+
+// Decoded 8-byte SETUP packet (USB 2.0 §9.3, all multi-byte fields LE).
+pub const Setup = struct {
+    bmRequestType: u8,
+    bRequest: u8,
+    wValue: u16,
+    wIndex: u16,
+    wLength: u16,
+
+    // GET_DESCRIPTOR packs type in the high byte, index in the low byte.
+    pub fn descType(self: Setup) u8 {
+        return @intCast(self.wValue >> 8);
+    }
+    pub fn descIndex(self: Setup) u8 {
+        return @intCast(self.wValue & 0x00FF);
+    }
+    // SET_ADDRESS carries a 7-bit address in wValue.
+    pub fn address(self: Setup) u8 {
+        return @intCast(self.wValue & 0x007F);
+    }
+};
+
+pub fn decodeSetup(raw: *const [8]u8) Setup {
+    return .{
+        .bmRequestType = raw[0],
+        .bRequest = raw[1],
+        .wValue = @as(u16, raw[2]) | (@as(u16, raw[3]) << 8),
+        .wIndex = @as(u16, raw[4]) | (@as(u16, raw[5]) << 8),
+        .wLength = @as(u16, raw[6]) | (@as(u16, raw[7]) << 8),
+    };
+}
+
+// --- Host tests ---
+
+const testing = std.testing;
+
+test "device descriptor is byte-exact (CDC class at device level)" {
+    try testing.expectEqual(@as(usize, 18), device_descriptor.len);
+    try testing.expectEqual(@as(u8, 18), device_descriptor[0]); // bLength
+    try testing.expectEqual(DESC_DEVICE, device_descriptor[1]);
+    try testing.expectEqual(@as(u8, 0x02), device_descriptor[4]); // bDeviceClass = CDC
+    try testing.expectEqual(@as(u8, 0x00), device_descriptor[5]); // bDeviceSubClass
+    try testing.expectEqual(@as(u8, 0x00), device_descriptor[6]); // bDeviceProtocol
+    try testing.expectEqual(@as(u8, 0x40), device_descriptor[7]); // bMaxPacketSize0 = 64
+    // idVendor 0x1209 / idProduct 0x0001, little-endian.
+    try testing.expectEqual(@as(u8, 0x09), device_descriptor[8]);
+    try testing.expectEqual(@as(u8, 0x12), device_descriptor[9]);
+    try testing.expectEqual(@as(u8, 0x01), device_descriptor[10]);
+    try testing.expectEqual(@as(u8, 0x00), device_descriptor[11]);
+    try testing.expectEqual(@as(u8, 1), device_descriptor[17]); // bNumConfigurations
+}
+
+test "config descriptor: CDC-ACM two-interface layout is byte-exact" {
+    try testing.expectEqual(@as(usize, 67), config_descriptor.len);
+    // configuration descriptor
+    try testing.expectEqual(@as(u8, 9), config_descriptor[0]);
+    try testing.expectEqual(DESC_CONFIG, config_descriptor[1]);
+    try testing.expectEqual(@as(u8, 0x43), config_descriptor[2]); // wTotalLength = 67 lo
+    try testing.expectEqual(@as(u8, 0x00), config_descriptor[3]); // wTotalLength hi
+    try testing.expectEqual(@as(u8, 2), config_descriptor[4]); // bNumInterfaces
+    try testing.expectEqual(@as(u8, 1), config_descriptor[5]); // bConfigurationValue
+    // interface 0: Communications class (subclass ACM, 1 notify EP)
+    try testing.expectEqual(DESC_INTERFACE, config_descriptor[10]);
+    try testing.expectEqual(@as(u8, 0), config_descriptor[11]); // bInterfaceNumber
+    try testing.expectEqual(@as(u8, 1), config_descriptor[13]); // bNumEndpoints
+    try testing.expectEqual(@as(u8, 0x02), config_descriptor[14]); // CDC
+    try testing.expectEqual(@as(u8, 0x02), config_descriptor[15]); // ACM
+    // notification endpoint (interrupt IN, EP1)
+    try testing.expectEqual(DESC_ENDPOINT, config_descriptor[38]);
+    try testing.expectEqual(@as(u8, 0x81), config_descriptor[39]);
+    try testing.expectEqual(@as(u8, 0x03), config_descriptor[40]); // interrupt
+    // interface 1: Data class + bulk endpoints
+    try testing.expectEqual(@as(u8, 0x0A), config_descriptor[49]); // CDC Data
+    try testing.expectEqual(@as(u8, 0x02), config_descriptor[55]); // bulk OUT addr
+    try testing.expectEqual(@as(u8, 0x40), config_descriptor[57]); // bulk OUT MPS = 64
+    try testing.expectEqual(@as(u8, 0x82), config_descriptor[62]); // bulk IN addr
+    try testing.expectEqual(@as(u8, 0x40), config_descriptor[64]); // bulk IN MPS = 64
+}
+
+test "CDC Union functional descriptor links comms->data (macOS binds on this)" {
+    try testing.expectEqual(@as(u8, 5), config_descriptor[32]); // bFunctionLength
+    try testing.expectEqual(CS_INTERFACE, config_descriptor[33]);
+    try testing.expectEqual(@as(u8, 0x06), config_descriptor[34]); // Union subtype
+    try testing.expectEqual(@as(u8, 0), config_descriptor[35]); // bControlInterface = comms
+    try testing.expectEqual(@as(u8, 1), config_descriptor[36]); // bSubordinateInterface0 = data
+    // Call-Management functional descriptor points at the data interface.
+    try testing.expectEqual(@as(u8, 0x01), config_descriptor[25]); // Call-Mgmt subtype
+    try testing.expectEqual(@as(u8, 1), config_descriptor[27]); // bDataInterface = 1
+}
+
+test "LANGID string descriptor (index 0) is mandatory and exact" {
+    // A missing/wrong index-0 LANGID is the classic macOS enum-abort cause.
+    try testing.expectEqualSlices(u8, &[_]u8{ 0x04, 0x03, 0x09, 0x04 }, &str_langid);
+}
+
+test "getDescriptor resolves the known descriptors and STALLs the rest" {
+    try testing.expect(getDescriptor(DESC_DEVICE, 0) != null);
+    try testing.expectEqual(@as(usize, 67), getDescriptor(DESC_CONFIG, 0).?.len);
+    try testing.expectEqual(@as(usize, 4), getDescriptor(DESC_STRING, 0).?.len);
+    try testing.expect(getDescriptor(DESC_STRING, 1) != null);
+    try testing.expect(getDescriptor(DESC_STRING, 9) == null); // unknown string → STALL
+    try testing.expect(getDescriptor(DESC_DEVICE_QUALIFIER, 0) == null); // FS-only → STALL
+    try testing.expect(getDescriptor(DESC_OTHER_SPEED, 0) == null); // FS-only → STALL
+}
+
+test "string descriptors carry UTF-16LE bodies with correct bLength" {
+    // "FlashOS" = 7 chars → bLength = 2 + 2*7 = 16.
+    try testing.expectEqual(@as(u8, 16), str_manufacturer[0]);
+    try testing.expectEqual(DESC_STRING, str_manufacturer[1]);
+    try testing.expectEqual(@as(u8, 'F'), str_manufacturer[2]);
+    try testing.expectEqual(@as(u8, 0x00), str_manufacturer[3]);
+    try testing.expectEqual(@as(u8, 'l'), str_manufacturer[4]);
+    // "0001" = 4 chars → bLength = 10.
+    try testing.expectEqual(@as(u8, 10), str_serial[0]);
+}
+
+test "line coding default is 115200 8N1" {
+    // dwDTERate = 115200 = 0x0001C200, little-endian.
+    try testing.expectEqual(@as(u8, 0x00), line_coding_default[0]);
+    try testing.expectEqual(@as(u8, 0xC2), line_coding_default[1]);
+    try testing.expectEqual(@as(u8, 0x01), line_coding_default[2]);
+    try testing.expectEqual(@as(u8, 0x00), line_coding_default[3]);
+    try testing.expectEqual(@as(u8, 0x00), line_coding_default[4]); // 1 stop bit
+    try testing.expectEqual(@as(u8, 0x00), line_coding_default[5]); // no parity
+    try testing.expectEqual(@as(u8, 0x08), line_coding_default[6]); // 8 data bits
+}
+
+test "decodeSetup unpacks a GET_DESCRIPTOR(device) request" {
+    // bmRT=0x80 (D2H,std,device) bReq=0x06 wValue=0x0100 (DEVICE,idx0) wLen=64.
+    const raw = [8]u8{ 0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00 };
+    const s = decodeSetup(&raw);
+    try testing.expectEqual(@as(u8, 0x80), s.bmRequestType);
+    try testing.expectEqual(REQ_GET_DESCRIPTOR, s.bRequest);
+    try testing.expectEqual(@as(u16, 0x0100), s.wValue);
+    try testing.expectEqual(DESC_DEVICE, s.descType());
+    try testing.expectEqual(@as(u8, 0), s.descIndex());
+    try testing.expectEqual(@as(u16, 64), s.wLength);
+}
+
+test "decodeSetup masks the SET_ADDRESS 7-bit address" {
+    // SET_ADDRESS to 0x6B; high bit of wValue must be masked off.
+    const raw = [8]u8{ 0x00, 0x05, 0xEB, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const s = decodeSetup(&raw);
+    try testing.expectEqual(REQ_SET_ADDRESS, s.bRequest);
+    try testing.expectEqual(@as(u8, 0x6B), s.address()); // 0xEB & 0x7F
+}
+
+test "decodeSetup unpacks a SET_CONFIGURATION request" {
+    const raw = [8]u8{ 0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const s = decodeSetup(&raw);
+    try testing.expectEqual(REQ_SET_CONFIGURATION, s.bRequest);
+    try testing.expectEqual(@as(u16, 1), s.wValue);
+}
+
+test "decodeSetup unpacks a CDC SET_LINE_CODING request" {
+    // bmRT=0x21 (H2D, class, interface) bReq=0x20 wIndex=0 wLength=7.
+    const raw = [8]u8{ 0x21, 0x20, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00 };
+    const s = decodeSetup(&raw);
+    try testing.expectEqual(@as(u8, 0x21), s.bmRequestType);
+    try testing.expectEqual(REQ_SET_LINE_CODING, s.bRequest);
+    try testing.expectEqual(@as(u16, 7), s.wLength);
+}
+
+test "config descriptor sub-descriptor bLength chain sums to wTotalLength" {
+    // Walk the descriptor chain by bLength; it must land exactly on the
+    // buffer end. Catches an edit that resizes a functional descriptor but
+    // forgets wTotalLength — a silent enumeration-corrupting bug macOS
+    // surfaces only as an unhelpful "device not configured".
+    var i: usize = 0;
+    while (i < config_descriptor.len) {
+        try testing.expect(config_descriptor[i] != 0); // bLength 0 = malformed (would never terminate on hw)
+        i += config_descriptor[i];
+    }
+    try testing.expectEqual(@as(usize, 67), i); // chain ends exactly at the buffer end
+    const wtotal = @as(u16, config_descriptor[2]) | (@as(u16, config_descriptor[3]) << 8);
+    try testing.expectEqual(@as(u16, config_descriptor.len), wtotal);
+}
+
+test "getDescriptor(CONFIG) serves exactly wTotalLength bytes" {
+    // The served slice length must match the descriptor's own wTotalLength
+    // field, or the host's two-stage config fetch (9-byte header, then full)
+    // reads a truncated/over-long body.
+    const d = getDescriptor(DESC_CONFIG, 0).?;
+    const wtotal = @as(u16, d[2]) | (@as(u16, d[3]) << 8);
+    try testing.expectEqual(@as(usize, 67), d.len);
+    try testing.expectEqual(@as(u16, @intCast(d.len)), wtotal);
+}
+
+test "descType/descIndex split CONFIG and STRING wValue correctly" {
+    // GET_DESCRIPTOR(CONFIG, 0) → wValue 0x0200; (STRING, 3 = serial) → 0x0303.
+    const cfg_raw = [8]u8{ 0x80, 0x06, 0x00, 0x02, 0x00, 0x00, 0xFF, 0x00 };
+    const cfg = decodeSetup(&cfg_raw);
+    try testing.expectEqual(DESC_CONFIG, cfg.descType());
+    try testing.expectEqual(@as(u8, 0), cfg.descIndex());
+    const str_raw = [8]u8{ 0x80, 0x06, 0x03, 0x03, 0x09, 0x04, 0xFF, 0x00 };
+    const str = decodeSetup(&str_raw);
+    try testing.expectEqual(DESC_STRING, str.descType());
+    try testing.expectEqual(@as(u8, 3), str.descIndex());
+}
+
+test "decodeSetup unpacks the CDC SET_CONTROL_LINE_STATE request" {
+    // macOS sends this on tty open: bmRT=0x21, bReq=0x22, wValue bit0=DTR
+    // bit1=RTS, wLength=0 (no data stage — dispatchSetup ZLP-acks it).
+    const raw = [8]u8{ 0x21, 0x22, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const s = decodeSetup(&raw);
+    try testing.expectEqual(@as(u8, 0x21), s.bmRequestType);
+    try testing.expectEqual(REQ_SET_CONTROL_LINE_STATE, s.bRequest);
+    try testing.expectEqual(@as(u16, 0x0003), s.wValue); // DTR|RTS asserted
+    try testing.expectEqual(@as(u16, 0), s.wLength);
+}
+
+test "decodeSetup unpacks GET_CONFIGURATION / GET_STATUS / CLEAR_FEATURE" {
+    // The remaining standard requests dispatchSetup answers — round-trip
+    // each so every arm of that switch has decode coverage.
+    const getcfg = [8]u8{ 0x80, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00 };
+    try testing.expectEqual(REQ_GET_CONFIGURATION, decodeSetup(&getcfg).bRequest);
+    const getsts = [8]u8{ 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00 };
+    try testing.expectEqual(REQ_GET_STATUS, decodeSetup(&getsts).bRequest);
+    // CLEAR_FEATURE(ENDPOINT_HALT) on EP2 IN: bmRT=0x02 (endpoint), wIndex=0x82.
+    const clrf = [8]u8{ 0x02, 0x01, 0x00, 0x00, 0x82, 0x00, 0x00, 0x00 };
+    const s = decodeSetup(&clrf);
+    try testing.expectEqual(REQ_CLEAR_FEATURE, s.bRequest);
+    try testing.expectEqual(@as(u16, 0x0082), s.wIndex);
+}

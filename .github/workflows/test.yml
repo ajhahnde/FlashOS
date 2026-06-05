@@ -1,0 +1,140 @@
+# Per-push CI: host unit tests + rpi4b build-only + virt QEMU boot
+# smoke. The rpi4b boot suite takes 5–8 min and is verified locally
+# before tags; the build-only step here catches link / cross-compile
+# breakage on the rpi4b path (board_asm_defs.inc, mini-uart, BCM2711
+# timer, armstub, …) for ~30 s of CI time without paying the boot cost.
+#
+# Toolchain note: build.zig hardcodes the `aarch64-elf-` binutils
+# prefix (matches the macOS Homebrew naming). Ubuntu's apt ships the
+# same tools under `aarch64-linux-gnu-`, so the install step below
+# symlinks them into PATH under the expected names.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# GitHub switches all JavaScript actions to the Node 24 runtime on
+# 2026-06-16. checkout@v5 already declares node24 and codecov-action@v5
+# is a composite action (no Node runtime), but mlugg/setup-zig@v2
+# (latest release) still declares node20 — upstream has no node24
+# release yet. Forcing Node 24 now means every CI run proves the
+# pipeline survives the switch, instead of finding out on enforcement
+# day. Drop this once setup-zig ships a node24 release.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test:
+    # Pinned to 22.04 because kcov was dropped from Ubuntu 24.04 noble
+    # repositories; jammy universe still carries kcov 38-2. Coverage
+    # upload depends on this — see the `host unit tests with coverage`
+    # step below.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: install zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: hygiene gate
+        # Fails on trailing spaces, hard tabs in *.zig, CRLF, or
+        # lowercase hex literals in src/.
+        run: zig build check-hygiene
+
+      - name: doc-drift gate
+        # Deterministic doc-drift subset: fails the build only on a dead
+        # repo-relative path referenced by an active public doc (README,
+        # DOCUMENTATION, SETUP). Version/target/scenario mismatches are
+        # printed as advisory warnings; the fuzzy prose review stays with
+        # the human-driven /doc-drift pass.
+        run: bash scripts/check_doc_drift.sh
+
+      - name: install qemu + aarch64 binutils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm binutils-aarch64-linux-gnu
+          # build.zig invokes `aarch64-elf-objcopy` and `aarch64-elf-nm`;
+          # Ubuntu's apt ships them as `aarch64-linux-gnu-*`. Symlinks
+          # bridge the prefix without touching build.zig (Pi byte-identity
+          # is sensitive to build.zig changes).
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-objcopy /usr/local/bin/aarch64-elf-objcopy
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-nm      /usr/local/bin/aarch64-elf-nm
+
+      - name: host unit tests
+        run: zig build test
+
+      - name: build kcov v43 from source
+        # Ubuntu jammy ships kcov v38 (2020). Its DWARF and breakpoint
+        # handling predates two fixes that zig binaries need: addresses
+        # that map to multiple lines (v39) and BFD state clearing
+        # between files (v41) — without them kcov silently drops
+        # coverage for most of the test binaries. Ubuntu 24.04 dropped
+        # the kcov package entirely, so build the current release from
+        # source instead of using apt.
+        run: |
+          sudo apt-get install -y binutils-dev libssl-dev libelf-dev zlib1g-dev libdw-dev libiberty-dev libcurl4-openssl-dev
+          git clone --depth 1 --branch v43 https://github.com/SimonKagstrom/kcov /tmp/kcov-src
+          cmake -S /tmp/kcov-src -B /tmp/kcov-build -DCMAKE_BUILD_TYPE=Release
+          make -C /tmp/kcov-build -j"$(nproc)"
+          sudo make -C /tmp/kcov-build install
+          kcov --version
+
+      - name: host unit tests with coverage
+        # Coverage pass. Four things make this report trustworthy:
+        #
+        #   - -Dcoverage builds the test binaries with the LLVM backend;
+        #     zig's self-hosted x86_64 backend (Debug default on
+        #     x86_64-linux) emits DWARF that kcov cannot read.
+        #   - Both zig cache tiers point at fresh run-local dirs. The
+        #     shared .zig-cache is restored from the Actions cache, and
+        #     zig satisfying test roots from stale artifacts there
+        #     silently shrinks the report.
+        #   - The binary count is checked against the addHostTest
+        #     registrations in build.zig, so a missing test root fails
+        #     the job instead of shrinking the badge.
+        #   - kcov output dirs are numbered (every zig test binary is
+        #     named `test`, so basenames collide) and merged into a
+        #     single report; the include filter is anchored to the
+        #     workspace so zig's own standard library stays out.
+        #
+        # The `zig build test` step above stays the green/red
+        # correctness gate; kcov failures on individual binaries stay
+        # non-fatal (|| true).
+        run: |
+          export ZIG_LOCAL_CACHE_DIR="$RUNNER_TEMP/cov-local"
+          export ZIG_GLOBAL_CACHE_DIR="$RUNNER_TEMP/cov-global"
+          zig build test -Dcoverage
+          bins=$(find "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR" -type f -name 'test*' -perm -111 2>/dev/null)
+          expected=$(grep -c 'addHostTest(b, test_step' build.zig)
+          found=$(echo "$bins" | grep -c .)
+          echo "coverage: found $found test binaries, expected $expected"
+          test "$found" -eq "$expected" || { echo "coverage: binary count mismatch" >&2; exit 1; }
+          mkdir -p coverage/raw
+          i=0
+          for bin in $bins; do
+            i=$((i+1))
+            kcov --include-path="$GITHUB_WORKSPACE/src,$GITHUB_WORKSPACE/lib,$GITHUB_WORKSPACE/user_space" "coverage/raw/$i" "$bin" || true
+          done
+          kcov --merge coverage/merged coverage/raw/*
+          echo "coverage: merged report contains:"
+          find coverage/merged -name 'cobertura.xml' -o -name 'codecov.json'
+
+      - name: upload coverage to codecov
+        uses: codecov/codecov-action@v5
+        with:
+          directory: ./coverage/merged
+          fail_ci_if_error: false
+
+      - name: rpi4b build (compile + link only, no boot)
+        run: zig build -Dboard=rpi4b
+
+      - name: virt QEMU boot smoke
+        # -Dci-login-seed seeds flash/flash before /bin/login so the
+        # unattended boot authenticates with no typist. Hardware deploys omit
+        # the flag and stop at a real login: prompt.
+        run: zig build -Dboard=virt -Dci-login-seed=true test-virt

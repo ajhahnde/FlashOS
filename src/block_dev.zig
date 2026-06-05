@@ -1,0 +1,46 @@
+// block_dev: block-device abstraction.
+//
+// The FAT32 backend talks to this; the board layer
+// (src/board/<board>/emmc2.zig) populates the vtable post-init.
+// A single global instance (`sd_dev`) covers the current "exactly one
+// SD card" assumption — future work generalises if/when a second
+// block device shows up (USB mass storage, virtio-blk, etc.).
+//
+// `extern struct` + `callconv(.c)` keep the layout reachable from
+// assembly + future board ports without depending on the Zig
+// compiler's internal calling convention.
+
+pub const BlockDev = extern struct {
+    read_fn: ?*const fn (lba: u32, buf: *[512]u8) callconv(.c) i32,
+    write_fn: ?*const fn (lba: u32, buf: *const [512]u8) callconv(.c) i32,
+};
+
+// Wired at boot by board.emmc2.init() — null before that point.
+pub var sd_dev: BlockDev = .{
+    .read_fn = null,
+    .write_fn = null,
+};
+
+const builtin = @import("builtin");
+
+// See vfs.relocateOps / sys_call_table_relocate.
+const LINEAR_MAP_BASE: u64 = 0xFFFF000000000000;
+
+// Re-point sd_dev's function pointers to their high-mem (TTBR1)
+// aliases. File syscalls run at EL1 with TTBR0 holding the *user*
+// pgd; an indirect call through a low link-address pointer
+// instruction-aborts because the user pgd does not map kernel low
+// memory as executable. Mirrors vfs.relocateOps. `| BASE` is
+// idempotent, so a double call is harmless. No-op on host builds
+// (no TTBR split). The FAT32 backend's init() calls this before its
+// first mount so every later read/write — kernel bring-up or
+// syscall context — goes through the high alias.
+pub fn relocate() void {
+    if (comptime builtin.target.os.tag != .freestanding) return;
+    if (sd_dev.read_fn) |f| {
+        sd_dev.read_fn = @ptrFromInt(@intFromPtr(f) | LINEAR_MAP_BASE);
+    }
+    if (sd_dev.write_fn) |f| {
+        sd_dev.write_fn = @ptrFromInt(@intFromPtr(f) | LINEAR_MAP_BASE);
+    }
+}

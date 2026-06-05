@@ -1,0 +1,171 @@
+// pwfile: /etc/passwd line parser.
+//
+// Pure, allocation-free, no externs. One parser for the account database,
+// shared by every consumer that previously rolled its own or had none:
+//   * the kernel's sys_passwd (src/sys.zig) — maps the caller's uid back
+//     to a login name to enforce "non-root may only change its own record"
+//   * /bin/login (tools/login_elf.zig) — name → {uid, gid, shell} for the
+//     privilege drop after authentication
+//   * fsh's whoami builtin (user_space/fsh/fsh.zig) — uid → name
+//
+// Line format: `user:uid:gid:home:shell` (exactly 5 colon-delimited
+// fields). /etc/passwd itself stays an initramfs file — the account LIST
+// is build-time-immutable; only passwords (/etc/shadow, /mnt/shadow) are
+// mutable state. The host tests below pin the format against
+// user_space/etc/passwd.
+
+pub const Entry = struct {
+    user: []const u8,
+    uid: u32,
+    gid: u32,
+    home: []const u8,
+    shell: []const u8,
+};
+
+// Find the entry whose login name equals `name`. Returns null when absent
+// or when the matching line is malformed.
+pub fn lookupByName(content: []const u8, name: []const u8) ?Entry {
+    var it = LineIter{ .content = content };
+    while (it.next()) |line| {
+        const e = parseLine(line) orelse continue;
+        if (bytesEqual(e.user, name)) return e;
+    }
+    return null;
+}
+
+// Find the entry whose uid equals `uid`. First match wins (uids are
+// unique in the seed database). Returns null when absent.
+pub fn lookupByUid(content: []const u8, uid: u32) ?Entry {
+    var it = LineIter{ .content = content };
+    while (it.next()) |line| {
+        const e = parseLine(line) orelse continue;
+        if (e.uid == uid) return e;
+    }
+    return null;
+}
+
+// Split one passwd line (no trailing newline) into its five fields.
+// Returns null on a missing or extra field or a non-decimal uid/gid.
+pub fn parseLine(line: []const u8) ?Entry {
+    var fields: [5][]const u8 = undefined;
+    var nf: usize = 0;
+    var fstart: usize = 0;
+    var j: usize = 0;
+    while (j <= line.len) : (j += 1) {
+        if (j != line.len and line[j] != ':') continue;
+        if (nf == 5) return null; // a 6th field is malformed
+        fields[nf] = line[fstart..j];
+        nf += 1;
+        fstart = j + 1;
+    }
+    if (nf != 5) return null;
+    if (fields[0].len == 0) return null;
+
+    const uid = parseDecimalU32(fields[1]) orelse return null;
+    const gid = parseDecimalU32(fields[2]) orelse return null;
+
+    return .{
+        .user = fields[0],
+        .uid = uid,
+        .gid = gid,
+        .home = fields[3],
+        .shell = fields[4],
+    };
+}
+
+const LineIter = struct {
+    content: []const u8,
+    pos: usize = 0,
+
+    fn next(self: *LineIter) ?[]const u8 {
+        if (self.pos >= self.content.len) return null;
+        const start = self.pos;
+        var end = start;
+        while (end < self.content.len and self.content[end] != '\n') end += 1;
+        self.pos = end + 1;
+        var line = self.content[start..end];
+        // CRLF tolerance, mirroring overlay.parse.
+        if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
+        return line;
+    }
+};
+
+fn bytesEqual(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |x, y| {
+        if (x != y) return false;
+    }
+    return true;
+}
+
+// Decimal u32 parse, exact (no sign, no whitespace).
+fn parseDecimalU32(s: []const u8) ?u32 {
+    if (s.len == 0) return null;
+    var v: u64 = 0;
+    for (s) |c| {
+        if (c < '0' or c > '9') return null;
+        v = v * 10 + (c - '0');
+        if (v > 0xFFFF_FFFF) return null;
+    }
+    return @intCast(v);
+}
+
+// ---- Host tests ----
+const std = @import("std");
+const testing = std.testing;
+
+// Mirrors user_space/etc/passwd.
+const FIXTURE =
+    "root:0:0:/root:/bin/fsh\n" ++
+    "flash:1000:1000:/home/flash:/bin/fsh\n";
+
+test "lookupByName: finds root and flash" {
+    const root = lookupByName(FIXTURE, "root").?;
+    try testing.expectEqual(@as(u32, 0), root.uid);
+    try testing.expectEqual(@as(u32, 0), root.gid);
+    try testing.expectEqualStrings("/bin/fsh", root.shell);
+
+    const flash = lookupByName(FIXTURE, "flash").?;
+    try testing.expectEqual(@as(u32, 1000), flash.uid);
+    try testing.expectEqualStrings("/home/flash", flash.home);
+}
+
+test "lookupByName: misses an absent user" {
+    try testing.expectEqual(@as(?Entry, null), lookupByName(FIXTURE, "anton"));
+    // Prefix of an existing name must not match.
+    try testing.expectEqual(@as(?Entry, null), lookupByName(FIXTURE, "fla"));
+}
+
+test "lookupByUid: reverse lookup finds the right record" {
+    const flash = lookupByUid(FIXTURE, 1000).?;
+    try testing.expectEqualStrings("flash", flash.user);
+    const root = lookupByUid(FIXTURE, 0).?;
+    try testing.expectEqualStrings("root", root.user);
+}
+
+test "lookupByUid: misses an absent uid" {
+    try testing.expectEqual(@as(?Entry, null), lookupByUid(FIXTURE, 4711));
+}
+
+test "parseLine: rejects missing / extra fields and bad numbers" {
+    try testing.expectEqual(@as(?Entry, null), parseLine("flash:1000:1000:/home/flash"));
+    try testing.expectEqual(@as(?Entry, null), parseLine("flash:1000:1000:/home/flash:/bin/fsh:extra"));
+    try testing.expectEqual(@as(?Entry, null), parseLine("flash:10x0:1000:/home/flash:/bin/fsh"));
+    try testing.expectEqual(@as(?Entry, null), parseLine(":0:0:/root:/bin/fsh"));
+    try testing.expectEqual(@as(?Entry, null), parseLine(""));
+}
+
+test "lookups skip malformed lines instead of failing the file" {
+    const mixed =
+        "# not a passwd line at all\n" ++
+        "root:0:0:/root:/bin/fsh\n";
+    const root = lookupByName(mixed, "root").?;
+    try testing.expectEqual(@as(u32, 0), root.uid);
+}
+
+test "CRLF line endings are tolerated" {
+    const crlf = "root:0:0:/root:/bin/fsh\r\nflash:1000:1000:/home/flash:/bin/fsh\r\n";
+    const flash = lookupByName(crlf, "flash").?;
+    try testing.expectEqual(@as(u32, 1000), flash.uid);
+    try testing.expectEqualStrings("/bin/fsh", flash.shell);
+}

@@ -1,0 +1,182 @@
+// usb_tx_ring: bounded byte ring for the DWC2 CDC-ACM bulk-IN TX path.
+//
+// Pure data + pure logic — no MMIO, no extern — so it host-unit-tests with
+// no hardware (mirrors src/console.zig's RX ring and src/pipe.zig). The
+// rpi4b driver (src/board/rpi4b/usb.zig) imports this as the named module
+// "usb_tx_ring", instantiates one ByteRing(512), and keeps only the MMIO
+// FIFO push in the driver; the host-test build runs the tests at the bottom.
+//
+// Monotone u64 head/tail with modulo indexing distinguishes full from empty
+// without a reserved slot (the counters wrap cleanly via -% / +%). The ring
+// has one producer (cdc_tx) and one consumer (serviceTxRing) on a single
+// core, so the driver brackets every push/peek/advance in preempt_disable —
+// a producer preempted mid-enqueue would otherwise corrupt head. SMP → a
+// real spinlock, exactly as console.zig documents for the RX side.
+//
+// Consumer protocol is peek-then-advance, not pop: serviceTxRing peeks one
+// max-packet chunk, and only advances once the hardware TX FIFO has actually
+// accepted those bytes (if the FIFO is full it bails and the bytes stay
+// queued). Backpressure (policy: never block the kernel on the host)
+// lives in the driver — push returns false when full and the caller spins
+// briefly then drops.
+
+pub fn ByteRing(comptime size: u64) type {
+    return struct {
+        const Self = @This();
+        pub const SIZE: u64 = size;
+
+        buf: [size]u8 = [_]u8{0} ** size,
+        head: u64 = 0, // producer (cdc_tx)
+        tail: u64 = 0, // consumer (serviceTxRing)
+
+        // Bytes queued but not yet consumed.
+        pub fn available(self: *const Self) u64 {
+            return self.head -% self.tail;
+        }
+
+        pub fn isFull(self: *const Self) bool {
+            return self.available() >= SIZE;
+        }
+
+        // Enqueue one byte. Returns false (a no-op) when full — the caller's
+        // backpressure policy (spin-then-drop) decides what to do next.
+        pub fn push(self: *Self, byte: u8) bool {
+            if (self.isFull()) return false;
+            self.buf[self.head % SIZE] = byte;
+            self.head +%= 1;
+            return true;
+        }
+
+        // Copy up to dst.len queued bytes into dst WITHOUT consuming them —
+        // the caller advances only once the hardware FIFO has taken the
+        // chunk. Returns the number copied = min(available, dst.len).
+        pub fn peek(self: *const Self, dst: []u8) u64 {
+            const n = @min(self.available(), @as(u64, dst.len));
+            var i: u64 = 0;
+            while (i < n) : (i += 1) {
+                dst[@intCast(i)] = self.buf[(self.tail +% i) % SIZE];
+            }
+            return n;
+        }
+
+        // Consume n bytes the consumer has committed to the FIFO.
+        pub fn advance(self: *Self, n: u64) void {
+            self.tail +%= n;
+        }
+
+        // Drop everything (USBRST / SET_CONFIGURATION(0) — the in-flight host
+        // session is gone and the FIFOs were just flushed).
+        pub fn clear(self: *Self) void {
+            self.head = 0;
+            self.tail = 0;
+        }
+    };
+}
+
+// ---- Host tests ----
+
+const std = @import("std");
+const testing = std.testing;
+const Ring = ByteRing(8); // small ring → exercise wrap + overflow cheaply
+
+test "push/peek/advance round-trips bytes in order" {
+    var r = Ring{};
+    try testing.expectEqual(@as(u64, 0), r.available());
+    try testing.expect(r.push(0xAA));
+    try testing.expect(r.push(0xBB));
+    try testing.expect(r.push(0xCC));
+    try testing.expectEqual(@as(u64, 3), r.available());
+    var buf: [8]u8 = undefined;
+    try testing.expectEqual(@as(u64, 3), r.peek(buf[0..]));
+    try testing.expectEqual(@as(u8, 0xAA), buf[0]);
+    try testing.expectEqual(@as(u8, 0xBB), buf[1]);
+    try testing.expectEqual(@as(u8, 0xCC), buf[2]);
+    try testing.expectEqual(@as(u64, 3), r.available()); // peek did not consume
+    r.advance(3);
+    try testing.expectEqual(@as(u64, 0), r.available());
+}
+
+test "push returns false when full and keeps the queued bytes intact" {
+    var r = Ring{};
+    var i: u8 = 0;
+    while (i < Ring.SIZE) : (i += 1) try testing.expect(r.push(i));
+    try testing.expect(r.isFull());
+    try testing.expect(!r.push(0xFF)); // full → rejected, nothing overwritten
+    try testing.expectEqual(Ring.SIZE, r.available());
+    var buf: [8]u8 = undefined;
+    try testing.expectEqual(Ring.SIZE, r.peek(buf[0..]));
+    i = 0;
+    while (i < Ring.SIZE) : (i += 1) try testing.expectEqual(i, buf[i]);
+}
+
+test "peek clamps to dst.len and to available, both directions" {
+    var r = Ring{};
+    try testing.expect(r.push(1));
+    try testing.expect(r.push(2));
+    var small: [1]u8 = undefined; // dst < available → clamp to dst.len
+    try testing.expectEqual(@as(u64, 1), r.peek(small[0..]));
+    try testing.expectEqual(@as(u8, 1), small[0]);
+    var big: [8]u8 = undefined; // dst > available → clamp to available
+    try testing.expectEqual(@as(u64, 2), r.peek(big[0..]));
+}
+
+test "ring wraps cleanly across the modulo boundary" {
+    var r = Ring{};
+    var i: u8 = 0;
+    while (i < Ring.SIZE) : (i += 1) _ = r.push(i); // fill 0..7
+    r.advance(5); // consume 0..4, leaving 5,6,7
+    i = 100;
+    while (i < 105) : (i += 1) try testing.expect(r.push(i)); // 5 new straddle the wrap
+    try testing.expectEqual(Ring.SIZE, r.available()); // 3 left + 5 new = full
+    var buf: [8]u8 = undefined;
+    _ = r.peek(buf[0..]);
+    try testing.expectEqual(@as(u8, 5), buf[0]);
+    try testing.expectEqual(@as(u8, 6), buf[1]);
+    try testing.expectEqual(@as(u8, 7), buf[2]);
+    try testing.expectEqual(@as(u8, 100), buf[3]);
+    try testing.expectEqual(@as(u8, 104), buf[7]);
+}
+
+test "partial advance (one MPS-sized chunk) leaves the tail intact" {
+    var r = Ring{};
+    var i: u8 = 0;
+    while (i < 6) : (i += 1) _ = r.push(0xD0 + i);
+    var buf: [4]u8 = undefined;
+    try testing.expectEqual(@as(u64, 4), r.peek(buf[0..])); // a 4-byte bite
+    r.advance(4);
+    try testing.expectEqual(@as(u64, 2), r.available());
+    var rest: [8]u8 = undefined;
+    try testing.expectEqual(@as(u64, 2), r.peek(rest[0..]));
+    try testing.expectEqual(@as(u8, 0xD4), rest[0]);
+    try testing.expectEqual(@as(u8, 0xD5), rest[1]);
+}
+
+test "clear drops everything and the ring is reusable" {
+    var r = Ring{};
+    _ = r.push(1);
+    _ = r.push(2);
+    r.advance(1);
+    r.clear();
+    try testing.expectEqual(@as(u64, 0), r.available());
+    try testing.expect(!r.isFull());
+    try testing.expect(r.push(9));
+    try testing.expectEqual(@as(u64, 1), r.available());
+}
+
+test "counters stay correctly ordered across u64 wraparound" {
+    var r = Ring{};
+    // Drive head/tail to the top of the u64 range so the +%/-% wrap is
+    // exercised — the real ring runs for years of bytes and must never
+    // mis-order available() at the counter wrap.
+    r.head = std.math.maxInt(u64) - 2;
+    r.tail = std.math.maxInt(u64) - 2;
+    try testing.expectEqual(@as(u64, 0), r.available());
+    try testing.expect(r.push(0x11)); // head → max-1
+    try testing.expect(r.push(0x22)); // head → max
+    try testing.expect(r.push(0x33)); // head → 0 (wrap)
+    try testing.expectEqual(@as(u64, 3), r.available()); // 0 -% (max-2) == 3
+    var buf: [8]u8 = undefined;
+    try testing.expectEqual(@as(u64, 3), r.peek(buf[0..]));
+    try testing.expectEqual(@as(u8, 0x11), buf[0]);
+    try testing.expectEqual(@as(u8, 0x33), buf[2]);
+}

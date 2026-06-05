@@ -1,0 +1,53 @@
+// Process-glue layer of flibc — fork / wait / exit / execve / chdir as
+// thin wrappers around the kernel ABI. fork / wait / exit / chdir are
+// direct sys-* passthroughs; `execve` is the path-form that resolves
+// the binary through VFS.
+//
+// All wrappers run from EL0 in an ELF-loaded process — the only
+// context flibc supports. PID 1 (still blob-loaded) cannot link against
+// flibc until initramfs lands; for now PID 1 keeps using the
+// `sys_*` wrappers in user_space/kernel_tests.zig.
+
+const sys = @import("syscalls.zig");
+
+/// fork() — clone the current process. Returns the child's pid in the
+/// parent and 0 in the child. -1 on failure (NR_TASKS exhausted,
+/// out-of-memory, etc.).
+pub fn fork() i32 {
+    return sys.fork();
+}
+
+/// wait() — block until any child terminates and reap it. Returns the
+/// reaped child's pid, or -1 if the caller has no children.
+pub fn wait() i32 {
+    return sys.wait();
+}
+
+/// exit() — terminate the current process. Never returns. The kernel
+/// flips the task to TASK_ZOMBIE; the parent's wait reaps it (frees
+/// every user/kernel page tracked by `mm`).
+pub fn exit() noreturn {
+    sys.exit();
+}
+
+/// execve(path, argv) — path-resolved exec on slot 31. `path` is a
+/// NUL-terminated UVA; `argv` points at a NULL-terminated array of
+/// `[*:0]u8`. The kernel resolves `path` through VFS (relative paths
+/// are joined against the task's `cwd` at the syscall boundary),
+/// streams PT_LOAD segments from the open file, and lays an
+/// argv block on the new user stack. On success the syscall does not
+/// return; the kernel erets to the new entry point with `x0 = argc`,
+/// `x1 = argv` (AAPCS64). Returns -1 on failure (path not found, parse
+/// error, alloc failure) with the caller's address space untouched.
+pub fn execve(path: [*:0]const u8, argv: [*]const ?[*:0]const u8) i32 {
+    return sys.exec_path(path, argv);
+}
+
+/// chdir(path) — replace the calling task's working directory with the
+/// joined + collapsed version of `path`. Direct passthrough to slot 36
+/// (sys_chdir); the kernel handles the join against the existing `cwd`
+/// and the `.`/`..` collapse. Returns 0 on success, -1 on wild user
+/// pointer / un-NUL-terminated input / oversize composition.
+pub fn chdir(path: [*:0]const u8) i32 {
+    return sys.chdir(path);
+}

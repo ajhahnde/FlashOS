@@ -1,0 +1,15 @@
+# macOS clutter
+.DS_Store
+
+# Zig build artefacts
+.zig-cache/
+zig-out/
+
+# Private notes and tools
+ajhahnde/
+
+# Logs
+stdbuf_test.log
+boot.log
+qemu_output.log
+screenlog.*

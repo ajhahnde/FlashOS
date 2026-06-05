@@ -1,0 +1,62 @@
+// user_layout: user-space virtual address layout.
+//
+// Single source of truth for the regions the ELF loader populates and
+// the page-fault path classifies. Imported by src/fork.zig
+// (prepare_move_to_user_elf) and src/mm_user.zig (do_data_abort,
+// map_page) so both sides agree on text/data/heap/stack.
+//
+// Region map (matches DOCUMENTATION.md §3 "User virtual layout"):
+//
+//   0x0000_0000_0000_0000  text    (RWX — writable; no read-only bit yet)
+//   0x0000_0000_0010_0000  data    (RW-)
+//   0x0000_0000_0020_0000  heap    (RW-, grows up via brk)
+//   0x0000_0FFF_FFFF_F000  stack   (RW-, grows down, guard below)
+//
+// Region flags are plumbed through map_page: prepare_move_to_user_elf
+// stamps per-region attributes on each PT_LOAD segment, while
+// do_data_abort applies the combined-permission default bag to pages
+// it demand-allocates for the heap and stack.
+
+pub const PAGE_SIZE: u64 = 1 << 12;
+
+pub const TEXT_BASE: u64 = 0x0000_0000_0000_0000;
+pub const DATA_BASE: u64 = 0x0000_0000_0010_0000;
+pub const HEAP_BASE: u64 = 0x0000_0000_0020_0000;
+pub const STACK_TOP: u64 = 0x0000_0FFF_FFFF_F000;
+
+// Stack budget: largest legal stack VA range is [STACK_LOW, STACK_TOP).
+// prepare_move_to_user_elf eagerly maps the top page; do_data_abort
+// demand-allocates the rest within the budget. Below STACK_LOW sits a
+// 1-page guard region [STACK_GUARD_LOW, STACK_GUARD_HIGH) that
+// do_data_abort treats as a stack-overflow signal — it prints a
+// diagnostic and zombies the offending task (the parent's sys_wait
+// reaps as usual). 64 KiB matches sys_brk's upper-bound check, so the
+// heap can't grow into either the stack or its guard.
+pub const STACK_BUDGET: u64 = 16 * PAGE_SIZE;
+pub const STACK_LOW: u64 = STACK_TOP - STACK_BUDGET;
+pub const STACK_GUARD_PAGES: u64 = 1;
+pub const STACK_GUARD_HIGH: u64 = STACK_LOW;
+pub const STACK_GUARD_LOW: u64 = STACK_LOW - STACK_GUARD_PAGES * PAGE_SIZE;
+
+// Stage-1 page-descriptor bit 54: UXN (Unprivileged eXecute Never),
+// AArch64 ARM D5-2750. PXN (privileged XN) is bit 53; user data/heap/
+// stack pages set UXN to forbid EL0 execution. User text clears it.
+pub const TD_USER_XN: u64 = 1 << 54;
+
+// MMU descriptor sub-flags shared with src/mm_user.zig. Kept here so
+// the assembled per-region bags (TEXT/DATA/...) below can be derived
+// in one place; mm_user.zig keeps its own copies for the page-table-
+// walk internals (table flags etc.) that the loader does not stamp.
+const TD_VALID: u64 = 1 << 0;
+const TD_PAGE: u64 = 1 << 1;
+const TD_USER_PERMS: u64 = 1 << 6;
+const TD_INNER_SHARABLE: u64 = 3 << 8;
+const TD_ACCESS: u64 = 1 << 10;
+
+// Default user-page permission bag — the historical
+// TD_USER_PAGE_FLAGS from src/mm_user.zig. The baseline the ELF loader
+// (prepare_move_to_user_elf) ORs per-region flags onto, the bag
+// do_data_abort stamps on demand-allocated heap/stack pages, and the
+// attributes copy_virt_memory inherits across fork.
+pub const TD_USER_PAGE_FLAGS_DEFAULT: u64 =
+    TD_ACCESS | TD_INNER_SHARABLE | TD_USER_PERMS | TD_PAGE | TD_VALID;

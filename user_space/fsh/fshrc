@@ -1,0 +1,6 @@
+# FlashOS shell startup file (/etc/fshrc).
+# Read once by fsh at launch; comment and blank lines are ignored, every
+# other line runs through the same dispatcher as interactive input.
+# Keep this free of `free` / meminfo so the boot free-page count stays
+# deterministic for the CI watchdog (rule 2).
+cd /

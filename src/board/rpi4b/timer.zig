@@ -1,0 +1,42 @@
+// System Timer driver for Raspberry Pi 4
+
+const LINEAR_MAP_BASE: u64 = 0xFFFF000000000000;
+const DEVICE_BASE: u64 = 0xFE000000;
+const TIMER_BASE: u64 = DEVICE_BASE + 0x3000 + LINEAR_MAP_BASE;
+
+const CLOCKHZ: u32 = 1_000_000;
+
+const SysTimerRegs = extern struct {
+    control_status: u32,
+    counter_lo: u32,
+    counter_hi: u32,
+    compare: [4]u32,
+};
+
+fn getTimerRegs() *volatile SysTimerRegs {
+    return @as(*volatile SysTimerRegs, @ptrFromInt(TIMER_BASE));
+}
+
+const interval_1: u32 = CLOCKHZ;
+var cur_ls32_1: u32 = 0;
+
+// Output interface constant from utilc.c (MU = mini-uart interface index)
+const MU: i32 = 0;
+extern fn main_output(interface: i32, str: [*:0]const u8) void;
+
+/// Initialize system timer compare 1 (compare 0 and 2 are used by VC)
+export fn timer_init() void {
+    const regs = getTimerRegs();
+    cur_ls32_1 = regs.counter_lo;
+    cur_ls32_1 +%= interval_1;
+    regs.compare[1] = cur_ls32_1;
+}
+
+/// IRQ handler for system timer 1
+export fn handle_sys_timer_1() void {
+    const regs = getTimerRegs();
+    cur_ls32_1 +%= interval_1;
+    regs.compare[1] = cur_ls32_1;
+    regs.control_status |= (1 << 1);
+    main_output(MU, "timer 1 interrupt\n");
+}

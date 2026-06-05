@@ -1,0 +1,211 @@
+// fsh command tokenizer — whitespace splitter with an optional single
+// `|` split. Pure: no syscalls, no allocator. The
+// driver (fsh.zig) feeds in a submitted line and a caller-owned argv
+// array + scratch buffer (rule 1 — fixed-size, no realloc); this fills
+// the argv pointers and reports how the line decomposes. Host-tested in
+// isolation (see the `test` blocks at the end), the same layout
+// readline.zig / execvp.zig use for their pure cores.
+//
+// Decomposition:
+//   * tokens are maximal runs of non-whitespace, non-`|` bytes;
+//   * the first `|` (if any) splits the line into a left and a right
+//     command — fsh supports exactly one pipe stage. Each token
+//     is copied NUL-terminated into `buf`; its argv slot points there.
+//   * the pipe boundary and the line end are marked by a `null` argv
+//     slot, so `argv[0..]` is already an execve-ready NULL-terminated
+//     vector for the left command, and `argv[left_argc + 1 ..]` is one
+//     for the right command.
+//
+// Overflow truncates (rule 1): once the argv array or `buf` is full the
+// rest of the line is dropped — matching readline's truncate-on-overflow
+// rather than erroring. A second `|`, or a `|` with an empty side, is a
+// hard error (the shells fsh imitates reject `a | | b` and `| b`).
+
+const std = @import("std");
+
+/// argv capacity, including the interleaved `null` separators (the pipe
+/// boundary and the trailing terminator). 16 covers a command plus a
+/// generous argument list for demoware; longer lines truncate.
+pub const MAX_ARGS: usize = 16;
+
+/// Why the two sides of a `|` cannot both be commands, or why a second
+/// `|` appeared.
+pub const Err = enum { too_many_pipes, empty_side };
+
+/// A single-pipe decomposition. The right command's argv begins at
+/// `argv[left_argc + 1]` (the `+ 1` skips the `null` the tokenizer wrote
+/// at the pipe boundary); both vectors are NULL-terminated in place.
+pub const Piped = struct { left_argc: usize, right_argc: usize };
+
+/// How a line decomposed.
+pub const Result = union(enum) {
+    /// Blank or whitespace-only line — fsh redraws the prompt.
+    empty,
+    /// One command; `argv[0..argc]` valid, `argv[argc] == null`.
+    single: usize,
+    /// One pipe stage; see `Piped`.
+    piped: Piped,
+    /// Malformed pipe usage.
+    err: Err,
+};
+
+inline fn is_space(c: u8) bool {
+    return c == ' ' or c == '\t' or c == '\r' or c == '\n';
+}
+
+/// Split `line` into `argv` (pointers into `buf`). See the module header
+/// for the decomposition rules. `argv` and `buf` are caller-owned and
+/// reused per line; the returned pointers are valid until the next call
+/// that reuses them.
+pub fn tokenize(line: []const u8, argv: *[MAX_ARGS]?[*:0]u8, buf: []u8) Result {
+    var argc: usize = 0; // slots written so far (tokens + pipe `null`)
+    var buf_pos: usize = 0;
+    var pipe_at: ?usize = null; // argv index of the pipe-boundary `null`
+    var pipes: usize = 0;
+
+    var i: usize = 0;
+    while (i < line.len) {
+        while (i < line.len and is_space(line[i])) : (i += 1) {}
+        if (i >= line.len) break;
+
+        // Reserve the final slot for the trailing `null` terminator.
+        if (argc >= MAX_ARGS - 1) break;
+
+        if (line[i] == '|') {
+            pipes += 1;
+            if (pipes > 1) return .{ .err = .too_many_pipes };
+            pipe_at = argc;
+            argv[argc] = null;
+            argc += 1;
+            i += 1;
+            continue;
+        }
+
+        const start = i;
+        while (i < line.len and !is_space(line[i]) and line[i] != '|') : (i += 1) {}
+        const tok = line[start..i];
+
+        // Need room for the bytes + a NUL; otherwise truncate the line.
+        if (buf_pos + tok.len + 1 > buf.len) break;
+        @memcpy(buf[buf_pos..][0..tok.len], tok);
+        buf[buf_pos + tok.len] = 0;
+        argv[argc] = buf[buf_pos .. buf_pos + tok.len :0].ptr;
+        argc += 1;
+        buf_pos += tok.len + 1;
+    }
+
+    if (argc < MAX_ARGS) argv[argc] = null;
+
+    if (pipe_at) |p| {
+        const left_argc = p;
+        const right_argc = argc - p - 1;
+        if (left_argc == 0 or right_argc == 0) return .{ .err = .empty_side };
+        return .{ .piped = .{ .left_argc = left_argc, .right_argc = right_argc } };
+    }
+
+    if (argc == 0) return .empty;
+    return .{ .single = argc };
+}
+
+// ---- Host tests ----
+
+const testing = std.testing;
+
+fn argAt(argv: *const [MAX_ARGS]?[*:0]u8, idx: usize) []const u8 {
+    return std.mem.span(argv[idx].?);
+}
+
+test "tokenize: empty line" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    try testing.expectEqual(Result.empty, tokenize("", &argv, &buf));
+}
+
+test "tokenize: whitespace-only line is empty" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    try testing.expectEqual(Result.empty, tokenize("  \t  ", &argv, &buf));
+}
+
+test "tokenize: single token" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    const r = tokenize("exit", &argv, &buf);
+    try testing.expectEqual(@as(usize, 1), r.single);
+    try testing.expectEqualStrings("exit", argAt(&argv, 0));
+    try testing.expectEqual(@as(?[*:0]u8, null), argv[1]);
+}
+
+test "tokenize: multi-arg command, surrounding + collapsed whitespace" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    const r = tokenize("  cd   /test  ", &argv, &buf);
+    try testing.expectEqual(@as(usize, 2), r.single);
+    try testing.expectEqualStrings("cd", argAt(&argv, 0));
+    try testing.expectEqualStrings("/test", argAt(&argv, 1));
+    try testing.expectEqual(@as(?[*:0]u8, null), argv[2]);
+}
+
+test "tokenize: one pipe splits left/right NULL-terminated vectors" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    const r = tokenize("echo hi | cat", &argv, &buf);
+    const p = r.piped;
+    try testing.expectEqual(@as(usize, 2), p.left_argc);
+    try testing.expectEqual(@as(usize, 1), p.right_argc);
+    // left vector: argv[0..left_argc], terminated by the pipe `null`.
+    try testing.expectEqualStrings("echo", argAt(&argv, 0));
+    try testing.expectEqualStrings("hi", argAt(&argv, 1));
+    try testing.expectEqual(@as(?[*:0]u8, null), argv[p.left_argc]);
+    // right vector starts past the boundary `null`.
+    try testing.expectEqualStrings("cat", argAt(&argv, p.left_argc + 1));
+    try testing.expectEqual(@as(?[*:0]u8, null), argv[p.left_argc + 1 + p.right_argc]);
+}
+
+test "tokenize: pipe with no surrounding spaces still splits" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    const r = tokenize("echo|cat", &argv, &buf);
+    const p = r.piped;
+    try testing.expectEqual(@as(usize, 1), p.left_argc);
+    try testing.expectEqual(@as(usize, 1), p.right_argc);
+    try testing.expectEqualStrings("echo", argAt(&argv, 0));
+    try testing.expectEqualStrings("cat", argAt(&argv, 2));
+}
+
+test "tokenize: pipe at start is an empty side" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    try testing.expectEqual(Err.empty_side, tokenize("| cat", &argv, &buf).err);
+}
+
+test "tokenize: pipe at end is an empty side" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    try testing.expectEqual(Err.empty_side, tokenize("echo hi |", &argv, &buf).err);
+}
+
+test "tokenize: two pipes rejected" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [64]u8 = undefined;
+    try testing.expectEqual(Err.too_many_pipes, tokenize("a | b | c", &argv, &buf).err);
+}
+
+test "tokenize: argv overflow truncates the line" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [256]u8 = undefined;
+    // 20 single-char tokens; MAX_ARGS - 1 = 15 fit, the 16th slot is the
+    // trailing null.
+    const r = tokenize("a b c d e f g h i j k l m n o p q r s t", &argv, &buf);
+    try testing.expectEqual(@as(usize, MAX_ARGS - 1), r.single);
+    try testing.expectEqual(@as(?[*:0]u8, null), argv[MAX_ARGS - 1]);
+}
+
+test "tokenize: buf overflow truncates without corrupting placed tokens" {
+    var argv: [MAX_ARGS]?[*:0]u8 = undefined;
+    var buf: [8]u8 = undefined; // fits "abc\0" + "de\0" = 7 bytes; "fgh" drops
+    const r = tokenize("abc de fgh", &argv, &buf);
+    try testing.expectEqual(@as(usize, 2), r.single);
+    try testing.expectEqualStrings("abc", argAt(&argv, 0));
+    try testing.expectEqualStrings("de", argAt(&argv, 1));
+}

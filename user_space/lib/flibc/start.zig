@@ -1,0 +1,36 @@
+// _start argc/argv shim — the default ELF entry point for flibc-linked
+// programs that take command-line arguments. The kernel's sys_execve
+// path (src/execve.zig) lays an argv block on the new user stack and
+// erets to e_entry with `x0 = argc`, `x1 = argv` per AAPCS64; this
+// trampolines into the program's `main(argc, argv)`.
+//
+// Why a typed shim rather than a `callconv(.naked)` register read:
+// declaring argc/argv as parameters makes the compiler treat x0/x1 as
+// live-in arguments. The standard prologue (save fp/lr, adjust sp) never
+// touches x0/x1 before they are forwarded to `main`, so there is no
+// prologue to dodge. `main` is declared `noreturn` — flibc programs exit
+// via `flibc.exit`, never by returning — so the shim needs no fallback
+// exit path and pulls in no syscall dependency.
+//
+// Why a standalone module instead of an entry in flibc/process.zig:
+// `flibc.zig` re-exports `process`, so anything defined there is compiled
+// into every flibc-linked program — including demos that define their own
+// `_start` (today `flibc_demo.elf`). Zig 0.16 rejects two `_start`
+// exports in one compilation as an "exported symbol collision" regardless
+// of linkage (weak does not defer to the linker here), so the shim cannot
+// live in flibc's always-imported graph. Programs that want it opt in by
+// importing this module as `flibc_start` and forcing its emission with
+// `comptime { _ = @import("flibc_start"); }`; programs with a bespoke
+// entry simply do not import it and keep their own `_start`. The new
+// argv_echo demo and the future fsh coreutils take the shim; the legacy
+// hello/stackbomb/flibc_demo payloads keep their own entry.
+
+extern fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn;
+
+fn _start_shim(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn {
+    main(argc, argv);
+}
+
+comptime {
+    @export(&_start_shim, .{ .name = "_start", .linkage = .strong });
+}
