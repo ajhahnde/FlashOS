@@ -125,6 +125,10 @@ export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn
     }
     var sessions_done: u32 = 0;
 
+    // Blank line before the first `login:` prompt, separating it from the
+    // kernel's last boot status line (or the -Dboot-selftest tally).
+    emit("\n");
+
     while (true) {
         // Username — kernel echo on so the user sees what they type.
         _ = flibc.sys.set_console_mode(defs.CONSOLE_MODE_ECHO);
@@ -180,7 +184,7 @@ export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn
         const shell_z: [*:0]const u8 = @ptrCast(&shell_buf);
 
         // Boot marker proving the auth path ran — once per session.
-        emit("\n" ++ OK ++ "Authenticated.\n");
+        emit("\n" ++ OK ++ "Authenticated\n");
 
         if (!runSession(entry.uid, entry.gid, shell_z)) continue;
 

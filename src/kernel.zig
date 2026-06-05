@@ -175,20 +175,20 @@ export fn kernel_main_impl(id: u64) void {
         // Mini-UART first so the boot status lines land on the same cable
         // (pin 14/15) as the exception handler's "ERROR CAUGHT" output.
         mini_uart_init();
-        main_output(MU, OK ++ "Initialized Mini-UART console.\n");
+        main_output(MU, OK ++ "Initialized Mini-UART console\n");
 
         pl011_uart_init();
-        main_output(MU, OK ++ "Initialized PL011 trace UART.\n");
+        main_output(MU, OK ++ "Initialized PL011 trace UART\n");
 
         irq_init_vectors();
-        main_output(MU, OK ++ "Loaded exception vectors.\n");
+        main_output(MU, OK ++ "Loaded exception vectors\n");
 
         // Board-specific GIC bring-up: GICv3 needs ICC_*_EL1 + per-core
         // redistributor wakeup. Pi's GICv2 inlines to nothing.
         board.irq.board_irq_init();
 
         enable_interrupt_gic(VC_AUX_IRQ, @intCast(id));
-        main_output(MU, OK ++ "Enabled interrupt controller.\n");
+        main_output(MU, OK ++ "Enabled interrupt controller\n");
 
         // USB-OTG gadget bring-up (DWC2). The device MMIO at 0xFE980000 is
         // already device-mapped by boot.S, so this needs no page allocator.
@@ -196,22 +196,22 @@ export fn kernel_main_impl(id: u64) void {
         // -1 and the polled console simply never enumerates. Serviced from
         // the PID-0 idle loop below.
         if (board.usb.usb_init() < 0) {
-            main_output(MU, SKIP ++ "USB gadget (no controller).\n");
+            main_output(MU, SKIP ++ "USB gadget (no controller)\n");
         } else {
-            main_output(MU, OK ++ "Started USB gadget.\n");
+            main_output(MU, OK ++ "Started USB gadget\n");
         }
 
         ksyms_init();
-        main_output(MU, OK ++ "Loaded kernel symbols.\n");
+        main_output(MU, OK ++ "Loaded kernel symbols\n");
 
         sys_call_table_relocate();
-        main_output(MU, OK ++ "Relocated syscall table.\n");
+        main_output(MU, OK ++ "Relocated syscall table\n");
 
         trace_init();
-        main_output(MU, OK ++ "Initialized trace subsystem.\n");
+        main_output(MU, OK ++ "Initialized trace subsystem\n");
 
         trace_output_kernel_pts(PL);
-        main_output(MU, OK ++ "Started kernel trace output.\n");
+        main_output(MU, OK ++ "Started kernel trace output\n");
 
         // VFS root mount bring-up. initramfs_backend
         // only sets pointers — no get_free_page — so it slots in ahead
@@ -219,7 +219,7 @@ export fn kernel_main_impl(id: u64) void {
         // /mnt mount is wired later, after board.emmc2.init() has wired
         // block_dev.sd_dev (fat32_backend.init issues block reads).
         initramfs_backend.init();
-        main_output(MU, OK ++ "Mounted initramfs root.\n");
+        main_output(MU, OK ++ "Mounted initramfs root\n");
 
         // Block-device bring-up. On virt
         // the memory-backed fake never fails — graceful degradation
@@ -229,9 +229,9 @@ export fn kernel_main_impl(id: u64) void {
         // shot: it exercises the BlockDev vtable end-to-end and
         // proves init() wired `block_dev.sd_dev`.
         if (board.emmc2.init() < 0) {
-            main_output(MU, SKIP ++ "EMMC2 block device (init failed).\n");
+            main_output(MU, SKIP ++ "EMMC2 block device (init failed)\n");
         } else {
-            main_output(MU, OK ++ "Initialized EMMC2 block device.\n");
+            main_output(MU, OK ++ "Initialized EMMC2 block device\n");
             // Pre-PID-1 block-device smoke — part of the boot-as-test path,
             // gated so a clean (non-selftest) boot stays quiet.
             if (build_options.boot_selftest) run_emmc2_smoke();
@@ -240,16 +240,16 @@ export fn kernel_main_impl(id: u64) void {
             // disk leaves mount_table[1] null and /mnt/* resolves to
             // ENOENT.
             if (fat32_backend.init() < 0) {
-                main_output(MU, SKIP ++ "/mnt (no FAT32 volume).\n");
+                main_output(MU, SKIP ++ "/mnt (no FAT32 volume)\n");
             } else {
-                main_output(MU, OK ++ "Mounted /mnt (FAT32).\n");
+                main_output(MU, OK ++ "Mounted /mnt (FAT32)\n");
                 // Permission overlay: init() parsed PERMS.TAB
                 // into the backend's table. A mounted volume without a
                 // parseable overlay is the loud anti-brick announcement:
                 // /mnt runs on defaults (shadow floored 0600 root:root)
                 // until the operator reseeds the overlay file.
                 if (!fat32_backend.overlay_ok) {
-                    main_output(MU, WARN ++ "/mnt overlay missing - defaults active, shadow floored.\n");
+                    main_output(MU, WARN ++ "/mnt overlay missing - defaults active, shadow floored\n");
                 }
             }
         }
@@ -277,7 +277,7 @@ export fn kernel_main_impl(id: u64) void {
     main_output_char(MU, @intCast(id + '0'));
     main_output(MU, " (EL");
     main_output_char(MU, @intCast(get_el() + '0'));
-    main_output(MU, ").\n");
+    main_output(MU, ")\n");
     delay(30000);
 
     // generic timer and timer IRQ (vectors already loaded on core 0)

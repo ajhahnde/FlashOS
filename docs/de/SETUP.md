@@ -80,7 +80,7 @@ zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
 Für einen selbstvalidierenden Lauf, der mit 0 endet, wenn der Boot den
-interaktiven `fsh`-Prompt erreicht (die dritte Markierung `[ OK ] Reached target Shell.`
+interaktiven `fsh`-Prompt erreicht (die dritte Markierung `[ OK ] Reached target Shell`
 — siehe unten) ohne `[FAIL]` / `ERROR CAUGHT` und mit den erwarteten
 Free-Page-Checkpoints, und mit 1 bei einem Fehler oder einem watchdog-Timeout
 (keine manuelle QEMU-Überwachung):
@@ -106,12 +106,12 @@ direkt im steuernden Terminal erscheinen. `run-virt` verwendet
 `-M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic`, mit der auf das
 Host-stdio geleiteten PL011.
 
-Ein grüner Lauf auf beiden Boards landet bei `27/27 passed`, 31
+Ein grüner Lauf auf beiden Boards landet bei `28/28 passed`, 32
 Free-Page-Checkpoints pro Szenario (`0xbbff2` auf rpi4b, `0x3be4a` auf virt)
 plus der passenden Boot-Baseline (`0xbc000` / `0x3be58`) und 0 `ERROR CAUGHT`.
 Der Boot übergibt dann an `/bin/login` → `/bin/fsh`; mit dem
-Login-Lifecycle erscheinen die Markierungen `[ OK ] Authenticated.` und
-`[ OK ] Reached target Shell.` jeweils dreimal (zwei skriptgesteuerte
+Login-Lifecycle erscheinen die Markierungen `[ OK ] Authenticated` und
+`[ OK ] Reached target Shell` jeweils dreimal (zwei skriptgesteuerte
 `[TEST] login`-Sitzungen + der echte Boot-Login), und der CI-watchdog
 (`scripts/run_qemu_test.sh`) zählt genau das. Die Free-Page-Invarianten sind in
 [Dokumentation §8](DOCUMENTATION.md#free-page-invarianten) dokumentiert.
@@ -214,7 +214,7 @@ ls /dev/cu.usbmodem*            # node appears once the gadget enumerates
 screen /dev/cu.usbmodem00011 115200
 ```
 
-Sobald enumeriert, wechselt die Ausgabe von user/`fsh` (der `>>> `-Prompt,
+Sobald enumeriert, wechselt die Ausgabe von user/`fsh` (der `# ` / `$ `-Prompt,
 Befehlsausgaben) automatisch von der Mini-UART zur USB-Konsole; die
 `[Debug]`-Ausgaben des kernel und der eigene Bring-up-Trace des USB-Treibers
 bleiben auf der Mini-UART. Wenn das Gadget nie enumeriert (kein Host
@@ -241,10 +241,10 @@ zu machen.
   - `usb` (default): wartet, bis das CDC-Gadget auf `/dev/cu.usbmodem*`
     enumeriert (das Einstecken des C-zu-C-Kabels versorgt den Pi mit Strom,
     sodass das Erscheinen des Nodes selbst das erste Boot-Signal ist), und
-    fragt dann die Konsole einmal pro Sekunde ab, bis ein laufendes `fsh`
-    mit dem `>>> `-Prompt antwortet.
+    fragt dann die Konsole einmal pro Sekunde ab, bis die Boot-Markierung
+    `[ OK ] Reached target Shell` erscheint (fsh hat seine interaktive REPL erreicht).
   - `mu`: erfasst den Mini-UART-Trace-Adapter
-    (`/dev/cu.usbserial-*`), bis `[ OK ] Reached target Shell.` (der Boot hat die
+    (`/dev/cu.usbserial-*`), bis `[ OK ] Reached target Shell` (der Boot hat die
     Shell über den MU-Fallback erreicht — kein USB-Host angeschlossen) oder
     `ERROR CAUGHT` erscheint. Mache einen Power-Cycle des Pi, wenn dazu
     aufgefordert.
@@ -310,7 +310,7 @@ zig build test
 Führt die host-seitigen Unit-Tests gegen Pure-Logic-kernel-Module aus.
 Jedes Modul mit Tests bildet seinen eigenen Test-Root, gelinkt gegen
 `tests/host_stubs.zig` (Stubs für reine Assembly-Externs). Die aktuelle
-Suite deckt 35 Module ab (361 Host-Tests); sie ist weit unter einer Sekunde
+Suite deckt 35 Module ab (370 Host-Tests); sie ist weit unter einer Sekunde
 fertig und ist das schnellste Signal dafür, dass die Kernlogik des kernel
 weiterhin hält.
 
@@ -318,4 +318,4 @@ weiterhin hält.
 
 [← Zurück: Dokumentation](DOCUMENTATION.md) · [Weiter: Migration →](../../MIGRATION.md)
 
-<!-- sync-ref: SETUP.md @ 6e5815d3d21a43d1c9c98f7a4dfc4cb2b4d724de | synced 2026-06-05 -->
+<!-- sync-ref: SETUP.md @ 6d20c0476e67410f1b4cf50b808de364d51953ea | synced 2026-06-06 -->

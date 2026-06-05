@@ -637,7 +637,7 @@ R+X-PT_LOAD, in die jede Payload linkt, kein beschreibbares `.bss` trägt.
   den Kernel, das Passwort gegen die aktive Shadow-Datenbank zu
   verifizieren (`sys_authenticate`, §5), schlägt den User in `/etc/passwd`
   nach (der gemeinsame `src/pwfile.zig`-Parser), druckt den
-  per-Session-`[ OK ] Authenticated.`-Marker und **forkt** dann ein Child, das
+  per-Session-`[ OK ] Authenticated`-Marker und **forkt** dann ein Child, das
   Privilegien über `setgid` + `setuid` droppt (gid zuerst, während noch
   root) und die Shell des Users per exec startet — login selbst bleibt root, wartet,
   reaped und fragt erneut. `exit` in fsh ist daher ein Logout zurück zu
@@ -647,10 +647,10 @@ R+X-PT_LOAD, in die jede Payload linkt, kein beschreibbares `.bss` trägt.
   optionales argv-Session-Limit (`/bin/login 2`) lässt es nach N Sessions
   exiten — der Hook des `[TEST] login`-Schlusssteins (§8). **Das Erreichen
   des interaktiven Prompts ist das Boot-Erfolgssignal:** fsh druckt
-  `[ OK ] Reached target Shell.` beim REPL-Eintritt und zeigt `#` (root) oder `$`
+  `[ OK ] Reached target Shell` beim REPL-Eintritt und zeigt `#` (root) oder `$`
   (alle anderen) als seinen Prompt; mit den zwei gescripteten Sessions von
   `[TEST] login` wartet der CI-QEMU-watchdog (`scripts/run_qemu_test.sh`)
-  auf das **dritte** `fsh init OK` (dann SIGTERMt er) und assertet genau
+  auf das **dritte** `[ OK ] Reached target Shell` (dann SIGTERMt er) und assertet genau
   3 × beide Marker. Auf Pi / interaktivem QEMU fällt der Boot auf einen
   echten Login-Prompt, dann einen `fsh`-Prompt, der als der
   authentifizierte User läuft. **Unbeaufsichtigte CI:** PID 1 injiziert
@@ -1153,7 +1153,7 @@ initramfs-/file-Paar bekommen dedizierte per-Target-Stub-Objekte
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`), um das Doppeldefinieren von Symbolen zu
 vermeiden, die das zu testende Modul bereits exportiert. Die aktuelle
-Suite umfasst insgesamt **361 Host-Tests** über 35 Module — siehe die
+Suite umfasst insgesamt **370 Host-Tests** über 35 Module — siehe die
 Coverage-Matrix unten für die per-Modul-Aufteilung.
 
 **In-Kernel-Runtime-Harness** (`user_space/kernel_tests.zig`).
@@ -1333,7 +1333,7 @@ Kernel-Zustand übt:
   jede Session, forkt ein Child, das Privilegien droppt und die Shell
   per exec startet, reaped es bei `exit` und fragt erneut — der volle
   Supervisor-Lifecycle durch das echte Binary. Jede Session gibt die
-  `[ OK ] Authenticated.` / `[ OK ] Reached target Shell.`-Marker aus, sodass ein grüner
+  `[ OK ] Authenticated` / `[ OK ] Reached target Shell`-Marker aus, sodass ein grüner
   Boot drei von jedem trägt (zwei von hier + der echte Boot-Login);
   `scripts/run_qemu_test.sh` keyt sein Erfolgskriterium und guardet auf
   genau diese Counts. Reap-basiert und baseline-neutral — der ganze Baum
@@ -1357,11 +1357,11 @@ Jedes Szenario gibt `[TEST] name` … `[PASS] name` (oder `[FAIL]`) aus, und
 `run_all` druckt eine finale `X/Y passed`-Bilanz. Die Harness läuft
 identisch unter QEMU (`zig build -Dboard=virt run-virt` /
 `-Dboard=rpi4b run`) und auf echter Hardware (`./build.sh` → SD-Flash →
-`picapture`); ein grüner Lauf landet `27/27 passed` mit 31
+`picapture`); ein grüner Lauf landet `28/28 passed` mit 32
 Baseline-Checkpoints (`0xbbff2` rpi4b / `0x3be4a` virt) und 0
 `ERROR CAUGHT` auf beiden Boards, übergibt dann an `/bin/login` →
 `/bin/fsh`. Mit dem Login-Lifecycle erscheinen die
-`[ OK ] Authenticated.`- und `[ OK ] Reached target Shell.`-Marker jeweils **dreimal**
+`[ OK ] Authenticated`- und `[ OK ] Reached target Shell`-Marker jeweils **dreimal**
 pro Boot — zweimal von den gescripteten Sessions von `[TEST] login` und
 einmal vom echten Boot-Login — und der CI-watchdog (§4) zählt genau das
 (sein Early-Exit feuert beim dritten Shell-Marker). (In QEMU ist der
@@ -1378,7 +1378,7 @@ byte-vergleicht. Gibt `[TEST] emmc2-block` … `[PASS] emmc2-block` oder
 `[FAIL] emmc2-block (write|read|mismatch)` aus. Auf QEMU übt es das
 virt-Fake (`src/board/virt/emmc2.zig`); auf Pi 4 übt es den echten
 BCM2711-EMMC2-Treiber (verifiziert auf einer 64-GB-SDXC). Die
-EL0-27/27-Bilanz ist unbeeinflusst — beide Buffer leben auf dem
+EL0-28/28-Bilanz ist unbeeinflusst — beide Buffer leben auf dem
 Kernel-Stack und das Szenario läuft im Kernel-Kontext.
 
 ### Behoben — Real-HW-Bilanz-Flap
@@ -1393,7 +1393,7 @@ eine absolute `CNTP_CVAL`-Deadline mit einem Catch-up-Clamp um; der Flap
 hat sich seither nicht reproduziert (14 aufeinanderfolgende grüne
 Pi-4-Boots beim Release). QEMU-Läufe waren nie betroffen — beide Boards
 waren durchgehend deterministisch. Das Boot-Erfolgskriterium (der
-`[ OK ] Reached target Shell.`-Marker, den der watchdog matcht, siehe §4 PID-1 →
+`[ OK ] Reached target Shell`-Marker, den der watchdog matcht, siehe §4 PID-1 →
 fsh-Übergabe) ist von der Bilanz so oder so unabhängig: ein einzelner
 später Tick erreicht trotzdem den interaktiven Prompt, und der
 no-`[FAIL]`- / Checkpoint-Count-Guard des watchdogs fängt trotzdem ein
@@ -1425,7 +1425,7 @@ rng / oom-graceful / kill / exec-elf / execve / brk / stack-overflow /
 wild-pointer / exec-fault / undef-instr / efault-syscall / flibc / pipe /
 console-echo / fd-redirect / initramfs-open / vfs-dispatch / trace /
 fs-roundtrip / readdir / klog / creds / authenticate / perm / login /
-passwd — d. h. 31 × `0xbbff2` (die User-Space-Baseline plus 30
+passwd — d. h. 32 × `0xbbff2` (die User-Space-Baseline plus 31
 Szenario-Checkpoints) + 1 × `0xbc000`.
 
 ```text
@@ -1501,9 +1501,9 @@ end-to-end auf QEMU + Pi 4 üben.
 | `src/sdhci_cmd.zig`           |         13 | `emmc2-block` (CMD17/CMD24-Encoding, CSD-v2-Parse, Clock-Divisor)                                 | —                                                                                                                                                                                                                                           |
 | `src/mailbox.zig`             |         14 | `emmc2-block` (Clock-Rate-Query für SDHCI-Divider; SD-VDD-Power-on und 3,3-V-I/O-Schiene bei init); USB-C-Console (`usb_init`s USB-HCD-Power-on)    | —                                                                                                                                                                                                                                           |
 | `src/board/virt/dtb.zig`      |          4 | (virt-Boot-Übergabe)                                                                                | —                                                                                                                                                                                                                                           |
-| `src/fat32.zig`               |         20 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
+| `src/fat32.zig`               |         27 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
 | `src/initramfs_backend.zig`   |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
-| `src/fat32_backend.zig`       |          9 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | dünner VfsOps-Wrapper über `src/fat32.zig`; der echte SD-Read/Write-Pfad läuft nur auf Pi-4-Hardware (QEMU `raspi4b`-EMMC2 stirbt bei CMD8, `virt` hat keine SD), sodass die On-Disk-Decode-Logik stattdessen von `src/fat32.zig`-Host-Tests abgedeckt wird. Der Splice-Vertrag (Sub-Sektor- + Whole-File-Same-Length-Writes) und der Permission-Overlay-Parse/-Apply sind hier host-getestet; FAT32-`readdir` wird von `[TEST] readdir` auf dem nur-Pi-Bein geübt (`/mnt/*` liefert unter QEMU sauber -1; FAT32-Host-Tests decken den `decode8_3`-Helper ab) |
+| `src/fat32_backend.zig`       |         11 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | dünner VfsOps-Wrapper über `src/fat32.zig`; der echte SD-Read/Write-Pfad läuft nur auf Pi-4-Hardware (QEMU `raspi4b`-EMMC2 stirbt bei CMD8, `virt` hat keine SD), sodass die On-Disk-Decode-Logik stattdessen von `src/fat32.zig`-Host-Tests abgedeckt wird. Der Splice-Vertrag (Sub-Sektor- + Whole-File-Same-Length-Writes) und der Permission-Overlay-Parse/-Apply sind hier host-getestet; FAT32-`readdir` wird von `[TEST] readdir` auf dem nur-Pi-Bein geübt (`/mnt/*` liefert unter QEMU sauber -1; FAT32-Host-Tests decken den `decode8_3`-Helper ab) |
 | `src/block_dev.zig`           |          0 | `emmc2-block`                                                                                     | reine vtable-Indirektion; Logik ≈ fn-Pointer-Forwarding                                                                                                                                                                                      |
 | `src/sys.zig`                 |          0 | jedes Syscall-Szenario                                                                              | extern-lastiger Dispatch; Logik ≈ Argument-Forwarding                                                                                                                                                                                        |
 | `src/fork.zig`                |          5 | `fork-stress`, `oom-graceful`, `exec-elf`, `brk`                                                    | —                                                                                                                                                                                                                                           |
@@ -1521,7 +1521,7 @@ end-to-end auf QEMU + Pi 4 üben.
 | `src/hwrng.zig`               |          6 | `rng`                                                                                               | der reine SplitMix64-Mixer ist auf dem Host vektor- und differential-getestet; der Kernel-Glue (`fill` / die `hwrng_init`-Ankündigung) ist von `[TEST] rng` durch den klog-Ring integrationsgetestet                                                  |
 | `user_space/lib/flibc/readline.zig` |   13 | (PID-1-Übergabe)                                                                                  | reine Byte→Buffer-Line-Editor-State-Machine; der SVC-Treiber sitzt hinter einem comptime-`has_driver`-Gate, sodass der Host-Build nie Inline-Asm analysiert; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                          |
 | `user_space/lib/flibc/execvp.zig`   |   13 | (PID-1-Übergabe)                                                                                  | reiner `/bin/<name>`-Path-Build; SVC-Treiber gegated wie `readline`; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                                                                                                          |
-| `user_space/fsh/tokenize.zig`       |   11 | (PID-1-Übergabe)                                                                                  | reiner Whitespace-Split + Single-Pipe-Dekomposition; der Shell-Treiber (`fsh.zig`) ist nur integrationsgetestet über die PID-1 → fsh-Übergabe (der `[ OK ] Reached target Shell.`-Boot-Erfolgsmarker)                                                                                                                     |
+| `user_space/fsh/tokenize.zig`       |   11 | (PID-1-Übergabe)                                                                                  | reiner Whitespace-Split + Single-Pipe-Dekomposition; der Shell-Treiber (`fsh.zig`) ist nur integrationsgetestet über die PID-1 → fsh-Übergabe (der `[ OK ] Reached target Shell`-Boot-Erfolgsmarker)                                                                                                                     |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | gemeinsamer Bump-Allocator-Helper, von anderen Test-Roots konsumiert; trägt keine eigenen inline-Tests                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | Runtime-Code-Patching; keine ICache-Sync host-seitig                                                                                                                                                                                              |
 | `src/trace/fp_walk.zig`       |          6 | — (rein Host)                                                                                       | AAPCS64-Frame-Record-Decoder für den `-Dtrace`-Sampler; die FP-Walk-Bounds- / Wrap- / Alignment- / Monotonic-Guards sind host-verifiziert (der Live-Sampler feuert nur auf echten Pi-Async-Timer-Ticks)                                                  |
@@ -1533,14 +1533,14 @@ end-to-end auf QEMU + Pi 4 üben.
 | `src/usb_tx_ring.zig`         |          7 | — (USB-C-Console, nur Pi-HW)                                                                     | reine Bulk-IN-TX-Ring-Arithmetik (monotone u64 head/tail, peek-then-advance); der MMIO/FIFO-Konsument in `src/board/rpi4b/usb.zig` bleibt hardware-verifiziert                                                                                    |
 | `src/board/rpi4b/usb.zig`     |          0 | — (USB-C-Console, nur Pi-HW)                                                                     | DWC2-MMIO; QEMU `raspi4b` emuliert den Device-Mode-Datenpfad nicht, sodass Enumeration, der Connection-Manager und die Bulk-Console-Schleife (inkl. Replug-Re-Enumeration) auf echter Pi-4-Hardware verifiziert sind; der Deskriptor-Satz + SETUP-Decode, den er konsumiert, sind in `src/usb_descriptors.zig` host-getestet, der TX-Ring in `src/usb_tx_ring.zig` |
 
-Summen: **361 Host-Tests** (`zig build test`) + **27 In-Kernel-EL0-Szenarien**
+Summen: **370 Host-Tests** (`zig build test`) + **28 In-Kernel-EL0-Szenarien**
 + **1 Pre-PID-1-EL1-Szenario** (`emmc2-block`, `run-virt` / `run`). Die
-35 Per-Modul-Inline-Zähler der Tabelle summieren sich auf **345**; das
-`zig build test`-Total (361) ist genau 16 höher, weil der
+35 Per-Modul-Inline-Zähler der Tabelle summieren sich auf **354**; das
+`zig build test`-Total (370) ist genau 16 höher, weil der
 `fork.zig`-Test-Root die 16 Tests von `src/elf.zig` über seinen direkten
 Datei-Import erneut ausführt — elfs Tests laufen einmal unter ihrer
-eigenen Zeile und einmal innerhalb des Steps von `fork.zig`. 345 + 16 =
-361.
+eigenen Zeile und einmal innerhalb des Steps von `fork.zig`. 354 + 16 =
+370.
 
 ### Output-Marker
 
@@ -1550,14 +1550,14 @@ eigenen Zeile und einmal innerhalb des Steps von `fork.zig`. 345 + 16 =
 | `[PASS] <name>`       | Szenario mit der erwarteten Free-Page-Zahl abgeschlossen           |
 | `[FAIL] <name>`       | Szenario mit einem Leak oder falschem Rückgabewert beendet          |
 | `X/Y passed`          | Finale Bilanz;`X == Y` ist die Green-Run-Bedingung               |
-| `[ OK ] Authenticated.`          | Auth-Erfolgsmarker — `/bin/login` hat die Credentials verifiziert und Privilegien gedroppt; der QEMU-watchdog assertet, dass er genau einmal erscheint |
-| `[ OK ] Reached target Shell.`          | Boot-Erfolgsmarker — fsh hat seine interaktive REPL erreicht; der QEMU-watchdog und der Real-HW-`picapture`-Helper warten beide darauf |
+| `[ OK ] Authenticated`          | Auth-Erfolgsmarker — `/bin/login` hat die Credentials verifiziert und Privilegien gedroppt; der QEMU-watchdog assertet, dass er genau einmal erscheint |
+| `[ OK ] Reached target Shell`          | Boot-Erfolgsmarker — fsh hat seine interaktive REPL erreicht; der QEMU-watchdog und der Real-HW-`picapture`-Helper warten beide darauf |
 | `ERROR CAUGHT`        | Kernel-seitiger Fault (Data Abort, Instruction Abort usw.)          |
 | `kill ok`, `exec-elf ok` | Per-Szenario-Fortschritts-Prints                                   |
 
 Greens erfordern: `X == Y`, alle `[PASS]` kein `[FAIL]`, 0 `ERROR CAUGHT`,
-31 per-Szenario-Checkpoints + 1 Boot-Baseline und die
-`[ OK ] Authenticated.`- und `[ OK ] Reached target Shell.`-Marker ausgegeben.
+32 per-Szenario-Checkpoints + 1 Boot-Baseline und die
+`[ OK ] Authenticated`- und `[ OK ] Reached target Shell`-Marker ausgegeben.
 
 ## 9. Build-Artefakte
 
@@ -1572,4 +1572,4 @@ Greens erfordern: `X == Y`, alle `[PASS]` kein `[FAIL]`, 0 `ERROR CAUGHT`,
 
 [← Zurück: README](README.md) · [Weiter: Setup →](SETUP.md)
 
-<!-- sync-ref: DOCUMENTATION.md @ 6e5815d3d21a43d1c9c98f7a4dfc4cb2b4d724de | synced 2026-06-05 -->
+<!-- sync-ref: DOCUMENTATION.md @ 6d20c0476e67410f1b4cf50b808de364d51953ea | synced 2026-06-06 -->

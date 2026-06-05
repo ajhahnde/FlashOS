@@ -130,7 +130,7 @@ piconnect() {
 # session. The log always lands at $_FLASHOS_DIR/boot.log (covered by the
 # repo .gitignore), regardless of the current directory.
 #   picapture        usb mode (default): wait for the CDC gadget to enumerate
-#                    on /dev/cu.usbmodem*, then wait for the `[ OK ] Reached target Shell.` marker
+#                    on /dev/cu.usbmodem*, then wait for the `[ OK ] Reached target Shell` marker
 #   picapture mu     mini-UART mode: capture /dev/cu.usbserial-* until the
 #                    harness prints its `N/N passed` tally (green; the shipping
 #                    kernel then waits at the real `login:` prompt) or a
@@ -228,14 +228,23 @@ picapture() {
           result="failed"
           break
         fi
-        # Success = the boot reached the `login:` prompt. The shipping/deploy
-        # kernel boots clean (no self-test harness unless built with
-        # -Dboot-selftest) straight to the password-gated `login:`, so reaching
-        # it is the boot-complete signal. A -Dboot-selftest build also prints a
-        # `N/N passed` tally first; accept either. (The `[ OK ] Reached target
-        # Shell.` marker cannot anchor here: the deploy kernel never auto-logs-
-        # in, so it never reaches fsh on a real boot — waiting on it hangs.)
-        if grep -qF "login:" "$logfile" || grep -qE "[0-9]+/[0-9]+ passed" "$logfile"; then
+        # Boot-complete depends on the build:
+        #   * A -Dboot-selftest build runs the in-kernel suite, whose scripted
+        #     `[TEST] login` scenario prints `login:` TWICE mid-run -- so a bare
+        #     `login:` match fires before the suite finishes and truncates the
+        #     capture. Its real completion is the 3rd `[ OK ] Reached target
+        #     Shell.` (two scripted login sessions + the real boot login), the
+        #     same count run_qemu_test.sh trusts.
+        #   * A clean deploy/shipping kernel has no `[TEST]` lines and never
+        #     auto-logs-in, so it stops at the password-gated `login:` -- that
+        #     prompt is its boot-complete signal (`Reached target Shell` never
+        #     anchors there, so waiting on it would hang).
+        if grep -qF "[TEST]" "$logfile"; then
+          if [[ "$(grep -cF "[ OK ] Reached target Shell" "$logfile")" -ge 3 ]]; then
+            result="success"
+            break
+          fi
+        elif grep -qF "login:" "$logfile"; then
           result="success"
           break
         fi
@@ -244,7 +253,7 @@ picapture() {
   else
     # Stuff a CR each second to wake/keep the session (readline submits on CR,
     # an empty line is a no-op dispatch), and watch for the one-time boot marker
-    # `[ OK ] Reached target Shell.` — the same interactive-REPL signal run_qemu_test.sh
+    # `[ OK ] Reached target Shell` — the same interactive-REPL signal run_qemu_test.sh
     # and mu-mode trust. The shell prompt is `# ` / `$ `; it never prints `>>> `.
     # `-p 0` is mandatory: a born-detached (-dmS) session has no current
     # window on macOS screen 4.00.03, so -X stuff silently goes nowhere
@@ -259,7 +268,7 @@ picapture() {
         result="died"
         break
       fi
-      if [[ -f "$logfile" ]] && grep -qF "[ OK ] Reached target Shell." "$logfile"; then
+      if [[ -f "$logfile" ]] && grep -qF "[ OK ] Reached target Shell" "$logfile"; then
         result="success"
         break
       fi

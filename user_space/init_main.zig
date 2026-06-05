@@ -14,7 +14,7 @@ const tests = @import("kernel_tests.zig");
 const build_options = @import("build_options");
 
 const OK = "[ OK ] ";
-const PID1_MSG: [*:0]const u8 = OK ++ "Reached target Userspace.\n";
+const PID1_MSG: [*:0]const u8 = OK ++ "Reached target Userspace\n";
 const LOGIN_PATH: [*:0]const u8 = "/bin/login";
 
 // CI credential script. When the `ci-login-seed` build flag is set,
@@ -43,7 +43,7 @@ export fn _start() callconv(.naked) noreturn {
 export fn pid1_main() noreturn {
     tests.sys_writeConsole(PID1_MSG);
     // The in-kernel [TEST] harness is the boot-as-test path the QEMU
-    // watchdog asserts (27 scenarios + 31 free-page checkpoints). Gated so
+    // watchdog asserts (28 scenarios + 32 free-page checkpoints). Gated so
     // deploy/run boot clean straight to login; -Dboot-selftest=true
     // (CI/validation) runs it, the default skips it.
     if (build_options.boot_selftest) {
@@ -52,7 +52,7 @@ export fn pid1_main() noreturn {
     }
     // Hand PID 1 to /bin/login. login authenticates against
     // /etc/shadow, drops privilege per /etc/passwd, then execs the user's
-    // shell — fsh still prints `[ OK ] Reached target Shell.` at REPL entry, the
+    // shell — fsh still prints `[ OK ] Reached target Shell` at REPL entry, the
     // boot-success marker the watchdog waits for. To keep the unattended
     // QEMU boot reaching that marker (no interactive typist), inject the CI
     // credentials into the console RX ring first via SYS_CONSOLE_INJECT so

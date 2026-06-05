@@ -27,6 +27,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-06-06
+
 ### Added
 
 - **FAT32 subdirectory path traversal.** Files below the mount root
@@ -59,8 +61,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Boot output restyled to systemd-style status lines.** The kernel,
   init, login, and fsh now print `[ OK ]` / `[SKIP]` / `[WARN]` lines
   instead of `[Debug]` noise. The two success markers were renamed —
-  `[Debug] login OK` → `[ OK ] Authenticated.` and
-  `[Debug] fsh init OK` → `[ OK ] Reached target Shell.` — so any log
+  `[Debug] login OK` → `[ OK ] Authenticated` and
+  `[Debug] fsh init OK` → `[ OK ] Reached target Shell` — so any log
   parser keying on the old strings must be updated. The boot-contract
   checkpoint and session counts are unchanged by the restyle.
 - **Diagnostic output suppressed by default.** EMMC2 and USB bring-up

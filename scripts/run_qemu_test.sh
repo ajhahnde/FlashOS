@@ -2,13 +2,13 @@
 # Self-validating QEMU runner for `zig build test-virt` / `test-rpi4b`.
 #
 # Boot success is reaching the interactive fsh prompt. With the
-# login lifecycle, `[ OK ] Reached target Shell.` (user_space/fsh/fsh.zig) appears
+# login lifecycle, `[ OK ] Reached target Shell` (user_space/fsh/fsh.zig) appears
 # THREE times per boot: twice from [TEST] login's console-scripted
 # sessions and once from the real boot login's shell — only the third one
 # means the boot is done, so the early-exit below counts markers instead
 # of first-matching. This script spawns the supplied QEMU command, tails
 # its serial log, and exits:
-#   * 0  on the 3rd `[ OK ] Reached target Shell.` with no `[FAIL]` / `ERROR CAUGHT`
+#   * 0  on the 3rd `[ OK ] Reached target Shell` with no `[FAIL]` / `ERROR CAUGHT`
 #        and the expected free-page-checkpoint + marker counts
 #   * 1  on `ERROR CAUGHT`, any `[FAIL]` marker, drifted counts, or timeout
 #
@@ -17,7 +17,7 @@
 # REQUIRES the kernel be built with `-Dci-login-seed=true` (the test-virt /
 # test-rpi4b steps and CI pass it). That flag makes PID-1 seed `flash\nflash\n`
 # into the console before /bin/login so the unattended boot authenticates with
-# no typist and reaches the 3rd `[ OK ] Reached target Shell.`. Without it the boot
+# no typist and reaches the 3rd `[ OK ] Reached target Shell`. Without it the boot
 # stops at the real `login:` prompt (correct for a hardware deploy) and this
 # watchdog would hang to the timeout. The expected checkpoint values below are
 # for the seeded kernel.
@@ -29,7 +29,7 @@
 #         the PID-1 fork delta over the PID-0 boot snapshot)
 #   *  1 × healthy kernel-entropy announce (`hwrng: ... ok`), 0 × failed
 #         self-test announce
-#   *  3 × `[ OK ] Authenticated.` + 3 × `[ OK ] Reached target Shell.` (two scripted
+#   *  3 × `[ OK ] Authenticated` + 3 × `[ OK ] Reached target Shell` (two scripted
 #         [TEST] login sessions + the real boot login; each session
 #         authenticated, dropped privilege in its child, and reached the
 #         shell)
@@ -98,7 +98,7 @@ while kill -0 "$QEMU_PID" 2>/dev/null; do
     # counts occurrences instead of first-matching (killing on the first
     # one would truncate the run mid-harness). The real boot's shell then
     # blocks reading fd 0 — under QEMU there is no input, so it sits here.
-    if [ "$(grep -cF "[ OK ] Reached target Shell." "$LOG" || true)" -ge 3 ]; then
+    if [ "$(grep -cF "[ OK ] Reached target Shell" "$LOG" || true)" -ge 3 ]; then
         status=ready
         break
     fi
@@ -160,8 +160,8 @@ hwrng_bad=$(grep -cF "hwrng: self-test failed" "$LOG" || true)
 # (flash, then root, each fork+drop+exec'd by the supervisor) plus the
 # real boot login. Fewer means the lifecycle or the auth path regressed;
 # more means a scenario leaked an extra session.
-login_ok=$(grep -cF "[ OK ] Authenticated." "$LOG" || true)
-fsh_ok=$(grep -cF "[ OK ] Reached target Shell." "$LOG" || true)
+login_ok=$(grep -cF "[ OK ] Authenticated" "$LOG" || true)
+fsh_ok=$(grep -cF "[ OK ] Reached target Shell" "$LOG" || true)
 
 if [ "$errors" -ne 0 ] || [ "$fails" -ne 0 ] || [ "$ok_chk" -ne 32 ] || [ "$ok_base" -ne 1 ] \
     || [ "$hwrng_ok" -ne 1 ] || [ "$hwrng_bad" -ne 0 ] || [ "$login_ok" -ne 3 ] || [ "$fsh_ok" -ne 3 ]; then

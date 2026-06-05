@@ -9,7 +9,7 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://codecov.io/gh/ajhahnde/FlashOS/branch/main/graph/badge.svg" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.1.0-blue" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.2.0-blue" alt="Version">
     <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
     <img src="https://img.shields.io/badge/zig-0.16.0-orange" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey" alt="aarch64-elf">
@@ -33,13 +33,14 @@
 ---
 
 <p align="center">
-  <img src="../../assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi" width="780">
+  <img src="../../assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi into the fsh shell" width="780">
 </p>
 
-> Diese Animation ist eine echte Serial-Console-Aufnahme von FlashOS
-> beim Booten auf echter Hardware — der Boot durchläuft das
-> kernelinterne Test-Harness und endet an einem interaktiven
-> `fsh`-Prompt.
+> Der Boot oben ist eine echte Serial-Console-Aufnahme von FlashOS
+> beim Booten auf echter Raspberry-Pi-4B-Hardware bis zum
+> `login:`-Prompt; die anschließende `fsh`-Session — `whoami`, `ls`,
+> `cat` und eine einstufige Pipe — spielt die echte Ausgabe der Shell
+> in einer lesbaren Kadenz ab.
 
 ## About
 
@@ -148,8 +149,8 @@ Stress-Zyklen hinweg, geprüft durch ein kernelinternes
   `populate-syms`-Schritt und konsumiert vom Function-Entry-Tracer
   (Laufzeit intakt, aber derzeit inert — Zig hat noch kein Äquivalent
   zu `-fpatchable-function-entry=2`).
-- **Kernelinternes Test-Harness** (`[TEST]/[PASS]/[FAIL]` + Bilanz, 27
-  Szenarien) plus eine host-seitige `zig build test`-Suite (361
+- **Kernelinternes Test-Harness** (`[TEST]/[PASS]/[FAIL]` + Bilanz, 28
+  Szenarien) plus eine host-seitige `zig build test`-Suite (370
   Host-Tests über 35 Module).
 
 ## Schnellstart
@@ -214,7 +215,7 @@ und das Setup der seriellen Konsole.
 | `zig build -Dboard=virt test-virt`   | virt booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht    |
 | `zig build -Dboard=rpi4b test-rpi4b` | raspi4b booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht |
 | `zig build -Dboard=virt iso`         | Eine GRUB-EFI-Rescue-ISO bauen (nur virt)                            |
-| `zig build test`                     | Host-seitige Unit-Tests (361 tests, 35 modules)                      |
+| `zig build test`                     | Host-seitige Unit-Tests (370 tests, 35 modules)                      |
 | `zig build clean`                    | `.zig-cache/` und `zig-out/` entfernen                                |
 
 Der Standard-Optimierungsmodus ist `ReleaseSmall`. Mit
@@ -260,4 +261,4 @@ Apache License, Version 2.0. Siehe [Lizenz](../../LICENSE.md).
 
 [Als Nächstes: Dokumentation →](DOCUMENTATION.md)
 
-<!-- sync-ref: README.md @ 6e5815d3d21a43d1c9c98f7a4dfc4cb2b4d724de | synced 2026-06-05 -->
+<!-- sync-ref: README.md @ 6d20c0476e67410f1b4cf50b808de364d51953ea | synced 2026-06-06 -->
