@@ -214,7 +214,7 @@ ls /dev/cu.usbmodem*            # node appears once the gadget enumerates
 screen /dev/cu.usbmodem00011 115200
 ```
 
-Once enumerated, user/`fsh` output (the `>>> ` prompt, command output)
+Once enumerated, user/`fsh` output (the `# ` / `$ ` prompt, command output)
 switches from the Mini-UART to the USB console automatically; kernel
 `[Debug]` prints and the USB driver's own bring-up trace stay on the
 Mini-UART. If the gadget never enumerates (no host attached, or under
@@ -240,8 +240,8 @@ shell.
   - `usb` (default): waits for the CDC gadget to enumerate on
     `/dev/cu.usbmodem*` (plugging in the C-to-C cable powers the Pi,
     so the node's appearance is itself the first boot signal), then
-    probes the console once per second until a live `fsh` answers
-    with the `>>> ` prompt.
+    probes the console once per second until the boot marker
+    `[Debug] fsh init OK` appears (fsh reached its interactive REPL).
   - `mu`: captures the Mini-UART trace adapter
     (`/dev/cu.usbserial-*`) until `[Debug] fsh init OK` (the boot
     reached the shell on the MU fallback — no USB host attached) or

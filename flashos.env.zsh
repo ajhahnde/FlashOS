@@ -130,7 +130,7 @@ piconnect() {
 # session. The log always lands at $_FLASHOS_DIR/boot.log (covered by the
 # repo .gitignore), regardless of the current directory.
 #   picapture        usb mode (default): wait for the CDC gadget to enumerate
-#                    on /dev/cu.usbmodem*, then probe for the `>>> ` prompt
+#                    on /dev/cu.usbmodem*, then wait for the `[Debug] fsh init OK` marker
 #   picapture mu     mini-UART mode: capture /dev/cu.usbserial-* until the
 #                    harness prints its `N/N passed` tally (green; the shipping
 #                    kernel then waits at the real `login:` prompt) or a
@@ -242,10 +242,10 @@ picapture() {
       fi
     done
   else
-    # The boot marker prints exactly once, on whichever console fsh saw at
-    # that moment (it races enumeration), so don't wait for it. Instead stuff
-    # a CR each second — a live fsh answers every one with a fresh `>>> `
-    # prompt (readline submits on CR, an empty line is a no-op dispatch).
+    # Stuff a CR each second to wake/keep the session (readline submits on CR,
+    # an empty line is a no-op dispatch), and watch for the one-time boot marker
+    # `[Debug] fsh init OK` — the same interactive-REPL signal run_qemu_test.sh
+    # and mu-mode trust. The shell prompt is `# ` / `$ `; it never prints `>>> `.
     # `-p 0` is mandatory: a born-detached (-dmS) session has no current
     # window on macOS screen 4.00.03, so -X stuff silently goes nowhere
     # without an explicit window target.
@@ -259,7 +259,7 @@ picapture() {
         result="died"
         break
       fi
-      if [[ -f "$logfile" ]] && grep -qF ">>> " "$logfile"; then
+      if [[ -f "$logfile" ]] && grep -qF "[Debug] fsh init OK" "$logfile"; then
         result="success"
         break
       fi
