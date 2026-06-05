@@ -44,7 +44,7 @@ extern fn memcpy(dst: *anyopaque, src: *const anyopaque, bytes: u64) *anyopaque;
 extern fn main_output(interface: i32, str: [*:0]const u8) void;
 extern fn main_output_u64(interface: i32, in: u64) void;
 extern fn exit_process() void;
-extern var current: *TaskStruct;
+extern var current: ?*TaskStruct;
 
 const MU: i32 = 0;
 
@@ -217,13 +217,13 @@ export fn allocate_user_page(t: *TaskStruct, uva: u64, flags: u64) u64 {
 export fn copy_virt_memory(dst: *TaskStruct) i32 {
     var i: usize = 0;
     while (i < MAX_PAGE_COUNT) : (i += 1) {
-        const up = current.mm.user_pages[i];
+        const up = current.?.mm.user_pages[i];
         if (up.pa == 0) continue;
         const kva = allocate_user_page(dst, up.uva, up.flags);
         if (kva == 0) return -1;
         _ = memcpy(@ptrFromInt(kva), @ptrFromInt(up.uva), PAGE_SIZE);
     }
-    dst.mm.brk = current.mm.brk;
+    dst.mm.brk = current.?.mm.brk;
     return 0;
 }
 
@@ -347,10 +347,10 @@ export fn do_data_abort(far: u64, esr: u64) i32 {
     const fault_uva: u64 = far & PAGE_MASK;
     const rw_nx: u64 = user_layout.TD_USER_PAGE_FLAGS_DEFAULT | user_layout.TD_USER_XN;
 
-    if (fault_uva >= user_layout.HEAP_BASE and fault_uva < current.mm.brk) {
+    if (fault_uva >= user_layout.HEAP_BASE and fault_uva < current.?.mm.brk) {
         const page = get_free_page();
         if (page == 0) return oom_zombie(far);
-        if (map_page(current, fault_uva, page, rw_nx) < 0) {
+        if (map_page(current.?, fault_uva, page, rw_nx) < 0) {
             free_page(page);
             return oom_zombie(far);
         }
@@ -360,7 +360,7 @@ export fn do_data_abort(far: u64, esr: u64) i32 {
     if (fault_uva >= user_layout.STACK_LOW and fault_uva < user_layout.STACK_TOP) {
         const page = get_free_page();
         if (page == 0) return oom_zombie(far);
-        if (map_page(current, fault_uva, page, rw_nx) < 0) {
+        if (map_page(current.?, fault_uva, page, rw_nx) < 0) {
             free_page(page);
             return oom_zombie(far);
         }
@@ -448,10 +448,10 @@ export fn do_el0_sync_fault(esr: u64, elr: u64) i32 {
 fn soft_demand_alloc(fault_uva: u64) i32 {
     const rw_nx: u64 = user_layout.TD_USER_PAGE_FLAGS_DEFAULT | user_layout.TD_USER_XN;
 
-    if (fault_uva >= user_layout.HEAP_BASE and fault_uva < current.mm.brk) {
+    if (fault_uva >= user_layout.HEAP_BASE and fault_uva < current.?.mm.brk) {
         const page = get_free_page();
         if (page == 0) return -1;
-        if (map_page(current, fault_uva, page, rw_nx) < 0) {
+        if (map_page(current.?, fault_uva, page, rw_nx) < 0) {
             free_page(page);
             return -1;
         }
@@ -461,7 +461,7 @@ fn soft_demand_alloc(fault_uva: u64) i32 {
     if (fault_uva >= user_layout.STACK_LOW and fault_uva < user_layout.STACK_TOP) {
         const page = get_free_page();
         if (page == 0) return -1;
-        if (map_page(current, fault_uva, page, rw_nx) < 0) {
+        if (map_page(current.?, fault_uva, page, rw_nx) < 0) {
             free_page(page);
             return -1;
         }
@@ -488,7 +488,7 @@ export fn check_and_prefault_user_range(uva: u64, len: u64) i32 {
         var is_mapped = false;
         var i: usize = 0;
         while (i < MAX_PAGE_COUNT) : (i += 1) {
-            const up = current.mm.user_pages[i];
+            const up = current.?.mm.user_pages[i];
             if (up.pa != 0 and up.uva == curr) {
                 is_mapped = true;
                 break;

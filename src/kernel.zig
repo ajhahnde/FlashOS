@@ -21,7 +21,7 @@ extern fn mini_uart_init() void;
 extern fn main_output(interface: i32, str: [*:0]const u8) void;
 extern fn main_output_u64(interface: i32, in: u64) void;
 extern fn main_output_char(interface: i32, ch: u8) void;
-extern fn main_output_process(interface: i32, p: *anyopaque) void;
+extern fn main_output_process(interface: i32, p: *task_layout.TaskStruct) void;
 extern fn delay(ticks: u64) void;
 extern fn get_el() u32;
 
@@ -40,7 +40,7 @@ extern fn copy_process(clone_flags: u64, fn_ptr: u64, arg: u64) i32;
 extern fn prepare_move_to_user_elf(blob_addr_kva: u64, blob_size: u64) i32;
 extern fn sched_init() void;
 extern fn schedule() void;
-extern var current: *anyopaque;
+extern var current: ?*task_layout.TaskStruct;
 
 // Syscall table
 extern fn sys_call_table_relocate() void;
@@ -90,7 +90,7 @@ export fn kernel_process() void {
     // allocate no page and leave the free-page baseline untouched.
     // fork() inherits them via fdtable.dupAll; execve() preserves them.
     // User-space sees fd 0/1/2 already wired to the mini-UART.
-    const cur: *task_layout.TaskStruct = @ptrCast(@alignCast(current));
+    const cur: *task_layout.TaskStruct = current.?;
     _ = fdtable.install(cur, .console, null);
     _ = fdtable.install(cur, .console, null);
     _ = fdtable.install(cur, .console, null);
@@ -289,7 +289,7 @@ export fn kernel_main_impl(id: u64) void {
     while (true) {
         if (id != 0 or state != 1) continue;
         sched_init();
-        main_output_process(MU, current);
+        main_output_process(MU, current.?);
         // create pid 1, kernel threads don't need a user stack page
         const res = copy_process(KTHREAD, @intFromPtr(&kernel_process), 0);
         if (res <= 0) {

@@ -67,7 +67,7 @@ extern fn main_output(interface: i32, str: [*:0]const u8) void;
 extern fn main_output_u64(interface: i32, in: u64) void;
 extern fn main_output_char(interface: i32, ch: u8) void;
 
-extern var current: *TaskStruct;
+extern var current: ?*TaskStruct;
 extern var task: [NR_TASKS]?*TaskStruct;
 extern var nr_tasks: i32;
 extern var next_pid: i32;
@@ -114,7 +114,7 @@ export fn copy_process_impl(clone_flags: u64, fn_addr: u64, arg: u64) i32 {
         p.core_context.x19 = fn_addr | LINEAR_MAP_BASE;
         p.core_context.x20 = arg;
     } else {
-        const cur_regs = task_ke_regs(current);
+        const cur_regs = task_ke_regs(current.?);
         // copy_ke_regs avoids gcc emitting a memcpy call
         copy_ke_regs(childregs, cur_regs);
         // child returns 0 from fork
@@ -136,7 +136,7 @@ export fn copy_process_impl(clone_flags: u64, fn_addr: u64, arg: u64) i32 {
         // CLOEXEC for now (future work wires CLOEXEC + close-on-exec).
         // KTHREAD branch skips this — kernel threads cannot reach the
         // EL0 syscall path that fills fd_table.
-        fdtable.dupAll(current, p);
+        fdtable.dupAll(current.?, p);
         // Inherit the parent's working directory. cwd lives
         // on the child task's kernel page (zeroed by get_kernel_page),
         // so without this copy the child would come up with cwd = ""
@@ -144,19 +144,19 @@ export fn copy_process_impl(clone_flags: u64, fn_addr: u64, arg: u64) i32 {
         // a stray leading byte. KTHREADs skip the copy along with fds —
         // their default cwd = "/" from the TaskStruct field initialiser
         // is fine for sched-only code paths.
-        @memcpy(&p.cwd, &current.cwd);
+        @memcpy(&p.cwd, &current.?.cwd);
         // Inherit process credentials: a forked child runs as
         // the same user as its parent until it (or an image it execs)
         // drops privilege via setuid/setgid. KTHREADs skip this along
         // with fds/cwd — their 0/root default suits sched-only paths.
-        p.uid = current.uid;
-        p.gid = current.gid;
-        p.euid = current.euid;
-        p.egid = current.egid;
+        p.uid = current.?.uid;
+        p.gid = current.?.gid;
+        p.euid = current.?.euid;
+        p.egid = current.?.egid;
     }
 
     p.flags = clone_flags;
-    p.priority = current.priority;
+    p.priority = current.?.priority;
     p.state = TASK_RUNNING;
     // Halved so a freshly forked child doesn't out-budget a parent that has
     // already burned ticks; gives the round-robin path a chance to interleave
@@ -279,7 +279,7 @@ pub fn prepare_move_to_user_elf_argv(
         var i: u64 = 0;
         while (i < num_pages) : (i += 1) {
             const uva = ph.p_vaddr + i * PAGE_SIZE;
-            const kva = allocate_user_page(current, uva, flags);
+            const kva = allocate_user_page(current.?, uva, flags);
             if (kva == 0) return -1;
 
             const seg_off: u64 = i * PAGE_SIZE;
@@ -300,13 +300,13 @@ pub fn prepare_move_to_user_elf_argv(
     // arrives in 2.5 / 2.6.
     const stack_uva: u64 = user_layout.STACK_TOP - PAGE_SIZE;
     const stack_kva = allocate_user_page(
-        current,
+        current.?,
         stack_uva,
         user_layout.TD_USER_PAGE_FLAGS_DEFAULT | user_layout.TD_USER_XN,
     );
     if (stack_kva == 0) return -1;
 
-    const regs = task_ke_regs(current);
+    const regs = task_ke_regs(current.?);
     memzero(@intFromPtr(regs), @sizeOf(KeRegs));
     regs.elr = ehdr.e_entry;
     regs.pstate = SPSR_EL1_MODE_EL0t;
@@ -334,9 +334,9 @@ pub fn prepare_move_to_user_elf_argv(
 
     // Heap starts empty at HEAP_BASE — sys_brk grows / shrinks from
     // here, do_data_abort demand-allocates pages as the heap is touched.
-    current.mm.brk = user_layout.HEAP_BASE;
+    current.?.mm.brk = user_layout.HEAP_BASE;
 
-    set_pgd(current.mm.pgd);
+    set_pgd(current.?.mm.pgd);
     return 0;
 }
 
