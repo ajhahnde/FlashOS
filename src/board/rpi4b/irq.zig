@@ -7,6 +7,8 @@ const GICC_BASE: u64 = GIC_BASE + 0x2000;
 
 const GICD_ISENABLER_BASE: u64 = GICD_BASE + 0x100;
 const GICD_ITARGETSR_BASE: u64 = GICD_BASE + 0x800;
+const GICC_CTLR: u64 = GICC_BASE + 0x00;
+const GICC_PMR: u64 = GICC_BASE + 0x04;
 const GICC_IAR: u64 = GICC_BASE + 0x0C;
 const GICC_EOIR: u64 = GICC_BASE + 0x10;
 
@@ -167,8 +169,28 @@ export fn handle_irq(frame: *KeRegs) void {
     }
 }
 
-/// Pi's GICv2 needs no per-CPU init beyond what irq_init_vectors does;
-/// kept as an empty inline so kernel.zig can call `board.irq.board_irq_init()`
-/// uniformly across boards. Inlining ensures the rpi4b output stays
-/// byte-identical (no `bl` is emitted).
-pub inline fn board_irq_init() void {}
+/// CPU-side GICv2 (GIC-400) bring-up for the calling core — the rpi4b analog of
+/// virt's GICv3 board_irq_init. FlashOS runs at non-secure EL1, so these MMIO
+/// accesses hit the NS-banked CPU interface: GICC_CTLR bit 0 = EnableGrp1, and
+/// GICC_PMR is the NS priority mask.
+///   1. GICC_PMR  = 0xF0  — accept any priority. FlashOS uses a single
+///                          interrupt priority, so this can never narrow
+///                          delivery below the working set.
+///   2. GICC_CTLR |= 1    — OR-in the Group-1 enable. Read-modify-write, NOT a
+///                          plain assign: GICv2's GICC_CTLR packs firmware-owned
+///                          bits (EOImode / CBPR / bypass, plus GIC-400 group /
+///                          security bits) that a blind write would clobber, and
+///                          an OR can only ever SET the enable — it cannot
+///                          disable a CPU interface firmware already brought up,
+///                          so it is regression-safe whatever the firmware left.
+/// On the current Pi boot path firmware leaves the interface enabled, so this is
+/// a self-healing no-op that removes the silent dependency on that firmware
+/// state. NOTE: QEMU raspi4b pre-enables the CPU interface, so the watchdog
+/// cannot tell a correct enable from a wrong one here — real-Pi boot acceptance
+/// stays authoritative for this path.
+pub fn board_irq_init() void {
+    const gicc_pmr = @as(*volatile u32, @ptrFromInt(GICC_PMR));
+    const gicc_ctlr = @as(*volatile u32, @ptrFromInt(GICC_CTLR));
+    gicc_pmr.* = 0xF0;
+    gicc_ctlr.* |= 0x1;
+}
