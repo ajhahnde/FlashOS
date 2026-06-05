@@ -38,6 +38,11 @@ comptime {
 
 const PASSWD_PATH: [*:0]const u8 = "/etc/passwd";
 
+// Boot status prefix — mirrors src/kernel.zig's OK. The line emitted with it
+// below is a boot-contract marker the watchdog counts; if you change this
+// prefix, update the run_qemu_test.sh grep too.
+const OK = "[ OK ] ";
+
 fn emit(s: []const u8) void {
     _ = flibc.sys.write_fd(1, s.ptr, s.len);
 }
@@ -175,7 +180,7 @@ export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn
         const shell_z: [*:0]const u8 = @ptrCast(&shell_buf);
 
         // Boot marker proving the auth path ran — once per session.
-        emit("\n[Debug] login OK\n");
+        emit("\n" ++ OK ++ "Authenticated.\n");
 
         if (!runSession(entry.uid, entry.gid, shell_z)) continue;
 

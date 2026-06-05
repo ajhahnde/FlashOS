@@ -163,7 +163,7 @@ pub const NR_SYSCALLS: usize = SYS_PASSWD + 1;
 // the kernel ring (src/klog_ring.zig sizes `KlogRing` to it) and userland
 // `dmesg` (sizes its read buffer to it) must agree — an ABI-visible
 // constant, like Dirent. 16 KiB holds a full interactive boot log
-// (firmware marker → `fsh init OK`); a longer in-harness log wraps,
+// (firmware marker → `Reached target Shell`); a longer in-harness log wraps,
 // keeping the most recent 16 KiB.
 pub const KLOG_SIZE: u64 = 16 * 1024;
 

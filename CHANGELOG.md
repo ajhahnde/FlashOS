@@ -36,6 +36,25 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   reachable. The open hook now walks the path one component at a time,
   descending into each subdirectory entry. Directory *listing*
   (`readdir`) stays root-only for now — opening a known path works.
+- **`-Dboot-selftest` build option (default off).** Gates the in-kernel
+  test harness: a normal `zig build run-virt` / `deploy` now boots
+  straight to the `login:` prompt with no test output, while CI and
+  validation builds pass `-Dboot-selftest=true` to run the full
+  in-kernel scenario suite. The EMMC2 smoke test and the free-page
+  checkpoint dump are gated the same way.
+
+### Changed
+
+- **Boot output restyled to systemd-style status lines.** The kernel,
+  init, login, and fsh now print `[ OK ]` / `[SKIP]` / `[WARN]` lines
+  instead of `[Debug]` noise. The two success markers were renamed —
+  `[Debug] login OK` → `[ OK ] Authenticated.` and
+  `[Debug] fsh init OK` → `[ OK ] Reached target Shell.` — so any log
+  parser keying on the old strings must be updated. Boot-contract
+  counts (31 checkpoints, 3 sessions) are numerically unchanged.
+- **Diagnostic output suppressed by default.** EMMC2 and USB bring-up
+  traces and hwrng chatter are now gated behind in-file flags
+  (`DIAG`, `TRACE_VERBOSE`) that default off, keeping the boot log clean.
 
 ## [v0.1.0] - 2026-06-05
 

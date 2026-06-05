@@ -80,7 +80,7 @@ zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
 Für einen selbstvalidierenden Lauf, der mit 0 endet, wenn der Boot den
-interaktiven `fsh`-Prompt erreicht (die dritte Markierung `[Debug] fsh init OK`
+interaktiven `fsh`-Prompt erreicht (die dritte Markierung `[ OK ] Reached target Shell.`
 — siehe unten) ohne `[FAIL]` / `ERROR CAUGHT` und mit den erwarteten
 Free-Page-Checkpoints, und mit 1 bei einem Fehler oder einem watchdog-Timeout
 (keine manuelle QEMU-Überwachung):
@@ -110,8 +110,8 @@ Ein grüner Lauf auf beiden Boards landet bei `27/27 passed`, 31
 Free-Page-Checkpoints pro Szenario (`0xbbff2` auf rpi4b, `0x3be4a` auf virt)
 plus der passenden Boot-Baseline (`0xbc000` / `0x3be58`) und 0 `ERROR CAUGHT`.
 Der Boot übergibt dann an `/bin/login` → `/bin/fsh`; mit dem
-Login-Lifecycle erscheinen die Markierungen `[Debug] login OK` und
-`[Debug] fsh init OK` jeweils dreimal (zwei skriptgesteuerte
+Login-Lifecycle erscheinen die Markierungen `[ OK ] Authenticated.` und
+`[ OK ] Reached target Shell.` jeweils dreimal (zwei skriptgesteuerte
 `[TEST] login`-Sitzungen + der echte Boot-Login), und der CI-watchdog
 (`scripts/run_qemu_test.sh`) zählt genau das. Die Free-Page-Invarianten sind in
 [Dokumentation §8](DOCUMENTATION.md#free-page-invarianten) dokumentiert.
@@ -244,7 +244,7 @@ zu machen.
     fragt dann die Konsole einmal pro Sekunde ab, bis ein laufendes `fsh`
     mit dem `>>> `-Prompt antwortet.
   - `mu`: erfasst den Mini-UART-Trace-Adapter
-    (`/dev/cu.usbserial-*`), bis `[Debug] fsh init OK` (der Boot hat die
+    (`/dev/cu.usbserial-*`), bis `[ OK ] Reached target Shell.` (der Boot hat die
     Shell über den MU-Fallback erreicht — kein USB-Host angeschlossen) oder
     `ERROR CAUGHT` erscheint. Mache einen Power-Cycle des Pi, wenn dazu
     aufgefordert.

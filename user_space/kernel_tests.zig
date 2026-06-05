@@ -362,7 +362,7 @@ const STACKBOMB_ELF_PATH: [*:0]const u8 = "/test/stackbomb.elf";
 const FLIBC_DEMO_ELF_PATH: [*:0]const u8 = "/test/flibc_demo.elf";
 // fsh-scenario constants — disabled with run_fsh below (kept, not deleted).
 // The interactive shell is now exercised by the PID-1 hand-off + the boot
-// watchdog's `[Debug] fsh init OK` success marker, so an in-harness fsh test is
+// watchdog's `[ OK ] Reached target Shell.` success marker, so an in-harness fsh test is
 // redundant. Re-enable by uncommenting these, run_fsh, and the scenarios[]
 // entry.
 // const FSH_PATH: [*:0]const u8 = "/bin/fsh";
@@ -895,7 +895,7 @@ fn run_wild_pointer(baseline: u64) bool {
 // Liveness is the real assertion: had the routing regressed, the child
 // would spin the core, sys_wait would never return, the harness would
 // never hand off to fsh, and the QEMU watchdog would catch the missing
-// `[Debug] fsh init OK`. The free-page baseline rules out a leak across
+// `[ OK ] Reached target Shell.`. The free-page baseline rules out a leak across
 // the fault → reap. The child runs in the inherited image (no exec) —
 // the path keys only on entry.S's EC dispatch.
 fn run_exec_fault(baseline: u64) bool {
@@ -935,7 +935,7 @@ fn run_exec_fault(baseline: u64) bool {
 // only alternative was the core-spin). Liveness is the assertion: had
 // the routing regressed, the child would hang the core, sys_wait would
 // never return, and the QEMU watchdog would catch the missing
-// `[Debug] fsh init OK`. The free-page baseline rules out a leak across
+// `[ OK ] Reached target Shell.`. The free-page baseline rules out a leak across
 // the fault → reap. Reap-based + baseline-neutral, like run_exec_fault.
 fn run_undef_instr(baseline: u64) bool {
     sys_writeConsole(TEST_UNDEF_INSTR);
@@ -968,7 +968,7 @@ fn run_undef_instr(baseline: u64) bool {
 // the soft path returns -1 to the syscall without invoking exit_process.
 // PID 1 itself is the probe: if the soft path regresses to the hard
 // path, the harness task zombifies mid-scenario, the hand-off to fsh
-// never runs, and the QEMU watchdog catches the missing `[Debug] fsh init OK`.
+// never runs, and the QEMU watchdog catches the missing `[ OK ] Reached target Shell.`.
 // Free-page baseline holds trivially because sys_openFile bails before
 // any File allocation when copy_from_user returns -1.
 fn run_efault_syscall(baseline: u64) bool {
@@ -1495,7 +1495,7 @@ fn run_fs_roundtrip(baseline: u64) bool {
 
 // fsh capstone scenario — DISABLED (kept, not deleted). The interactive
 // shell is now exercised by the PID-1 hand-off + the boot watchdog's
-// `[Debug] fsh init OK` success marker, so an in-harness fsh test is redundant.
+// `[ OK ] Reached target Shell.` success marker, so an in-harness fsh test is redundant.
 // Re-enable by uncommenting the const + fn below, the FSH_* constants
 // above, and the scenarios[] entry further down.
 //
@@ -1879,8 +1879,8 @@ fn run_perm(baseline: u64) bool {
 // The 30-byte script fits the 256-byte console RX ring with room to
 // spare, and login drains it as it reads.
 //
-// Serial side effects: each session emits `[Debug] login OK` + the
-// shell's `[Debug] fsh init OK`, so a full boot log carries 3 of each
+// Serial side effects: each session emits `[ OK ] Authenticated.` + the
+// shell's `[ OK ] Reached target Shell.`, so a full boot log carries 3 of each
 // (2 from here + 1 from the real boot login). run_qemu_test.sh keys its
 // early-exit and guards on exactly those counts.
 const LOGIN_CYCLE_SCRIPT = "flash\nflash\nexit\nroot\nroot\nexit\n";
@@ -2106,7 +2106,7 @@ const scenarios = [_]Scenario{
     // login drives the real /bin/login supervisor through two console-
     // scripted sessions (the logout → re-prompt lifecycle). Its
     // two inner shells emit the same boot markers the real login does, so
-    // run_qemu_test.sh counts 3× login OK / fsh init OK per boot. Runs
+    // run_qemu_test.sh counts 3× Authenticated / Reached target Shell per boot. Runs
     // late so its console scripting never interleaves with the I/O
     // scenarios; never first (rng holds that slot by contract).
     .{ .name = "login", .run = run_login },

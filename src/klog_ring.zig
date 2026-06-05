@@ -35,7 +35,7 @@ const defs = @import("syscall_defs");
 // Ring capacity. Lives in lib/syscall_defs.zig because userland `dmesg`
 // sizes its read buffer against the same number (an ABI-visible constant,
 // like Dirent). Big enough to hold a full interactive boot log
-// (firmware marker → `fsh init OK`); the much longer in-harness log wraps,
+// (firmware marker → `Reached target Shell`); the much longer in-harness log wraps,
 // which is fine — [TEST] klog only asserts a recent marker survives.
 pub const SIZE: u64 = defs.KLOG_SIZE;
 

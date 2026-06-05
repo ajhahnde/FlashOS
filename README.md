@@ -33,12 +33,13 @@
 ---
 
 <p align="center">
-  <img src="assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi" width="780">
+  <img src="assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi into the fsh shell" width="780">
 </p>
 
-> The animation above is the captured serial-console
-> log of FlashOS booting on real hardware — through the in-kernel
-> test harness to an interactive `fsh` prompt.
+> The boot above is a captured serial console of FlashOS booting on real
+> Raspberry Pi 4B hardware to the `login:` prompt; the trailing `fsh`
+> session — `whoami`, `ls`, `cat`, and a one-stage pipe — replays the
+> shell's real output at a readable cadence.
 
 ## About
 

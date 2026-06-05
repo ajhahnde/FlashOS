@@ -134,6 +134,24 @@ pub fn build(b: *std.Build) void {
     ) orelse false;
     build_options.addOption(bool, "ci_login_seed", ci_login_seed);
 
+    // In-kernel self-test harness gate (default OFF). When set, PID 1 runs
+    // the [TEST] scenario suite + tally before handing off to /bin/login —
+    // the boot-as-test path the QEMU watchdog (run_qemu_test.sh) asserts
+    // (27 scenarios, 31 free-page checkpoints). Default OFF so `zig build
+    // deploy` / `run` produce a clean boot straight to the login prompt with
+    // no test wall. The watchdog/CI builds pass `-Dboot-selftest=true`
+    // alongside `-Dci-login-seed=true`; a forgotten flag fails loud (no
+    // scenarios → watchdog guard mismatch) rather than silently shipping an
+    // unvalidated boot. Comptime-gated, so a `-Dboot-selftest=true` build is
+    // byte-identical to the pre-gate harness build (the boot contract and
+    // free-page checkpoints never move when the flag is on).
+    const boot_selftest = b.option(
+        bool,
+        "boot-selftest",
+        "Run the in-kernel [TEST] self-test harness at PID 1 (CI/validation builds); default OFF for a clean boot",
+    ) orelse false;
+    build_options.addOption(bool, "boot_selftest", boot_selftest);
+
     // Statistical kernel profiler (default OFF — the released kernel carries
     // zero of it). With -Dtrace the timer/IRQ entry threads the saved
     // exception frame to a frame-pointer-walking sampler that prints a
@@ -718,7 +736,7 @@ pub fn build(b: *std.Build) void {
     // that module is host-tested separately in the test section below.
     // Staged into the initramfs at /bin/fsh and exec'd by the PID-1
     // hand-off after the harness tally; the boot watchdog keys on fsh's
-    // `[Debug] fsh init OK` marker as the success signal. (The in-harness
+    // `[ OK ] Reached target Shell.` marker as the success signal. (The in-harness
     // [TEST] fsh scenario is disabled — see user_space/kernel_tests.zig.)
     const fsh_mod = b.createModule(.{
         .root_source_file = b.path("user_space/fsh/fsh.zig"),
@@ -1311,7 +1329,7 @@ pub fn build(b: *std.Build) void {
         run_step.dependOn(&qemu_cmd.step);
 
         // Self-validating QEMU run: the watchdog tails the serial log,
-        // exits 0 on `[Debug] fsh init OK` (with no `[FAIL]` / `ERROR CAUGHT` and
+        // exits 0 on `[ OK ] Reached target Shell.` (with no `[FAIL]` / `ERROR CAUGHT` and
         // the expected free-page-checkpoint counts), exits 1 on
         // `ERROR CAUGHT`, any `[FAIL]`, count drift, or timeout.
         // Same QEMU args as `run`. raspi4b is slow (~5–8 min); the

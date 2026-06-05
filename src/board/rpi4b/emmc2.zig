@@ -49,6 +49,8 @@ extern fn main_output(interface: i32, str: [*:0]const u8) void;
 extern fn main_output_u64(interface: i32, in: u64) void;
 const MU: i32 = 0;
 
+const DIAG: bool = false; // per-step SDHCI init trace; flip to true to see which step fails on a bad card
+
 const LINEAR_MAP_BASE: u64 = 0xFFFF000000000000;
 const DEVICE_BASE: u64 = 0xFE000000;
 const EMMC2_BASE: u64 = DEVICE_BASE + 0x340000 + LINEAR_MAP_BASE;
@@ -150,24 +152,26 @@ pub fn init() i32 {
     // Diagnostic dump before any controller poke. Proves the MMIO
     // address is right (SLOTISR_VER reads a sane vendor/version, not
     // 0xFFFFFFFF) and records the controller's pre-init state.
-    main_output(MU, "[Debug] EMMC2 diag SLOTISR_VER=0x");
-    main_output_u64(MU, reg_at(0xFC).*);
-    main_output(MU, " CAPS_LO=0x");
-    main_output_u64(MU, reg_at(0x40).*);
-    main_output(MU, " CAPS_HI=0x");
-    main_output_u64(MU, reg_at(0x44).*);
-    main_output(MU, "\n");
-    main_output(MU, "[Debug] EMMC2 diag entry ctrl0=0x");
-    main_output_u64(MU, r.control0);
-    main_output(MU, " ctrl1=0x");
-    main_output_u64(MU, r.control1);
-    main_output(MU, " ctrl2=0x");
-    main_output_u64(MU, r.control2);
-    main_output(MU, " status=0x");
-    main_output_u64(MU, r.status);
-    main_output(MU, " intr=0x");
-    main_output_u64(MU, r.interrupt);
-    main_output(MU, "\n");
+    if (DIAG) {
+        main_output(MU, "[Debug] EMMC2 diag SLOTISR_VER=0x");
+        main_output_u64(MU, reg_at(0xFC).*);
+        main_output(MU, " CAPS_LO=0x");
+        main_output_u64(MU, reg_at(0x40).*);
+        main_output(MU, " CAPS_HI=0x");
+        main_output_u64(MU, reg_at(0x44).*);
+        main_output(MU, "\n");
+        main_output(MU, "[Debug] EMMC2 diag entry ctrl0=0x");
+        main_output_u64(MU, r.control0);
+        main_output(MU, " ctrl1=0x");
+        main_output_u64(MU, r.control1);
+        main_output(MU, " ctrl2=0x");
+        main_output_u64(MU, r.control2);
+        main_output(MU, " status=0x");
+        main_output_u64(MU, r.status);
+        main_output(MU, " intr=0x");
+        main_output_u64(MU, r.interrupt);
+        main_output(MU, "\n");
+    }
 
     // 0. Ensure the SD-card power rail is on. Circle's CardInit calls
     //    PROPTAG_SET_POWER_STATE(SD_CARD, ON|WAIT) before any controller
@@ -175,9 +179,9 @@ pub fn init() i32 {
     //    this slot so VDD is normally already on, but matching Circle
     //    defensively rules out a half-powered state where commands
     //    transmit on the wire but the card can't answer.
-    main_output(MU, "[Debug] EMMC2 step 0 sd_power_on\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 0 sd_power_on\n");
     if (!mbox.setPowerState(mailbox.DEVICE_ID_SD_CARD, mailbox.POWER_STATE_ON | mailbox.POWER_STATE_WAIT)) {
-        main_output(MU, "[Debug] EMMC2 sd_power_on FAILED\n");
+        if (DIAG) main_output(MU, "[Debug] EMMC2 sd_power_on FAILED\n");
         return -1;
     }
     delay_us(2_000);
@@ -188,9 +192,9 @@ pub fn init() i32 {
     //     bring-up assumption. Pi-HW init has been verified end-to-end
     //     from this 3.3 V default; 1.8 V UHS-I
     //     switching stays a future perf concern.
-    main_output(MU, "[Debug] EMMC2 step 0a sd_io_3v3\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 0a sd_io_3v3\n");
     if (!mbox.setGpioState(mailbox.EXP_GPIO_SD_1V8, 0)) {
-        main_output(MU, "[Debug] EMMC2 sd_io_3v3 FAILED\n");
+        if (DIAG) main_output(MU, "[Debug] EMMC2 sd_io_3v3 FAILED\n");
         return -1;
     }
     delay_us(5_000);
@@ -200,7 +204,7 @@ pub fn init() i32 {
     //    no effect on real hardware after SRST_HC alone. Triple-reset
     //    (SRST_HC | SRST_CMD | SRST_DAT) matches Linux's
     //    drivers/mmc/host/sdhci.c sdhci_reset(host, SDHCI_RESET_ALL).
-    main_output(MU, "[Debug] EMMC2 step 1 SRST_ALL\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 1 SRST_ALL\n");
     emmc_write(&r.control1, r.control1 | CTRL1_SRST_ALL);
     if (!busy_wait_clear(&r.control1, CTRL1_SRST_ALL, 100_000)) return -1;
 
@@ -209,7 +213,7 @@ pub fn init() i32 {
     //     SDCLK; SRST_HC zeroes both. POWER_ON = bit 8, BUS_VOLTAGE =
     //     bits 11:9 (0b111 = 3.3 V). Let the rail settle before the
     //     clock is brought up.
-    main_output(MU, "[Debug] EMMC2 step 1a bus_power\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 1a bus_power\n");
     emmc_write(&r.control2, 0);
     emmc_write(&r.control0, (@as(u32, 1) << 8) | (@as(u32, 0b111) << 9));
     // SD spec PLSS §6.4.1: ≥1 ms after VDD reaches stable level before
@@ -223,15 +227,17 @@ pub fn init() i32 {
     //     The SDHCI divider is derived from this; the CAP register's
     //     base-clock field is unreliable on the BCM2711, so the
     //     firmware value is the only sound source.
-    main_output(MU, "[Debug] EMMC2 step 1b base_clock\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 1b base_clock\n");
     base_clock_hz = mbox.getClockRate(mailbox.CLOCK_ID_EMMC2);
     if (base_clock_hz == 0) {
-        main_output(MU, "[Debug] EMMC2 mailbox clock query FAILED\n");
+        if (DIAG) main_output(MU, "[Debug] EMMC2 mailbox clock query FAILED\n");
         return -1;
     }
-    main_output(MU, "[Debug] EMMC2 base clock=0x");
-    main_output_u64(MU, base_clock_hz);
-    main_output(MU, "\n");
+    if (DIAG) {
+        main_output(MU, "[Debug] EMMC2 base clock=0x");
+        main_output_u64(MU, base_clock_hz);
+        main_output(MU, "\n");
+    }
 
     // 2. Internal clock + identification-mode divider (~400 kHz). The
     //    divisor is a power of two derived from the firmware base
@@ -240,7 +246,7 @@ pub fn init() i32 {
     //    hardware wants the internal clock to settle before the card
     //    clock is gated on, and again before the first command.
     //    TOUNIT = 0xC matches Circle's Pi 4 data-timeout choice.
-    main_output(MU, "[Debug] EMMC2 step 2 CLK_STABLE\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 2 CLK_STABLE\n");
     const id_div = sdhci.clockDivisor(base_clock_hz, 400_000);
     emmc_write(&r.control1, CTRL1_CLK_INTLEN | sdhci.control1ClockBits(id_div) | (@as(u32, 0xC) << 16));
     if (!busy_wait_set(&r.control1, CTRL1_CLK_STABLE, 100_000)) return -1;
@@ -262,17 +268,19 @@ pub fn init() i32 {
     emmc_write(&r.irpt_mask, 0xFFFF_FFFF);
     delay_us(2_000);
 
-    main_output(MU, "[Debug] EMMC2 pre-CMD0 status=0x");
-    main_output_u64(MU, r.status);
-    main_output(MU, " ctrl0=0x");
-    main_output_u64(MU, r.control0);
-    main_output(MU, " ctrl1=0x");
-    main_output_u64(MU, r.control1);
-    main_output(MU, " ctrl2=0x");
-    main_output_u64(MU, r.control2);
-    main_output(MU, " mask=0x");
-    main_output_u64(MU, r.irpt_mask);
-    main_output(MU, "\n");
+    if (DIAG) {
+        main_output(MU, "[Debug] EMMC2 pre-CMD0 status=0x");
+        main_output_u64(MU, r.status);
+        main_output(MU, " ctrl0=0x");
+        main_output_u64(MU, r.control0);
+        main_output(MU, " ctrl1=0x");
+        main_output_u64(MU, r.control1);
+        main_output(MU, " ctrl2=0x");
+        main_output_u64(MU, r.control2);
+        main_output(MU, " mask=0x");
+        main_output_u64(MU, r.irpt_mask);
+        main_output(MU, "\n");
+    }
 
     // 3. CMD0 — GO_IDLE_STATE. No response; the card transitions to idle.
     //    Triple-issue with 5 ms gaps. Pi 4 firmware can hand off with
@@ -283,18 +291,20 @@ pub fn init() i32 {
     //    back to Idle when the card was warm-handed-off. Three sends
     //    with 5 ms gaps gives the card-side state machine time to
     //    transition, per SD PLSS §4.4 NCC + post-reset settle.
-    main_output(MU, "[Debug] EMMC2 step 3 CMD0 (x3)\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 3 CMD0 (x3)\n");
     var cmd0_try: u32 = 0;
     while (cmd0_try < 3) : (cmd0_try += 1) {
         if (send_cmd(sdhci.CMD0_GO_IDLE, 0, BLKSIZECNT_NONE) < 0) return -1;
         delay_us(5_000);
     }
 
-    main_output(MU, "[Debug] EMMC2 post-CMD0 status=0x");
-    main_output_u64(MU, r.status);
-    main_output(MU, " intr=0x");
-    main_output_u64(MU, r.interrupt);
-    main_output(MU, "\n");
+    if (DIAG) {
+        main_output(MU, "[Debug] EMMC2 post-CMD0 status=0x");
+        main_output_u64(MU, r.status);
+        main_output(MU, " intr=0x");
+        main_output_u64(MU, r.interrupt);
+        main_output(MU, "\n");
+    }
 
     // Extra settle after CMD0 burst, before CMD8 — covers post-state-
     // transition NCC plus internal card-clock domain crossing.
@@ -302,7 +312,7 @@ pub fn init() i32 {
 
     // 4. CMD8 — SEND_IF_COND. Echo the 0xAA check pattern back in R7;
     //    mismatch means pre-v2.0 card or out-of-range voltage rail.
-    main_output(MU, "[Debug] EMMC2 step 4 CMD8\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 4 CMD8\n");
     if (send_cmd(sdhci.CMD8_SEND_IF_COND, sdhci.CMD8_ARG_VHS_27_36_CHECK_AA, BLKSIZECNT_NONE) < 0) {
         // CMD8 timeout = no card present or unreadable card. Fail
         // cleanly; kernel.zig logs `EMMC2 init FAILED` and degrades
@@ -310,7 +320,7 @@ pub fn init() i32 {
         return -1;
     }
     if ((r.resp0 & 0xFF) != 0xAA) {
-        main_output(MU, "[Debug] EMMC2 step 4 CMD8 echo mismatch\n");
+        if (DIAG) main_output(MU, "[Debug] EMMC2 step 4 CMD8 echo mismatch\n");
         return -1;
     }
 
@@ -318,7 +328,7 @@ pub fn init() i32 {
     //    OCR (resp0) is set, indicating card power-up complete. Each
     //    ACMD requires a preceding CMD55 (APP_CMD); failures inside
     //    the loop are tolerated because the next pass re-issues both.
-    main_output(MU, "[Debug] EMMC2 step 5 ACMD41\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 5 ACMD41\n");
     var tries: u32 = 0;
     while (tries < 100) : (tries += 1) {
         _ = send_cmd(sdhci.CMD55_APP_CMD, 0, BLKSIZECNT_NONE);
@@ -331,29 +341,29 @@ pub fn init() i32 {
     // 6. CMD2 — ALL_SEND_CID. R2 lands in resp0..resp3; the CID is
     //    not consumed past init, but the card must transition through
     //    this state to accept CMD3.
-    main_output(MU, "[Debug] EMMC2 step 6 CMD2\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 6 CMD2\n");
     if (send_cmd(sdhci.CMD2_ALL_SEND_CID, 0, BLKSIZECNT_NONE) < 0) return -1;
 
     // 7. CMD3 — SEND_REL_ADDR. R6: RCA in resp0[31:16]. Subsequent
     //    addressed commands (CMD7, CMD9) use this in arg[31:16].
-    main_output(MU, "[Debug] EMMC2 step 7 CMD3\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 7 CMD3\n");
     if (send_cmd(sdhci.CMD3_SEND_REL_ADDR, 0, BLKSIZECNT_NONE) < 0) return -1;
     rca = r.resp0 & 0xFFFF_0000;
 
     // 8. CMD9 — SEND_CSD. R2 again; parseCsdV2 rejects pre-SDHC v1.0
     //    cards (CSD_STRUCTURE = 0) which this driver does not
     //    support.
-    main_output(MU, "[Debug] EMMC2 step 8 CMD9\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 8 CMD9\n");
     if (send_cmd(sdhci.CMD9_SEND_CSD, rca, BLKSIZECNT_NONE) < 0) return -1;
     const csd = sdhci.parseCsdV2(.{ r.resp0, r.resp1, r.resp2, r.resp3 }) catch {
-        main_output(MU, "[Debug] EMMC2 step 8 CSD parse failed (v1 card?)\n");
+        if (DIAG) main_output(MU, "[Debug] EMMC2 step 8 CSD parse failed (v1 card?)\n");
         return -1;
     };
     capacity_blocks = csd.capacity_blocks;
 
     // 9. CMD7 — SELECT_CARD. Moves the card into the transfer state so
     //    CMD17 / CMD24 are legal.
-    main_output(MU, "[Debug] EMMC2 step 9 CMD7\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 9 CMD7\n");
     if (send_cmd(sdhci.CMD7_SELECT_CARD, rca, BLKSIZECNT_NONE) < 0) return -1;
 
     // 10. Transfer-mode clock (~25 MHz). Divisor derived from the same
@@ -364,7 +374,7 @@ pub fn init() i32 {
     //     longer triggered (the 2-SD-clock window shrinks below CPU
     //     instruction-pair spacing only at the ID clock), so clear
     //     `low_clock` here and skip the per-write delay from now on.
-    main_output(MU, "[Debug] EMMC2 step 10 switch_clk\n");
+    if (DIAG) main_output(MU, "[Debug] EMMC2 step 10 switch_clk\n");
     const tx_div = sdhci.clockDivisor(base_clock_hz, 25_000_000);
     var c1 = r.control1;
     c1 &= ~CTRL1_CLK_EN;
@@ -395,7 +405,7 @@ const BLKSIZECNT_512x1: u32 = (@as(u32, 1) << 16) | 512;
 fn send_cmd(cmdtm: u32, arg: u32, blksizecnt: u32) i32 {
     const r = regs();
     if (!busy_wait_clear(&r.status, STATUS_CMD_INHIBIT, SPIN_CMD)) {
-        main_output(MU, "[Debug] send_cmd CMD_INHIBIT stuck\n");
+        if (DIAG) main_output(MU, "[Debug] send_cmd CMD_INHIBIT stuck\n");
         return -1;
     }
     // Clear any stale CMD_DONE / error bits left from a previous command.
@@ -411,19 +421,23 @@ fn send_cmd(cmdtm: u32, arg: u32, blksizecnt: u32) i32 {
     while (spin < SPIN_CMD) : (spin += 1) {
         const irpt = r.interrupt;
         if ((irpt & INTERRUPT_ERR_MASK) != 0) {
-            main_output(MU, "[Debug] send_cmd ERR_MASK irpt=0x");
-            main_output_u64(MU, irpt);
-            main_output(MU, " status=0x");
-            main_output_u64(MU, r.status);
-            main_output(MU, " resp0=0x");
-            main_output_u64(MU, r.resp0);
-            main_output(MU, " resp1=0x");
-            main_output_u64(MU, r.resp1);
-            main_output(MU, "\n");
+            if (DIAG) {
+                main_output(MU, "[Debug] send_cmd ERR_MASK irpt=0x");
+                main_output_u64(MU, irpt);
+                main_output(MU, " status=0x");
+                main_output_u64(MU, r.status);
+                main_output(MU, " resp0=0x");
+                main_output_u64(MU, r.resp0);
+                main_output(MU, " resp1=0x");
+                main_output_u64(MU, r.resp1);
+                main_output(MU, "\n");
+            }
             emmc_write(&r.interrupt, INTERRUPT_ERR_MASK);
-            main_output(MU, "[Debug] send_cmd post-clear intr=0x");
-            main_output_u64(MU, r.interrupt);
-            main_output(MU, "\n");
+            if (DIAG) {
+                main_output(MU, "[Debug] send_cmd post-clear intr=0x");
+                main_output_u64(MU, r.interrupt);
+                main_output(MU, "\n");
+            }
             return -1;
         }
         if ((irpt & INTERRUPT_CMD_DONE) != 0) {
@@ -431,11 +445,13 @@ fn send_cmd(cmdtm: u32, arg: u32, blksizecnt: u32) i32 {
             return 0;
         }
     }
-    main_output(MU, "[Debug] send_cmd CMD_DONE timeout status=0x");
-    main_output_u64(MU, r.status);
-    main_output(MU, " irpt=0x");
-    main_output_u64(MU, r.interrupt);
-    main_output(MU, "\n");
+    if (DIAG) {
+        main_output(MU, "[Debug] send_cmd CMD_DONE timeout status=0x");
+        main_output_u64(MU, r.status);
+        main_output(MU, " irpt=0x");
+        main_output_u64(MU, r.interrupt);
+        main_output(MU, "\n");
+    }
     return -1;
 }
 
@@ -538,20 +554,22 @@ pub fn write_block(lba: u32, buf: *const [512]u8) callconv(.c) i32 {
 }
 
 fn log_io_fail(tag: [*:0]const u8, word_idx: u32) void {
-    const r = regs();
-    main_output(MU, "[Debug] EMMC2 ");
-    main_output(MU, tag);
-    if (word_idx != 0xFFFFFFFF) {
-        main_output(MU, " word=0x");
-        main_output_u64(MU, word_idx);
+    if (DIAG) {
+        const r = regs();
+        main_output(MU, "[Debug] EMMC2 ");
+        main_output(MU, tag);
+        if (word_idx != 0xFFFFFFFF) {
+            main_output(MU, " word=0x");
+            main_output_u64(MU, word_idx);
+        }
+        main_output(MU, " status=0x");
+        main_output_u64(MU, r.status);
+        main_output(MU, " intr=0x");
+        main_output_u64(MU, r.interrupt);
+        main_output(MU, " resp0=0x");
+        main_output_u64(MU, r.resp0);
+        main_output(MU, "\n");
     }
-    main_output(MU, " status=0x");
-    main_output_u64(MU, r.status);
-    main_output(MU, " intr=0x");
-    main_output_u64(MU, r.interrupt);
-    main_output(MU, " resp0=0x");
-    main_output_u64(MU, r.resp0);
-    main_output(MU, "\n");
 }
 
 // Polled-bit helpers. Returns true on the bit reaching the target

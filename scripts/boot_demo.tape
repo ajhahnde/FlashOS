@@ -28,4 +28,4 @@ Type@5ms "python3 scripts/boot_demo_typing.py"
 Enter
 Show
 
-Sleep 19s
+Sleep 21s

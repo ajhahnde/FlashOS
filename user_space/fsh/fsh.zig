@@ -16,7 +16,7 @@
 // The pure tokenizer lives in tokenize.zig and is host-tested in
 // isolation; this file is the SVC-driving shell loop, exercised end to
 // end by the PID-1 hand-off: init execs /bin/fsh after the harness, and
-// the boot watchdog treats the `[Debug] fsh init OK` marker fsh prints at REPL
+// the boot watchdog treats the `[ OK ] Reached target Shell.` marker fsh prints at REPL
 // entry as the boot success signal (reaching the prompt = pass).
 
 const flibc = @import("flibc");
@@ -41,7 +41,8 @@ const PROMPT_USER = "$ ";
 // One-time marker emitted when fsh reaches its interactive REPL. The QEMU
 // boot watchdog (scripts/run_qemu_test.sh) treats this line as the boot
 // success signal: a boot that reaches the interactive prompt is a pass.
-const READY = "\n[Debug] fsh init OK\n";
+const OK = "[ OK ] ";
+const READY = OK ++ "Reached target Shell.\n\n";
 const HELP_TEXT =
     "fsh built-ins: cd [dir]  exit  help  free  whoami\n" ++
     "external: <cmd> [args]   one pipe: <cmd> | <cmd>\n";

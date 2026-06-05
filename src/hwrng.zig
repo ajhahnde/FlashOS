@@ -89,6 +89,8 @@ pub fn fill(buf: []u8) Source {
 // the time the EL0 harness scenario snapshots it. Allocates nothing —
 // the free-page baseline emitted right after is unaffected.
 export fn hwrng_init() void {
+    const OK = "[ OK ] ";
+    const WARN = "[WARN] ";
     mixer = Mixer.init(get_sys_count());
 
     // Self-test: two draws must differ. A stuck counter or a mixer
@@ -104,10 +106,10 @@ export fn hwrng_init() void {
         if (a[i] != b[i]) same = false;
     }
     if (same) {
-        main_output(MU, "[Debug] hwrng: self-test failed (constant output)\n");
+        main_output(MU, WARN ++ "hwrng: self-test failed (constant output)\n");
         return;
     }
-    main_output(MU, "[Debug] hwrng: fallback (timer mix, weak) ok\n");
+    main_output(MU, OK ++ "hwrng: fallback (timer mix, weak) ok\n");
 }
 
 // ---- Host tests ----

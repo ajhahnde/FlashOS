@@ -10,6 +10,15 @@ const task_layout = @import("task_layout");
 const MU: i32 = 0;
 const PL: i32 = 1;
 
+// Boot status-line prefixes (systemd-style). Single source for the boot log:
+// edit these to restyle every "[ OK ] …" / "[SKIP] …" / "[WARN] …" bring-up
+// line at once. Cosmetic — none are grepped by the boot contract. (The
+// user-space contract markers in fsh.zig / login_elf.zig mirror OK; a change
+// here means changing them + the run_qemu_test.sh greps too.)
+const OK = "[ OK ] ";
+const SKIP = "[SKIP] ";
+const WARN = "[WARN] ";
+
 const KTHREAD: u64 = 1;
 
 // IRQ numbers
@@ -75,10 +84,6 @@ export var state: u32 = 0;
 /// TTBR1-mapped, no allocation) go to `prepare_move_to_user_elf`,
 /// the same loader the exec-elf / flibc test payloads use.
 export fn kernel_process() void {
-    main_output(MU, "pid 1 started in EL");
-    main_output_char(MU, @intCast(get_el() + '0'));
-    main_output(MU, "\n");
-
     const entry = (initramfs.locate("/sbin/init") catch null) orelse {
         main_output(MU, "PID 1: /sbin/init missing from initramfs\n");
         return;
@@ -167,23 +172,23 @@ export fn kernel_main_impl(id: u64) void {
             mem_map_reserve_above(0x80000000);
         }
 
-        // Mini-UART first so the [Debug] checkpoints land on the same cable
+        // Mini-UART first so the boot status lines land on the same cable
         // (pin 14/15) as the exception handler's "ERROR CAUGHT" output.
         mini_uart_init();
-        main_output(MU, "[Debug] Mini-UART initialized\n");
+        main_output(MU, OK ++ "Initialized Mini-UART console.\n");
 
         pl011_uart_init();
-        main_output(MU, "[Debug] PL011 initialized\n");
+        main_output(MU, OK ++ "Initialized PL011 trace UART.\n");
 
         irq_init_vectors();
-        main_output(MU, "[Debug] IRQ vectors loaded\n");
+        main_output(MU, OK ++ "Loaded exception vectors.\n");
 
         // Board-specific GIC bring-up: GICv3 needs ICC_*_EL1 + per-core
         // redistributor wakeup. Pi's GICv2 inlines to nothing.
         board.irq.board_irq_init();
 
         enable_interrupt_gic(VC_AUX_IRQ, @intCast(id));
-        main_output(MU, "[Debug] GIC enabled\n");
+        main_output(MU, OK ++ "Enabled interrupt controller.\n");
 
         // USB-OTG gadget bring-up (DWC2). The device MMIO at 0xFE980000 is
         // already device-mapped by boot.S, so this needs no page allocator.
@@ -191,22 +196,22 @@ export fn kernel_main_impl(id: u64) void {
         // -1 and the polled console simply never enumerates. Serviced from
         // the PID-0 idle loop below.
         if (board.usb.usb_init() < 0) {
-            main_output(MU, "[Debug] USB init FAILED (no controller?)\n");
+            main_output(MU, SKIP ++ "USB gadget (no controller).\n");
         } else {
-            main_output(MU, "[Debug] USB init OK\n");
+            main_output(MU, OK ++ "Started USB gadget.\n");
         }
 
         ksyms_init();
-        main_output(MU, "[Debug] ksyms done\n");
+        main_output(MU, OK ++ "Loaded kernel symbols.\n");
 
         sys_call_table_relocate();
-        main_output(MU, "[Debug] Syscalls relocated\n");
+        main_output(MU, OK ++ "Relocated syscall table.\n");
 
         trace_init();
-        main_output(MU, "[Debug] trace_init done\n");
+        main_output(MU, OK ++ "Initialized trace subsystem.\n");
 
         trace_output_kernel_pts(PL);
-        main_output(MU, "[Debug] trace_output_kernel_pts done\n");
+        main_output(MU, OK ++ "Started kernel trace output.\n");
 
         // VFS root mount bring-up. initramfs_backend
         // only sets pointers — no get_free_page — so it slots in ahead
@@ -214,7 +219,7 @@ export fn kernel_main_impl(id: u64) void {
         // /mnt mount is wired later, after board.emmc2.init() has wired
         // block_dev.sd_dev (fat32_backend.init issues block reads).
         initramfs_backend.init();
-        main_output(MU, "[Debug] VFS initramfs registered\n");
+        main_output(MU, OK ++ "Mounted initramfs root.\n");
 
         // Block-device bring-up. On virt
         // the memory-backed fake never fails — graceful degradation
@@ -224,25 +229,27 @@ export fn kernel_main_impl(id: u64) void {
         // shot: it exercises the BlockDev vtable end-to-end and
         // proves init() wired `block_dev.sd_dev`.
         if (board.emmc2.init() < 0) {
-            main_output(MU, "[Debug] EMMC2 init FAILED\n");
+            main_output(MU, SKIP ++ "EMMC2 block device (init failed).\n");
         } else {
-            main_output(MU, "[Debug] EMMC2 init OK\n");
-            run_emmc2_smoke();
+            main_output(MU, OK ++ "Initialized EMMC2 block device.\n");
+            // Pre-PID-1 block-device smoke — part of the boot-as-test path,
+            // gated so a clean (non-selftest) boot stays quiet.
+            if (build_options.boot_selftest) run_emmc2_smoke();
             // FAT32 /mnt mount — needs block_dev.sd_dev, wired just
             // above by board.emmc2.init(). Fails soft: a blank/bad
             // disk leaves mount_table[1] null and /mnt/* resolves to
             // ENOENT.
             if (fat32_backend.init() < 0) {
-                main_output(MU, "[Debug] VFS fat32 mount failed (slot null)\n");
+                main_output(MU, SKIP ++ "/mnt (no FAT32 volume).\n");
             } else {
-                main_output(MU, "[Debug] VFS fat32 mounted\n");
+                main_output(MU, OK ++ "Mounted /mnt (FAT32).\n");
                 // Permission overlay: init() parsed PERMS.TAB
                 // into the backend's table. A mounted volume without a
                 // parseable overlay is the loud anti-brick announcement:
                 // /mnt runs on defaults (shadow floored 0600 root:root)
                 // until the operator reseeds the overlay file.
                 if (!fat32_backend.overlay_ok) {
-                    main_output(MU, "[Debug] /mnt overlay missing or corrupt - defaults active, shadow floored\n");
+                    main_output(MU, WARN ++ "/mnt overlay missing - defaults active, shadow floored.\n");
                 }
             }
         }
@@ -257,7 +264,7 @@ export fn kernel_main_impl(id: u64) void {
         // Boot-time free-page baseline. Logged before any task is created
         // so the user-space dumps later in the trace can be compared
         // against this absolute reference.
-        _ = dump_free_count();
+        if (build_options.boot_selftest) _ = dump_free_count();
 
         state = 0;
     }
@@ -265,18 +272,13 @@ export fn kernel_main_impl(id: u64) void {
     // single core for now
     while (id != 0) {}
 
-    // startup message and EL
-    main_output(MU, "Bare Metal... (core ");
+    // startup banner — one clean status line per core
+    main_output(MU, OK ++ "Booted core ");
     main_output_char(MU, @intCast(id + '0'));
-    main_output(MU, ")\n");
-    delay(30000);
-    main_output(MU, "EL: ");
+    main_output(MU, " (EL");
     main_output_char(MU, @intCast(get_el() + '0'));
-    main_output(MU, "\n");
-    // syscount
-    const sys_count: u64 = get_sys_count();
-    main_output_u64(MU, sys_count);
-    main_output(MU, "\n");
+    main_output(MU, ").\n");
+    delay(30000);
 
     // generic timer and timer IRQ (vectors already loaded on core 0)
     generic_timer_init();
@@ -289,7 +291,6 @@ export fn kernel_main_impl(id: u64) void {
     while (true) {
         if (id != 0 or state != 1) continue;
         sched_init();
-        main_output_process(MU, current.?);
         // create pid 1, kernel threads don't need a user stack page
         const res = copy_process(KTHREAD, @intFromPtr(&kernel_process), 0);
         if (res <= 0) {

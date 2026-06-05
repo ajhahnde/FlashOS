@@ -1,6 +1,7 @@
 arm_64bit=1
 disable_commandline_tags=1
-uart_2ndstage=1
+uart_2ndstage=0
+disable_splash=1
 enable_uart=1
 dtoverlay=miniuart-bt
 kernel=kernel8.img

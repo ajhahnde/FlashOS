@@ -130,7 +130,7 @@ piconnect() {
 # session. The log always lands at $_FLASHOS_DIR/boot.log (covered by the
 # repo .gitignore), regardless of the current directory.
 #   picapture        usb mode (default): wait for the CDC gadget to enumerate
-#                    on /dev/cu.usbmodem*, then wait for the `[Debug] fsh init OK` marker
+#                    on /dev/cu.usbmodem*, then wait for the `[ OK ] Reached target Shell.` marker
 #   picapture mu     mini-UART mode: capture /dev/cu.usbserial-* until the
 #                    harness prints its `N/N passed` tally (green; the shipping
 #                    kernel then waits at the real `login:` prompt) or a
@@ -228,14 +228,14 @@ picapture() {
           result="failed"
           break
         fi
-        # Success = the in-kernel harness printed its green `N/N passed`
-        # tally. This fires for both the shipping kernel (which then stops at
-        # the password-gated real `login:` prompt) and the -Dci-login-seed CI
-        # kernel (which auto-logs-in past it). The `[Debug] fsh init OK` marker
-        # cannot anchor success here: the shipping kernel prints it only for
-        # the two scripted [TEST] login sessions, never for the real boot
-        # login, so waiting on it hangs the capture to the timeout.
-        if grep -qE "[0-9]+/[0-9]+ passed" "$logfile"; then
+        # Success = the boot reached the `login:` prompt. The shipping/deploy
+        # kernel boots clean (no self-test harness unless built with
+        # -Dboot-selftest) straight to the password-gated `login:`, so reaching
+        # it is the boot-complete signal. A -Dboot-selftest build also prints a
+        # `N/N passed` tally first; accept either. (The `[ OK ] Reached target
+        # Shell.` marker cannot anchor here: the deploy kernel never auto-logs-
+        # in, so it never reaches fsh on a real boot — waiting on it hangs.)
+        if grep -qF "login:" "$logfile" || grep -qE "[0-9]+/[0-9]+ passed" "$logfile"; then
           result="success"
           break
         fi
@@ -244,7 +244,7 @@ picapture() {
   else
     # Stuff a CR each second to wake/keep the session (readline submits on CR,
     # an empty line is a no-op dispatch), and watch for the one-time boot marker
-    # `[Debug] fsh init OK` — the same interactive-REPL signal run_qemu_test.sh
+    # `[ OK ] Reached target Shell.` — the same interactive-REPL signal run_qemu_test.sh
     # and mu-mode trust. The shell prompt is `# ` / `$ `; it never prints `>>> `.
     # `-p 0` is mandatory: a born-detached (-dmS) session has no current
     # window on macOS screen 4.00.03, so -X stuff silently goes nowhere
@@ -259,7 +259,7 @@ picapture() {
         result="died"
         break
       fi
-      if [[ -f "$logfile" ]] && grep -qF "[Debug] fsh init OK" "$logfile"; then
+      if [[ -f "$logfile" ]] && grep -qF "[ OK ] Reached target Shell." "$logfile"; then
         result="success"
         break
       fi

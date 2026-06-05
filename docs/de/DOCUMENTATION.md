@@ -637,7 +637,7 @@ R+X-PT_LOAD, in die jede Payload linkt, kein beschreibbares `.bss` trägt.
   den Kernel, das Passwort gegen die aktive Shadow-Datenbank zu
   verifizieren (`sys_authenticate`, §5), schlägt den User in `/etc/passwd`
   nach (der gemeinsame `src/pwfile.zig`-Parser), druckt den
-  per-Session-`[Debug] login OK`-Marker und **forkt** dann ein Child, das
+  per-Session-`[ OK ] Authenticated.`-Marker und **forkt** dann ein Child, das
   Privilegien über `setgid` + `setuid` droppt (gid zuerst, während noch
   root) und die Shell des Users per exec startet — login selbst bleibt root, wartet,
   reaped und fragt erneut. `exit` in fsh ist daher ein Logout zurück zu
@@ -647,7 +647,7 @@ R+X-PT_LOAD, in die jede Payload linkt, kein beschreibbares `.bss` trägt.
   optionales argv-Session-Limit (`/bin/login 2`) lässt es nach N Sessions
   exiten — der Hook des `[TEST] login`-Schlusssteins (§8). **Das Erreichen
   des interaktiven Prompts ist das Boot-Erfolgssignal:** fsh druckt
-  `[Debug] fsh init OK` beim REPL-Eintritt und zeigt `#` (root) oder `$`
+  `[ OK ] Reached target Shell.` beim REPL-Eintritt und zeigt `#` (root) oder `$`
   (alle anderen) als seinen Prompt; mit den zwei gescripteten Sessions von
   `[TEST] login` wartet der CI-QEMU-watchdog (`scripts/run_qemu_test.sh`)
   auf das **dritte** `fsh init OK` (dann SIGTERMt er) und assertet genau
@@ -1333,7 +1333,7 @@ Kernel-Zustand übt:
   jede Session, forkt ein Child, das Privilegien droppt und die Shell
   per exec startet, reaped es bei `exit` und fragt erneut — der volle
   Supervisor-Lifecycle durch das echte Binary. Jede Session gibt die
-  `[Debug] login OK` / `[Debug] fsh init OK`-Marker aus, sodass ein grüner
+  `[ OK ] Authenticated.` / `[ OK ] Reached target Shell.`-Marker aus, sodass ein grüner
   Boot drei von jedem trägt (zwei von hier + der echte Boot-Login);
   `scripts/run_qemu_test.sh` keyt sein Erfolgskriterium und guardet auf
   genau diese Counts. Reap-basiert und baseline-neutral — der ganze Baum
@@ -1361,7 +1361,7 @@ identisch unter QEMU (`zig build -Dboard=virt run-virt` /
 Baseline-Checkpoints (`0xbbff2` rpi4b / `0x3be4a` virt) und 0
 `ERROR CAUGHT` auf beiden Boards, übergibt dann an `/bin/login` →
 `/bin/fsh`. Mit dem Login-Lifecycle erscheinen die
-`[Debug] login OK`- und `[Debug] fsh init OK`-Marker jeweils **dreimal**
+`[ OK ] Authenticated.`- und `[ OK ] Reached target Shell.`-Marker jeweils **dreimal**
 pro Boot — zweimal von den gescripteten Sessions von `[TEST] login` und
 einmal vom echten Boot-Login — und der CI-watchdog (§4) zählt genau das
 (sein Early-Exit feuert beim dritten Shell-Marker). (In QEMU ist der
@@ -1393,7 +1393,7 @@ eine absolute `CNTP_CVAL`-Deadline mit einem Catch-up-Clamp um; der Flap
 hat sich seither nicht reproduziert (14 aufeinanderfolgende grüne
 Pi-4-Boots beim Release). QEMU-Läufe waren nie betroffen — beide Boards
 waren durchgehend deterministisch. Das Boot-Erfolgskriterium (der
-`[Debug] fsh init OK`-Marker, den der watchdog matcht, siehe §4 PID-1 →
+`[ OK ] Reached target Shell.`-Marker, den der watchdog matcht, siehe §4 PID-1 →
 fsh-Übergabe) ist von der Bilanz so oder so unabhängig: ein einzelner
 später Tick erreicht trotzdem den interaktiven Prompt, und der
 no-`[FAIL]`- / Checkpoint-Count-Guard des watchdogs fängt trotzdem ein
@@ -1521,7 +1521,7 @@ end-to-end auf QEMU + Pi 4 üben.
 | `src/hwrng.zig`               |          6 | `rng`                                                                                               | der reine SplitMix64-Mixer ist auf dem Host vektor- und differential-getestet; der Kernel-Glue (`fill` / die `hwrng_init`-Ankündigung) ist von `[TEST] rng` durch den klog-Ring integrationsgetestet                                                  |
 | `user_space/lib/flibc/readline.zig` |   13 | (PID-1-Übergabe)                                                                                  | reine Byte→Buffer-Line-Editor-State-Machine; der SVC-Treiber sitzt hinter einem comptime-`has_driver`-Gate, sodass der Host-Build nie Inline-Asm analysiert; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                          |
 | `user_space/lib/flibc/execvp.zig`   |   13 | (PID-1-Übergabe)                                                                                  | reiner `/bin/<name>`-Path-Build; SVC-Treiber gegated wie `readline`; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                                                                                                          |
-| `user_space/fsh/tokenize.zig`       |   11 | (PID-1-Übergabe)                                                                                  | reiner Whitespace-Split + Single-Pipe-Dekomposition; der Shell-Treiber (`fsh.zig`) ist nur integrationsgetestet über die PID-1 → fsh-Übergabe (der `[Debug] fsh init OK`-Boot-Erfolgsmarker)                                                                                                                     |
+| `user_space/fsh/tokenize.zig`       |   11 | (PID-1-Übergabe)                                                                                  | reiner Whitespace-Split + Single-Pipe-Dekomposition; der Shell-Treiber (`fsh.zig`) ist nur integrationsgetestet über die PID-1 → fsh-Übergabe (der `[ OK ] Reached target Shell.`-Boot-Erfolgsmarker)                                                                                                                     |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | gemeinsamer Bump-Allocator-Helper, von anderen Test-Roots konsumiert; trägt keine eigenen inline-Tests                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | Runtime-Code-Patching; keine ICache-Sync host-seitig                                                                                                                                                                                              |
 | `src/trace/fp_walk.zig`       |          6 | — (rein Host)                                                                                       | AAPCS64-Frame-Record-Decoder für den `-Dtrace`-Sampler; die FP-Walk-Bounds- / Wrap- / Alignment- / Monotonic-Guards sind host-verifiziert (der Live-Sampler feuert nur auf echten Pi-Async-Timer-Ticks)                                                  |
@@ -1550,14 +1550,14 @@ eigenen Zeile und einmal innerhalb des Steps von `fork.zig`. 345 + 16 =
 | `[PASS] <name>`       | Szenario mit der erwarteten Free-Page-Zahl abgeschlossen           |
 | `[FAIL] <name>`       | Szenario mit einem Leak oder falschem Rückgabewert beendet          |
 | `X/Y passed`          | Finale Bilanz;`X == Y` ist die Green-Run-Bedingung               |
-| `[Debug] login OK`          | Auth-Erfolgsmarker — `/bin/login` hat die Credentials verifiziert und Privilegien gedroppt; der QEMU-watchdog assertet, dass er genau einmal erscheint |
-| `[Debug] fsh init OK`          | Boot-Erfolgsmarker — fsh hat seine interaktive REPL erreicht; der QEMU-watchdog und der Real-HW-`picapture`-Helper warten beide darauf |
+| `[ OK ] Authenticated.`          | Auth-Erfolgsmarker — `/bin/login` hat die Credentials verifiziert und Privilegien gedroppt; der QEMU-watchdog assertet, dass er genau einmal erscheint |
+| `[ OK ] Reached target Shell.`          | Boot-Erfolgsmarker — fsh hat seine interaktive REPL erreicht; der QEMU-watchdog und der Real-HW-`picapture`-Helper warten beide darauf |
 | `ERROR CAUGHT`        | Kernel-seitiger Fault (Data Abort, Instruction Abort usw.)          |
 | `kill ok`, `exec-elf ok` | Per-Szenario-Fortschritts-Prints                                   |
 
 Greens erfordern: `X == Y`, alle `[PASS]` kein `[FAIL]`, 0 `ERROR CAUGHT`,
 31 per-Szenario-Checkpoints + 1 Boot-Baseline und die
-`[Debug] login OK`- und `[Debug] fsh init OK`-Marker ausgegeben.
+`[ OK ] Authenticated.`- und `[ OK ] Reached target Shell.`-Marker ausgegeben.
 
 ## 9. Build-Artefakte
 

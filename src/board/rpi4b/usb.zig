@@ -60,6 +60,7 @@ extern fn preempt_enable() void;
 // Flip to 1 (PL011/UART4, GPIO8-9) if a second adapter is wired and you
 // want USB trace off the console cable.
 const TRACE: i32 = 0;
+const TRACE_VERBOSE: bool = false; // gate the [usb] bring-up dump; flip to true to debug USB enumeration
 
 // Per-packet bulk trace (EP2 OUT byte counts, EP2 IN chunk sizes). Off by
 // default so normal operation leaves the MU trace readable; flip on for HW
@@ -278,9 +279,11 @@ fn delay_us(us: u64) void {
 // ---------------------------------------------------------------------------
 
 fn trace(s: [*:0]const u8) void {
+    if (!TRACE_VERBOSE) return;
     main_output(TRACE, s);
 }
 fn traceHex(s: [*:0]const u8, v: u64) void {
+    if (!TRACE_VERBOSE) return;
     main_output(TRACE, s);
     main_output_u64(TRACE, v);
     main_output(TRACE, "\n");
