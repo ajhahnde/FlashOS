@@ -198,8 +198,11 @@ el0_svc:
     cmp x26, x25
     /* branch if syscall number >= NR_SYSCALLS */
     b.hs invalid_syscall_num
-    /* call syscall */
+    /* call syscall — guard against a null table slot. All NR_SYSCALLS slots
+       are filled today; a future renumber that leaves a hole would otherwise
+       `blr` to address 0 from EL1. cbz keeps that a clean -ENOSYS instead. */
     ldr x16, [x27, x26, lsl #3]
+    cbz x16, invalid_syscall_num
     blr x16
     b ret_from_syscall
 
