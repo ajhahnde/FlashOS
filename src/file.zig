@@ -7,10 +7,10 @@
 // meaning. The fd-table proper — installing a `File` into a task's
 // `fds` slots, dup/close on fork/reap — lives in src/fdtable.zig.
 //
-// One get_free_page per `File`. sizeof(File) = 56 (the
-// `sb` superblock pointer + the permission metadata, padded to
-// the u64 alignment), so the page hosts
-// ~73 Files; one page per open is allocated and returned on close.
+// One get_free_page per `File`. sizeof(File) = 64 (the
+// `sb` superblock pointer + the permission metadata + the dir-entry
+// location, padded to the u64 alignment), so the page hosts
+// ~64 Files; one page per open is allocated and returned on close.
 // Future work will pool these. The page is **not** tracked in
 // mm.user_pages / mm.kernel_pages — File.refs owns the page
 // lifetime, same posture as src/pipe.zig.
@@ -92,6 +92,9 @@ test "alloc returns a zero-initialised File" {
     try std.testing.expectEqual(@as(u32, 0), f.mode);
     try std.testing.expectEqual(@as(u32, 0), f.uid);
     try std.testing.expectEqual(@as(u32, 0), f.gid);
+    // Dir-entry location starts unset.
+    try std.testing.expectEqual(@as(u32, 0), f.dirent_lba);
+    try std.testing.expectEqual(@as(u32, 0), f.dirent_off);
 }
 
 test "ftype tag round-trips through extern struct" {

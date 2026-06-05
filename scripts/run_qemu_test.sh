@@ -23,8 +23,8 @@
 # for the seeded kernel.
 #
 # Expected success picture:
-#   * 27 EL0 scenarios, all `[PASS]` (no `[FAIL]`)
-#   * 31 × per-scenario checkpoint at the board's PID-1 baseline
+#   * 28 EL0 scenarios, all `[PASS]` (no `[FAIL]`)
+#   * 32 × per-scenario checkpoint at the board's PID-1 baseline
 #   *  1 × initial boot-baseline checkpoint (baseline + 0xe = 14 pages,
 #         the PID-1 fork delta over the PID-0 boot snapshot)
 #   *  1 × healthy kernel-entropy announce (`hwrng: ... ok`), 0 × failed
@@ -163,9 +163,9 @@ hwrng_bad=$(grep -cF "hwrng: self-test failed" "$LOG" || true)
 login_ok=$(grep -cF "[ OK ] Authenticated." "$LOG" || true)
 fsh_ok=$(grep -cF "[ OK ] Reached target Shell." "$LOG" || true)
 
-if [ "$errors" -ne 0 ] || [ "$fails" -ne 0 ] || [ "$ok_chk" -ne 31 ] || [ "$ok_base" -ne 1 ] \
+if [ "$errors" -ne 0 ] || [ "$fails" -ne 0 ] || [ "$ok_chk" -ne 32 ] || [ "$ok_base" -ne 1 ] \
     || [ "$hwrng_ok" -ne 1 ] || [ "$hwrng_bad" -ne 0 ] || [ "$login_ok" -ne 3 ] || [ "$fsh_ok" -ne 3 ]; then
-    echo "FAIL (guard): ERROR_CAUGHT=$errors [FAIL]=$fails ${chk_label}=$ok_chk (want 31) ${base_label}=$ok_base (want 1) hwrng_ok=$hwrng_ok (want 1) hwrng_bad=$hwrng_bad (want 0) login_ok=$login_ok (want 3) fsh_ok=$fsh_ok (want 3)" >&2
+    echo "FAIL (guard): ERROR_CAUGHT=$errors [FAIL]=$fails ${chk_label}=$ok_chk (want 32) ${base_label}=$ok_base (want 1) hwrng_ok=$hwrng_ok (want 1) hwrng_bad=$hwrng_bad (want 0) login_ok=$login_ok (want 3) fsh_ok=$fsh_ok (want 3)" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

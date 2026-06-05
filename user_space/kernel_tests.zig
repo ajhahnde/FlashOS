@@ -445,6 +445,16 @@ const MAG_INBOOT_BAD: [*:0]const u8 = "[DBG] mag-inboot=00 (1-byte writeBack REG
 const ROUNDTRIP_DAT_PATH: [*:0]const u8 = "/mnt/roundtr.dat";
 const ROUNDTRIP_MAG_PATH: [*:0]const u8 = "/mnt/roundtr.mag";
 
+// [TEST] fs-empty-write — drives fat32_backend.write's step-0 (give a
+// first_cluster == 0 file its first data cluster). Seeded as a 0-byte
+// /mnt/EMPTY.TXT (make_test_disk.sh + the real Pi card).
+const TEST_FS_EMPTY: [*:0]const u8 = "[TEST] fs-empty-write\n";
+const PASS_FS_EMPTY: [*:0]const u8 = "[PASS] fs-empty-write\n";
+const PASS_FS_EMPTY_SKIP: [*:0]const u8 = "[PASS] fs-empty-write (skip)\n";
+const FAIL_FS_EMPTY: [*:0]const u8 = "[FAIL] fs-empty-write\n";
+const EMPTY_PATH: [*:0]const u8 = "/mnt/empty.txt";
+const EMPTY_MARK = [_]u8{ 'E', 'M', 'P', 'T', 'Y', 'O', 'K', '\n' };
+
 const SLASH: [*:0]const u8 = "/";
 const PASSED_SUFFIX: [*:0]const u8 = " passed\n";
 const D0: [*:0]const u8 = "0";
@@ -1491,6 +1501,86 @@ fn run_fs_roundtrip(baseline: u64) bool {
     }
 }
 
+// fs-empty-write — the empty-file leg of the FAT32 write path:
+// fat32_backend.write step 0 must give a first_cluster == 0 file its
+// first data cluster (allocCluster + updateDirEntryFirstCluster) before
+// the I/O loop, else clusterLba(0) fails closed and the write returns -1.
+// Seeded as a 0-byte /mnt/EMPTY.TXT.
+//
+// Pi-only, like fs-roundtrip: /mnt does not mount under QEMU on either
+// board, so the first open returns -1 → SKIP-PASS (no false FAIL).
+//
+// Not re-runnable in place: once the first write lands, the file owns a
+// cluster and is no longer empty, and EL0 has no truncate to reset it. So
+// a populated re-run (the 1-byte probe reads data, not EOF) SKIPs
+// honestly — re-seed the card (0-byte EMPTY.TXT) to re-arm. A genuine
+// step-0 regression on a freshly-seeded file surfaces as a -1 write or a
+// read-back mismatch → FAIL.
+//
+// sys_dump_free() is called exactly once per invocation in every branch
+// (unmounted-skip / populated-skip / real) so the per-scenario checkpoint
+// count is identical on both boards — the same contract as fs-roundtrip.
+fn run_fs_empty(baseline: u64) bool {
+    sys_writeConsole(TEST_FS_EMPTY);
+
+    // Probe: open + a 1-byte read classifies the file. fd < 0 → /mnt
+    // unmounted (QEMU) → SKIP. read == 0 → empty (the case under test).
+    // read > 0 → already populated by a prior real run → SKIP.
+    const fd_probe = sys_openFile(EMPTY_PATH);
+    if (fd_probe < 0) {
+        _ = sys_dump_free(); // checkpoint-count parity
+        sys_writeConsole(PASS_FS_EMPTY_SKIP);
+        return true;
+    }
+    var probe: [1]u8 = .{0};
+    const pr = sys_read(fd_probe, @intFromPtr(&probe[0]), 1);
+    if (sys_close(fd_probe) != 0) {
+        sys_writeConsole(FAIL_FS_EMPTY);
+        return false;
+    }
+    if (pr != 0) {
+        _ = sys_dump_free(); // checkpoint-count parity (populated re-run)
+        sys_writeConsole(PASS_FS_EMPTY_SKIP);
+        return true;
+    }
+
+    // Real phase (freshly-seeded empty file): the write MUST traverse
+    // step-0 for the bytes to land. A step-0 regression returns -1 here.
+    const fd_w = sys_openFile(EMPTY_PATH);
+    if (fd_w < 0) {
+        sys_writeConsole(FAIL_FS_EMPTY);
+        return false;
+    }
+    const w = sys_write(fd_w, @intFromPtr(&EMPTY_MARK[0]), EMPTY_MARK.len);
+    const cw = sys_close(fd_w);
+    if (w != @as(i64, @intCast(EMPTY_MARK.len)) or cw != 0) {
+        sys_writeConsole(FAIL_FS_EMPTY);
+        return false;
+    }
+
+    // Read it back and byte-compare: proves the cluster was allocated,
+    // recorded in the dir entry, and the data round-trips.
+    const fd_r = sys_openFile(EMPTY_PATH);
+    if (fd_r < 0) {
+        sys_writeConsole(FAIL_FS_EMPTY);
+        return false;
+    }
+    var got: [EMPTY_MARK.len]u8 = .{0} ** EMPTY_MARK.len;
+    const rn = sys_read(fd_r, @intFromPtr(&got[0]), EMPTY_MARK.len);
+    const cr = sys_close(fd_r);
+    var ok = (rn == @as(i64, @intCast(EMPTY_MARK.len)) and cr == 0);
+    if (ok) {
+        var i: usize = 0;
+        while (i < EMPTY_MARK.len) : (i += 1) {
+            if (got[i] != EMPTY_MARK[i]) ok = false;
+        }
+    }
+
+    if (sys_dump_free() != baseline) ok = false;
+    sys_writeConsole(if (ok) PASS_FS_EMPTY else FAIL_FS_EMPTY);
+    return ok;
+}
+
 // ---- Runner ----
 
 // fsh capstone scenario — DISABLED (kept, not deleted). The interactive
@@ -2085,6 +2175,11 @@ const scenarios = [_]Scenario{
     .{ .name = "vfs-dispatch", .run = run_vfs_dispatch },
     .{ .name = "trace", .run = run_trace },
     .{ .name = "fs-roundtrip", .run = run_fs_roundtrip },
+    // fs-empty-write is fs-roundtrip's empty-file sibling: it drives
+    // write()'s step-0 (first-cluster alloc for a first_cluster == 0
+    // file). Pi-only; SKIPs under QEMU and on a populated (non-re-seeded)
+    // re-run. One sys_dump_free per branch → +1 checkpoint.
+    .{ .name = "fs-empty-write", .run = run_fs_empty },
     // .{ .name = "fsh", .run = run_fsh }, // DISABLED — see run_fsh above
     .{ .name = "readdir", .run = run_readdir },
     .{ .name = "klog", .run = run_klog },

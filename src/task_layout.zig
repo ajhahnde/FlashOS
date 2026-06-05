@@ -185,6 +185,16 @@ pub const File = extern struct {
     mode: u32 = 0,
     uid: u32 = 0,
     gid: u32 = 0,
+    // On-disk directory-entry location, copied from OpenResult at open.
+    // FAT32 write() uses it to rewrite the entry's first-cluster (when a
+    // previously empty file gets its first data cluster) and file_size,
+    // without an ambiguous re-walk by first cluster (0 is not unique
+    // across empty files). dirent_off is the byte offset within the
+    // dirent_lba sector. 0 = unset. Appended last; File is never
+    // referenced by raw offset from the .S files, so the append is
+    // layout-safe.
+    dirent_lba: u32 = 0,
+    dirent_off: u32 = 0,
 };
 
 pub const KeRegs = extern struct {

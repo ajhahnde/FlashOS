@@ -1258,6 +1258,11 @@ pub fn build(b: *std.Build) void {
             \\dd if=/dev/zero of="$SD_BOOT/ROUNDTR.DAT" bs=4096 count=1 2>/dev/null
             \\dd if=/dev/zero of="$SD_BOOT/ROUNDTR.MAG" bs=1 count=1 2>/dev/null
             \\rm -f "$SD_BOOT"/._ROUNDTR* 2>/dev/null || true
+            \\# 0-byte EMPTY.TXT for [TEST] fs-empty-write: the first write
+            \\# must allocate this file's first cluster (fat32_backend.write
+            \\# step 0). Stays 0 bytes until that scenario writes it.
+            \\: > "$SD_BOOT/EMPTY.TXT"
+            \\rm -f "$SD_BOOT"/._EMPTY* 2>/dev/null || true
             \\# Identity seeds: the writable shadow (the boot login
             \\# reads it first; passwd rewrites it) + the permission overlay
             \\# that keeps it 0600 root:root. Same bytes as the QEMU image.

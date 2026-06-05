@@ -212,6 +212,12 @@ export fn sys_openFile(path_ptr: u64) i32 {
     f.mode = open_result.mode;
     f.uid = open_result.uid;
     f.gid = open_result.gid;
+    // Directory-entry location: FAT32 write() rewrites the entry's
+    // first-cluster / size through it. Only writable handles (this path)
+    // need it; the read-only open sites below leave the alloc-zeroed
+    // default, and non-FAT backends never set it.
+    f.dirent_lba = open_result.dirent_lba;
+    f.dirent_off = open_result.dirent_off;
 
     const fd = fdtable.install(c, .file, f);
     if (fd < 0) {

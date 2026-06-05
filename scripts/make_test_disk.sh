@@ -75,7 +75,8 @@ probe_ok=1
 if [ -f "$IMG" ] \
    && minfo  -i "$IMG@@1M" ::            >/dev/null 2>&1 \
    && mdir   -i "$IMG@@1M" ::/ROUNDTR.DAT >/dev/null 2>&1 \
-   && mdir   -i "$IMG@@1M" ::/ROUNDTR.MAG >/dev/null 2>&1; then
+   && mdir   -i "$IMG@@1M" ::/ROUNDTR.MAG >/dev/null 2>&1 \
+   && mdir   -i "$IMG@@1M" ::/EMPTY.TXT   >/dev/null 2>&1; then
     if [ -n "$SHADOW_SRC" ]; then
         mdir -i "$IMG@@1M" ::/SHADOW    >/dev/null 2>&1 || probe_ok=0
         mdir -i "$IMG@@1M" ::/PERMS.TAB >/dev/null 2>&1 || probe_ok=0
@@ -111,14 +112,20 @@ mformat -i "$IMG@@1M" -F -c 8 -T "$PART_SECTORS" -N 12345678 -v SCRATCH ::
 # ---- seed files (deterministic content + mtime) ----
 TMP_DAT="$(mktemp -t roundtr_dat.XXXXXX)"
 TMP_MAG="$(mktemp -t roundtr_mag.XXXXXX)"
+TMP_EMP="$(mktemp -t empty_seed.XXXXXX)"
 TMP_SHD="$(mktemp -t shadow_seed.XXXXXX)"
 TMP_PRM="$(mktemp -t perms_seed.XXXXXX)"
-trap 'rm -f "$TMP_DAT" "$TMP_MAG" "$TMP_SHD" "$TMP_PRM"' EXIT
+trap 'rm -f "$TMP_DAT" "$TMP_MAG" "$TMP_EMP" "$TMP_SHD" "$TMP_PRM"' EXIT
 dd if=/dev/zero of="$TMP_DAT" bs=4096 count=1 status=none   # 4 KiB zero
 dd if=/dev/zero of="$TMP_MAG" bs=1    count=1 status=none   # 1 byte zero
-touch -t 197001010000.00 "$TMP_DAT" "$TMP_MAG"
+: > "$TMP_EMP"                                              # 0 bytes -> first_cluster 0
+touch -t 197001010000.00 "$TMP_DAT" "$TMP_MAG" "$TMP_EMP"
 mcopy -i "$IMG@@1M" "$TMP_DAT" ::/ROUNDTR.DAT
 mcopy -i "$IMG@@1M" "$TMP_MAG" ::/ROUNDTR.MAG
+# 0-byte seed for [TEST] fs-empty-write: the first write must allocate
+# its first data cluster (fat32_backend.write step 0). Pi-only; under
+# QEMU /mnt never mounts so the scenario SKIPs and this stays 0 bytes.
+mcopy -i "$IMG@@1M" "$TMP_EMP" ::/EMPTY.TXT
 
 # ---- identity seeds: SHADOW + PERMS.TAB ----
 # The shadow file is the gen_shadow build artifact (same content as the

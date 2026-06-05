@@ -406,6 +406,22 @@ pub fn updateDirEntrySize(m: *Mount, found: FoundEntry, new_size: u32) FatError!
     if (write_fn(found.lba, sector_buf) != 0) return error.BlockWriteFailed;
 }
 
+// Rewrite a directory entry's first-cluster fields. FAT32 splits the
+// 32-bit cluster across two non-adjacent u16s — fst_clus_hi @0x14,
+// fst_clus_lo @0x1A — so this writes both. Used when a previously empty
+// file (first_cluster == 0) is given its first data cluster on the first
+// write. Self-contained RMW on fat_sector_scratch, same posture as
+// updateDirEntrySize; only found.lba + found.byte_offset are read.
+pub fn updateDirEntryFirstCluster(m: *Mount, found: FoundEntry, cluster: u32) FatError!void {
+    const sector_buf = &fat_sector_scratch;
+    const read_fn = m.dev.read_fn orelse return error.BlockReadFailed;
+    if (read_fn(found.lba, sector_buf) != 0) return error.BlockReadFailed;
+    std.mem.writeInt(u16, sector_buf[found.byte_offset + 0x14 ..][0..2], @truncate(cluster >> 16), .little);
+    std.mem.writeInt(u16, sector_buf[found.byte_offset + 0x1A ..][0..2], @truncate(cluster), .little);
+    const write_fn = m.dev.write_fn orelse return error.BlockWriteFailed;
+    if (write_fn(found.lba, sector_buf) != 0) return error.BlockWriteFailed;
+}
+
 pub fn encode8_3(name: []const u8) ?[11]u8 {
     var out: [11]u8 = .{' '} ** 11;
     var dot: usize = name.len;

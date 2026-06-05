@@ -1097,7 +1097,7 @@ initramfs/file pair get dedicated per-target stub objects
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`) to
 avoid double-defining symbols that the module under test already
-exports. The current suite totals **368 host tests** across 35
+exports. The current suite totals **370 host tests** across 35
 modules — see the coverage matrix below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.zig`).
@@ -1283,7 +1283,7 @@ Each scenario emits `[TEST] name` … `[PASS] name` (or `[FAIL]`), and
 `run_all` prints a final `X/Y passed` tally. The harness runs
 identically under QEMU (`zig build -Dboard=virt run-virt` /
 `-Dboard=rpi4b run`) and on real hardware (`./build.sh` → SD-flash →
-`picapture`); a green run lands `27/27 passed` with 31 baseline
+`picapture`); a green run lands `28/28 passed` with 32 baseline
 checkpoints (`0xbbff2` rpi4b / `0x3be4a` virt) and 0 `ERROR CAUGHT`
 on both boards, then hands off to
 `/bin/login` → `/bin/fsh`. With the login lifecycle the
@@ -1304,7 +1304,7 @@ byte-comparing. Emits `[TEST] emmc2-block` … `[PASS] emmc2-block`
 or `[FAIL] emmc2-block (write|read|mismatch)`. On QEMU it
 exercises the virt fake (`src/board/virt/emmc2.zig`); on Pi 4 it
 exercises the real BCM2711 EMMC2 driver (verified on a 64 GB SDXC).
-The EL0 27/27 tally is unaffected — both
+The EL0 28/28 tally is unaffected — both
 buffers live on the kernel stack and the scenario runs in kernel
 context.
 
@@ -1348,7 +1348,7 @@ exec-elf / execve / brk / stack-overflow / wild-pointer / exec-fault /
 undef-instr / efault-syscall / flibc / pipe / console-echo / fd-redirect /
 initramfs-open / vfs-dispatch / trace / fs-roundtrip / readdir / klog /
 creds / authenticate / perm / login / passwd —
-i.e. 31 × `0xbbff2` (the user-space baseline plus 30 scenario checkpoints) +
+i.e. 32 × `0xbbff2` (the user-space baseline plus 31 scenario checkpoints) +
 1 × `0xbc000`.
 
 ```text
@@ -1426,7 +1426,7 @@ end-to-end on QEMU + Pi 4.
 | `src/board/virt/dtb.zig`      |          4 | (virt boot hand-off)                                                                                | —                                                                                                                                                                                                                                           |
 | `src/fat32.zig`               |         27 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
 | `src/initramfs_backend.zig`   |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
-| `src/fat32_backend.zig`       |          9 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | thin VfsOps wrapper over `src/fat32.zig`; the real SD read/write path runs on Pi-4 hardware only (QEMU `raspi4b` EMMC2 dies at CMD8, `virt` has no SD), so the on-disk decode logic is covered by `src/fat32.zig` host tests instead. The splice contract (sub-sector + whole-file same-length writes) and the permission-overlay parse/apply are host-tested here; FAT32 `readdir` is exercised by `[TEST] readdir` on the Pi-only leg (`/mnt/*` returns -1 cleanly under QEMU; FAT32 host tests cover the `decode8_3` helper) |
+| `src/fat32_backend.zig`       |         11 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | thin VfsOps wrapper over `src/fat32.zig`; the real SD read/write path runs on Pi-4 hardware only (QEMU `raspi4b` EMMC2 dies at CMD8, `virt` has no SD), so the on-disk decode logic is covered by `src/fat32.zig` host tests instead. The splice contract (sub-sector + whole-file same-length writes) and the permission-overlay parse/apply are host-tested here; FAT32 `readdir` is exercised by `[TEST] readdir` on the Pi-only leg (`/mnt/*` returns -1 cleanly under QEMU; FAT32 host tests cover the `decode8_3` helper) |
 | `src/block_dev.zig`           |          0 | `emmc2-block`                                                                                     | pure vtable indirection; logic ≈ fn-pointer forwarding                                                                                                                                                                                      |
 | `src/sys.zig`                 |          0 | every syscall scenario                                                                              | extern-heavy dispatch; logic ≈ argument forwarding                                                                                                                                                                                          |
 | `src/fork.zig`                |          5 | `fork-stress`, `oom-graceful`, `exec-elf`, `brk`                                                    | —                                                                                                                                                                                                                                           |
@@ -1456,13 +1456,13 @@ end-to-end on QEMU + Pi 4.
 | `src/usb_tx_ring.zig`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.zig` stays hardware-verified                                                                                    |
 | `src/board/rpi4b/usb.zig`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.zig`, the TX ring in `src/usb_tx_ring.zig` |
 
-Totals: **368 host tests** (`zig build test`) + **27 in-kernel
+Totals: **370 host tests** (`zig build test`) + **28 in-kernel
 EL0 scenarios** + **1 pre-PID-1 EL1 scenario** (`emmc2-block`,
 `run-virt` / `run`). The table's 35 per-module inline counts sum to
-**352**; the `zig build test` total (368) is exactly 16 higher
+**354**; the `zig build test` total (370) is exactly 16 higher
 because the `fork.zig` test root re-runs `src/elf.zig`'s 16 tests
 through its direct file import — elf's tests run once under their own
-row and once inside `fork.zig`'s step. 352 + 16 = 368.
+row and once inside `fork.zig`'s step. 354 + 16 = 370.
 
 ### Output markers
 
@@ -1478,7 +1478,7 @@ row and once inside `fork.zig`'s step. 352 + 16 = 368.
 | `kill ok`, `exec-elf ok` | Per-scenario progress prints                                        |
 
 Greens require: `X == Y`, all `[PASS]` no `[FAIL]`, 0 `ERROR CAUGHT`,
-31 per-scenario checkpoints + 1 boot baseline, and the `[ OK ] Authenticated.`
+32 per-scenario checkpoints + 1 boot baseline, and the `[ OK ] Authenticated.`
 and `[ OK ] Reached target Shell.` markers emitted.
 
 ## 9. Build artefacts

@@ -66,6 +66,14 @@ pub const OpenResult = extern struct {
     mode: u32 = 0,
     uid: u32 = 0,
     gid: u32 = 0,
+    // On-disk directory-entry location of the opened file, for backends
+    // that rewrite the entry on write (FAT32: giving a previously empty
+    // file its first data cluster, and growing file_size). dirent_off is
+    // the byte offset of the entry within the dirent_lba sector. Appended
+    // last so the extern layout of the older fields stays byte-identical;
+    // 0 = unset (read-only backends never rewrite, so they leave these 0).
+    dirent_lba: u32 = 0,
+    dirent_off: u32 = 0,
 };
 
 // Backend vtable. All entries are C-ABI function pointers so the

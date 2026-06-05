@@ -36,6 +36,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   reachable. The open hook now walks the path one component at a time,
   descending into each subdirectory entry. Directory *listing*
   (`readdir`) stays root-only for now — opening a known path works.
+- **FAT32 write to an empty file.** Writing to a file whose directory
+  entry has no data cluster yet (`first_cluster == 0`, the on-disk shape
+  of a 0-byte file) now allocates its first cluster, links it, and
+  records it in the directory entry, instead of failing closed. The
+  write path now identifies the file by its directory-entry location
+  (stashed at open) rather than an ambiguous re-walk by first cluster, so
+  file growth works for subdirectory files too. Covered by host tests and
+  a Pi-only `[TEST] fs-empty-write` in-kernel scenario; the boot contract
+  moves to **28 in-kernel scenarios / 32 per-scenario checkpoints** (was
+  27 / 31). Create-if-missing for a *non-existent* path and crash-atomic
+  writes remain future work.
 - **`-Dboot-selftest` build option (default off).** Gates the in-kernel
   test harness: a normal `zig build run-virt` / `deploy` now boots
   straight to the `login:` prompt with no test output, while CI and
@@ -50,8 +61,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   instead of `[Debug]` noise. The two success markers were renamed —
   `[Debug] login OK` → `[ OK ] Authenticated.` and
   `[Debug] fsh init OK` → `[ OK ] Reached target Shell.` — so any log
-  parser keying on the old strings must be updated. Boot-contract
-  counts (31 checkpoints, 3 sessions) are numerically unchanged.
+  parser keying on the old strings must be updated. The boot-contract
+  checkpoint and session counts are unchanged by the restyle.
 - **Diagnostic output suppressed by default.** EMMC2 and USB bring-up
   traces and hwrng chatter are now gated behind in-file flags
   (`DIAG`, `TRACE_VERBOSE`) that default off, keeping the boot log clean.

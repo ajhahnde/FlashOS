@@ -157,6 +157,11 @@ fn open(_: *vfs.SuperBlock, path_ptr: [*]const u8, path_len: usize, out: *vfs.Op
     const first_clus = fat32.firstCluster(found.entry);
     out.private = first_clus;
     out.size = found.entry.file_size;
+    // Stash the on-disk directory-entry location so write() can rewrite
+    // the entry's first-cluster (empty-file first write) and file_size
+    // without an ambiguous re-walk by first cluster.
+    out.dirent_lba = found.lba;
+    out.dirent_off = found.byte_offset;
     // Permission metadata: the mount-time overlay (PERMS.TAB)
     // supplies per-file mode/uid/gid. Annotated paths get their entry
     // (low 9 bits + the regular-file type the perm layer expects);
@@ -247,20 +252,24 @@ fn close(_: *vfs.SuperBlock, _: *File) callconv(.c) void {
     // until a future buffer cache adds a real fsync here.
 }
 
-// write (writeBack) — extends or overwrites an existing file.
-// No create-if-missing yet, no sparse write past EOF + len
+// write (writeBack) — extends or overwrites an existing file, including
+// a previously empty one. No create-if-missing for a NON-existent path
+// yet (the dir entry must already exist); no sparse write past EOF + len
 // (offset > size treated as -1). Sequence:
+//   0. If the file is empty (first_cluster == 0), allocate its first
+//      data cluster, link it EOC, and record it in the dir entry (via
+//      the open-time-stashed dirent location — an empty file can't be
+//      found by first cluster, since 0 is not unique across empty files).
 //   1. Walk the chain from first_cluster to the cluster covering
 //      f.offset; if the chain ends before that, allocCluster + link.
 //   2. Sector read-modify-write loop: read the target sector, splice
 //      `take` bytes, write it back. Cross cluster boundaries via the
 //      same alloc-or-follow path.
-//   3. If f.offset + copied > f.size, update the in-RAM f.size and
-//      the on-disk dir entry's file_size (re-walk root by first
-//      cluster, then updateDirEntrySize).
+//   3. If f.offset + copied > f.size, update the in-RAM f.size and the
+//      on-disk dir entry's file_size at the stashed dirent location.
 //   4. fsInfoOnAlloc once per allocCluster.
 //
-// Not crash-safe (FAT1/FAT2, dir-entry, FSInfo writes are three
+// Not crash-safe (FAT1/FAT2, dir-entry, FSInfo writes are separate
 // non-atomic RMW points). Single-shot acceptance run never power-
 // cycles mid-write; a future journal closes the gap.
 fn write(_: *vfs.SuperBlock, f: *File, buf: [*]const u8, len: u64) callconv(.c) i64 {
@@ -268,8 +277,30 @@ fn write(_: *vfs.SuperBlock, f: *File, buf: [*]const u8, len: u64) callconv(.c) 
     // No sparse write: a hole between f.size and f.offset is -1.
     if (f.offset > f.size) return -1;
 
+    // On-disk dir-entry location, stashed at open. Used to give an empty
+    // file its first cluster (step 0) and to grow file_size (step 3) —
+    // both rewrite the entry, which an empty file can't locate by first
+    // cluster (0 is not unique). `.entry` is unread by either updater.
+    const dirent_loc: fat32.FoundEntry = .{
+        .entry = undefined,
+        .lba = f.dirent_lba,
+        .byte_offset = @intCast(f.dirent_off),
+    };
+
     var cluster: u32 = @intCast(f.private & 0xFFFF_FFFF);
     var cluster_offset: u64 = f.offset;
+
+    // Step 0: first write to an empty file. Its dir entry has
+    // first_cluster == 0 (no data yet), so clusterLba would fail closed.
+    // allocCluster reserves a free cluster and writes its FAT_EOC; record
+    // it in the dir entry and adopt it as the chain head.
+    if (cluster == 0) {
+        const first = fat32.allocCluster(&mount_info) catch return -1;
+        fat32.fsInfoOnAlloc(&mount_info, first) catch {};
+        fat32.updateDirEntryFirstCluster(&mount_info, dirent_loc, first) catch return -1;
+        f.private = first;
+        cluster = first;
+    }
 
     // Step 1: walk to the cluster covering f.offset, extending the
     // chain via allocCluster when the walk hits end-of-chain.
@@ -333,70 +364,17 @@ fn write(_: *vfs.SuperBlock, f: *File, buf: [*]const u8, len: u64) callconv(.c) 
         }
     }
 
-    // Step 3: grow file_size on disk if the write went past EOF.
+    // Step 3: grow file_size on disk if the write went past EOF, at the
+    // open-time-stashed dirent location (works for root + subdir files
+    // and for the just-given first cluster — no re-walk, no ambiguity).
     const new_offset = f.offset + copied;
     if (new_offset > f.size) {
-        // Can't reconstruct the encoded 8.3 name from File state
-        // (not stashed on open — needs 11 bytes, the private word is
-        // 8). Re-walk root for the entry whose first cluster matches.
-        // The small root dir makes the re-walk trivial; future
-        // work caches FoundEntry on open.
-        const first_clus_u32: u32 = @intCast(f.private & 0xFFFF_FFFF);
-        if (findEntryByFirstCluster(first_clus_u32)) |found| {
-            fat32.updateDirEntrySize(&mount_info, found, @intCast(new_offset)) catch return -1;
-        } else {
-            return -1; // entry vanished mid-write — should be impossible
-        }
+        fat32.updateDirEntrySize(&mount_info, dirent_loc, @intCast(new_offset)) catch return -1;
         f.size = new_offset;
     }
 
     f.offset = new_offset;
     return @bitCast(copied);
-}
-
-// Scan the root dir for the entry whose (fst_clus_hi<<16 |
-// fst_clus_lo) equals `first_cluster`. Returns null on miss. Used by
-// write() when growing file_size — avoids stashing the encoded 8.3
-// name in File.private (11 bytes won't fit the 8-byte private word).
-fn findEntryByFirstCluster(first_cluster: u32) ?fat32.FoundEntry {
-    var cluster: u32 = mount_info.bpb.root_clus;
-    const sector_buf = &io_sector_scratch;
-    // Cycle guard: a valid chain visits at most total_clusters links;
-    // exceeding that proves a self-loop in a corrupted FAT, so bail.
-    var hops: u32 = 0;
-    while (cluster >= 2 and cluster < fat32.FAT_EOC_MIN) {
-        const start_lba = fat32.clusterLba(&mount_info, cluster) catch return null;
-        var i: u32 = 0;
-        while (i < mount_info.sectors_per_cluster) : (i += 1) {
-            const lba = start_lba + i;
-            const read_fn = block_dev.sd_dev.read_fn orelse return null;
-            if (read_fn(lba, sector_buf) != 0) return null;
-            var j: u16 = 0;
-            while (j < 16) : (j += 1) {
-                const byte_off: u16 = j * 32;
-                const first_byte = sector_buf[byte_off];
-                if (first_byte == 0x00) return null; // end-of-dir
-                if (first_byte == 0xE5) continue; // deleted
-                const attr = sector_buf[byte_off + 0x0B];
-                if ((attr & fat32.ATTR_LONG_NAME) == fat32.ATTR_LONG_NAME) continue;
-                const fc_hi = std.mem.readInt(u16, sector_buf[byte_off + 0x14 ..][0..2], .little);
-                const fc_lo = std.mem.readInt(u16, sector_buf[byte_off + 0x1A ..][0..2], .little);
-                const fc: u32 = (@as(u32, fc_hi) << 16) | fc_lo;
-                if (fc == first_cluster) {
-                    var e: fat32.DirEntry = undefined;
-                    e.fst_clus_hi = fc_hi;
-                    e.fst_clus_lo = fc_lo;
-                    e.attr = attr;
-                    e.file_size = std.mem.readInt(u32, sector_buf[byte_off + 0x1C ..][0..4], .little);
-                    return .{ .entry = e, .lba = lba, .byte_offset = byte_off };
-                }
-            }
-        }
-        cluster = fat32.readFatEntry(&mount_info, cluster) catch return null;
-        hops += 1;
-        if (hops > mount_info.total_clusters) return null;
-    }
-    return null;
 }
 
 // readdir — enumerate the FAT32 mount root, one entry per call. Stateless
@@ -792,4 +770,129 @@ test "overlay: corrupt PERMS.TAB content is rejected wholesale (floor applies)" 
     // With the table empty, the floor still protects the shadow file.
     try testing.expectEqual(@as(c_int, 0), ops_vtable.open(&sb, "/shadow".ptr, 7, &out));
     try testing.expectEqual(@as(u32, 0o100600), out.mode);
+}
+
+// ---- empty-file write fixture (read + write in-memory disk) ----
+//
+// The splice tests above use an antagonist with no real storage; this
+// one is an 8-sector read+write disk so the first-write-to-an-empty-file
+// path runs end to end. Layout: FAT @ LBA 2 (root cluster 2 -> EOC,
+// clusters 3.. FREE), root dir @ LBA 6 with one empty file (EMPTY.TXT,
+// first_cluster 0, size 0). data_lba 6, sec/clus 1, so cluster N lives at
+// LBA 6 + (N - 2).
+var rw_disk: [8 * 512]u8 align(512) = undefined;
+
+fn rwRead(lba: u32, buf: *[512]u8) callconv(.c) i32 {
+    const off: usize = @as(usize, lba) * 512;
+    if (off + 512 > rw_disk.len) return -1;
+    @memcpy(buf, rw_disk[off..][0..512]);
+    return 0;
+}
+
+fn rwWrite(lba: u32, buf: *const [512]u8) callconv(.c) i32 {
+    const off: usize = @as(usize, lba) * 512;
+    if (off + 512 > rw_disk.len) return -1;
+    @memcpy(rw_disk[off..][0..512], buf);
+    return 0;
+}
+
+fn setupEmptyFileFixture() void {
+    @memset(&rw_disk, 0);
+    // FAT @ LBA 2: root cluster 2 -> EOC; clusters 3+ left FREE (0).
+    std.mem.writeInt(u32, rw_disk[2 * 512 + 8 ..][0..4], fat32.FAT_EOC, .little);
+    // Root dir @ LBA 6 (cluster 2): one empty file at entry 0.
+    const root = rw_disk[6 * 512 .. 7 * 512];
+    @memcpy(root[0..11], "EMPTY   TXT");
+    root[0x0B] = fat32.ATTR_ARCHIVE;
+    // fst_clus_hi/lo = 0, file_size = 0 — already zeroed.
+}
+
+fn installRwMount() void {
+    block_dev.sd_dev = .{ .read_fn = rwRead, .write_fn = rwWrite };
+    var bpb = std.mem.zeroes(fat32.Bpb);
+    bpb.root_clus = 2;
+    bpb.num_fats = 1; // single FAT in this fixture (no mirror)
+    mount_info = .{
+        .bpb = bpb,
+        .partition_lba = 0,
+        .fat_lba = 2,
+        .data_lba = 6,
+        .sectors_per_cluster = 1,
+        .bytes_per_cluster = 512,
+        .fsinfo_lba = 1,
+        .total_clusters = 124,
+        .dev = &block_dev.sd_dev,
+    };
+}
+
+test "write to an empty file allocates a first cluster and records it in the dir entry" {
+    setupEmptyFileFixture();
+    installRwMount();
+
+    // open() resolves the entry and stashes its on-disk location.
+    var out: vfs.OpenResult = .{};
+    try testing.expectEqual(@as(c_int, 0), ops_vtable.open(&sb, "/empty.txt".ptr, 10, &out));
+    try testing.expectEqual(@as(u64, 0), out.private); // empty -> first_cluster 0
+    try testing.expectEqual(@as(u32, 6), out.dirent_lba); // root dir LBA
+    try testing.expectEqual(@as(u32, 0), out.dirent_off); // first entry
+
+    // Build the handle the way sys_openFile would (private + dirent loc).
+    var f: File = .{
+        .refs = 1,
+        .offset = 0,
+        .private = out.private,
+        .size = out.size,
+        .sb = &sb,
+        .dirent_lba = out.dirent_lba,
+        .dirent_off = out.dirent_off,
+    };
+
+    const payload = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
+    try testing.expectEqual(@as(i64, 4), ops_vtable.write(&sb, &f, &payload, 4));
+
+    // (a) allocCluster reserved cluster 3 and linked it EOC.
+    try testing.expectEqual(fat32.FAT_EOC, fat32.readFatEntry(&mount_info, 3) catch unreachable);
+    // (b) the dir entry now points at cluster 3 (hi:lo = 0:3).
+    const root = rw_disk[6 * 512 .. 7 * 512];
+    try testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, root[0x1A..][0..2], .little));
+    try testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, root[0x14..][0..2], .little));
+    // (c) the dir-entry size grew to 4.
+    try testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, root[0x1C..][0..4], .little));
+    // (d) the bytes landed at cluster 3's LBA (6 + (3 - 2) = 7).
+    try testing.expectEqualSlices(u8, &payload, rw_disk[7 * 512 ..][0..4]);
+    // (e) the handle adopted the new chain head and grew its size.
+    try testing.expectEqual(@as(u64, 3), f.private);
+    try testing.expectEqual(@as(u64, 4), f.size);
+}
+
+test "write past EOF on an existing file grows size via the stashed dirent location" {
+    setupEmptyFileFixture();
+    // Pre-seed EMPTY.TXT with a first cluster (3) + size 4, FAT[3] -> EOC.
+    {
+        const root = rw_disk[6 * 512 .. 7 * 512];
+        std.mem.writeInt(u16, root[0x1A..][0..2], 3, .little); // fst_clus_lo = 3
+        std.mem.writeInt(u32, root[0x1C..][0..4], 4, .little); // size = 4
+        std.mem.writeInt(u32, rw_disk[2 * 512 + 12 ..][0..4], fat32.FAT_EOC, .little); // FAT[3]
+    }
+    installRwMount();
+
+    var f: File = .{
+        .refs = 1,
+        .offset = 4, // append at the current EOF
+        .private = 3,
+        .size = 4,
+        .sb = &sb,
+        .dirent_lba = 6,
+        .dirent_off = 0,
+    };
+    const payload = [_]u8{ 0x11, 0x22 };
+    try testing.expectEqual(@as(i64, 2), ops_vtable.write(&sb, &f, &payload, 2));
+
+    const root = rw_disk[6 * 512 .. 7 * 512];
+    // Size grew 4 -> 6 in the dir entry (step 3 via the stashed location,
+    // not the removed first-cluster re-walk).
+    try testing.expectEqual(@as(u32, 6), std.mem.readInt(u32, root[0x1C..][0..4], .little));
+    // The appended bytes landed at cluster 3, byte offset 4 (LBA 7).
+    try testing.expectEqualSlices(u8, &payload, rw_disk[7 * 512 + 4 ..][0..2]);
+    try testing.expectEqual(@as(u64, 6), f.size);
 }
