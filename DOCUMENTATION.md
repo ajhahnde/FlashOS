@@ -1097,7 +1097,7 @@ initramfs/file pair get dedicated per-target stub objects
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`) to
 avoid double-defining symbols that the module under test already
-exports. The current suite totals **361 host tests** across 35
+exports. The current suite totals **368 host tests** across 35
 modules — see the coverage matrix below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.zig`).
@@ -1424,7 +1424,7 @@ end-to-end on QEMU + Pi 4.
 | `src/sdhci_cmd.zig`           |         13 | `emmc2-block` (CMD17/CMD24 encoding, CSD v2 parse, clock divisor)                                 | —                                                                                                                                                                                                                                           |
 | `src/mailbox.zig`             |         14 | `emmc2-block` (clock-rate query for SDHCI divider; SD VDD power-on and 3.3 V I/O rail at init); USB-C console (`usb_init`'s USB-HCD power-on)    | —                                                                                                                                                                                                                                           |
 | `src/board/virt/dtb.zig`      |          4 | (virt boot hand-off)                                                                                | —                                                                                                                                                                                                                                           |
-| `src/fat32.zig`               |         20 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
+| `src/fat32.zig`               |         27 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
 | `src/initramfs_backend.zig`   |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
 | `src/fat32_backend.zig`       |          9 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | thin VfsOps wrapper over `src/fat32.zig`; the real SD read/write path runs on Pi-4 hardware only (QEMU `raspi4b` EMMC2 dies at CMD8, `virt` has no SD), so the on-disk decode logic is covered by `src/fat32.zig` host tests instead. The splice contract (sub-sector + whole-file same-length writes) and the permission-overlay parse/apply are host-tested here; FAT32 `readdir` is exercised by `[TEST] readdir` on the Pi-only leg (`/mnt/*` returns -1 cleanly under QEMU; FAT32 host tests cover the `decode8_3` helper) |
 | `src/block_dev.zig`           |          0 | `emmc2-block`                                                                                     | pure vtable indirection; logic ≈ fn-pointer forwarding                                                                                                                                                                                      |
@@ -1456,13 +1456,13 @@ end-to-end on QEMU + Pi 4.
 | `src/usb_tx_ring.zig`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.zig` stays hardware-verified                                                                                    |
 | `src/board/rpi4b/usb.zig`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.zig`, the TX ring in `src/usb_tx_ring.zig` |
 
-Totals: **361 host tests** (`zig build test`) + **27 in-kernel
+Totals: **368 host tests** (`zig build test`) + **27 in-kernel
 EL0 scenarios** + **1 pre-PID-1 EL1 scenario** (`emmc2-block`,
 `run-virt` / `run`). The table's 35 per-module inline counts sum to
-**345**; the `zig build test` total (361) is exactly 16 higher
+**352**; the `zig build test` total (368) is exactly 16 higher
 because the `fork.zig` test root re-runs `src/elf.zig`'s 16 tests
 through its direct file import — elf's tests run once under their own
-row and once inside `fork.zig`'s step. 345 + 16 = 361.
+row and once inside `fork.zig`'s step. 352 + 16 = 368.
 
 ### Output markers
 

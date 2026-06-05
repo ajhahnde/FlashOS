@@ -293,7 +293,15 @@ pub const FoundEntry = struct {
 pub const LookupError = error{ NotFound, BlockReadFailed, InvalidCluster };
 
 pub fn lookupInRoot(m: *const Mount, name8_3: [11]u8) LookupError!FoundEntry {
-    var cluster: u32 = m.bpb.root_clus;
+    return lookupInDir(m, m.bpb.root_clus, name8_3);
+}
+
+// Scan a single directory's cluster chain (starting at `start_cluster`)
+// for an 8.3 entry. lookupInRoot is the root-directory specialisation;
+// lookupPath calls this once per path component to descend
+// subdirectories.
+pub fn lookupInDir(m: *const Mount, start_cluster: u32, name8_3: [11]u8) LookupError!FoundEntry {
+    var cluster: u32 = start_cluster;
     const sector_buf = &dir_sector_scratch;
     // Cycle guard: a valid chain visits at most total_clusters links;
     // exceeding that proves a self-loop or back-edge in a corrupted
@@ -334,6 +342,57 @@ pub fn lookupInRoot(m: *const Mount, name8_3: [11]u8) LookupError!FoundEntry {
         if (hops > m.total_clusters) return error.NotFound;
     }
     return error.NotFound;
+}
+
+// Combine a directory entry's split first-cluster fields into the
+// 28-bit cluster number.
+pub fn firstCluster(e: DirEntry) u32 {
+    return (@as(u32, e.fst_clus_hi) << 16) | e.fst_clus_lo;
+}
+
+pub const PathError = error{ NotFound, NotADirectory, BlockReadFailed, InvalidCluster };
+
+// Resolve a mount-relative, '/'-separated path to its directory entry,
+// descending into ATTR_DIRECTORY entries for every non-final component.
+// `rel` carries no leading slash (open() strips it; vfs.resolve already
+// removed the /mnt prefix). A single-component path reduces to a
+// root-directory lookup — the historical behaviour. A non-final
+// component that resolves to a regular file yields NotADirectory; an
+// empty path (the mount root itself) yields NotFound — a directory is
+// not an openable file here.
+//
+// Iterative, not recursive: nesting depth costs only a handful of
+// scalars on the stack, and each per-component lookup reuses the static
+// directory scratch — so deep paths never threaten the kernel-stack
+// budget (the prior sys_openFile overflow class).
+pub fn lookupPath(m: *const Mount, rel: []const u8) PathError!FoundEntry {
+    var dir_cluster: u32 = m.bpb.root_clus;
+    var found: ?FoundEntry = null;
+
+    var i: usize = 0;
+    while (i < rel.len) {
+        // Skip slash runs so a doubled or trailing slash never produces
+        // an empty component (vfs.resolve collapses these, but fat32
+        // stays self-contained for the host suite).
+        while (i < rel.len and rel[i] == '/') i += 1;
+        if (i >= rel.len) break;
+        var j = i;
+        while (j < rel.len and rel[j] != '/') j += 1;
+        const comp = rel[i..j];
+        i = j;
+
+        // Another component follows, so the entry matched last round had
+        // to be a directory — descend into it before this lookup.
+        if (found) |prev| {
+            if ((prev.entry.attr & ATTR_DIRECTORY) == 0) return error.NotADirectory;
+            dir_cluster = firstCluster(prev.entry);
+        }
+
+        const name = encode8_3(comp) orelse return error.NotFound;
+        found = try lookupInDir(m, dir_cluster, name);
+    }
+
+    return found orelse error.NotFound;
 }
 
 pub fn updateDirEntrySize(m: *Mount, found: FoundEntry, new_size: u32) FatError!void {
@@ -707,4 +766,100 @@ test "decode8_3 round-trips an encode8_3 name" {
     const enc = encode8_3("readme.md") orelse return error.EncodeFail;
     const dec = decode8_3(enc);
     try testing.expectEqualStrings("readme.md", dec.buf[0..dec.len]);
+}
+
+// ---- lookupPath subdirectory descent ----
+
+// Stamp a directory entry into the host fixture at absolute byte offset
+// `base` (an LBA*512 + slot*32 address inside host_disk).
+fn putEntry(base: usize, name: *const [11]u8, attr: u8, first_clus: u16, size: u32) void {
+    @memcpy(host_disk[base..][0..11], name);
+    host_disk[base + 0x0B] = attr;
+    std.mem.writeInt(u16, host_disk[base + 0x14 ..][0..2], 0, .little); // fst_clus_hi
+    std.mem.writeInt(u16, host_disk[base + 0x1A ..][0..2], first_clus, .little);
+    std.mem.writeInt(u32, host_disk[base + 0x1C ..][0..4], size, .little);
+}
+
+// Plant a two-level subtree onto the base fixture (which occupies only
+// cluster 2 = root and cluster 3 = HELLO.TXT), reusing free clusters 4
+// and 5 for the two directories:
+//   /SUBDIR               dir,  cluster 4 (LBA 8)
+//   /SUBDIR/DEEP.TXT      file, cluster 6, size 7
+//   /SUBDIR/SUB2          dir,  cluster 5 (LBA 9)
+//   /SUBDIR/SUB2/NEST.TXT file, cluster 7, size 9
+// Each directory fits its single cluster; the trailing slots stay 0x00
+// (end-of-dir) from setupFixture's zero-fill. The file clusters (6, 7)
+// hold no data — lookupPath never reads file contents.
+fn seedSubtree() void {
+    putEntry(6 * 512 + 96, "SUBDIR     ", ATTR_DIRECTORY, 4, 0); // root slot 3
+    putEntry(8 * 512 + 0, "DEEP    TXT", ATTR_ARCHIVE, 6, 7); // SUBDIR slot 0
+    putEntry(8 * 512 + 32, "SUB2       ", ATTR_DIRECTORY, 5, 0); // SUBDIR slot 1
+    putEntry(9 * 512 + 0, "NEST    TXT", ATTR_ARCHIVE, 7, 9); // SUB2 slot 0
+    // Mark both new directory clusters as single-cluster (EOC) chains in
+    // FAT1 (LBA 2 = byte 1024) and FAT2 (LBA 4 = byte 3072).
+    inline for (.{ 1024, 3072 }) |fat_base| {
+        std.mem.writeInt(u32, host_disk[fat_base + 4 * 4 ..][0..4], FAT_EOC, .little);
+        std.mem.writeInt(u32, host_disk[fat_base + 5 * 4 ..][0..4], FAT_EOC, .little);
+    }
+}
+
+test "lookupPath descends one level into a subdirectory" {
+    setupFixture();
+    seedSubtree();
+    const m = try mount(&fake_dev, 0);
+    const found = try lookupPath(&m, "subdir/deep.txt");
+    try testing.expectEqual(@as(u32, 7), found.entry.file_size);
+    try testing.expectEqual(@as(u32, 6), firstCluster(found.entry));
+}
+
+test "lookupPath descends two levels" {
+    setupFixture();
+    seedSubtree();
+    const m = try mount(&fake_dev, 0);
+    const found = try lookupPath(&m, "subdir/sub2/nest.txt");
+    try testing.expectEqual(@as(u32, 9), found.entry.file_size);
+    try testing.expectEqual(@as(u32, 7), firstCluster(found.entry));
+}
+
+test "lookupPath single component still resolves at the root" {
+    setupFixture();
+    const m = try mount(&fake_dev, 0);
+    // No subtree seeded: a bare name must behave exactly like the old
+    // lookupInRoot path (HELLO.TXT at cluster 3, size 11).
+    const found = try lookupPath(&m, "hello.txt");
+    try testing.expectEqual(@as(u32, 11), found.entry.file_size);
+    try testing.expectEqual(@as(u32, 3), firstCluster(found.entry));
+}
+
+test "lookupPath returns NotADirectory when a non-final component is a file" {
+    setupFixture();
+    const m = try mount(&fake_dev, 0);
+    // HELLO.TXT is a regular file; descending through it must fail rather
+    // than misread its size/clusters as a directory.
+    try testing.expectError(error.NotADirectory, lookupPath(&m, "hello.txt/deep.txt"));
+}
+
+test "lookupPath returns NotFound for a missing intermediate directory" {
+    setupFixture();
+    const m = try mount(&fake_dev, 0);
+    try testing.expectError(error.NotFound, lookupPath(&m, "nope/deep.txt"));
+}
+
+test "lookupPath returns NotFound for a missing leaf inside a real subdirectory" {
+    setupFixture();
+    seedSubtree();
+    const m = try mount(&fake_dev, 0);
+    // Proves the descent reached SUBDIR (cluster 4) and only then failed
+    // to find the leaf — not a first-component miss.
+    try testing.expectError(error.NotFound, lookupPath(&m, "subdir/missing.txt"));
+}
+
+test "lookupPath tolerates redundant slashes" {
+    setupFixture();
+    seedSubtree();
+    const m = try mount(&fake_dev, 0);
+    // A leading slash and a doubled separator must collapse to the same
+    // resolution (defensive — vfs.resolve normally pre-collapses).
+    const found = try lookupPath(&m, "/subdir//deep.txt");
+    try testing.expectEqual(@as(u32, 6), firstCluster(found.entry));
 }

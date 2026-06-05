@@ -140,7 +140,7 @@ harness and a host-side unit test suite.
   currently inert — Zig has no `-fpatchable-function-entry=2`
   equivalent yet).
 - **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 27
-  scenarios) plus a host-side `zig build test` suite (361 host
+  scenarios) plus a host-side `zig build test` suite (368 host
   tests across 35 modules).
 
 ## Quick start
@@ -205,7 +205,7 @@ serial-console setup.
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt     |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt  |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                         |
-| `zig build test`                     | Host-side unit tests (361 tests, 35 modules)                    |
+| `zig build test`                     | Host-side unit tests (368 tests, 35 modules)                    |
 | `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                             |
 
 The default optimisation mode is `ReleaseSmall`. Override with

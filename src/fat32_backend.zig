@@ -153,9 +153,8 @@ pub fn init() i32 {
 fn open(_: *vfs.SuperBlock, path_ptr: [*]const u8, path_len: usize, out: *vfs.OpenResult) callconv(.c) c_int {
     const path = path_ptr[0..path_len];
     const rel = if (path.len > 0 and path[0] == '/') path[1..] else path;
-    const name = fat32.encode8_3(rel) orelse return -1;
-    const found = fat32.lookupInRoot(&mount_info, name) catch return -1;
-    const first_clus = (@as(u32, found.entry.fst_clus_hi) << 16) | found.entry.fst_clus_lo;
+    const found = fat32.lookupPath(&mount_info, rel) catch return -1;
+    const first_clus = fat32.firstCluster(found.entry);
     out.private = first_clus;
     out.size = found.entry.file_size;
     // Permission metadata: the mount-time overlay (PERMS.TAB)

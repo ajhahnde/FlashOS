@@ -27,6 +27,16 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **FAT32 subdirectory path traversal.** Files below the mount root
+  (`/mnt/dir/file`, and deeper) now open. Previously the mount backend
+  encoded the whole mount-relative path as a single 8.3 name, so any
+  `/`-separated path was rejected and only files in the mount root were
+  reachable. The open hook now walks the path one component at a time,
+  descending into each subdirectory entry. Directory *listing*
+  (`readdir`) stays root-only for now — opening a known path works.
+
 ## [v0.1.0] - 2026-06-05
 
 First public release. FlashOS was developed privately before this
