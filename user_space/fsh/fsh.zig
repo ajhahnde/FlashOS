@@ -52,7 +52,11 @@ const AUTHOR = "ajhahnde";
 const HELP_TEXT =
     "fsh built-ins: cd [dir]  exit  help  free  whoami\n" ++
     "external: <cmd> [args]   one pipe: <cmd> | <cmd>\n" ++
-    "e.g. ls  cat  echo  dmesg\n";
+    "TAB completes commands + paths\n";
+
+// Built-in command names, offered alongside /bin for first-token TAB
+// completion (these dispatch in-process, so they are not in /bin).
+const BUILTINS = [_][]const u8{ "cd", "exit", "help", "free", "whoami" };
 
 export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn {
     _ = argc;
@@ -117,15 +121,20 @@ inline fn isSpace(c: u8) bool {
 
 fn repl() void {
     var line_buf: [LINE_MAX]u8 = undefined;
+    const comp = flibc.Completion{ .builtins = &BUILTINS };
     console_ui.homescreen(consoleSink, build_options.version, AUTHOR);
     while (true) {
         emit(1, if (flibc.sys.geteuid() == 0) PROMPT_ROOT else PROMPT_USER);
-        switch (flibc.readline(&line_buf)) {
+        switch (flibc.readlineCompleting(&line_buf, comp)) {
             .eof => return, // ^D on an empty line / stream closed → logout
             .abandoned => emit(1, "\n"), // ^C: readline drew nothing, fsh ends the line
             .line => |l| {
                 emit(1, "\n"); // readline submits without echoing the CR
                 dispatch(l);
+                // A full-screen child (a future TUI tool) may have left the
+                // kernel console in raw / masked / alt mode; reset it so the
+                // next prompt + readline behave.
+                _ = flibc.sys.set_console_mode(0);
                 // Blank line after a real command's output, before the next
                 // prompt; skipped on a bare Enter so empty lines don't double up.
                 if (trim(l).len != 0) emit(1, "\n");
@@ -228,6 +237,7 @@ fn runBuiltin(name: [*:0]const u8, argv: *[tok.MAX_ARGS]?[*:0]u8, argc: usize) b
     if (streq(name, "exit")) flibc.exit();
     if (streq(name, "help")) {
         emit(1, HELP_TEXT);
+        listBin();
         return true;
     }
     if (streq(name, "cd")) {
@@ -244,6 +254,22 @@ fn runBuiltin(name: [*:0]const u8, argv: *[tok.MAX_ARGS]?[*:0]u8, argc: usize) b
         return true;
     }
     return false;
+}
+
+// List /bin so `help` advertises the external commands without a hardcoded
+// catalog — a new tool shows up by existing (and TAB completes it too). The
+// Dirent lives on the stack (rule 1); a missing /bin simply lists nothing.
+fn listBin() void {
+    emit(1, "in /bin:");
+    var d: flibc.Dirent = .{};
+    var i: u64 = 0;
+    while (flibc.sys.readdir("/bin", i, &d) == 0) : (i += 1) {
+        var n: usize = 0;
+        while (n < d.name.len and d.name[n] != 0) : (n += 1) {}
+        emit(1, " ");
+        emit(1, d.name[0..n]);
+    }
+    emit(1, "\n");
 }
 
 // Print the login name matching the real uid, resolved against

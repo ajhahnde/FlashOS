@@ -944,6 +944,38 @@ pub fn build(b: *std.Build) void {
     forkbomb.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     forkbomb.entry = .disabled;
 
+    // ---- sysinfo.elf — one-shot system summary coreutil ----
+    // First consumer of the console_ui screen-layer kv() renderer (the
+    // full-screen-navigation scaffold): prints the FlashOS version, the
+    // logged-in user, and the free-page count as aligned key/value rows, then
+    // exits. Imports console_ui for kv(), pwfile for the uid -> name lookup, and
+    // build_options for the version (single-sourced from build.zig.zon). Same
+    // recipe as ls / meminfo (flibc _start shim, flibc_mem, pie=false,
+    // ReleaseSmall, strip, shared coreutil_linker.ld). Staged at /bin/sysinfo;
+    // kept out of the CI FSH_SCRIPT like meminfo (its free-page value is live).
+    const sysinfo_mod = b.createModule(.{
+        .root_source_file = b.path("tools/sysinfo_elf.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    sysinfo_mod.addImport("flibc", flibc_mod);
+    sysinfo_mod.addImport("flibc_start", flibc_start_mod);
+    sysinfo_mod.addImport("flibc_mem", flibc_mem_mod);
+    sysinfo_mod.addImport("pwfile", pwfile_mod);
+    sysinfo_mod.addImport("console_ui", console_ui_mod);
+    sysinfo_mod.addOptions("build_options", build_options);
+    const sysinfo = b.addExecutable(.{
+        .name = "sysinfo.elf",
+        .root_module = sysinfo_mod,
+    });
+    sysinfo.pie = false;
+    sysinfo.bundle_compiler_rt = false;
+    sysinfo.link_z_max_page_size = 0x80;
+    sysinfo.link_z_common_page_size = 0x80;
+    sysinfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    sysinfo.entry = .disabled;
+
     // ---- login.elf — credential gate + session supervisor ----
     // PID-1 execs /bin/login instead of /bin/fsh: it prompts for a username
     // (echoed) + password (echo suppressed via SYS_SET_CONSOLE_MODE), has the
@@ -1102,6 +1134,7 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(fsh.getEmittedBin(), "bin/fsh");
     _ = cpio_stage.addCopyFile(ls.getEmittedBin(), "bin/ls");
     _ = cpio_stage.addCopyFile(meminfo.getEmittedBin(), "bin/meminfo");
+    _ = cpio_stage.addCopyFile(sysinfo.getEmittedBin(), "bin/sysinfo");
     _ = cpio_stage.addCopyFile(b.path("user_space/fsh/fshrc"), "etc/fshrc");
     _ = cpio_stage.addCopyFile(login.getEmittedBin(), "bin/login");
     _ = cpio_stage.addCopyFile(passwd_bin.getEmittedBin(), "bin/passwd");
@@ -1137,6 +1170,7 @@ pub fn build(b: *std.Build) void {
         .{ .arc = "bin/ls", .mode = 0o100755 },
         .{ .arc = "bin/meminfo", .mode = 0o100755 },
         .{ .arc = "bin/passwd", .mode = 0o100755 },
+        .{ .arc = "bin/sysinfo", .mode = 0o100755 },
         .{ .arc = "etc/fshrc", .mode = 0o100644 },
         .{ .arc = "etc/passwd", .mode = 0o100644 },
         .{ .arc = "etc/shadow", .mode = 0o100600 },
@@ -1568,6 +1602,20 @@ pub fn build(b: *std.Build) void {
     // coverage. Pure `tokenize`: fills a caller argv array
     // from a line + scratch buffer; no externs, no stubs, no SVC.
     _ = addHostTest(b, test_step, .{ .src = "user_space/fsh/tokenize.zig" });
+
+    // flibc keys.zig — VT100 input Decoder host coverage (arrows / ctrl / tab).
+    // Pure `Decoder.feed`; the SVC readKey driver sits behind the same
+    // has_driver gate as readline. No stubs, no imports.
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/keys.zig" });
+
+    // flibc completion.zig — tab-completion core host coverage (parse,
+    // hasPrefix, commonPrefixLen). Pure; the readdir-driven gathering lives in
+    // readline's driver. No stubs, no imports.
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/completion.zig" });
+
+    // console_ui screen.zig — panel / kv / cursor renderer host coverage.
+    // Pure Sink emitters; imports palette.zig (sibling) only. No stubs.
+    _ = addHostTest(b, test_step, .{ .src = "lib/console_ui/screen.zig" });
 
     // virt DTB parser — pure big-endian FDT decode + bounds guards.
     // The handoff entry (`fromHandoff`) reads the `dtb_pa` extern and the

@@ -455,9 +455,9 @@ backends synthesise the listing differently:
   segment as a synthetic `DT_DIR` (`bin` under `/`). The arc list is
   lexicographically sorted, so duplicate synthetic subdirectories are
   adjacent and collapse with a single de-dup. `ls /` → `bin`, `etc`,
-  `sbin`, `test`; `ls /bin` → `cat`, `echo`, `forkbomb`, `fsh`, `ls`,
-  `meminfo`. The pure `directEntry` helper is host-tested against a
-  comptime cpio fixture.
+  `sbin`, `test`; `ls /bin` → `cat`, `dmesg`, `echo`, `forkbomb`, `fsh`,
+  `login`, `ls`, `meminfo`, `passwd`, `sysinfo`. The pure `directEntry`
+  helper is host-tested against a comptime cpio fixture.
 - **FAT32 — root-directory 8.3 walk (Pi-only).** `readdir` reuses the
   root-walk (16 entries/sector, skipping `0x00` end / `0xE5` deleted /
   `ATTR_LONG_NAME` / `ATTR_VOLUME_ID` — the volume label is not an
@@ -1098,7 +1098,7 @@ initramfs/file pair get dedicated per-target stub objects
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`) to
 avoid double-defining symbols that the module under test already
-exports. The current suite totals **370 host tests** across 35
+exports. The current suite totals **392 host tests** across 38
 modules — see the coverage matrix below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.zig`).
@@ -1443,8 +1443,11 @@ end-to-end on QEMU + Pi 4.
 | `src/pwfile.zig`              |          7 | `login`, `passwd` (and `/bin/login` / `whoami` at runtime)                                                                                              | pure `/etc/passwd` parser (name + uid lookups) shared by the kernel (`sys_passwd` authorization), `/bin/login`, `/bin/passwd`, and fsh's `whoami` builtin; the host tests pin the 5-field format against `user_space/etc/passwd`                              |
 | `scripts/build_initramfs.zig` |          2 | `perm` (via the staged initramfs modes)                                                             | deterministic newc cpio encoder (a build-time host tool, not kernel code); its host tests pin the mode/uid/gid byte offsets shared with `src/initramfs.zig`'s parser — an encoder/parser drift would be a silent permission bypass                              |
 | `src/hwrng.zig`               |          6 | `rng`                                                                                               | the pure SplitMix64 mixer is vector- and differential-tested on the host; the kernel glue (`fill` / the `hwrng_init` announce) is integration-tested by `[TEST] rng` through the klog ring                                                  |
-| `user_space/lib/flibc/readline.zig` |   13 | (PID-1 hand-off)                                                                                  | pure byte→buffer line-editor state machine; the SVC driver sits behind a comptime `has_driver` gate so the host build never analyses inline asm; runtime path = the interactive fsh shell after the harness                                                                                          |
+| `user_space/lib/flibc/readline.zig` |   14 | (PID-1 hand-off)                                                                                  | pure byte→buffer line-editor state machine (incl. the TAB completion action); the SVC driver sits behind a comptime `has_driver` gate so the host build never analyses inline asm; runtime path = the interactive fsh shell after the harness                                                                                          |
 | `user_space/lib/flibc/execvp.zig`   |   13 | (PID-1 hand-off)                                                                                  | pure `/bin/<name>` path-build; SVC driver gated like `readline`; runtime path = the interactive fsh shell after the harness                                                                                                                                                                          |
+| `user_space/lib/flibc/completion.zig` | 8 | (PID-1 hand-off)                                                                                  | pure tab-completion core (`parse` command-vs-path, `commonPrefixLen`); the `readdir`-driven candidate gathering lives in `readline`'s completing driver; runtime path = the interactive fsh shell after the harness                                                                                  |
+| `user_space/lib/flibc/keys.zig`     |    7 | — (full-screen tools)                                                                             | pure VT100 input `Decoder` (`ESC[` arrows / ctrl / tab → `Key`); the SVC `readKey` driver is gated like `readline`; runtime path = a future full-screen tool over the serial console                                                                                                                  |
+| `lib/console_ui/screen.zig`         |    6 | — (full-screen tools)                                                                             | pure ANSI screen renderers (alt-screen lifecycle, cursor, `Panel` box, `kv` rows); `Sink`-routed, allocator-free; the first consumer is `/bin/sysinfo` (`kv`)                                                                                                                                         |
 | `user_space/fsh/tokenize.zig`       |   11 | (PID-1 hand-off)                                                                                  | pure whitespace split + single-pipe decomposition; the shell driver (`fsh.zig`) is integration-only via the PID-1 → fsh hand-off (the `type 'help' for commands` boot success marker)                                                                                                                     |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | shared bump-allocator helper consumed by other test roots; carries no inline tests of its own                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | runtime code patching; no ICache sync host-side                                                                                                                                                                                              |
@@ -1457,13 +1460,13 @@ end-to-end on QEMU + Pi 4.
 | `src/usb_tx_ring.zig`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.zig` stays hardware-verified                                                                                    |
 | `src/board/rpi4b/usb.zig`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.zig`, the TX ring in `src/usb_tx_ring.zig` |
 
-Totals: **370 host tests** (`zig build test`) + **28 in-kernel
+Totals: **392 host tests** (`zig build test`) + **28 in-kernel
 EL0 scenarios** + **1 pre-PID-1 EL1 scenario** (`emmc2-block`,
-`run-virt` / `run`). The table's 35 per-module inline counts sum to
-**354**; the `zig build test` total (370) is exactly 16 higher
+`run-virt` / `run`). The table's 38 per-module inline counts sum to
+**376**; the `zig build test` total (392) is exactly 16 higher
 because the `fork.zig` test root re-runs `src/elf.zig`'s 16 tests
 through its direct file import — elf's tests run once under their own
-row and once inside `fork.zig`'s step. 354 + 16 = 370.
+row and once inside `fork.zig`'s step. 376 + 16 = 392.
 
 ### Output markers
 

@@ -21,6 +21,7 @@
 
 pub const palette = @import("palette.zig");
 pub const tags = @import("tags.zig");
+pub const screen = @import("screen.zig");
 
 // ---- public surface (flat re-exports) --------------------------------------
 // The hot names a consumer reaches for, lifted to the top level so call sites
@@ -42,10 +43,10 @@ pub const skip = tags.skip;
 ///   user   -> write(1, bytes.ptr, bytes.len)
 pub const Sink = *const fn (bytes: []const u8) void;
 
-/// Box-drawing charset for future panels. false = ASCII (+-|), true = Unicode.
-/// The device console passes raw bytes, but only UTF-8 terminals render the
-/// Unicode forms, so ASCII is the safe default.
-pub const unicode: bool = false;
+/// Box-drawing charset for the screen-layer panels — single-sourced in
+/// palette.zig and re-exported here so call sites keep reading
+/// `console_ui.unicode`. false = ASCII (+-|), true = Unicode.
+pub const unicode: bool = palette.unicode;
 
 /// Boot-success marker — the homescreen tail. Frozen: scripts/run_qemu_test.sh
 /// greps this literal (x3 per boot) as the boot pass signal. Single source of

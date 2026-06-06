@@ -51,10 +51,10 @@
 #              the 64 MiB `.sdscratch` buffer; reserve_above caps the
 #              pool at virt's 1 GiB RAM end (0x80000000), well below
 #              MALLOC_END's RPi-derived 0xFC000000. Boot baseline =
-#              0x3be58, per-scenario checkpoint = 0x3be4a.
+#              0x3be57, per-scenario checkpoint = 0x3be49.
 #
 # The script accepts either pattern; the active board's pair must
-# match exactly. Net: 32 × {bbff2, 3be4a} + 1 × {bc000, 3be58}.
+# match exactly. Net: 32 × {bbff2, 3be49} + 1 × {bc000, 3be57}.
 #
 # Tally-matcher note: the harness counts a green fs-roundtrip as one PASS
 # whichever of `[PASS] fs-roundtrip-write …` / `[PASS] fs-roundtrip` /
@@ -129,11 +129,11 @@ errors=$(grep -cF "ERROR CAUGHT" "$LOG" || true)
 fails=$(grep -cF "[FAIL]" "$LOG" || true)
 
 # Board-specific baseline pair (see header). rpi4b: bbff2 / bc000;
-# virt: 3be4a / 3be58. Pick the board whose checkpoint pattern is
+# virt: 3be49 / 3be57. Pick the board whose checkpoint pattern is
 # present, then require its exact pair (32 checkpoints + 1 boot
 # baseline). Detecting by content keeps this script board-arg-free.
 rpi_chk=$(grep -cF "free_pages: 00000000000bbff2" "$LOG" || true)
-virt_chk=$(grep -cF "free_pages: 000000000003be4a" "$LOG" || true)
+virt_chk=$(grep -cF "free_pages: 000000000003be49" "$LOG" || true)
 
 if [ "$rpi_chk" -gt 0 ]; then
     ok_chk=$rpi_chk
@@ -141,10 +141,10 @@ if [ "$rpi_chk" -gt 0 ]; then
     chk_label="0xbbff2"; base_label="0xbc000"
 elif [ "$virt_chk" -gt 0 ]; then
     ok_chk=$virt_chk
-    ok_base=$(grep -cF "free_pages: 000000000003be58" "$LOG" || true)
-    chk_label="0x3be4a"; base_label="0x3be58"
+    ok_base=$(grep -cF "free_pages: 000000000003be57" "$LOG" || true)
+    chk_label="0x3be49"; base_label="0x3be57"
 else
-    echo "FAIL (no known checkpoint pattern): neither 0xbbff2 (rpi4b) nor 0x3be4a (virt) found" >&2
+    echo "FAIL (no known checkpoint pattern): neither 0xbbff2 (rpi4b) nor 0x3be49 (virt) found" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

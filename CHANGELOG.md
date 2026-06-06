@@ -45,6 +45,20 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `FlashOS [v<version>] by ajhahnde - type 'help' for commands` at REPL
   entry, with the version single-sourced from `build.zig.zon` via
   `build_options` (no version literal in code).
+- **TAB completion in the shell.** `fsh` completes on TAB via a new
+  `readlineCompleting` line-editor path: the first token against `/bin`
+  plus the in-process built-ins, a later token as a filesystem path; the
+  buffer extends to the longest common prefix and a unique match appends a
+  trailing space or `/`. `help` now also enumerates `/bin`, so a new tool
+  advertises itself by existing.
+- **`/bin/sysinfo`.** A print-and-exit coreutil rendering the FlashOS
+  version, the logged-in user, and the free-page count as aligned
+  key/value rows — the first consumer of the new screen-renderer module.
+- **Shared screen-renderer + input seams.** New freestanding, host-tested
+  modules: `lib/console_ui/screen.zig` (alternate-screen, cursor, box
+  panels, key/value rows), `user_space/lib/flibc/keys.zig` (VT100 input
+  decoder), and `user_space/lib/flibc/completion.zig` (tab-completion
+  core). Allocator-free, with no kernel changes.
 
 ### Changed
 
@@ -56,6 +70,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `hwrng: fallback (timer mix, weak) ok` to `Initialized hwrng`. These
   change the serial console output format (a breaking change to the boot
   contract).
+- **virt boot-watchdog free-page checkpoints.** They move to `0x3be49`
+  (per scenario) / `0x3be57` (boot baseline) because the larger `fsh` and
+  the new `/bin/sysinfo` grow the embedded initramfs; rpi4b is unchanged.
 
 ### Removed
 

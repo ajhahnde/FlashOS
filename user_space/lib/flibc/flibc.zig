@@ -59,6 +59,19 @@ pub const execve = process.execve;
 pub const chdir = process.chdir;
 
 pub const readline = readline_mod.readline;
+pub const readlineCompleting = readline_mod.readlineCompleting;
+pub const Completion = readline_mod.Completion;
 pub const ReadlineOutcome = readline_mod.Outcome;
 
 pub const execvp = execvp_mod.execvp;
+
+// Navigation seams. Re-exported so a
+// full-screen tool reaches the key decoder + completion core one module deep.
+// Unreferenced by the current boot binaries, so they stay byte-identical until
+// the first consumer (/bin/mon) names them. readlineCompleting + Completion
+// land in readline.zig alongside the fsh wiring.
+pub const keys = @import("keys.zig");
+pub const Key = keys.Key;
+pub const KeyEvent = keys.Event;
+pub const readKey = keys.readKey;
+pub const completion = @import("completion.zig");

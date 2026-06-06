@@ -18,6 +18,12 @@
 /// word and leaves the brackets in the default color.
 pub const color: bool = true;
 
+/// Charset knob for the box-drawing renderers (console_ui.screen panels).
+/// false = ASCII (+-|), true = Unicode lines. The device console passes raw
+/// bytes; only UTF-8 terminals render the Unicode forms, so ASCII is the safe
+/// default. Single source — console_ui re-exports this as console_ui.unicode.
+pub const unicode: bool = false;
+
 const esc = "\x1b[";
 
 // foreground — the eight base ANSI colors (yellow is the amber the
