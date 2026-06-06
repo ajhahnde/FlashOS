@@ -391,7 +391,7 @@ const FAIL_RNG: [*:0]const u8 = "[FAIL] rng\n";
 // PID 1 exists. The positive token matches any announce; the negative
 // token is printed only by the failed boot self-test and must be absent —
 // both together assert "the announce ran AND it was healthy".
-const HWRNG_MARKER: []const u8 = "hwrng:";
+const HWRNG_MARKER: []const u8 = "hwrng";
 const HWRNG_FAIL_MARKER: []const u8 = "hwrng: self-test failed";
 const TEST_CREDS: [*:0]const u8 = "[TEST] creds\n";
 const PASS_CREDS: [*:0]const u8 = "[PASS] creds\n";

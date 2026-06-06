@@ -2,13 +2,14 @@
 # Self-validating QEMU runner for `zig build test-virt` / `test-rpi4b`.
 #
 # Boot success is reaching the interactive fsh prompt. With the
-# login lifecycle, `[ OK ] Reached target Shell` (user_space/fsh/fsh.zig) appears
-# THREE times per boot: twice from [TEST] login's console-scripted
-# sessions and once from the real boot login's shell — only the third one
-# means the boot is done, so the early-exit below counts markers instead
+# login lifecycle, fsh's homescreen marker (user_space/fsh/fsh.zig — the
+# stable `type 'help' for commands` tail) appears THREE times per boot: twice
+# from [TEST] login's console-scripted sessions and once from the real boot
+# login's shell — only the third one means the boot is done, so the early-exit
+# below counts markers instead
 # of first-matching. This script spawns the supplied QEMU command, tails
 # its serial log, and exits:
-#   * 0  on the 3rd `[ OK ] Reached target Shell` with no `[FAIL]` / `ERROR CAUGHT`
+#   * 0  on the 3rd homescreen marker with no `[FAIL]` / `ERROR CAUGHT`
 #        and the expected free-page-checkpoint + marker counts
 #   * 1  on `ERROR CAUGHT`, any `[FAIL]` marker, drifted counts, or timeout
 #
@@ -17,7 +18,7 @@
 # REQUIRES the kernel be built with `-Dci-login-seed=true` (the test-virt /
 # test-rpi4b steps and CI pass it). That flag makes PID-1 seed `flash\nflash\n`
 # into the console before /bin/login so the unattended boot authenticates with
-# no typist and reaches the 3rd `[ OK ] Reached target Shell`. Without it the boot
+# no typist and reaches the 3rd homescreen marker. Without it the boot
 # stops at the real `login:` prompt (correct for a hardware deploy) and this
 # watchdog would hang to the timeout. The expected checkpoint values below are
 # for the seeded kernel.
@@ -27,12 +28,12 @@
 #   * 32 × per-scenario checkpoint at the board's PID-1 baseline
 #   *  1 × initial boot-baseline checkpoint (baseline + 0xe = 14 pages,
 #         the PID-1 fork delta over the PID-0 boot snapshot)
-#   *  1 × healthy kernel-entropy announce (`hwrng: ... ok`), 0 × failed
-#         self-test announce
-#   *  3 × `[ OK ] Authenticated` + 3 × `[ OK ] Reached target Shell` (two scripted
+#   *  1 × healthy kernel-entropy announce (`Initialized hwrng ...`), 0 ×
+#         failed self-test announce
+#   *  3 × homescreen marker (`type 'help' for commands`) — two scripted
 #         [TEST] login sessions + the real boot login; each session
 #         authenticated, dropped privilege in its child, and reached the
-#         shell)
+#         shell
 #   *  0 × `ERROR CAUGHT`
 #
 # Baseline values are board-specific because the get_free_page pool
@@ -53,7 +54,7 @@
 #              0x3be58, per-scenario checkpoint = 0x3be4a.
 #
 # The script accepts either pattern; the active board's pair must
-# match exactly. Net: 31 × {bbff2, 3be4a} + 1 × {bc000, 3be58}.
+# match exactly. Net: 32 × {bbff2, 3be4a} + 1 × {bc000, 3be58}.
 #
 # Tally-matcher note: the harness counts a green fs-roundtrip as one PASS
 # whichever of `[PASS] fs-roundtrip-write …` / `[PASS] fs-roundtrip` /
@@ -93,12 +94,12 @@ while kill -0 "$QEMU_PID" 2>/dev/null; do
         break
     fi
     # Success: the boot reached the interactive shell. With the
-    # login lifecycle the marker appears three times — [TEST] login's two
-    # scripted sessions plus the real boot login's shell — so the trigger
-    # counts occurrences instead of first-matching (killing on the first
-    # one would truncate the run mid-harness). The real boot's shell then
+    # login lifecycle the homescreen marker appears three times — [TEST]
+    # login's two scripted sessions plus the real boot login's shell — so the
+    # trigger counts occurrences instead of first-matching (killing on the
+    # first one would truncate the run mid-harness). The real boot's shell then
     # blocks reading fd 0 — under QEMU there is no input, so it sits here.
-    if [ "$(grep -cF "[ OK ] Reached target Shell" "$LOG" || true)" -ge 3 ]; then
+    if [ "$(grep -cF "type 'help' for commands" "$LOG" || true)" -ge 3 ]; then
         status=ready
         break
     fi
@@ -129,7 +130,7 @@ fails=$(grep -cF "[FAIL]" "$LOG" || true)
 
 # Board-specific baseline pair (see header). rpi4b: bbff2 / bc000;
 # virt: 3be4a / 3be58. Pick the board whose checkpoint pattern is
-# present, then require its exact pair (31 checkpoints + 1 boot
+# present, then require its exact pair (32 checkpoints + 1 boot
 # baseline). Detecting by content keeps this script board-arg-free.
 rpi_chk=$(grep -cF "free_pages: 00000000000bbff2" "$LOG" || true)
 virt_chk=$(grep -cF "free_pages: 000000000003be4a" "$LOG" || true)
@@ -152,20 +153,19 @@ fi
 # Both QEMU targets take the weak timer-mix fallback (QEMU emulates no
 # BCM2711 RNG200); the announce must be the healthy "ok" form and the
 # failed-self-test form must never appear.
-hwrng_ok=$(grep -cF "hwrng: fallback (timer mix, weak) ok" "$LOG" || true)
+hwrng_ok=$(grep -cF "Initialized hwrng" "$LOG" || true)
 hwrng_bad=$(grep -cF "hwrng: self-test failed" "$LOG" || true)
 
-# Every login session must authenticate and reach the shell —
-# exactly three of each per boot: [TEST] login's two scripted sessions
-# (flash, then root, each fork+drop+exec'd by the supervisor) plus the
-# real boot login. Fewer means the lifecycle or the auth path regressed;
-# more means a scenario leaked an extra session.
-login_ok=$(grep -cF "[ OK ] Authenticated" "$LOG" || true)
-fsh_ok=$(grep -cF "[ OK ] Reached target Shell" "$LOG" || true)
+# Every login session must reach the interactive shell — exactly three per
+# boot: [TEST] login's two scripted sessions (flash, then root, each
+# fork+drop+exec'd by the supervisor) plus the real boot login. Each shell
+# entry prints fsh's homescreen marker. Fewer means the lifecycle or the auth
+# path regressed; more means a scenario leaked an extra session.
+fsh_ok=$(grep -cF "type 'help' for commands" "$LOG" || true)
 
 if [ "$errors" -ne 0 ] || [ "$fails" -ne 0 ] || [ "$ok_chk" -ne 32 ] || [ "$ok_base" -ne 1 ] \
-    || [ "$hwrng_ok" -ne 1 ] || [ "$hwrng_bad" -ne 0 ] || [ "$login_ok" -ne 3 ] || [ "$fsh_ok" -ne 3 ]; then
-    echo "FAIL (guard): ERROR_CAUGHT=$errors [FAIL]=$fails ${chk_label}=$ok_chk (want 32) ${base_label}=$ok_base (want 1) hwrng_ok=$hwrng_ok (want 1) hwrng_bad=$hwrng_bad (want 0) login_ok=$login_ok (want 3) fsh_ok=$fsh_ok (want 3)" >&2
+    || [ "$hwrng_ok" -ne 1 ] || [ "$hwrng_bad" -ne 0 ] || [ "$fsh_ok" -ne 3 ]; then
+    echo "FAIL (guard): ERROR_CAUGHT=$errors [FAIL]=$fails ${chk_label}=$ok_chk (want 32) ${base_label}=$ok_base (want 1) hwrng_ok=$hwrng_ok (want 1) hwrng_bad=$hwrng_bad (want 0) fsh_ok=$fsh_ok (want 3)" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

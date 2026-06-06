@@ -608,12 +608,13 @@ PT_LOAD each payload links into carries no writable `.bss`.
   after `run_all` prints the `N/N passed` tally, `init_main.zig` `execve`s
   `/bin/login` *instead of* `sys_exit` (falling through to `sys_exit` only
   if execve fails). login is a **session supervisor**: it prompts for a
-  username (kernel echo on) and a password (kernel echo off —
-  `SYS_SET_CONSOLE_MODE`), asks the kernel to verify the password against
-  the active shadow database (`sys_authenticate`, §5), looks the user up
-  in `/etc/passwd` (the shared `src/pwfile.zig` parser), prints the
-  per-session `[ OK ] Authenticated` marker, then **forks** a child that drops
-  privilege via `setgid` + `setuid` (gid first, while still root) and
+  username (kernel echo on) and a password (kernel masks each typed
+  character with `*` via `SYS_SET_CONSOLE_MODE`), asks the kernel to
+  verify the password against the active shadow database
+  (`sys_authenticate`, §5), looks the user up
+  in `/etc/passwd` (the shared `src/pwfile.zig` parser), then **forks** a
+  child that drops privilege via `setgid` + `setuid` (gid first, while
+  still root) and
   execs the user's shell — login itself stays root, waits, reaps, and
   prompts again. `exit` in fsh is therefore a logout back to `login:`, not
   the end of the boot. (The drop must live in the child: setuid is one-way
@@ -621,11 +622,11 @@ PT_LOAD each payload links into carries no writable `.bss`.
   second session.) An optional argv session limit (`/bin/login 2`) makes
   it exit after N sessions — the `[TEST] login` capstone's hook (§8).
   **Reaching the interactive prompt is the boot success signal:** fsh
-  prints `[ OK ] Reached target Shell` at REPL entry and shows `#` (root) or `$`
-  (everyone else) as its prompt; with `[TEST] login`'s two scripted
-  sessions the CI QEMU watchdog (`scripts/run_qemu_test.sh`) waits for the
-  **third** `[ OK ] Reached target Shell` (then SIGTERMs) and asserts exactly 3 × both
-  markers. On Pi / interactive QEMU the boot drops to a real login prompt,
+  prints its homescreen banner (the stable `type 'help' for commands`
+  tail) at REPL entry and shows `#` (root) or `$` (everyone else) as its
+  prompt; with `[TEST] login`'s two scripted sessions the CI QEMU watchdog
+  (`scripts/run_qemu_test.sh`) waits for the **third** homescreen marker
+  (then SIGTERMs) and asserts exactly three. On Pi / interactive QEMU the boot drops to a real login prompt,
   then a `fsh` prompt running as the authenticated user. **Unattended
   CI:** PID-1 console-injects the test credentials (`flash`/`flash`,
   `SYS_CONSOLE_INJECT`) before the exec, so the real login path
@@ -698,7 +699,7 @@ mapping rather than chasing into UVA space.
 |   29   | ~~`pipe_close`~~     | —                                       |                              —                              | **RETIRED** — legacy per-kind pipe close removed after slot 34 `close` replaced it; the slot number stays reserved forever and returns `-1`                                                                                                                                                                                                                                                                                                                                                                                                                    |
 |   23   | ~~`openConsole`~~    | —             |                         —                         | **RETIRED** — legacy console open removed; fd 0/1/2 are real `console` slots pre-installed on PID 1 (see §4 "File-descriptor model"). The slot number stays reserved forever and returns `-1`.                                                                                                                                                                                                                                                                                                                                                              |
 |   24   | ~~`readConsole`~~    | —                    |                —                | **RETIRED** — legacy console read removed after slot 32 `read` on a `console` fd replaced it; the slot number stays reserved forever and returns `-1`                                                                                                                                                                                                                                                                                                                                                      |
-|   25   | `setConsoleMode` | `x0 = u64 mode`                                   |                                          `i64` 0                                          | **Console echo flag.** `mode & CONSOLE_MODE_ECHO` on ⇒ the kernel echoes drained printable console bytes back through the console TX mux (cooked-style); off (the boot default) keeps the historical split where the kernel never echoes and userland `readline` owns echo. `/bin/login` flips it around its prompts (username echoed, password suppressed). One bit for now; full termios / line discipline is still future work                                                                                                                                                                                                                                                                                                                                                                     |
+|   25   | `setConsoleMode` | `x0 = u64 mode`                                   |                                          `i64` 0                                          | **Console echo/mask flags.** `mode & CONSOLE_MODE_ECHO` on ⇒ the kernel echoes drained printable console bytes back through the console TX mux (cooked-style); `mode & CONSOLE_MODE_MASK` on ⇒ it echoes a `*` per printable byte instead (password masking; mask wins if both are set); neither (the boot default) keeps the historical split where the kernel never echoes and userland `readline` owns echo. `/bin/login` sets echo for the username and mask for the password, then clears both before exec'ing the shell. Two bits for now; full termios / line discipline is still future work                                                                                                                                                                                                                                                                                                                                                                     |
 |   26   | `closeConsole`   | (none)                                            |                                          void                                          | Inert (fd-table teardown — not yet wired)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 |   30   | `console_inject` | `x0 = byte`                                     |                                          void                                          | **Debug only — not part of the stable ABI.** Pushes one byte into the kernel RX ring as if it had arrived on the UART. Powers deterministic `[TEST] console-echo` coverage on QEMU where there is no external input driver. To be removed once a real host-input driver lands                                                                                                                                                                                                                               |
 |   31   | `execve`         | `x0 = const char *path` (NUL-terminated), `x1 = char *const argv[]` (NULL-terminated) | `i32` 0 (does not return on success), -1 on resolve / parse / alloc / argv-fault failure, -13 (`-EACCES`) when the target's mode denies the caller exec | Path-resolved ELF loader (supersedes slot 5 `exec`). The permission layer gates it on the exec bit: the caller's effective ids are checked against the target's mode/owner right after the VFS resolve and **before** the address-space teardown, so a denied exec soft-fails to `-EACCES` with the caller intact (root bypasses). Resolves `path` through the VFS shim, streams the whole ELF into a static kernel buffer (no `PAGE_SIZE` cap), copies argv onto the new top stack page (entry contract `x0 = argc`, `x1 = argv`, AAPCS64), tears down the caller's address space, then maps the new image. Path + argv UVAs reach the kernel via `copy_from_user`; a wild UVA returns `-1` via the soft path in `mm_user.check_and_prefault_user_range` — caller does **not** zombify (every copy completes before the teardown point-of-no-return). The fd table (`current.fds`) is deliberately **preserved** across the teardown, so a shell hands a child its redirected stdio. A post-teardown loader OOM emits `[KERN] OOM` and zombifies the caller (controlled zombie — the address space is already torn down) |
@@ -905,7 +906,7 @@ accounts are `root` (uid 0) and `flash` (uid 1000).
 
 **Authentication flow.** PID 1 runs the test harness, then execs
 `/bin/login` (§4). login prompts for a username (console echo on) and a
-password (echo off via `setConsoleMode`), then asks the kernel to verify
+password (masked with `*` via `setConsoleMode`), then asks the kernel to verify
 it with `sys_authenticate` (slot 45). The kernel reads the shadow
 database itself, runs PBKDF2-HMAC-SHA256 over the password with the
 record's stored salt and iteration count, and constant-time-compares
@@ -1261,8 +1262,8 @@ kernel state:
   (`"2"`), and reaps it. login authenticates each session, forks a child
   that drops privilege and execs the shell, reaps it on `exit`, and
   re-prompts — the full supervisor lifecycle through the real binary. Each
-  session emits the `[ OK ] Authenticated` / `[ OK ] Reached target Shell` markers, so
-  a green boot carries three of each (two from here + the real boot
+  session emits fsh's homescreen marker (`type 'help' for commands`), so
+  a green boot carries three (two from here + the real boot
   login); `scripts/run_qemu_test.sh` keys its success criterion and
   guards on exactly those counts. Reap-based and baseline-neutral — the
   whole tree (login + two session shells) must be reclaimed.
@@ -1286,11 +1287,11 @@ identically under QEMU (`zig build -Dboard=virt run-virt` /
 `picapture`); a green run lands `28/28 passed` with 32 baseline
 checkpoints (`0xbbff2` rpi4b / `0x3be4a` virt) and 0 `ERROR CAUGHT`
 on both boards, then hands off to
-`/bin/login` → `/bin/fsh`. With the login lifecycle the
-`[ OK ] Authenticated` and `[ OK ] Reached target Shell` markers each appear **three
-times** per boot — twice from `[TEST] login`'s scripted sessions and once
-from the real boot login — and the CI watchdog (§4) counts exactly that
-(its early-exit fires on the third shell marker). (In QEMU the
+`/bin/login` → `/bin/fsh`. With the login lifecycle fsh's homescreen
+marker (`type 'help' for commands`) appears **three times** per boot —
+twice from `[TEST] login`'s scripted sessions and once from the real boot
+login — and the CI watchdog (§4) counts exactly that (its early-exit
+fires on the third homescreen marker). (In QEMU the
 `fs-roundtrip` checkpoint is its parity `sys_dump_free` on the SKIP path;
 on Pi-HW it is the real write/verify branch. There is no in-harness
 `fsh` scenario — the shell is exercised by the hand-off above plus the
@@ -1319,8 +1320,8 @@ real hardware. The fix switched the timer to an absolute `CNTP_CVAL`
 deadline with a catch-up clamp; the flap has not reproduced since (14
 consecutive green Pi-4 boots at release). QEMU runs were never affected
 — both boards were deterministic throughout. The boot success criterion
-(the `[ OK ] Reached target Shell` marker the watchdog matches, see §4 PID-1 → fsh
-hand-off) is independent of the tally either way: a single late tick
+(the `type 'help' for commands` homescreen marker the watchdog matches,
+see §4 PID-1 → fsh hand-off) is independent of the tally either way: a single late tick
 still reaches the interactive prompt, and the watchdog's
 no-`[FAIL]` / checkpoint-count guard still catches a regressed scenario.
 
@@ -1444,7 +1445,7 @@ end-to-end on QEMU + Pi 4.
 | `src/hwrng.zig`               |          6 | `rng`                                                                                               | the pure SplitMix64 mixer is vector- and differential-tested on the host; the kernel glue (`fill` / the `hwrng_init` announce) is integration-tested by `[TEST] rng` through the klog ring                                                  |
 | `user_space/lib/flibc/readline.zig` |   13 | (PID-1 hand-off)                                                                                  | pure byte→buffer line-editor state machine; the SVC driver sits behind a comptime `has_driver` gate so the host build never analyses inline asm; runtime path = the interactive fsh shell after the harness                                                                                          |
 | `user_space/lib/flibc/execvp.zig`   |   13 | (PID-1 hand-off)                                                                                  | pure `/bin/<name>` path-build; SVC driver gated like `readline`; runtime path = the interactive fsh shell after the harness                                                                                                                                                                          |
-| `user_space/fsh/tokenize.zig`       |   11 | (PID-1 hand-off)                                                                                  | pure whitespace split + single-pipe decomposition; the shell driver (`fsh.zig`) is integration-only via the PID-1 → fsh hand-off (the `[ OK ] Reached target Shell` boot success marker)                                                                                                                     |
+| `user_space/fsh/tokenize.zig`       |   11 | (PID-1 hand-off)                                                                                  | pure whitespace split + single-pipe decomposition; the shell driver (`fsh.zig`) is integration-only via the PID-1 → fsh hand-off (the `type 'help' for commands` boot success marker)                                                                                                                     |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | shared bump-allocator helper consumed by other test roots; carries no inline tests of its own                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | runtime code patching; no ICache sync host-side                                                                                                                                                                                              |
 | `src/trace/fp_walk.zig`       |          6 | — (pure host)                                                                                       | AAPCS64 frame-record decoder for the `-Dtrace` sampler; the FP-walk bounds / wrap / alignment / monotonic guards are host-verified (the live sampler only fires on real-Pi async timer ticks)                                                  |
@@ -1472,14 +1473,13 @@ row and once inside `fork.zig`'s step. 354 + 16 = 370.
 | `[PASS] <name>`       | Scenario finished with the expected free-page count                 |
 | `[FAIL] <name>`       | Scenario ended with a leak or wrong return value                    |
 | `X/Y passed`          | Final tally;`X == Y` is the green-run condition                   |
-| `[ OK ] Authenticated`          | Auth success marker — `/bin/login` verified the credentials and dropped privilege; the QEMU watchdog asserts it appears exactly once |
-| `[ OK ] Reached target Shell`          | Boot success marker — fsh has reached its interactive REPL; the QEMU watchdog and the real-HW `picapture` helper both wait on it |
+| `type 'help' for commands`          | Boot success marker — fsh's homescreen tail, printed once at interactive REPL entry; the QEMU watchdog and the real-HW `picapture` helper both wait on it (3× per boot) |
 | `ERROR CAUGHT`        | Kernel-side fault (data abort, instruction abort, etc.)             |
 | `kill ok`, `exec-elf ok` | Per-scenario progress prints                                        |
 
 Greens require: `X == Y`, all `[PASS]` no `[FAIL]`, 0 `ERROR CAUGHT`,
-32 per-scenario checkpoints + 1 boot baseline, and the `[ OK ] Authenticated`
-and `[ OK ] Reached target Shell` markers emitted.
+32 per-scenario checkpoints + 1 boot baseline, and fsh's homescreen
+marker (`type 'help' for commands`) emitted 3× per boot.
 
 ## 9. Build artefacts
 

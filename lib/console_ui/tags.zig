@@ -1,0 +1,65 @@
+// console_ui status tags — the severity taxonomy and its look.
+//
+// A status line is a six-column bracket label (`[ OK ]`, `[FAIL]`, …) followed
+// by a message. This file owns the taxonomy: the `Level` an event carries and
+// the `Tag` each level renders as. The renderer (console_ui.zig) tints only the
+// inner word and leaves the brackets + padding in the default color, the way
+// systemd's boot log does.
+
+const palette = @import("palette.zig");
+
+/// Severity of a status line. New levels slot in here and gain a tag below;
+/// every renderer that takes a `Level` then handles them through `of`.
+pub const Level = enum {
+    ok, // green   — a step completed
+    info, // cyan    — neutral notice
+    load, // yellow  — a step in progress (resolves to ok / fail)
+    warn, // yellow  — degraded but continuing
+    fail, // red     — a step failed
+    skip, // grey    — a step was not applicable
+};
+
+/// A six-column status tag, split into the three spans the renderer needs:
+/// the bracket-plus-padding on each side stays in the default color and only
+/// `word` is tinted by `ansi`. Splitting it this way (rather than coloring a
+/// fixed inner slice) lets `[ OK ]` tint just `OK` while `[FAIL]` tints all
+/// four inner columns, and keeps the colored bytes identical to the hand-rolled
+/// prefixes this taxonomy replaced.
+pub const Tag = struct {
+    /// Left bracket + leading padding, e.g. "[ " or "[".
+    pre: []const u8,
+    /// The tinted word, e.g. "OK" / "FAIL".
+    word: []const u8,
+    /// Trailing padding + right bracket, e.g. " ]" or "]".
+    post: []const u8,
+    /// SGR prefix wrapped around `word` when color is on ("" when off).
+    ansi: []const u8,
+};
+
+/// Build a tag, asserting the six-column total width that the carriage-return
+/// overwrite ([LOAD] -> [ OK ]) depends on — a wrong-width tag becomes a
+/// compile error instead of a runtime column jump.
+fn tag(comptime pre: []const u8, comptime word: []const u8, comptime post: []const u8, ansi: []const u8) Tag {
+    if (pre.len + word.len + post.len != 6) @compileError("console_ui tag must be exactly 6 columns wide");
+    return .{ .pre = pre, .word = word, .post = post, .ansi = ansi };
+}
+
+pub const ok = tag("[ ", "OK", " ]", palette.green);
+pub const info = tag("[", "INFO", "]", palette.cyan);
+pub const load = tag("[", "LOAD", "]", palette.yellow);
+pub const warn = tag("[", "WARN", "]", palette.yellow);
+pub const fail = tag("[", "FAIL", "]", palette.red);
+pub const skip = tag("[", "SKIP", "]", palette.grey);
+
+/// Map a `Level` to its `Tag`. The exhaustive switch makes a new `Level`
+/// variant a compile error here until it is given a tag.
+pub fn of(level: Level) Tag {
+    return switch (level) {
+        .ok => ok,
+        .info => info,
+        .load => load,
+        .warn => warn,
+        .fail => fail,
+        .skip => skip,
+    };
+}

@@ -29,6 +29,9 @@ export fn main_output(interface: i32, _: [*:0]const u8) void {
 export fn main_output_u64(interface: i32, _: u64) void {
     if (interface != 0) @panic("host_stubs: main_output_u64 on non-MU interface");
 }
+export fn main_output_char(interface: i32, _: u8) void {
+    if (interface != 0) @panic("host_stubs: main_output_char on non-MU interface");
+}
 
 // WaitQueue / pipe externs. wait_queue.zig and pipe.zig both link
 // against `current`, `preempt_disable`, `preempt_enable`, and

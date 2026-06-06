@@ -106,6 +106,11 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     build_options.addOption(Board, "board", board);
 
+    // Project version, single-sourced from build.zig.zon (.version). Flows to
+    // fsh via build_options so the homescreen banner never hardcodes it: a
+    // release bumps build.zig.zon and the shell line follows automatically.
+    build_options.addOption([]const u8, "version", @import("build.zig.zon").version);
+
     // Opt-in fork tracing: prints a `created pid N at <kva>` line on every
     // fork. Off by default so normal and CI boots read clean; flip on with
     // `-Dverbose-fork` when debugging the scheduler / process lifecycle.
@@ -137,7 +142,7 @@ pub fn build(b: *std.Build) void {
     // In-kernel self-test harness gate (default OFF). When set, PID 1 runs
     // the [TEST] scenario suite + tally before handing off to /bin/login —
     // the boot-as-test path the QEMU watchdog (run_qemu_test.sh) asserts
-    // (27 scenarios, 31 free-page checkpoints). Default OFF so `zig build
+    // (28 scenarios, 32 free-page checkpoints). Default OFF so `zig build
     // deploy` / `run` produce a clean boot straight to the login prompt with
     // no test wall. The watchdog/CI builds pass `-Dboot-selftest=true`
     // alongside `-Dci-login-seed=true`; a forgotten flag fails loud (no
@@ -198,6 +203,19 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("lib/syscall_defs.zig"),
         .target = target,
         .optimize = optimize,
+    });
+
+    // console_ui — shared terminal look (status tags, ANSI palette, the
+    // boot-success marker, and the line/stage/banner renderers). Pure and
+    // target-agnostic (no .target, like shadow_mod): the one source compiles
+    // into every console-drawing binary — the kernel boot log and the
+    // userspace tools — so the whole system restyles from a single file.
+    // Output is routed through a caller-supplied Sink, so it depends on
+    // neither kernel internals nor flibc. Added to consumers below
+    // (kernel_mod, fsh_mod); unused until a call site @imports it, so staging
+    // it leaves every image byte-identical.
+    const console_ui_mod = b.createModule(.{
+        .root_source_file = b.path("lib/console_ui/console_ui.zig"),
     });
 
     // User-space virtual address layout (text/data/heap/stack bases +
@@ -583,6 +601,10 @@ pub fn build(b: *std.Build) void {
     // sys_passwd authorization: uid -> login-name lookup against
     // /etc/passwd (the same parser /bin/login and fsh's whoami import).
     kernel_mod.addImport("pwfile", pwfile_mod);
+    // console_ui: shared terminal look for the boot log. Staged but not yet
+    // @imported by any kernel source, so the kernel image stays byte-identical
+    // until the migration call sites land.
+    kernel_mod.addImport("console_ui", console_ui_mod);
 
     // ---- hello.elf — payload for [TEST] exec-elf ----
     // Built as a standalone aarch64-freestanding ET_EXEC, staged into
@@ -749,6 +771,12 @@ pub fn build(b: *std.Build) void {
     // whoami builtin: uid -> login-name lookup against
     // /etc/passwd via the same parser the kernel and /bin/login use.
     fsh_mod.addImport("pwfile", pwfile_mod);
+    // console_ui: shared terminal look for the homescreen/prompt. fsh renders
+    // its homescreen banner through it, fed the build_options version below.
+    fsh_mod.addImport("console_ui", console_ui_mod);
+    // build_options carries the project version (from build.zig.zon) into the
+    // homescreen banner — single source, no hardcoded version in fsh.
+    fsh_mod.addOptions("build_options", build_options);
     // fsh is the first payload to actually exercise execvp + the
     // tokenizer's @memcpy, so LLVM lowers those to memcpy / strlen
     // libcalls; flibc_mem supplies the freestanding providers.
@@ -1920,5 +1948,9 @@ pub fn build(b: *std.Build) void {
     // SplitMix64 mixer is vector- and differential-tested; the kernel glue
     // (fill / hwrng_init) runs against host_stubs' ramping get_sys_count,
     // so the boot self-test + announce path is exercised end-to-end.
-    _ = addHostTest(b, test_step, .{ .src = "src/hwrng.zig", .stubs = stubs_obj });
+    _ = addHostTest(b, test_step, .{
+        .src = "src/hwrng.zig",
+        .stubs = stubs_obj,
+        .imports = &.{.{ .name = "console_ui", .mod = console_ui_mod }},
+    });
 }

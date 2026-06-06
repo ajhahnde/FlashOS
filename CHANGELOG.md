@@ -27,6 +27,43 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **Password masking at the login prompt.** `/bin/login` now echoes a
+  `*` per typed password character instead of suppressing echo, via a new
+  `CONSOLE_MODE_MASK` bit on `SYS_SET_CONSOLE_MODE`; typed secrets are
+  acknowledged without being shown. The mode is restored to the default
+  (kernel echo off) before the shell starts, so the mask never leaks into
+  the session.
+- **Shared `console_ui` terminal-look module (`lib/console_ui/`).** One
+  freestanding source owns the status-tag taxonomy (`[ OK ]` / `[WARN]` /
+  `[FAIL]` …), the ANSI palette, and the line/stage/banner renderers,
+  compiled into both the kernel boot log and the userspace shell through a
+  caller-supplied sink — the whole system restyles from a single file.
+  Status tags tint only the inner word, systemd-style.
+- **fsh homescreen banner.** The shell prints
+  `FlashOS [v<version>] by ajhahnde - type 'help' for commands` at REPL
+  entry, with the version single-sourced from `build.zig.zon` via
+  `build_options` (no version literal in code).
+
+### Changed
+
+- **Boot-success marker moved to the fsh homescreen.** The QEMU watchdog
+  and the `picapture` helper now key on the stable
+  `type 'help' for commands` homescreen tail instead of the retired
+  `[ OK ] Reached target Shell` / `[ OK ] Authenticated` markers. The
+  kernel entropy announce is reworded from
+  `hwrng: fallback (timer mix, weak) ok` to `Initialized hwrng`. These
+  change the serial console output format (a breaking change to the boot
+  contract).
+
+### Removed
+
+- **`[ OK ] Authenticated` login marker.** `/bin/login` no longer prints
+  a per-session auth marker; a blank line separates the password prompt
+  from the shell homescreen. Boot success is now the homescreen-marker
+  count alone.
+
 ## [v0.2.0] - 2026-06-06
 
 ### Added

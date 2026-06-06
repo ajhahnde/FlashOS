@@ -13,7 +13,7 @@
 const tests = @import("kernel_tests.zig");
 const build_options = @import("build_options");
 
-const OK = "[ OK ] ";
+const OK = "[ \x1b[32mOK\x1b[0m ] ";
 const PID1_MSG: [*:0]const u8 = OK ++ "Reached target Userspace\n";
 const LOGIN_PATH: [*:0]const u8 = "/bin/login";
 
@@ -52,8 +52,9 @@ export fn pid1_main() noreturn {
     }
     // Hand PID 1 to /bin/login. login authenticates against
     // /etc/shadow, drops privilege per /etc/passwd, then execs the user's
-    // shell — fsh still prints `[ OK ] Reached target Shell` at REPL entry, the
-    // boot-success marker the watchdog waits for. To keep the unattended
+    // shell — fsh prints its homescreen line at REPL entry (the stable
+    // `type 'help' for commands` tail), the boot-success marker the watchdog
+    // waits for. To keep the unattended
     // QEMU boot reaching that marker (no interactive typist), inject the CI
     // credentials into the console RX ring first via SYS_CONSOLE_INJECT so
     // login's fd-0 reads drain them; inject-before-exec closes the empty-ring

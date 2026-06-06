@@ -16,12 +16,15 @@
 // The pure tokenizer lives in tokenize.zig and is host-tested in
 // isolation; this file is the SVC-driving shell loop, exercised end to
 // end by the PID-1 hand-off: init execs /bin/fsh after the harness, and
-// the boot watchdog treats the `[ OK ] Reached target Shell` marker fsh prints at REPL
-// entry as the boot success signal (reaching the prompt = pass).
+// the boot watchdog treats the homescreen line fsh prints at REPL entry
+// (the stable `type 'help' for commands` tail) as the boot success signal
+// (reaching the prompt = pass).
 
 const flibc = @import("flibc");
 const tok = @import("tokenize.zig");
 const pwfile = @import("pwfile");
+const console_ui = @import("console_ui");
+const build_options = @import("build_options");
 
 comptime {
     _ = @import("flibc_start");
@@ -38,14 +41,18 @@ const PASSWD_MAX: usize = 512; // /etc/passwd slurp buffer (whoami)
 // in-shell privilege change is reflected immediately.
 const PROMPT_ROOT = "# ";
 const PROMPT_USER = "$ ";
-// One-time marker emitted when fsh reaches its interactive REPL. The QEMU
-// boot watchdog (scripts/run_qemu_test.sh) treats this line as the boot
-// success signal: a boot that reaches the interactive prompt is a pass.
-const OK = "[ OK ] ";
-const READY = OK ++ "Reached target Shell\n\n";
+// Homescreen banner, emitted once when fsh reaches its interactive REPL —
+// rendered by console_ui.homescreen() (see repl()), fed the project version
+// from build.zig.zon via build_options, so no version literal lives here. It
+// doubles as the boot-success marker: the QEMU watchdog (run_qemu_test.sh) and
+// the picapture helper grep the stable "type 'help' for commands" tail
+// (version-independent) as the pass signal — reaching the interactive prompt
+// is a pass.
+const AUTHOR = "ajhahnde";
 const HELP_TEXT =
     "fsh built-ins: cd [dir]  exit  help  free  whoami\n" ++
-    "external: <cmd> [args]   one pipe: <cmd> | <cmd>\n";
+    "external: <cmd> [args]   one pipe: <cmd> | <cmd>\n" ++
+    "e.g. ls  cat  echo  dmesg\n";
 
 export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn {
     _ = argc;
@@ -59,6 +66,12 @@ export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn
 
 fn emit(fd: i32, s: []const u8) void {
     _ = flibc.sys.write_fd(fd, s.ptr, s.len);
+}
+
+// console_ui Sink bound to stdout (fd 1), so the shared renderers reach the
+// shell's console.
+fn consoleSink(bytes: []const u8) void {
+    emit(1, bytes);
 }
 
 // ---- startup file ----
@@ -104,7 +117,7 @@ inline fn isSpace(c: u8) bool {
 
 fn repl() void {
     var line_buf: [LINE_MAX]u8 = undefined;
-    emit(1, READY);
+    console_ui.homescreen(consoleSink, build_options.version, AUTHOR);
     while (true) {
         emit(1, if (flibc.sys.geteuid() == 0) PROMPT_ROOT else PROMPT_USER);
         switch (flibc.readline(&line_buf)) {
@@ -113,6 +126,9 @@ fn repl() void {
             .line => |l| {
                 emit(1, "\n"); // readline submits without echoing the CR
                 dispatch(l);
+                // Blank line after a real command's output, before the next
+                // prompt; skipped on a bare Enter so empty lines don't double up.
+                if (trim(l).len != 0) emit(1, "\n");
             },
         }
     }

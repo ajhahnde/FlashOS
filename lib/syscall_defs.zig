@@ -59,10 +59,16 @@ pub const SYS_SET_CONSOLE_MODE: u64 = 25;
 pub const SYS_CLOSE_CONSOLE: u64 = 26;
 // Console mode bits for SYS_SET_CONSOLE_MODE. ECHO on => the
 // kernel echoes drained printable console bytes (cooked-style); off
-// (default) keeps echo in userland readline. /bin/login clears it around
-// the password prompt to suppress echo. One bit for now; a full termios
+// (default) keeps echo in userland readline. /bin/login sets ECHO for the
+// username prompt and MASK (below) for the password prompt. A full termios
 // flag set is future work.
 pub const CONSOLE_MODE_ECHO: u64 = 1;
+// MASK on => the kernel echoes a single '*' per drained printable byte
+// instead of the byte itself (password masking). /bin/login sets this around
+// the password prompt so typed characters are acknowledged without revealing
+// the secret. Mutually exclusive with ECHO in practice; if both are set,
+// MASK wins.
+pub const CONSOLE_MODE_MASK: u64 = 2;
 // Debug-only — not part of the stable ABI.
 // Pushes one byte into the kernel RX ring as if it had arrived on
 // the UART. Powers deterministic console-echo coverage on QEMU

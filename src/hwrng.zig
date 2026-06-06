@@ -59,6 +59,16 @@ const MU: i32 = 0;
 
 extern fn get_sys_count() u64;
 extern fn main_output(interface: i32, str: [*:0]const u8) void;
+extern fn main_output_char(interface: i32, ch: u8) void;
+
+const console_ui = @import("console_ui");
+
+// console_ui Sink bound to the same Mini-UART boot console the kernel logs to
+// (byte-at-a-time; see src/kernel.zig `bootSink` for the rationale).
+fn bootSink(bytes: []const u8) void {
+    for (bytes) |b| main_output_char(MU, b);
+}
+const boot = console_ui.logger(&bootSink);
 
 // Which entropy source produced the bytes. Only the weak fallback
 // exists today; the hardware source joins with the RNG200 driver.
@@ -89,8 +99,6 @@ pub fn fill(buf: []u8) Source {
 // the time the EL0 harness scenario snapshots it. Allocates nothing —
 // the free-page baseline emitted right after is unaffected.
 export fn hwrng_init() void {
-    const OK = "[ OK ] ";
-    const WARN = "[WARN] ";
     mixer = Mixer.init(get_sys_count());
 
     // Self-test: two draws must differ. A stuck counter or a mixer
@@ -106,10 +114,10 @@ export fn hwrng_init() void {
         if (a[i] != b[i]) same = false;
     }
     if (same) {
-        main_output(MU, WARN ++ "hwrng: self-test failed (constant output)\n");
+        boot.warn("hwrng: self-test failed (constant output)");
         return;
     }
-    main_output(MU, OK ++ "hwrng: fallback (timer mix, weak) ok\n");
+    boot.ok("Initialized hwrng");
 }
 
 // ---- Host tests ----

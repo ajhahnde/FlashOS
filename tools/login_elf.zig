@@ -1,7 +1,7 @@
 // login — interactive credential gate + session supervisor.
 //
 // PID-1 execs /bin/login instead of the shell. login prompts for a
-// username (echoed) and a password (echo suppressed via
+// username (echoed) and a password (masked with '*' via
 // SYS_SET_CONSOLE_MODE), asks the kernel to verify the password against
 // the active shadow database (sys_authenticate — the KDF lives in the
 // kernel), looks the user up in /etc/passwd for the uid / gid / shell,
@@ -37,11 +37,6 @@ comptime {
 }
 
 const PASSWD_PATH: [*:0]const u8 = "/etc/passwd";
-
-// Boot status prefix — mirrors src/kernel.zig's OK. The line emitted with it
-// below is a boot-contract marker the watchdog counts; if you change this
-// prefix, update the run_qemu_test.sh grep too.
-const OK = "[ OK ] ";
 
 fn emit(s: []const u8) void {
     _ = flibc.sys.write_fd(1, s.ptr, s.len);
@@ -143,11 +138,18 @@ export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn
         // real prompt is a clean `login:` instead of a phantom failed attempt.
         if (ulen == 0) continue;
 
-        // Password — kernel echo off.
-        _ = flibc.sys.set_console_mode(0);
+        // Password — kernel masks each typed char with '*'.
+        _ = flibc.sys.set_console_mode(defs.CONSOLE_MODE_MASK);
         emit("Password: ");
         const plen = readLine(&pass_buf);
         emit("\n");
+
+        // Secret captured — restore the default console mode (kernel echo off,
+        // userland readline owns echo) before the shell starts. Without this
+        // the mask leaks past login: the kernel keeps echoing '*' per keystroke
+        // while fsh's readline also echoes the real character, so every shell
+        // keystroke shows up as '*' + the character.
+        _ = flibc.sys.set_console_mode(0);
 
         if (flibc.sys.authenticate(&user_buf, ulen, &pass_buf, plen) != 0) {
             emit("Login incorrect\n");
@@ -183,8 +185,9 @@ export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn
         shell_buf[si] = 0;
         const shell_z: [*:0]const u8 = @ptrCast(&shell_buf);
 
-        // Boot marker proving the auth path ran — once per session.
-        emit("\n" ++ OK ++ "Authenticated\n");
+        // Blank line separating the password prompt from the shell's
+        // homescreen, which the session child execs into next.
+        emit("\n");
 
         if (!runSession(entry.uid, entry.gid, shell_z)) continue;
 

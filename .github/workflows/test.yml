@@ -136,7 +136,7 @@ jobs:
       - name: virt QEMU boot smoke
         # -Dci-login-seed seeds flash/flash before /bin/login so the
         # unattended boot authenticates with no typist. -Dboot-selftest runs
-        # the in-kernel [TEST] harness (the 27-scenario / 31-checkpoint
+        # the in-kernel [TEST] harness (the 28-scenario / 32-checkpoint
         # boot-as-test path run_qemu_test.sh asserts). Both default OFF so
         # hardware deploys boot clean straight to a real login: prompt; the
         # watchdog needs both ON.

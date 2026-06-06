@@ -80,8 +80,8 @@ zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
 For a self-validating run that exits 0 when the boot reaches the
-interactive `fsh` prompt (the third `[ OK ] Reached target Shell` marker — see
-below) with no `[FAIL]` / `ERROR CAUGHT` and the expected free-page
+interactive `fsh` prompt (the third `type 'help' for commands` homescreen
+marker — see below) with no `[FAIL]` / `ERROR CAUGHT` and the expected free-page
 checkpoints, and 1 on a failure or watchdog timeout (no manual QEMU
 supervision):
 
@@ -110,10 +110,10 @@ A green run on either board lands `28/28 passed`, 32 per-scenario
 free-page checkpoints (`0xbbff2` on rpi4b, `0x3be4a` on virt) plus the
 matching boot baseline (`0xbc000` / `0x3be58`), and 0 `ERROR CAUGHT`.
 The boot then hands off to `/bin/login` → `/bin/fsh`; with the login
-lifecycle the `[ OK ] Authenticated` and `[ OK ] Reached target Shell` markers each
-appear three times (two scripted `[TEST] login` sessions + the real
-boot login), and the CI watchdog (`scripts/run_qemu_test.sh`) counts
-exactly that. The free-page invariants are documented in
+lifecycle fsh's homescreen marker (`type 'help' for commands`) appears
+three times (two scripted `[TEST] login` sessions + the real boot
+login), and the CI watchdog (`scripts/run_qemu_test.sh`) counts exactly
+that. The free-page invariants are documented in
 [Documentation §8](DOCUMENTATION.md#free-page-invariants).
 
 QEMU is the authoritative inner-loop signal. The boot path matches
@@ -241,9 +241,9 @@ shell.
     `/dev/cu.usbmodem*` (plugging in the C-to-C cable powers the Pi,
     so the node's appearance is itself the first boot signal), then
     probes the console once per second until the boot marker
-    `[ OK ] Reached target Shell` appears (fsh reached its interactive REPL).
+    `type 'help' for commands` appears (fsh reached its interactive REPL).
   - `mu`: captures the Mini-UART trace adapter
-    (`/dev/cu.usbserial-*`) until `[ OK ] Reached target Shell` (the boot
+    (`/dev/cu.usbserial-*`) until `type 'help' for commands` (the boot
     reached the shell on the MU fallback — no USB host attached) or
     `ERROR CAUGHT` appears. Power-cycle the Pi when prompted.
   - Kernel faults only ever print on the MU adapter — use `mu` mode

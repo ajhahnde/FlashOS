@@ -66,13 +66,15 @@ const builtin = @import("builtin");
 // formula, which doubled the address into .bss.
 const LINEAR_MAP_BASE: u64 = if (builtin.target.os.tag == .freestanding) 0xFFFF000000000000 else 0;
 
-// Console echo flag. Default off preserves the historical
+// Console echo flags. Default off preserves the historical
 // split — the kernel never echoes, userland readline owns echo (so fsh is
-// unaffected). SYS_SET_CONSOLE_MODE flips it; when on, readConsoleBytes
-// echoes drained printable bytes. /bin/login turns it on for the username
-// prompt and off for the password, then leaves it off before exec'ing the
-// shell.
+// unaffected). SYS_SET_CONSOLE_MODE flips them; when echo is on,
+// readConsoleBytes echoes drained printable bytes, and when mask is on it
+// echoes a '*' per printable byte instead (password masking). /bin/login
+// turns echo on for the username prompt and mask on for the password, then
+// leaves both off before exec'ing the shell.
 var console_echo: bool = false;
+var console_mask: bool = false;
 
 // SYS CALL PROCESS CONTROL
 export fn sys_fork() i32 {
@@ -422,17 +424,20 @@ fn readConsoleBytes(buf_uva: u64, len: u64) i64 {
     const copied = console.console_read(&kbuf, n);
     if (copied > 0) {
         if (copy_to_user(buf_uva, &kbuf, @intCast(copied)) < 0) return -1;
-        // Cooked-style echo when enabled: printable bytes only,
+        // Cooked-style echo/mask when enabled: printable bytes only,
         // one NUL-terminated byte at a time through the console mux. Control
         // bytes (CR/LF, and the [TEST] console-echo 0xC0..0xC7 injects) are
-        // never echoed, so the default-off flag plus this filter leave every
-        // existing scenario's serial output byte-identical.
-        if (console_echo) {
+        // never emitted, so with both flags off (the default) this filter
+        // leaves every existing scenario's serial output byte-identical; with
+        // mask on, each printable byte is echoed as '*' instead of itself.
+        if (console_echo or console_mask) {
             var j: i64 = 0;
             while (j < copied) : (j += 1) {
                 const ch = kbuf[@intCast(j)];
                 if (ch >= 0x20 and ch < 0x7F) {
-                    var one = [2]u8{ ch, 0 };
+                    // mask wins over echo: show '*' instead of the secret.
+                    const out: u8 = if (console_mask) '*' else ch;
+                    var one = [2]u8{ out, 0 };
                     console_tx(@ptrCast(&one), 1);
                 }
             }
@@ -491,16 +496,18 @@ fn writeConsoleBytes(buf_uva: u64, len: u64) i64 {
     return @intCast(done);
 }
 
-// SYS_SET_CONSOLE_MODE (slot 25) — toggles the
-// kernel console echo flag. CONSOLE_MODE_ECHO on => readConsoleBytes echoes
-// drained printable bytes (cooked-style); off (the default) keeps the
-// historical split where the kernel never echoes and userland readline owns
-// echo. /bin/login uses it to show the typed username but suppress the
-// password. Full termios / line discipline is still future work.
-// SYS_CLOSE_CONSOLE stays inert (the unified ABI absorbs the close side via
-// SYS_CLOSE on a console fd).
+// SYS_SET_CONSOLE_MODE (slot 25) — sets the
+// kernel console echo/mask flags. CONSOLE_MODE_ECHO on => readConsoleBytes
+// echoes drained printable bytes (cooked-style); CONSOLE_MODE_MASK on =>
+// it echoes a '*' per printable byte instead (password masking); neither
+// (the default) keeps the historical split where the kernel never echoes and
+// userland readline owns echo. /bin/login uses ECHO to show the typed
+// username and MASK to acknowledge the password without revealing it. Full
+// termios / line discipline is still future work. SYS_CLOSE_CONSOLE stays
+// inert (the unified ABI absorbs the close side via SYS_CLOSE on a console fd).
 export fn sys_setConsoleMode(mode: u64) i64 {
     console_echo = (mode & defs.CONSOLE_MODE_ECHO) != 0;
+    console_mask = (mode & defs.CONSOLE_MODE_MASK) != 0;
     return 0;
 }
 export fn sys_closeConsole() void {}
