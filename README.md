@@ -102,8 +102,8 @@ harness and a host-side unit test suite.
   (`sys_pipe`) ride the same table.
 - **Interactive shell (`fsh`).** A userland REPL at `/bin/fsh` over a
   mini-libc (`flibc`): a `readline` line editor with TAB completion, a tokenizer with a
-  single `|` pipe stage, in-process built-ins (`cd` / `exit` / `help` /
-  `free` / `whoami`), a Unix-style `#`/`$` privilege prompt, and `fork` +
+  single `|` pipe stage, in-process built-ins (`cd` / `exit` / `logout` /
+  `help` / `free` / `whoami` / `reboot`), a Unix-style `#`/`$` privilege prompt, and `fork` +
   `execvp` (`/bin/<name>` resolution) for externals — plus `/bin/echo`,
   `/bin/cat`, `/bin/ls` (the stateless `sys_readdir` consumer),
   `/bin/meminfo`, `/bin/forkbomb` (a capped leak probe),

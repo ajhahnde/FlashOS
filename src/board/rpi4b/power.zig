@@ -1,0 +1,35 @@
+// power: machine reset for the Raspberry Pi 4 (BCM2711).
+//
+// Bare-metal Pi has no EL3 secure monitor, so PSCI is unavailable and the
+// reset path is the SoC's legacy watchdog. Arm the watchdog with a short
+// timeout and flag a full reset in the power-manager; the chip reboots
+// through the firmware when the counter underflows.
+//
+// The registers + the 0x5a... write password are the BCM2835/2711
+// power-manager block, 0x100000 above the peripheral base. MMIO is reached
+// through the kernel's linear map, exactly like every other driver here
+// (see gpio.zig / timer.zig — DEVICE_BASE + offset + LINEAR_MAP_BASE).
+
+const LINEAR_MAP_BASE: u64 = 0xFFFF000000000000;
+const DEVICE_BASE: u64 = 0xFE000000;
+const PM_BASE: u64 = DEVICE_BASE + 0x00100000 + LINEAR_MAP_BASE;
+
+// Power-manager reset registers (offsets within the PM block).
+const PM_RSTC: *volatile u32 = @ptrFromInt(PM_BASE + 0x1C);
+const PM_WDOG: *volatile u32 = @ptrFromInt(PM_BASE + 0x24);
+
+// Every PM write must carry the password in the top byte or the SoC drops
+// it. PM_RSTC_WRCFG_CLR masks off the old WRCFG field before OR-ing in
+// FULL_RESET; PM_WDOG_TICKS is a short countdown (~units of the 16-bit
+// watchdog clock) so the reset fires effectively immediately.
+const PM_PASSWORD: u32 = 0x5A000000;
+const PM_RSTC_WRCFG_CLR: u32 = 0xFFFFFFCF;
+const PM_RSTC_WRCFG_FULL_RESET: u32 = 0x00000020;
+const PM_WDOG_TICKS: u32 = 10;
+
+pub fn reboot() noreturn {
+    PM_WDOG.* = PM_PASSWORD | PM_WDOG_TICKS;
+    PM_RSTC.* = PM_PASSWORD | (PM_RSTC.* & PM_RSTC_WRCFG_CLR) | PM_RSTC_WRCFG_FULL_RESET;
+    // Wait for the watchdog to bite — this function never returns.
+    while (true) asm volatile ("wfe");
+}

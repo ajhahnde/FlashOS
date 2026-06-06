@@ -160,9 +160,9 @@
  * 32..35, SYS_CHDIR at 36 and SYS_READDIR at 37.
  * SYS_KLOG_READ at 38, then the process-credential ABI
  * SYS_GETUID..SYS_SETGID at 39..44, SYS_AUTHENTICATE at 45, and
- * SYS_PASSWD at 46, so the cap is now 47.
+ * SYS_PASSWD at 46, and SYS_REBOOT at 47, so the cap is now 48.
  * See lib/syscall_defs.zig. */
-#define NR_SYSCALLS  47
+#define NR_SYSCALLS  48
 
 /* ---- sched ---- */
 #define CORE_CONTEXT_OFFSET 0

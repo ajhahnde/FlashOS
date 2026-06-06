@@ -95,6 +95,14 @@ export fn sys_wait() i32 {
 export fn sys_exit() void {
     exit_process();
 }
+// SYS_REBOOT — reset the board. board.power.reboot() is the per-board
+// reset (PSCI SYSTEM_RESET on virt, the BCM2711 watchdog on rpi4b) and
+// never returns, so neither does this handler: el0_svc never reaches the
+// eret back to the caller. EL0 cannot do this itself (privileged SMC /
+// MMIO), which is why it is a syscall. No privilege gate yet.
+export fn sys_reboot() noreturn {
+    board.power.reboot();
+}
 // Walk task[] under preempt_disable for a matching .pid. On hit: flip to
 // TASK_ZOMBIE and wake any TASK_INTERRUPTIBLE parent (mirrors exit_process
 // in sched.zig). The slot stays occupied; the parent's existing do_wait
@@ -1163,6 +1171,7 @@ export var sys_call_table = blk: {
 
     t[defs.SYS_AUTHENTICATE] = @ptrCast(&sys_authenticate);
     t[defs.SYS_PASSWD] = @ptrCast(&sys_passwd);
+    t[defs.SYS_REBOOT] = @ptrCast(&sys_reboot);
 
     // Retired: legacy per-kind console / file / pipe / exec shims
     // (write_str, exec, readFile, writeFile, closeFile, openConsole,
@@ -1176,11 +1185,11 @@ export var sys_call_table = blk: {
 };
 
 // Build-time guard: src/asm_defs_common.inc must declare
-// `#define NR_SYSCALLS 47` to match. If you bump the highest SYS_*
+// `#define NR_SYSCALLS 48` to match. If you bump the highest SYS_*
 // constant in lib/syscall_defs.zig, also bump the asm-side literal,
 // then update this comptime check.
 comptime {
-    if (defs.NR_SYSCALLS != 47) {
+    if (defs.NR_SYSCALLS != 48) {
         @compileError("NR_SYSCALLS drifted from src/asm_defs_common.inc — keep both in lockstep");
     }
 }

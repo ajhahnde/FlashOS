@@ -50,13 +50,13 @@ const PROMPT_USER = "$ ";
 // is a pass.
 const AUTHOR = "ajhahnde";
 const HELP_TEXT =
-    "fsh built-ins: cd [dir]  exit  help  free  whoami\n" ++
+    "fsh built-ins: cd [dir]  exit/logout  help  free  whoami  reboot\n" ++
     "external: <cmd> [args]   one pipe: <cmd> | <cmd>\n" ++
     "TAB completes commands + paths\n";
 
 // Built-in command names, offered alongside /bin for first-token TAB
 // completion (these dispatch in-process, so they are not in /bin).
-const BUILTINS = [_][]const u8{ "cd", "exit", "help", "free", "whoami" };
+const BUILTINS = [_][]const u8{ "cd", "exit", "logout", "help", "free", "whoami", "reboot" };
 
 export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn {
     _ = argc;
@@ -234,7 +234,8 @@ fn runPiped(argv: *[tok.MAX_ARGS]?[*:0]u8, p: tok.Piped) void {
 // ---- built-ins (in-process, no fork) ----
 
 fn runBuiltin(name: [*:0]const u8, argv: *[tok.MAX_ARGS]?[*:0]u8, argc: usize) bool {
-    if (streq(name, "exit")) flibc.exit();
+    if (streq(name, "exit") or streq(name, "logout")) flibc.exit();
+    if (streq(name, "reboot")) flibc.sys.reboot();
     if (streq(name, "help")) {
         emit(1, HELP_TEXT);
         listBin();

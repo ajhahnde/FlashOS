@@ -29,6 +29,17 @@ pub fn exit() noreturn {
     unreachable;
 }
 
+// Reset the machine (SYS_REBOOT). The kernel performs a board-specific
+// reset and never returns control to userland, so this wrapper is
+// noreturn like exit().
+pub fn reboot() noreturn {
+    asm volatile ("svc #0"
+        :
+        : [nr] "{x8}" (defs.SYS_REBOOT),
+        : .{ .memory = true });
+    unreachable;
+}
+
 pub fn wait() i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),

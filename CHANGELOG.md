@@ -59,6 +59,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   panels, key/value rows), `user_space/lib/flibc/keys.zig` (VT100 input
   decoder), and `user_space/lib/flibc/completion.zig` (tab-completion
   core). Allocator-free, with no kernel changes.
+- **`reboot` and `logout` shell built-ins.** `fsh` gains `reboot`, which
+  resets the board through a new `SYS_REBOOT` syscall (slot 47) — PSCI
+  `SYSTEM_RESET` over the HVC conduit on QEMU `virt`, the BCM2711 watchdog
+  full-reset on Raspberry Pi 4 — and `logout`, a synonym for `exit` that
+  ends the session and returns to the `login:` prompt. Both join the
+  shell's TAB completion and `help` listing.
 
 ### Changed
 

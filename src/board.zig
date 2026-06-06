@@ -44,3 +44,12 @@ pub const usb = switch (build_options.board) {
     .rpi4b => @import("board/rpi4b/usb.zig"),
     .virt => @import("board/virt/usb.zig"),
 };
+
+// power: machine reset. BCM2711 watchdog full-reset on rpi4b; PSCI
+// SYSTEM_RESET (SMC) on QEMU virt. Called directly by sys_reboot
+// (SYS_REBOOT) — power.zig exports no driver `export fn`, so the call
+// site pulls it in, not a start.zig side-effect import.
+pub const power = switch (build_options.board) {
+    .rpi4b => @import("board/rpi4b/power.zig"),
+    .virt => @import("board/virt/power.zig"),
+};

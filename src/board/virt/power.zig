@@ -1,0 +1,25 @@
+// power: machine reset for QEMU `-M virt`.
+//
+// virt has no Pi power-manager; reset goes through PSCI. QEMU's virt
+// machine advertises the PSCI conduit as HVC in its generated device tree
+// (`psci { method = "hvc"; }`, confirmed via `-M virt,...,dumpdtb`) — NOT
+// SMC, despite the CPU_ON comment in boot_quirks.S (that single-core path
+// is a no-op and never issues the call, so its conduit was never tested).
+// SYSTEM_RESET is function id 0x84000009 (PSCI 0.2+, no arguments). QEMU
+// resets the machine; the call never returns.
+//
+// `hvc` / `smc` are gated by the assembler under `-mcpu baseline`
+// ("instruction requires: el2 / el3"), so the conduit is emitted as its
+// raw A64 encoding through `.inst`: hvc #0 = 0xD4000002. x0 carries the
+// function id, pinned by the input constraint.
+
+const PSCI_SYSTEM_RESET: u64 = 0x8400_0009;
+
+pub fn reboot() noreturn {
+    asm volatile (".inst 0xD4000002" // hvc #0
+        :
+        : [fn_id] "{x0}" (PSCI_SYSTEM_RESET),
+        : .{ .memory = true });
+    // PSCI SYSTEM_RESET does not return; spin if QEMU ever ignored it.
+    while (true) asm volatile ("wfe");
+}

@@ -581,8 +581,9 @@ PT_LOAD each payload links into carries no writable `.bss`.
   boundary is marked by a `null` argv slot, so the left and right
   commands are already `execve`-ready NULL-terminated vectors. Pure +
   host-tested.
-- **Built-ins** run in-process (no fork): `cd` (`sys_chdir`), `exit`,
-  `help`, `free` (wraps `sys_dump_free`). Externals fork + `execvp`;
+- **Built-ins** run in-process (no fork): `cd` (`sys_chdir`), `exit` /
+  `logout`, `help`, `free` (wraps `sys_dump_free`), `reboot`
+  (`sys_reboot`, resets the board). Externals fork + `execvp`;
   `execvp` resolves a bare name to `/bin/<name>` (no `$PATH` yet, no
   environment) and a slashed name verbatim. A single `|` wires `sys_pipe` +
   `dup2`: fork left (`dup2(wfd,1)`), fork right (`dup2(rfd,0)`), close
@@ -616,7 +617,8 @@ PT_LOAD each payload links into carries no writable `.bss`.
   child that drops privilege via `setgid` + `setuid` (gid first, while
   still root) and
   execs the user's shell — login itself stays root, waits, reaps, and
-  prompts again. `exit` in fsh is therefore a logout back to `login:`, not
+  prompts again. `exit` (or its alias `logout`) in fsh is therefore a logout
+  back to `login:`, not
   the end of the boot. (The drop must live in the child: setuid is one-way
   for non-root, so a login that dropped itself could never authenticate a
   second session.) An optional argv session limit (`/bin/login 2`) makes
@@ -664,10 +666,10 @@ x0       return value
 
 The vector at `vbar_el1 + 0x400` (`el0_svc` in `src/entry.S`)
 indexes into `sys_call_table` (`src/sys.zig`) and `blr`s to the
-selected handler. `NR_SYSCALLS = 47` (in `src/asm_defs_common.inc`)
+selected handler. `NR_SYSCALLS = 48` (in `src/asm_defs_common.inc`)
 is enforced by a `b.hs` check on `x8`; out-of-range numbers fall
 through to the invalid-entry path. A comptime guard in `src/sys.zig`
-re-asserts `defs.NR_SYSCALLS == 47` so the Zig table and the asm
+re-asserts `defs.NR_SYSCALLS == 48` so the Zig table and the asm
 literal stay in lockstep.
 
 Because the user PGD is installed in TTBR0 at the time of the SVC,

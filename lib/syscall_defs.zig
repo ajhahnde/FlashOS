@@ -158,12 +158,20 @@ pub const SYS_AUTHENTICATE: u64 = 45;
 // rewrite would change the record length. Six register args (x0..x5).
 pub const SYS_PASSWD: u64 = 46;
 
+// Machine-reset ABI. Slot 47 — sys_reboot() resets the board and does
+// not return. The reset itself is board-specific (PSCI SYSTEM_RESET via
+// SMC on QEMU virt; the BCM2711 watchdog full-reset on rpi4b) and lives
+// in src/board/<board>/power.zig behind the board.zig facade. The kernel
+// performs it because EL0 cannot issue the SMC or touch the power-manager
+// MMIO. No privilege gate yet: any logged-in session may reboot.
+pub const SYS_REBOOT: u64 = 47;
+
 // Highest slot + 1; equals the `#define NR_SYSCALLS` literal in
 // src/asm_defs_common.inc. Adding a new SYS_* constant past
-// SYS_PASSWD bumps this automatically; the comptime guard in
+// SYS_REBOOT bumps this automatically; the comptime guard in
 // src/sys.zig catches divergence from the asm-side literal at build
 // time.
-pub const NR_SYSCALLS: usize = SYS_PASSWD + 1;
+pub const NR_SYSCALLS: usize = SYS_REBOOT + 1;
 
 // Kernel-log ring capacity in bytes. Shared here because both
 // the kernel ring (src/klog_ring.zig sizes `KlogRing` to it) and userland
