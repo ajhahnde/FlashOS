@@ -8,6 +8,9 @@ zig-out/
 # Private notes and tools
 ajhahnde/
 
+# Python bytecode cache (boot-demo replay script)
+scripts/__pycache__
+
 # Logs
 stdbuf_test.log
 boot.log

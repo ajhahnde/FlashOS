@@ -1,13 +1,14 @@
-# FlashOS — animated README demo. Replays the captured Raspberry Pi 4B
-# boot (firmware + kernel `[ OK ]` lines) at a readable scroll, then
-# re-emits the real fsh session at the tail line by line — each command
-# (whoami / ls / echo) appears whole, then its real captured output, so it
-# reads like a real console session.
+# FlashOS — animated README demo. Replays the boot + fsh session via
+# scripts/boot_demo_typing.py with two cadences, so it reads like a real
+# console: boot `[ OK ]` lines and command OUTPUT paint whole, one line at
+# a time, while the username at `login:` and each `$ ` command (whoami / ls
+# / cat / echo) are typed out key-by-key at the prompt.
 #
-# Every byte is from a real capture (scripts/boot_demo_typing.py); only
-# the per-line pacing is added on replay.
+# Boot bytes mirror a real Raspberry Pi 4B Mini-UART capture; the
+# authenticated fsh session is reconstructed from the programs' own output
+# (the login gate blocks capturing it under QEMU). See the script header.
 #
-# Regenerate with `vhs scripts/boot_demo.tape` (renders OneDark).
+# Regenerate with `vhs scripts/boot_demo.tape`.
 
 Output assets/boot_demo.gif
 
@@ -32,4 +33,4 @@ Type@5ms "python3 scripts/boot_demo_typing.py"
 Enter
 Show
 
-Sleep 14s
+Sleep 16s

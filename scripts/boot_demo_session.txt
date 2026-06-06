@@ -1,0 +1,35 @@
+
+
+[ OK ] Initialized Mini-UART console
+[ OK ] Booted core 0 (EL1)
+[ OK ] Initialized PL011 trace UART
+[ OK ] Loaded exception vectors
+[ OK ] Enabled interrupt controller
+[ OK ] Started USB gadget
+[ OK ] Loaded kernel symbols
+[ OK ] Relocated syscall table
+[ OK ] Initialized trace subsystem
+[ OK ] Started kernel trace output
+[ OK ] Mounted initramfs root
+[ OK ] Initialized EMMC2 block device
+[ OK ] Mounted /mnt (FAT32)
+[ OK ] Initialized hwrng
+[ OK ] Reached target Userspace
+
+login: flash
+Password: *****
+
+FlashOS [v0.2.0] by ajhahnde - type 'help' for commands
+
+$ help
+fsh built-ins: cd [dir]  exit  help  free  whoami
+external: <cmd> [args]   one pipe: <cmd> | <cmd>
+e.g. ls  cat  echo  dmesg
+
+$ ls
+bin/
+etc/
+sbin/
+test/
+
+$
