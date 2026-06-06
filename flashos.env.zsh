@@ -1,7 +1,12 @@
 # FlashOS shell helpers. Source from ~/.zshrc:
 #   [[ -f /path/to/FlashOS/flashos.env.zsh ]] && source /path/to/FlashOS/flashos.env.zsh
 #
-# Naming: pi*  = serial console helpers, build/showfns = project utilities.
+# Public interface — two verb dispatchers plus a build wrapper:
+#   pi   connect|capture|list|quit    serial-console helpers (Raspberry Pi)
+#   run  qemu|virt|test|hw|auto        build-and-run a board, or attach to HW
+#   build                              two-pass kernel build (wraps ./build.sh)
+#   help                               list shell helpers + zig build steps + build.zig fns
+# Legacy flat names (piconnect/picapture/pilist/piquit/showfns) stay as thin aliases.
 
 # Resolve the directory of this file once at source time. Inside a function,
 # ${0:A:h} refers to the function name, not the source file — capture it now
@@ -13,7 +18,7 @@ typeset -g _GREEN=$'\033[0;32m'
 typeset -g _YELLOW=$'\033[1;33m'
 typeset -g _NC=$'\033[0m'
 
-# Screen session name shared by picapture (creates it) and piquit (kills it).
+# Screen session name shared by `pi capture` (creates it) and `pi quit` (kills it).
 typeset -g _FLASHOS_CAPTURE_SESSION="pi_capture"
 
 # Console serial parameters and the device-node globs the helpers match on.
@@ -28,6 +33,15 @@ typeset -g _FLASHOS_MU_GLOB='/dev/cu.usbserial-*'
 : "${SD_BOOT:=/Volumes/BOOT}"
 export SD_BOOT
 
+# ── shared primitives ──────────────────────────────────────────────────────
+# One idiom each for diagnostics and for running argv in the project root, so
+# every helper below speaks the same way: red/yellow go to stderr, green to
+# stdout, and project commands run from $_FLASHOS_DIR in a subshell.
+_flashos_err()  { print -u2 -- "${_RED}$*${_NC}"; }
+_flashos_warn() { print -u2 -- "${_YELLOW}$*${_NC}"; }
+_flashos_ok()   { print    -- "${_GREEN}$*${_NC}"; }
+_flashos_root() { ( cd "$_FLASHOS_DIR" && "$@" ); }
+
 # Echo a console device path on stdout, or return non-zero with a message on
 # stderr. $1 = NAME of an override env-var (honored verbatim if set), $2 = the
 # glob to match otherwise, $3 = human label used in the not-found message.
@@ -36,7 +50,7 @@ _flashos_pick_device() {
   local override=${(P)1}
   if [[ -n "$override" ]]; then
     if [[ ! -e "$override" ]]; then
-      print -u2 "${_RED}\$$1 ($override) does not exist${_NC}"
+      _flashos_err "\$$1 ($override) does not exist"
       return 1
     fi
     print -r -- "$override"
@@ -44,7 +58,7 @@ _flashos_pick_device() {
   fi
   local devs=(${~2}(N))
   if (( ${#devs} == 0 )); then
-    print -u2 "${_RED}no '$3' device found${_NC}"
+    _flashos_err "no '$3' device found"
     return 1
   fi
   print -r -- "${devs[1]}"
@@ -61,24 +75,28 @@ _flashos_usb_console_device() {
   _flashos_pick_device PI_USB_CONSOLE_DEVICE "$_FLASHOS_USB_GLOB" "$_FLASHOS_USB_GLOB"
 }
 
-# Quit the picapture screen session.
-piquit() {
+# ── pi domain: serial-console helpers ──────────────────────────────────────
+# Verbs are dispatched by pi() below; each impl is also reachable through its
+# legacy flat alias (piquit/pilist/piconnect/picapture).
+
+# Quit the capture screen session.
+_flashos_pi_quit() {
   emulate -L zsh
   if screen -S "$_FLASHOS_CAPTURE_SESSION" -X quit 2>/dev/null; then
-    print -- "${_GREEN}picapture session terminated${_NC}"
+    _flashos_ok "capture session terminated"
   else
-    print -u2 "${_YELLOW}no picapture session is running${_NC}"
+    _flashos_warn "no capture session is running"
   fi
 }
 
 # List attached console devices: the USB CDC console (fsh) and any USB-serial
 # adapters (Mini-UART trace).
-pilist() {
+_flashos_pi_list() {
   emulate -L zsh
   local usb_devs=(${~_FLASHOS_USB_GLOB}(N))
   local mu_devs=(${~_FLASHOS_MU_GLOB}(N))
   if (( ${#usb_devs} == 0 && ${#mu_devs} == 0 )); then
-    print -u2 "${_RED}no device found${_NC}"
+    _flashos_err "no device found"
     return 1
   fi
   if (( ${#usb_devs} > 0 )); then
@@ -92,12 +110,12 @@ pilist() {
 }
 
 # Attach an interactive screen session to the Pi console.
-#   piconnect        auto: USB CDC console (fsh) if present, else MU trace adapter
-#   piconnect usb    force the USB CDC console (/dev/cu.usbmodem*)
-#   piconnect mu     force the Mini-UART trace adapter (/dev/cu.usbserial-*)
+#   pi connect        auto: USB CDC console (fsh) if present, else MU trace adapter
+#   pi connect usb    force the USB CDC console (/dev/cu.usbmodem*)
+#   pi connect mu     force the Mini-UART trace adapter (/dev/cu.usbserial-*)
 # Once the gadget enumerates, fsh I/O rides USB; the MU adapter then only
 # carries kernel [Debug] prints and the USB bring-up trace.
-piconnect() {
+_flashos_pi_connect() {
   emulate -L zsh
   local mode="${1:-auto}"
   local device
@@ -110,16 +128,16 @@ piconnect() {
       ;;
     auto)
       if device="$(_flashos_usb_console_device 2>/dev/null)"; then
-        print -- "${_GREEN}usb console (fsh): ${device}${_NC}"
+        _flashos_ok "usb console (fsh): ${device}"
       elif device="$(_flashos_serial_device 2>/dev/null)"; then
-        print -- "${_YELLOW}mu trace adapter (${device}) — kernel [Debug] only; fsh rides usb once enumerated${_NC}"
+        _flashos_warn "mu trace adapter (${device}) — kernel [Debug] only; fsh rides usb once enumerated"
       else
-        print -u2 "${_RED}no console device found (no /dev/cu.usbmodem* or /dev/cu.usbserial-*)${_NC}"
+        _flashos_err "no console device found (no /dev/cu.usbmodem* or /dev/cu.usbserial-*)"
         return 1
       fi
       ;;
     *)
-      print -u2 "usage: piconnect [usb|mu]"
+      _flashos_err "pi connect: unknown target '$mode' (usb|mu|auto)"
       return 1
       ;;
   esac
@@ -129,21 +147,21 @@ piconnect() {
 # Capture the Pi console until boot success is confirmed, then close the
 # session. The log always lands at $_FLASHOS_DIR/boot.log (covered by the
 # repo .gitignore), regardless of the current directory.
-#   picapture        usb mode (default): wait for the CDC gadget to enumerate
-#                    on /dev/cu.usbmodem*, then wait for the `[ OK ] Reached target Shell` marker
-#   picapture mu     mini-UART mode: capture /dev/cu.usbserial-* until the
-#                    harness prints its `N/N passed` tally (green; the shipping
-#                    kernel then waits at the real `login:` prompt) or a
-#                    `[FAIL]` / `ERROR CAUGHT:` appears
+#   pi capture        usb mode (default): wait for the CDC gadget to enumerate
+#                     on /dev/cu.usbmodem*, then wait for the homescreen marker (`type 'help' for commands`)
+#   pi capture mu     mini-UART mode: capture /dev/cu.usbserial-* until the
+#                     harness prints its `N/N passed` tally (green; the shipping
+#                     kernel then waits at the real `login:` prompt) or a
+#                     `[FAIL]` / `ERROR CAUGHT:` appears
 # Kernel faults always print on the MU adapter, never on USB — use mu mode
 # (trace adapter + external non-host power) for fault diagnosis.
-picapture() {
+_flashos_pi_capture() {
   emulate -L zsh
   local mode="${1:-usb}"
   case "$mode" in
     usb|mu) ;;
     *)
-      print -u2 "usage: picapture [usb|mu]"
+      _flashos_err "pi capture: unknown target '$mode' (usb|mu)"
       return 1
       ;;
   esac
@@ -156,13 +174,13 @@ picapture() {
 
   if [[ "$mode" == "mu" ]]; then
     device="$(_flashos_serial_device)" || return 1
-    print -- "${_GREEN}cable detected (${device})${_NC}"
+    _flashos_ok "cable detected (${device})"
     print -- "please connect pi to power now..."
   else
     # The /dev/cu.usbmodem* node only exists once the gadget enumerates, so
     # its appearance is itself the first boot signal.
     if device="$(_flashos_usb_console_device 2>/dev/null)"; then
-      print -- "${_GREEN}usb console already present (${device}) — pi appears to be running${_NC}"
+      _flashos_ok "usb console already present (${device}) — pi appears to be running"
     else
       print -- "plug in the C-to-C cable now (powers the pi + carries the console)..."
       print -n -- "waiting for enumeration "
@@ -172,12 +190,12 @@ picapture() {
         (( waited++ ))
         print -n -- "."
         if (( waited >= timeout )); then
-          print -u2 "\n${_RED}timeout: no /dev/cu.usbmodem* appeared after ${timeout}s${_NC}"
-          print -u2 "${_YELLOW}kernel faults only print on the mu adapter — try 'picapture mu' with external power${_NC}"
+          _flashos_err "\ntimeout: no /dev/cu.usbmodem* appeared after ${timeout}s"
+          _flashos_warn "kernel faults only print on the mu adapter — try 'pi capture mu' with external power"
           return 1
         fi
       done
-      print -- "\n${_GREEN}enumerated (${device})${_NC}"
+      _flashos_ok "\nenumerated (${device})"
     fi
   fi
 
@@ -195,14 +213,14 @@ picapture() {
 
   if ! screen -c "$screenrc" -L -dmS "$session" "$device" "$_FLASHOS_BAUD"; then
     rm -f -- "$screenrc"
-    print -u2 "${_RED}failed to start screen session${_NC}"
+    _flashos_err "failed to start screen session"
     return 1
   fi
 
   sleep 1
   if ! screen -list | grep -q "\.${session}[[:space:]]"; then
     rm -f -- "$screenrc"
-    print -u2 "${_RED}screen session failed to start; port may be occupied${_NC}"
+    _flashos_err "screen session failed to start; port may be occupied"
     return 1
   fi
   rm -f -- "$screenrc" # screen has read the rc; safe to remove now
@@ -232,15 +250,15 @@ picapture() {
         #   * A -Dboot-selftest build runs the in-kernel suite, whose scripted
         #     `[TEST] login` scenario prints `login:` TWICE mid-run -- so a bare
         #     `login:` match fires before the suite finishes and truncates the
-        #     capture. Its real completion is the 3rd `[ OK ] Reached target
-        #     Shell.` (two scripted login sessions + the real boot login), the
-        #     same count run_qemu_test.sh trusts.
+        #     capture. Its real completion is the 3rd homescreen marker
+        #     (`type 'help' for commands`; two scripted login sessions + the
+        #     real boot login), the same count run_qemu_test.sh trusts.
         #   * A clean deploy/shipping kernel has no `[TEST]` lines and never
         #     auto-logs-in, so it stops at the password-gated `login:` -- that
-        #     prompt is its boot-complete signal (`Reached target Shell` never
+        #     prompt is its boot-complete signal (the homescreen marker never
         #     anchors there, so waiting on it would hang).
         if grep -qF "[TEST]" "$logfile"; then
-          if [[ "$(grep -cF "[ OK ] Reached target Shell" "$logfile")" -ge 3 ]]; then
+          if [[ "$(grep -cF "type 'help' for commands" "$logfile")" -ge 3 ]]; then
             result="success"
             break
           fi
@@ -253,7 +271,7 @@ picapture() {
   else
     # Stuff a CR each second to wake/keep the session (readline submits on CR,
     # an empty line is a no-op dispatch), and watch for the one-time boot marker
-    # `[ OK ] Reached target Shell` — the same interactive-REPL signal run_qemu_test.sh
+    # `type 'help' for commands` — the same interactive-REPL signal run_qemu_test.sh
     # and mu-mode trust. The shell prompt is `# ` / `$ `; it never prints `>>> `.
     # `-p 0` is mandatory: a born-detached (-dmS) session has no current
     # window on macOS screen 4.00.03, so -X stuff silently goes nowhere
@@ -268,7 +286,7 @@ picapture() {
         result="died"
         break
       fi
-      if [[ -f "$logfile" ]] && grep -qF "[ OK ] Reached target Shell" "$logfile"; then
+      if [[ -f "$logfile" ]] && grep -qF "type 'help' for commands" "$logfile"; then
         result="success"
         break
       fi
@@ -277,24 +295,24 @@ picapture() {
 
   case "$result" in
     success)
-      print -- "\n${_GREEN}boot successful${_NC}"
+      _flashos_ok "\nboot successful"
       ;;
     error)
-      print -- "\n${_RED}kernel fault: 'error caught' identified${_NC}"
+      _flashos_err "\nkernel fault: 'error caught' identified"
       ;;
     failed)
-      print -- "\n${_RED}harness failure: a '[FAIL]' scenario was detected${_NC}"
+      _flashos_err "\nharness failure: a '[FAIL]' scenario was detected"
       ;;
     died)
-      print -- "\n${_RED}screen session died mid-capture — device disconnected or re-enumerated${_NC}"
-      print -- "${_YELLOW}device re-enumerated: re-run picapture to attach to the fresh node${_NC}"
+      _flashos_err "\nscreen session died mid-capture — device disconnected or re-enumerated"
+      _flashos_warn "device re-enumerated: re-run pi capture to attach to the fresh node"
       ;;
     timeout)
       if [[ "$mode" == "mu" ]]; then
-        print -- "\n${_YELLOW}timeout: no relevant kernel messages detected after ${timeout}s${_NC}"
+        _flashos_warn "\ntimeout: no relevant kernel messages detected after ${timeout}s"
       else
-        print -- "\n${_YELLOW}timeout: enumerated, but fsh did not answer the prompt probe after ${probe_timeout}s${_NC}"
-        print -- "${_YELLOW}kernel faults only print on the mu adapter — try 'picapture mu' with external power${_NC}"
+        _flashos_warn "\ntimeout: enumerated, but fsh did not answer the prompt probe after ${probe_timeout}s"
+        _flashos_warn "kernel faults only print on the mu adapter — try 'pi capture mu' with external power"
       fi
       ;;
   esac
@@ -311,43 +329,52 @@ picapture() {
   fi
 
   if [[ ! -s "$logfile" ]]; then
-    print -u2 "${_YELLOW}warning: $logfile is empty${_NC}"
+    _flashos_warn "warning: $logfile is empty"
     if [[ "$mode" == "mu" ]]; then
-      print -u2 "${_YELLOW}verify tx/rx wiring (pins 14/15) and power supply${_NC}"
+      _flashos_warn "verify tx/rx wiring (pins 14/15) and power supply"
     else
-      print -u2 "${_YELLOW}fsh may be wedged — power-cycle the pi and re-run${_NC}"
+      _flashos_warn "fsh may be wedged — power-cycle the pi and re-run"
     fi
   fi
 
   [[ "$result" == "success" ]]
 }
 
-# List shell helpers, zig build steps, and zig functions defined in build.zig.
-showfns() {
-  emulate -L zsh
-  local project_file="$_FLASHOS_DIR/flashos.env.zsh"
-  local zig_file="$_FLASHOS_DIR/build.zig"
-
-  # Only the public surface — internal _flashos_* helpers start with '_'.
-  print -- "--- shell functions (flashos.env.zsh) ---"
-  if [[ -f "$project_file" ]]; then
-    grep -E '^[[:alpha:]][[:alnum:]_-]*\(\)' "$project_file" | sed 's/().*//'
-  else
-    print -- "${_RED}not found: $project_file${_NC}"
-  fi
-
-  print -- "\n--- zig build steps (build.zig) ---"
-  if [[ -f "$zig_file" ]]; then
-    (cd "$_FLASHOS_DIR" && zig build --list-steps 2>/dev/null)
-  else
-    print -- "${_RED}not found: $zig_file${_NC}"
-  fi
-
-  print -- "\n--- zig src functions (build.zig) ---"
-  if [[ -f "$zig_file" ]]; then
-    grep -E '^(pub )?fn ' "$zig_file" | sed -E 's/.*fn ([[:alnum:]_]+).*/\1/'
-  fi
+# pi <verb> — dispatcher for the serial-console helpers above.
+_flashos_pi_usage() {
+  print -- "usage: pi <verb> [args]"
+  print -- "  connect [usb|mu|auto]   attach an interactive screen session (default: auto)"
+  print -- "  capture [usb|mu]        capture boot.log until success/fault (default: usb)"
+  print -- "  list                    list attached console devices"
+  print -- "  quit                    kill the detached capture session"
 }
+
+pi() {
+  emulate -L zsh
+  local verb="${1:-help}"
+  (( $# > 0 )) && shift
+  case "$verb" in
+    connect) _flashos_pi_connect "$@" ;;
+    capture) _flashos_pi_capture "$@" ;;
+    list)    _flashos_pi_list "$@" ;;
+    quit)    _flashos_pi_quit "$@" ;;
+    help|-h|--help) _flashos_pi_usage ;;
+    *)
+      _flashos_err "pi: unknown verb '$verb'"
+      _flashos_pi_usage >&2
+      return 1
+      ;;
+  esac
+}
+
+# Legacy flat names — kept so existing docs, scripts, and muscle memory keep
+# working. Prefer the `pi <verb>` form; these forward to the same impls.
+piconnect() { _flashos_pi_connect "$@"; }
+picapture() { _flashos_pi_capture "$@"; }
+pilist()    { _flashos_pi_list "$@"; }
+piquit()    { _flashos_pi_quit "$@"; }
+
+# ── run domain: build + emulate/run ────────────────────────────────────────
 
 # Two-pass kernel build — thin wrapper around ./build.sh, anchored to the
 # project root so it works from any directory. All build logic (zig version
@@ -358,5 +385,62 @@ showfns() {
 #   NM=llvm-nm build    override the nm binary
 build() {
   emulate -L zsh
-  ( cd "$_FLASHOS_DIR" && ./build.sh "$@" )
+  _flashos_root ./build.sh "$@"
+}
+
+# run <mode> — build-and-run a board in QEMU, or attach to real hardware.
+_flashos_run_usage() {
+  print -- "usage: run [qemu|virt|test|hw|auto] [zig args...]"
+  print -- "  qemu   rpi4b board in QEMU (default via 'auto')"
+  print -- "  virt   qemu virt board"
+  print -- "  test   host + in-kernel test run"
+  print -- "  hw     attach to the Raspberry Pi over serial (pi connect)"
+  print -- "  auto   alias for qemu"
+}
+
+run() {
+  emulate -L zsh
+  local mode="${1:-auto}"
+  (( $# > 0 )) && shift
+  case "$mode" in
+    qemu|auto) _flashos_root zig build -Dboard=rpi4b run "$@" ;;
+    virt)      _flashos_root zig build -Dboard=virt run "$@" ;;
+    test)      _flashos_root zig build test "$@" ;;
+    hw)        _flashos_pi_connect "${@:-auto}" ;;
+    help|-h|--help) _flashos_run_usage ;;
+    *)
+      _flashos_err "run: unknown mode '$mode'"
+      _flashos_run_usage >&2
+      return 1
+      ;;
+  esac
+}
+
+# ── introspection ──────────────────────────────────────────────────────────
+
+# List shell helpers, zig build steps, and zig functions defined in build.zig.
+help() {
+  emulate -L zsh
+  local project_file="$_FLASHOS_DIR/flashos.env.zsh"
+  local zig_file="$_FLASHOS_DIR/build.zig"
+
+  # Only the public surface — internal _flashos_* helpers start with '_'.
+  print -- "--- shell functions (flashos.env.zsh) ---"
+  if [[ -f "$project_file" ]]; then
+    grep -E '^[[:alpha:]][[:alnum:]_-]*\(\)' "$project_file" | sed 's/().*//'
+  else
+    _flashos_err "not found: $project_file"
+  fi
+
+  print -- "\n--- zig build steps (build.zig) ---"
+  if [[ -f "$zig_file" ]]; then
+    _flashos_root zig build --list-steps 2>/dev/null
+  else
+    _flashos_err "not found: $zig_file"
+  fi
+
+  print -- "\n--- zig src functions (build.zig) ---"
+  if [[ -f "$zig_file" ]]; then
+    grep -E '^(pub )?fn ' "$zig_file" | sed -E 's/.*fn ([[:alnum:]_]+).*/\1/'
+  fi
 }
