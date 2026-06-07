@@ -1503,6 +1503,12 @@ pub fn build(b: *std.Build) void {
         });
         test_rpi4b_cmd.step.dependOn(&install_kernel_img.step);
         test_rpi4b_cmd.step.dependOn(&make_test_disk_cmd.step);
+        // The kernel image is passed as a literal path string, not a tracked
+        // file input, so the build graph cannot see it change between runs.
+        // Without this, a second `test-rpi4b` is cache-skipped and reports
+        // success without ever booting QEMU — a false green. A boot test must
+        // always run, so mark it as having side effects.
+        test_rpi4b_cmd.has_side_effects = true;
 
         const test_rpi4b_step = b.step("test-rpi4b", "Boot raspi4b in QEMU and assert the boot reaches the fsh prompt");
         test_rpi4b_step.dependOn(&test_rpi4b_cmd.step);
@@ -1545,6 +1551,9 @@ pub fn build(b: *std.Build) void {
             "zig-out/kernel8.img",
         });
         test_virt_cmd.step.dependOn(&install_kernel_img.step);
+        // Always boot — same reason as test-rpi4b: the kernel path is a literal
+        // string, so the step would otherwise cache-skip and false-green.
+        test_virt_cmd.has_side_effects = true;
 
         const test_virt_step = b.step("test-virt", "Boot virt in QEMU and assert the boot reaches the fsh prompt");
         test_virt_step.dependOn(&test_virt_cmd.step);

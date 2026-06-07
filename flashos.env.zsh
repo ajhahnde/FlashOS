@@ -505,7 +505,7 @@ run() {
       # unless the kernel is built with BOTH -Dci-login-seed=true (auto-auth
       # past the login: prompt) AND -Dboot-selftest=true (the in-kernel test
       # scenarios the contract counts). Missing either flag rides the timeout —
-      # and on rpi4b that is ~12 min of TCG that cooks the Mac. Bake both in so
+      # and on rpi4b that is ~12 min of TCG. Bake both in so
       # the footgun cannot happen. Defaults to the fast/safe virt board; rpi4b
       # is an explicit, warned opt-in.
       local wb="${1:-virt}" step
@@ -513,10 +513,21 @@ run() {
       case "$wb" in
         virt)  step=test-virt ;;
         rpi4b) step=test-rpi4b
-               _flashos_warn "rpi4b watchdog: ~5-8 min of TCG (720s ceiling) — the Mac will run hot" ;;
+               _flashos_warn "rpi4b watchdog: ~5-8 min of TCG (720s ceiling)" ;;
         *) _flashos_err "run watchdog: unknown board '$wb' (virt|rpi4b)"; return 1 ;;
       esac
       _flashos_root zig build -Dboard="$wb" -Dci-login-seed=true -Dboot-selftest=true "$step" "$@"
+      local rc=$?
+      # run_qemu_test.sh is silent on success — QEMU output goes to a temp log it
+      # deletes on exit, and only a FAIL dumps the tail. Without an explicit
+      # verdict a green run is indistinguishable from a no-op (e.g. a cache
+      # skip), so print one keyed on the exit status.
+      if (( rc == 0 )); then
+        _flashos_ok "watchdog $wb: PASS — boot contract satisfied (rc=0)"
+      else
+        _flashos_err "watchdog $wb: FAIL (rc=$rc) — see the log tail above"
+      fi
+      return $rc
       ;;
     hw)
       # `--trace` (or `--Trace`) selects the Mini-UART adapter that carries the
