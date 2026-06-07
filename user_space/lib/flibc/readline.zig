@@ -331,10 +331,14 @@ pub fn readlineEdit(buf: []u8, comp: Completion, hist: ?*History) Outcome {
 /// extra command names offered for the first token (a shell's in-process
 /// built-ins, which are absent from /bin); `bin_dir` is the directory searched
 /// for command completion. Path completion needs no policy — it reads the dir
-/// named in the token itself.
+/// named in the token itself. `prompt` is the string the caller printed before
+/// this line: the double-TAB candidate listing reprints `prompt` + the line
+/// after the list so the cursor returns to a faithful prompt (empty = caller
+/// has no prompt, so only the line is redrawn).
 pub const Completion = struct {
     builtins: []const []const u8 = &.{},
     bin_dir: [*:0]const u8 = "/bin",
+    prompt: []const u8 = "",
 };
 
 const driver = if (has_driver) struct {
@@ -371,11 +375,16 @@ const driver = if (has_driver) struct {
         // 16-aligned, and State's natural alignment is only 8.
         var state align(16) = State.init(buf);
         var dec = keys.Decoder{};
+        // Consecutive "stuck" TABs (completion with nothing left to insert). The
+        // second one lists the candidates; any other key clears the streak.
+        var stuck_tabs: u8 = 0;
         var byte: u8 = 0;
         while (true) {
             const n = sys.read(0, @ptrCast(&byte), 1);
             if (n <= 0) return .eof;
             const ev = dec.feed(byte);
+            const was_stuck = stuck_tabs;
+            stuck_tabs = 0;
             switch (ev.key) {
                 .char => render(&state, state.insertAt(ev.ch)),
                 .backspace => render(&state, state.backspace()),
@@ -387,7 +396,15 @@ const driver = if (has_driver) struct {
                 .down => if (hist) |h| {
                     if (h.newer()) |line| replaceAndRender(&state, line);
                 },
-                .tab => doComplete(&state, comp),
+                .tab => switch (doComplete(&state, comp)) {
+                    .stuck => {
+                        // First stuck TAB arms; the next one lists.
+                        if (was_stuck != 0) listCandidates(&state, comp) else {
+                            stuck_tabs = 1;
+                        }
+                    },
+                    .progressed, .empty => {},
+                },
                 .enter => {
                     if (hist) |h| h.push(state.slice());
                     return .{ .line = state.slice() };
@@ -467,27 +484,33 @@ const driver = if (has_driver) struct {
         while (i < n) : (i += 1) echoByte(' ');
     }
 
+    // Resolve the directory a completion enumerates into a NUL-terminated path
+    // for sys.readdir: comp.bin_dir for a command, the token's own dir for a
+    // path. Returns null when the dir name overflows the scratch buffer.
+    fn resolveDir(ctx: completion.Context, comp: Completion, dirbuf: *[128]u8) ?[*:0]const u8 {
+        switch (ctx.kind) {
+            .command => return comp.bin_dir,
+            .path => {
+                const d = if (ctx.dir.len == 0) "." else ctx.dir;
+                if (d.len >= dirbuf.len) return null;
+                _ = copyBytes(dirbuf, d);
+                dirbuf[d.len] = 0;
+                return @ptrCast(dirbuf);
+            },
+        }
+    }
+
     // On TAB: gather candidates that extend the token ending at the cursor,
     // insert the longest common extension at the cursor + echo it. A unique
     // match also gets a trailing ' ' (command / file) or '/' (directory).
-    // Ambiguous or empty matches do nothing (classic single-tab behaviour). All
-    // buffers are stack-local (rule 1); the running common prefix is copied out
-    // of the reused Dirent so it stays valid across the readdir walk.
-    fn doComplete(state: *State, comp: Completion) void {
+    // Returns how far it got (progressed / stuck / empty) so readlineEdit can
+    // arm the double-TAB listing on a stuck repeat. All buffers are stack-local
+    // (rule 1); the running common prefix is copied out of the reused Dirent so
+    // it stays valid across the readdir walk.
+    fn doComplete(state: *State, comp: Completion) completion.TabClass {
         const ctx = completion.parse(state.buf[0..state.pos]);
-
-        // Directory to enumerate, NUL-terminated for sys.readdir.
         var dirbuf: [128]u8 = undefined;
-        const dirz: [*:0]const u8 = switch (ctx.kind) {
-            .command => comp.bin_dir,
-            .path => blk: {
-                const d = if (ctx.dir.len == 0) "." else ctx.dir;
-                if (d.len >= dirbuf.len) return;
-                _ = copyBytes(&dirbuf, d);
-                dirbuf[d.len] = 0;
-                break :blk @ptrCast(&dirbuf);
-            },
-        };
+        const dirz = resolveDir(ctx, comp, &dirbuf) orelse return .empty;
 
         var best: [32]u8 = undefined;
         var best_len: usize = 0;
@@ -514,10 +537,55 @@ const driver = if (has_driver) struct {
             if (before == 0 and count == 1) only_is_dir = (d.d_type == defs.DT_DIR);
         }
 
-        if (count == 0 or best_len <= ctx.prefix.len) return;
+        const cls = completion.classify(count, best_len, ctx.prefix.len);
+        if (cls == .progressed) {
+            emitInsert(state, best[ctx.prefix.len..best_len]);
+            if (count == 1) emitInsert(state, if (only_is_dir) "/" else " ");
+        }
+        return cls;
+    }
 
-        emitInsert(state, best[ctx.prefix.len..best_len]);
-        if (count == 1) emitInsert(state, if (only_is_dir) "/" else " ");
+    // Double-TAB: print every candidate sharing the token's prefix on a fresh
+    // line, then redraw the prompt + the in-progress line so editing resumes
+    // where it left off. Re-walks the same sources doComplete enumerated (the
+    // candidate set is small and a stack cache would not outlive the readdir
+    // walk); names are listed bare, two spaces apart, and the terminal wraps a
+    // long row.
+    fn listCandidates(state: *State, comp: Completion) void {
+        const ctx = completion.parse(state.buf[0..state.pos]);
+        var dirbuf: [128]u8 = undefined;
+        const dirz = resolveDir(ctx, comp, &dirbuf) orelse return;
+
+        writeRange("\n");
+        var any = false;
+        if (ctx.kind == .command) {
+            for (comp.builtins) |name| {
+                if (!completion.hasPrefix(name, ctx.prefix)) continue;
+                emitCandidate(name, &any);
+            }
+        }
+        var d: defs.Dirent = .{};
+        var idx: u64 = 0;
+        while (sys.readdir(dirz, idx, &d) == 0) : (idx += 1) {
+            var nl: usize = 0;
+            while (nl < d.name.len and d.name[nl] != 0) : (nl += 1) {}
+            const name = d.name[0..nl];
+            if (!completion.hasPrefix(name, ctx.prefix)) continue;
+            emitCandidate(name, &any);
+        }
+        writeRange("\n");
+
+        // Redraw the prompt + line, then walk the cursor back to its column.
+        writeRange(comp.prompt);
+        writeRange(state.buf[0..state.len]);
+        emitBack(state.len - state.pos);
+    }
+
+    // One listed candidate, two-space separated from the previous.
+    fn emitCandidate(name: []const u8, any: *bool) void {
+        if (any.*) writeRange("  ");
+        writeRange(name);
+        any.* = true;
     }
 
     // Fold one candidate into the running longest-common-prefix `best`.

@@ -82,6 +82,16 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   arrow keys, `j`/`k`, space/`b` (page), and `g`/`G` (ends), quitting on
   `q` and restoring the shell view. Built on a new allocator-free,
   host-tested pager core (`flibc.Pager`); no new syscall.
+- **`/bin/clear`.** A terminal-clear coreutil — the smallest consumer of
+  the shared screen renderer. It emits the `console_ui.screen.clear`
+  sequence (cursor home + erase) and exits, wiping the current screen in
+  place; the escape bytes stay single-sourced in `console_ui` rather than
+  hardcoded in the tool.
+- **Double-TAB candidate listing in the shell.** When TAB completion is
+  ambiguous with nothing left to insert, a second consecutive TAB lists
+  every matching command or path on a fresh line and redraws the prompt,
+  so the choices are visible without abandoning the typed line. Built on a
+  new pure, host-tested `completion.classify` helper; no new syscall.
 
 ### Changed
 

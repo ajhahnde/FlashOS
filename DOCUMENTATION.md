@@ -455,7 +455,7 @@ backends synthesise the listing differently:
   segment as a synthetic `DT_DIR` (`bin` under `/`). The arc list is
   lexicographically sorted, so duplicate synthetic subdirectories are
   adjacent and collapse with a single de-dup. `ls /` → `bin`, `etc`,
-  `sbin`, `test`; `ls /bin` → `cat`, `dmesg`, `echo`, `forkbomb`, `fsh`,
+  `sbin`, `test`; `ls /bin` → `cat`, `clear`, `dmesg`, `echo`, `forkbomb`, `fsh`,
   `less`, `login`, `ls`, `meminfo`, `passwd`, `sysinfo`. The pure `directEntry`
   helper is host-tested against a comptime cpio fixture.
 - **FAT32 — root-directory 8.3 walk (Pi-only).** `readdir` reuses the
@@ -1100,7 +1100,7 @@ initramfs/file pair get dedicated per-target stub objects
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`) to
 avoid double-defining symbols that the module under test already
-exports. The current suite totals **415 host tests** across 39
+exports. The current suite totals **419 host tests** across 39
 modules — see the coverage matrix below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.zig`).
@@ -1447,10 +1447,10 @@ end-to-end on QEMU + Pi 4.
 | `src/hwrng.zig`               |          6 | `rng`                                                                                               | the pure SplitMix64 mixer is vector- and differential-tested on the host; the kernel glue (`fill` / the `hwrng_init` announce) is integration-tested by `[TEST] rng` through the klog ring                                                  |
 | `user_space/lib/flibc/readline.zig` |   27 | (PID-1 hand-off)                                                                                  | pure byte→buffer line-editor cores: the append-only state machine (TAB completion action), the cursor-edit ops (insert/backspace/move/replace), and the command-history ring; the SVC driver sits behind a comptime `has_driver` gate so the host build never analyses inline asm; runtime path = the interactive fsh shell after the harness                                                                                          |
 | `user_space/lib/flibc/execvp.zig`   |   13 | (PID-1 hand-off)                                                                                  | pure `/bin/<name>` path-build; SVC driver gated like `readline`; runtime path = the interactive fsh shell after the harness                                                                                                                                                                          |
-| `user_space/lib/flibc/completion.zig` | 8 | (PID-1 hand-off)                                                                                  | pure tab-completion core (`parse` command-vs-path, `commonPrefixLen`); the `readdir`-driven candidate gathering lives in `readline`'s completing driver; runtime path = the interactive fsh shell after the harness                                                                                  |
+| `user_space/lib/flibc/completion.zig` | 12 | (PID-1 hand-off)                                                                                  | pure tab-completion core (`parse` command-vs-path, `commonPrefixLen`, `classify` for the double-TAB decision); the `readdir`-driven candidate gathering + double-TAB listing live in `readline`'s completing driver; runtime path = the interactive fsh shell after the harness                                                                                  |
 | `user_space/lib/flibc/keys.zig`     |    7 | — (full-screen tools)                                                                             | pure VT100 input `Decoder` (`ESC[` arrows / ctrl / tab → `Key`); the SVC `readKey` driver is gated like `readline`; runtime path = `/bin/less` (the full-screen pager) over the serial console                                                                                                                  |
 | `user_space/lib/flibc/pager.zig`    |   10 | — (full-screen tools)                                                                             | pure scroll / line-index core (`Pager`: line indexing, `line` slicing, scroll clamping); no SVC — the render + key loop live in `/bin/less`; runtime path = `/bin/less` over the serial console |
-| `lib/console_ui/screen.zig`         |    6 | — (full-screen tools)                                                                             | pure ANSI screen renderers (alt-screen lifecycle, cursor, `Panel` box, `kv` rows); `Sink`-routed, allocator-free; the first consumers are `/bin/sysinfo` (`kv`) and `/bin/less` (alt-screen + `Panel`)                                                                                                                                         |
+| `lib/console_ui/screen.zig`         |    6 | — (full-screen tools)                                                                             | pure ANSI screen renderers (alt-screen lifecycle, cursor, `Panel` box, `kv` rows); `Sink`-routed, allocator-free; the first consumers are `/bin/sysinfo` (`kv`), `/bin/less` (alt-screen + `Panel`), and `/bin/clear` (`clear`)                                                                                                                                         |
 | `user_space/fsh/tokenize.zig`       |   11 | (PID-1 hand-off)                                                                                  | pure whitespace split + single-pipe decomposition; the shell driver (`fsh.zig`) is integration-only via the PID-1 → fsh hand-off (the `type 'help' for commands` boot success marker)                                                                                                                     |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | shared bump-allocator helper consumed by other test roots; carries no inline tests of its own                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | runtime code patching; no ICache sync host-side                                                                                                                                                                                              |
@@ -1463,13 +1463,13 @@ end-to-end on QEMU + Pi 4.
 | `src/usb_tx_ring.zig`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.zig` stays hardware-verified                                                                                    |
 | `src/board/rpi4b/usb.zig`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.zig`, the TX ring in `src/usb_tx_ring.zig` |
 
-Totals: **415 host tests** (`zig build test`) + **28 in-kernel
+Totals: **419 host tests** (`zig build test`) + **28 in-kernel
 EL0 scenarios** + **1 pre-PID-1 EL1 scenario** (`emmc2-block`,
 `run-virt` / `run`). The table's 39 per-module inline counts sum to
-**399**; the `zig build test` total (415) is exactly 16 higher
+**403**; the `zig build test` total (419) is exactly 16 higher
 because the `fork.zig` test root re-runs `src/elf.zig`'s 16 tests
 through its direct file import — elf's tests run once under their own
-row and once inside `fork.zig`'s step. 399 + 16 = 415.
+row and once inside `fork.zig`'s step. 403 + 16 = 419.
 
 ### Output markers
 

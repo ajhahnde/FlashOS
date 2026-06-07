@@ -101,14 +101,14 @@ harness and a host-side unit test suite.
   so a shell can hand a child redirected stdio. Anonymous pipes
   (`sys_pipe`) ride the same table.
 - **Interactive shell (`fsh`).** A userland REPL at `/bin/fsh` over a
-  mini-libc (`flibc`): a `readline` line editor with TAB completion, a tokenizer with a
+  mini-libc (`flibc`): a `readline` line editor with TAB completion (double-TAB lists candidates), a tokenizer with a
   single `|` pipe stage, in-process built-ins (`cd` / `exit` / `logout` /
   `help` / `free` / `whoami` / `reboot`), a Unix-style `#`/`$` privilege prompt, and `fork` +
   `execvp` (`/bin/<name>` resolution) for externals — plus `/bin/echo`,
   `/bin/cat`, `/bin/ls` (the stateless `sys_readdir` consumer),
   `/bin/meminfo`, `/bin/forkbomb` (a capped leak probe),
   `/bin/sysinfo` (a key/value system summary), `/bin/less` (a
-  full-screen pager), and `/bin/passwd`. Reads
+  full-screen pager), `/bin/clear` (a screen wipe), and `/bin/passwd`. Reads
   `/etc/fshrc` at startup; `sys_chdir` gives each
   task a working directory. No userland allocator yet — every buffer is
   fixed-size stack/static.
@@ -143,7 +143,7 @@ harness and a host-side unit test suite.
   currently inert — Zig has no `-fpatchable-function-entry=2`
   equivalent yet).
 - **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 28
-  scenarios) plus a host-side `zig build test` suite (415 host
+  scenarios) plus a host-side `zig build test` suite (419 host
   tests across 39 modules).
 
 ## Quick start
@@ -208,7 +208,7 @@ serial-console setup.
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt     |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt  |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                         |
-| `zig build test`                     | Host-side unit tests (415 tests, 39 modules)                    |
+| `zig build test`                     | Host-side unit tests (419 tests, 39 modules)                    |
 | `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                             |
 
 The default optimisation mode is `ReleaseSmall`. Override with

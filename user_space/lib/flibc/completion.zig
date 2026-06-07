@@ -84,6 +84,32 @@ pub fn commonPrefixLen(a: []const u8, b: []const u8) usize {
     return i;
 }
 
+/// What a TAB press did to the line — the driver's branch point for double-TAB
+/// listing. `count` candidates share the longest common prefix `best_len`; the
+/// user has already typed `prefix_len` bytes of the token.
+pub const TabClass = enum {
+    /// The line grew: either a unique match (which also gets a trailing
+    /// separator) or the common prefix extended past what was typed. Reset the
+    /// double-TAB streak.
+    progressed,
+    /// Two or more candidates already at their common prefix — nothing left to
+    /// insert. A second consecutive `stuck` TAB lists them.
+    stuck,
+    /// Nothing matched; the TAB is inert.
+    empty,
+};
+
+/// Classify a completion attempt from its candidate tally. A unique match always
+/// progresses (the driver appends a ' ' / '/' even when the typed token already
+/// equals the name); multiple candidates progress only while their common prefix
+/// runs past the typed prefix, otherwise they are `stuck` and a redraw-listing is
+/// the only forward move.
+pub fn classify(count: usize, best_len: usize, prefix_len: usize) TabClass {
+    if (count == 0) return .empty;
+    if (count == 1) return .progressed;
+    return if (best_len > prefix_len) .progressed else .stuck;
+}
+
 // ---- host tests ------------------------------------------------------------
 
 const std = @import("std");
@@ -141,4 +167,25 @@ test "commonPrefixLen" {
     try testing.expectEqual(@as(usize, 3), commonPrefixLen("login", "logout")); // "log"
     try testing.expectEqual(@as(usize, 0), commonPrefixLen("a", "b"));
     try testing.expectEqual(@as(usize, 3), commonPrefixLen("cat", "cat"));
+}
+
+test "classify: no candidates is empty" {
+    try testing.expectEqual(TabClass.empty, classify(0, 0, 3));
+}
+
+test "classify: a unique match always progresses" {
+    // Extends ("l" -> "ls") and exact ("ls" with only "ls" matching) both
+    // progress — the exact case still earns its trailing separator.
+    try testing.expectEqual(TabClass.progressed, classify(1, 2, 1));
+    try testing.expectEqual(TabClass.progressed, classify(1, 2, 2));
+}
+
+test "classify: ambiguous but still extendable progresses" {
+    // Typed "l", three candidates share "lo": the common prefix runs ahead.
+    try testing.expectEqual(TabClass.progressed, classify(3, 2, 1));
+}
+
+test "classify: ambiguous at the common prefix is stuck" {
+    // Typed "lo", three candidates share exactly "lo": nothing left to insert.
+    try testing.expectEqual(TabClass.stuck, classify(3, 2, 2));
 }

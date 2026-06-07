@@ -1020,6 +1020,33 @@ pub fn build(b: *std.Build) void {
     less.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     less.entry = .disabled;
 
+    // ---- clear.elf — terminal-clear coreutil ----
+    // Smallest console_ui consumer: emits the shared screen-clear sequence
+    // (console_ui.screen.clear) and exits, so the escape bytes stay
+    // single-sourced. Imports flibc + console_ui only, like less. Same recipe
+    // (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
+    // coreutil_linker.ld). Staged at /bin/clear.
+    const clear_mod = b.createModule(.{
+        .root_source_file = b.path("tools/clear_elf.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    clear_mod.addImport("flibc", flibc_mod);
+    clear_mod.addImport("flibc_start", flibc_start_mod);
+    clear_mod.addImport("flibc_mem", flibc_mem_mod);
+    clear_mod.addImport("console_ui", console_ui_mod);
+    const clear = b.addExecutable(.{
+        .name = "clear.elf",
+        .root_module = clear_mod,
+    });
+    clear.pie = false;
+    clear.bundle_compiler_rt = false;
+    clear.link_z_max_page_size = 0x80;
+    clear.link_z_common_page_size = 0x80;
+    clear.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    clear.entry = .disabled;
+
     // ---- login.elf — credential gate + session supervisor ----
     // PID-1 execs /bin/login instead of /bin/fsh: it prompts for a username
     // (echoed) + password (echo suppressed via SYS_SET_CONSOLE_MODE), has the
@@ -1172,6 +1199,7 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(flibc_demo.getEmittedBin(), "test/flibc_demo.elf");
     _ = cpio_stage.addCopyFile(argv_echo.getEmittedBin(), "test/argv_echo.elf");
     _ = cpio_stage.addCopyFile(cat.getEmittedBin(), "bin/cat");
+    _ = cpio_stage.addCopyFile(clear.getEmittedBin(), "bin/clear");
     _ = cpio_stage.addCopyFile(dmesg.getEmittedBin(), "bin/dmesg");
     _ = cpio_stage.addCopyFile(echo.getEmittedBin(), "bin/echo");
     _ = cpio_stage.addCopyFile(forkbomb.getEmittedBin(), "bin/forkbomb");
@@ -1207,6 +1235,7 @@ pub fn build(b: *std.Build) void {
     // what it is told.
     const initramfs_arcs = [_]struct { arc: []const u8, mode: u32 }{
         .{ .arc = "bin/cat", .mode = 0o100755 },
+        .{ .arc = "bin/clear", .mode = 0o100755 },
         .{ .arc = "bin/dmesg", .mode = 0o100755 },
         .{ .arc = "bin/echo", .mode = 0o100755 },
         .{ .arc = "bin/forkbomb", .mode = 0o100755 },

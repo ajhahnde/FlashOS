@@ -129,10 +129,16 @@ fn repl() void {
     // before they are read back, so `undefined` backing is valid here.
     var hist_slots: [HIST_N]flibc.HistSlot = undefined;
     var hist = flibc.History.init(&hist_slots);
-    const comp = flibc.Completion{ .builtins = &BUILTINS };
     console_ui.homescreen(consoleSink, build_options.version, AUTHOR);
     while (true) {
-        emit(1, if (flibc.sys.geteuid() == 0) PROMPT_ROOT else PROMPT_USER);
+        const prompt = if (flibc.sys.geteuid() == 0) PROMPT_ROOT else PROMPT_USER;
+        emit(1, prompt);
+        // Hand readline the live prompt so its double-TAB candidate listing can
+        // reprint `prompt` + line after the list. align(16): the >16-byte
+        // Completion is materialised on this frame and LLVM may SLP-store its
+        // adjacent slice fields with a `str q` (16-byte NEON) that faults on an
+        // 8-aligned slot under SCTLR_EL1.A — the strict-align vectorisation trap.
+        const comp: flibc.Completion align(16) = .{ .builtins = &BUILTINS, .prompt = prompt };
         switch (flibc.readlineEdit(&line_buf, comp, &hist)) {
             .eof => return, // ^D on an empty line / stream closed → logout
             .abandoned => emit(1, "\n"), // ^C: readline drew nothing, fsh ends the line
