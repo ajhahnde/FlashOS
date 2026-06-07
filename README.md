@@ -250,6 +250,7 @@ Apache License, Version 2.0. See [License](LICENSE.md).
 
 - [eeco](https://github.com/ajhahnde/eeco) — self-maintaining workflow ecosystem.
 - [the-way-out](https://github.com/ajhahnde/the-way-out) — top-down pixel-art escape-room shooter.
+- [Flash](https://github.com/ajhahnde/Flash) — a systems language and Zig transpiler.
 
 ---
 
