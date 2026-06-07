@@ -333,4 +333,4 @@ weiterhin hält.
 
 [← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Migration →](../../MIGRATION.md)
 
-<!-- sync-ref: SETUP.md @ d7bc74f0701ffe5de0dc8b6a0597cbf0a8dcfd9d | synced 2026-06-07 -->
+<!-- sync-ref: SETUP.md @ 4225962b633ff46a8cf0c8d5713622be836de031 | synced 2026-06-07 -->

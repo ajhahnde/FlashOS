@@ -27,6 +27,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-06-07
+
 ### Added
 
 - **Password masking at the login prompt.** `/bin/login` now echoes a
@@ -235,7 +237,9 @@ highlights are below.
 - **Kernel symbol table** generated from the linked ELF by a two-pass
   build step, so panics and the profiler can print real names.
 
-[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/ajhahnde/FlashOS/compare/v0.2.0...v0.3.0
+[v0.2.0]: https://github.com/ajhahnde/FlashOS/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/ajhahnde/FlashOS/releases/tag/v0.1.0
 
 ---

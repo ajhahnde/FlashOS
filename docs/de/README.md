@@ -9,7 +9,7 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://codecov.io/gh/ajhahnde/FlashOS/branch/main/graph/badge.svg" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.2.0-blue" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.3.0-blue" alt="Version">
     <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
     <img src="https://img.shields.io/badge/zig-0.16.0-orange" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey" alt="aarch64-elf">
@@ -259,9 +259,10 @@ Apache License, Version 2.0. Siehe [Lizenz](../../LICENSE.md).
 
 - [eeco](https://github.com/ajhahnde/eeco) — self-maintaining workflow ecosystem.
 - [the-way-out](https://github.com/ajhahnde/the-way-out) — top-down pixel-art escape-room shooter.
+- [Flash](https://github.com/ajhahnde/Flash) — eine Systemsprache und Zig-Transpiler.
 
 ---
 
 [Als Nächstes: Dokumentation →](DOCUMENTATION.md)
 
-<!-- sync-ref: README.md @ d7bc74f0701ffe5de0dc8b6a0597cbf0a8dcfd9d | synced 2026-06-07 -->
+<!-- sync-ref: README.md @ 4225962b633ff46a8cf0c8d5713622be836de031 | synced 2026-06-07 -->
