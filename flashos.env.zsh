@@ -393,8 +393,8 @@ _flashos_run_usage() {
   print -- "usage: run [qemu|virt|test|hw|auto] [zig args...]"
   print -- "  qemu   rpi4b board in QEMU (default via 'auto')"
   print -- "  virt   qemu virt board"
-  print -- "  test   host + in-kernel test run"
-  print -- "  hw     attach to the Raspberry Pi over serial (pi connect)"
+  print -- "  test   host unit tests   (--NAME filters by test name, e.g. run test --fat32)"
+  print -- "  hw     attach to the Raspberry Pi over serial (pi connect; --trace = MU adapter)"
   print -- "  auto   alias for qemu"
 }
 
@@ -405,8 +405,32 @@ run() {
   case "$mode" in
     qemu|auto) _flashos_root zig build -Dboard=rpi4b run "$@" ;;
     virt)      _flashos_root zig build -Dboard=virt run "$@" ;;
-    test)      _flashos_root zig build test "$@" ;;
-    hw)        _flashos_pi_connect "${@:-auto}" ;;
+    test)
+      # A bare `--NAME` is sugar for the host-test substring filter
+      # (`run test --fat32` -> `zig build test -Dtest-filter=fat32`); -D… and
+      # other args pass through untouched, and `--help` reaches zig verbatim.
+      local -a targs=() a
+      for a in "$@"; do
+        case "$a" in
+          --help) targs+=(--help) ;;
+          --?*)   targs+=("-Dtest-filter=${a#--}") ;;
+          *)      targs+=("$a") ;;
+        esac
+      done
+      _flashos_root zig build test "${targs[@]}"
+      ;;
+    hw)
+      # `--trace` (or `--Trace`) selects the Mini-UART adapter that carries the
+      # bring-up trace; everything else forwards to `pi connect` (usb|mu|auto).
+      local -a hargs=() a
+      for a in "$@"; do
+        case "$a" in
+          --trace|--Trace) hargs+=(mu) ;;
+          *)               hargs+=("$a") ;;
+        esac
+      done
+      _flashos_pi_connect "${hargs[@]:-auto}"
+      ;;
     help|-h|--help) _flashos_run_usage ;;
     *)
       _flashos_err "run: unknown mode '$mode'"

@@ -59,6 +59,10 @@ const HostTest = struct {
 // Set from the -Dcoverage option in build(); read by addHostTest below.
 var host_tests_use_llvm = false;
 
+// Set from the -Dtest-filter option in build(); read by addHostTest below. When
+// non-null, only tests whose name contains this substring run (zig test filter).
+var host_test_filter: ?[]const u8 = null;
+
 fn addHostTest(b: *std.Build, step: *std.Build.Step, cfg: HostTest) *std.Build.Module {
     const m = b.createModule(.{
         .root_source_file = b.path(cfg.src),
@@ -71,6 +75,7 @@ fn addHostTest(b: *std.Build, step: *std.Build.Step, cfg: HostTest) *std.Build.M
     const t = b.addTest(.{
         .root_module = m,
         .use_llvm = if (host_tests_use_llvm) true else null,
+        .filters = if (host_test_filter) |f| &.{f} else &.{},
     });
     step.dependOn(&b.addRunArtifact(t).step);
     return m;
@@ -184,6 +189,14 @@ pub fn build(b: *std.Build) void {
         "coverage",
         "Force the LLVM backend for host test binaries (kcov-readable DWARF)",
     ) orelse false;
+
+    // Substring filter for the host-test step: `zig build test -Dtest-filter=foo`
+    // runs only tests whose name contains "foo". Null (default) runs the suite.
+    host_test_filter = b.option(
+        []const u8,
+        "test-filter",
+        "Run only host tests whose name contains this substring",
+    );
 
     // ---- hygiene checks (trailing space, hard tabs, lowercase hex) ----
     const hygiene_step = b.step("check-hygiene", "Fail on whitespace or hex-literal regressions");
