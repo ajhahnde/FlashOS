@@ -76,6 +76,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   -Dtest-filter=<substr>` runs only host tests whose name contains the
   substring, for faster focused iteration; the default runs the full
   suite.
+- **`/bin/less`.** A full-screen text pager — the first interactive
+  consumer of the screen-renderer + input seams. It takes over the
+  alternate screen, draws a titled panel, and scrolls a file with the
+  arrow keys, `j`/`k`, space/`b` (page), and `g`/`G` (ends), quitting on
+  `q` and restoring the shell view. Built on a new allocator-free,
+  host-tested pager core (`flibc.Pager`); no new syscall.
 
 ### Changed
 
@@ -87,9 +93,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `hwrng: fallback (timer mix, weak) ok` to `Initialized hwrng`. These
   change the serial console output format (a breaking change to the boot
   contract).
-- **virt boot-watchdog free-page checkpoints.** They move to `0x3be49`
-  (per scenario) / `0x3be57` (boot baseline) because the larger `fsh` and
-  the new `/bin/sysinfo` grow the embedded initramfs; rpi4b is unchanged.
+- **virt boot-watchdog free-page checkpoints.** They move to `0x3be48`
+  (per scenario) / `0x3be56` (boot baseline) because the larger `fsh` and
+  the new `/bin/sysinfo` and `/bin/less` tools grow the embedded
+  initramfs; rpi4b is unchanged.
 
 ### Removed
 

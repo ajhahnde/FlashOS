@@ -1,0 +1,204 @@
+// flibc pager core — a scroll/line-index state machine for a text pager.
+//
+// The third navigation seam, sitting beside keys.zig (input) and screen.zig
+// (output): the pure paging logic a full-screen pager (/bin/less) drives. It
+// indexes the line starts of a slurped byte buffer once, then answers two
+// questions a render loop asks every frame — "which lines are on screen?" and
+// "where does the cursor scroll to?" — with all motion clamped so `top` never
+// runs past the last page or before the first line.
+//
+// Pure by construction, exactly like keys.Decoder and completion: no allocator
+// (the line index is a caller-owned []u32 — rule 1), no module state, no SVC,
+// no dependency on the kernel or the rest of flibc. The driver half — opening
+// the file, screen.enter/leave, readKey — lives in tools/less_elf.zig; this
+// file holds only the logic worth host-testing in isolation.
+//
+// Zero footprint until referenced: like the other seams it is analysed only
+// when a call site names it, so re-exporting it from flibc leaves every current
+// boot binary byte-identical until /bin/less lands.
+
+/// A pager view over an immutable text buffer. `init` indexes line starts into
+/// the caller's `slots`; the scroll ops move `top` (the first visible line)
+/// with clamping; `line(i)` returns the i-th logical line. `rows` is the
+/// visible content-row count the consumer paints (its page height).
+pub const Pager = struct {
+    text: []const u8,
+    lines: []u32, // caller-owned; lines[0..n] are line-start byte offsets
+    n: usize, // number of indexed lines
+    top: usize, // index of the first visible line
+    rows: usize, // visible content rows (page height)
+
+    /// Index the line starts of `text` into `slots` and return a Pager homed at
+    /// the top. Line 0 begins at offset 0; every byte after a '\n' begins the
+    /// next line, except a single trailing '\n' (the common case — a file that
+    /// ends in a newline is N lines, not N + 1). Internal blank lines are kept.
+    /// Indexing stops at `slots.len` lines: a pathological all-newline buffer is
+    /// capped rather than overrunning the caller's array (the driver caps the
+    /// slurp by bytes, so this bound is not normally the binding one).
+    pub fn init(text: []const u8, slots: []u32, rows: usize) Pager {
+        var n: usize = 0;
+        if (text.len > 0 and slots.len > 0) {
+            slots[0] = 0;
+            n = 1;
+            var i: usize = 0;
+            while (i < text.len) : (i += 1) {
+                if (text[i] == '\n' and i + 1 < text.len) {
+                    if (n >= slots.len) break;
+                    slots[n] = @intCast(i + 1);
+                    n += 1;
+                }
+            }
+        }
+        return .{ .text = text, .lines = slots, .n = n, .top = 0, .rows = rows };
+    }
+
+    /// The i-th logical line: from its start offset up to (not including) its
+    /// own '\n', with a preceding '\r' (CRLF) stripped. Computing the end by
+    /// scanning to the next '\n' — rather than the next index slot — keeps a
+    /// capped index honest: the last indexed line ends at its newline, it does
+    /// not swallow the un-indexed remainder. Out-of-range `i` yields an empty
+    /// slice so a render loop can ask past the last line without a bounds check.
+    pub fn line(self: Pager, i: usize) []const u8 {
+        if (i >= self.n) return "";
+        const start = self.lines[i];
+        var end: usize = start;
+        while (end < self.text.len and self.text[end] != '\n') : (end += 1) {}
+        var s = self.text[start..end];
+        if (s.len > 0 and s[s.len - 1] == '\r') s = s[0 .. s.len - 1];
+        return s;
+    }
+
+    /// The largest `top` that still fills the page — so the final screen sits at
+    /// the bottom with no blank overscroll. Zero when the text fits one page.
+    pub fn maxTop(self: Pager) usize {
+        return if (self.n > self.rows) self.n - self.rows else 0;
+    }
+
+    /// Scroll down `k` lines, clamped to maxTop().
+    pub fn down(self: *Pager, k: usize) void {
+        const mt = self.maxTop();
+        self.top = if (self.top + k > mt) mt else self.top + k;
+    }
+
+    /// Scroll up `k` lines, clamped to the first line.
+    pub fn up(self: *Pager, k: usize) void {
+        self.top = if (self.top > k) self.top - k else 0;
+    }
+
+    /// Forward one page (a full window of `rows`), clamped.
+    pub fn pageDown(self: *Pager) void {
+        self.down(self.rows);
+    }
+
+    /// Back one page, clamped.
+    pub fn pageUp(self: *Pager) void {
+        self.up(self.rows);
+    }
+
+    /// Jump to the first line.
+    pub fn toTop(self: *Pager) void {
+        self.top = 0;
+    }
+
+    /// Jump so the last line sits on the final row.
+    pub fn toBottom(self: *Pager) void {
+        self.top = self.maxTop();
+    }
+};
+
+// ---- host tests ------------------------------------------------------------
+
+const std = @import("std");
+const testing = std.testing;
+
+test "init indexes line starts and swallows only the final newline" {
+    var slots: [8]u32 = undefined;
+    // "a\n\nb\n" -> lines "a", "" (internal blank kept), "b"; trailing \n dropped.
+    const p = Pager.init("a\n\nb\n", &slots, 10);
+    try testing.expectEqual(@as(usize, 3), p.n);
+    try testing.expectEqualStrings("a", p.line(0));
+    try testing.expectEqualStrings("", p.line(1));
+    try testing.expectEqualStrings("b", p.line(2));
+}
+
+test "no trailing newline still indexes the last line" {
+    var slots: [8]u32 = undefined;
+    const p = Pager.init("ab\ncd", &slots, 10);
+    try testing.expectEqual(@as(usize, 2), p.n);
+    try testing.expectEqualStrings("ab", p.line(0));
+    try testing.expectEqualStrings("cd", p.line(1));
+}
+
+test "line strips a CRLF terminator" {
+    var slots: [8]u32 = undefined;
+    const p = Pager.init("x\r\ny", &slots, 10);
+    try testing.expectEqual(@as(usize, 2), p.n);
+    try testing.expectEqualStrings("x", p.line(0));
+    try testing.expectEqualStrings("y", p.line(1));
+}
+
+test "empty text has no lines and out-of-range yields empty" {
+    var slots: [8]u32 = undefined;
+    const p = Pager.init("", &slots, 10);
+    try testing.expectEqual(@as(usize, 0), p.n);
+    try testing.expectEqualStrings("", p.line(0));
+}
+
+test "init caps at slots.len" {
+    var slots: [3]u32 = undefined;
+    // five lines of input, only three slots.
+    const p = Pager.init("a\nb\nc\nd\ne", &slots, 10);
+    try testing.expectEqual(@as(usize, 3), p.n);
+    try testing.expectEqualStrings("c", p.line(2));
+}
+
+test "maxTop is zero when the text fits one page" {
+    var slots: [8]u32 = undefined;
+    var p = Pager.init("a\nb\nc", &slots, 10);
+    try testing.expectEqual(@as(usize, 0), p.maxTop());
+    p.toBottom();
+    try testing.expectEqual(@as(usize, 0), p.top);
+}
+
+test "maxTop leaves the last line on the final row" {
+    var slots: [16]u32 = undefined;
+    // ten lines, page of 3 -> maxTop 7 (lines 7,8,9 on screen).
+    const p = Pager.init("0\n1\n2\n3\n4\n5\n6\n7\n8\n9", &slots, 3);
+    try testing.expectEqual(@as(usize, 10), p.n);
+    try testing.expectEqual(@as(usize, 7), p.maxTop());
+}
+
+test "down and up clamp at the ends" {
+    var slots: [16]u32 = undefined;
+    var p = Pager.init("0\n1\n2\n3\n4\n5\n6\n7\n8\n9", &slots, 3); // maxTop 7
+    p.up(1);
+    try testing.expectEqual(@as(usize, 0), p.top); // already at top
+    p.down(2);
+    try testing.expectEqual(@as(usize, 2), p.top);
+    p.down(100);
+    try testing.expectEqual(@as(usize, 7), p.top); // clamped to maxTop
+    p.up(3);
+    try testing.expectEqual(@as(usize, 4), p.top);
+}
+
+test "page motion moves by a full window and clamps" {
+    var slots: [16]u32 = undefined;
+    var p = Pager.init("0\n1\n2\n3\n4\n5\n6\n7\n8\n9", &slots, 3); // maxTop 7
+    p.pageDown();
+    try testing.expectEqual(@as(usize, 3), p.top);
+    p.pageDown();
+    try testing.expectEqual(@as(usize, 6), p.top);
+    p.pageDown();
+    try testing.expectEqual(@as(usize, 7), p.top); // clamped
+    p.pageUp();
+    try testing.expectEqual(@as(usize, 4), p.top);
+}
+
+test "toTop and toBottom jump to the ends" {
+    var slots: [16]u32 = undefined;
+    var p = Pager.init("0\n1\n2\n3\n4\n5\n6\n7\n8\n9", &slots, 3); // maxTop 7
+    p.toBottom();
+    try testing.expectEqual(@as(usize, 7), p.top);
+    p.toTop();
+    try testing.expectEqual(@as(usize, 0), p.top);
+}

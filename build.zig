@@ -989,6 +989,37 @@ pub fn build(b: *std.Build) void {
     sysinfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     sysinfo.entry = .disabled;
 
+    // ---- less.elf — full-screen text pager ----
+    // First interactive consumer of the navigation scaffold: takes over the
+    // console with console_ui.screen (alt-screen + panelTop title bar), reads
+    // keys through flibc.readKey's VT100 decoder, and scrolls a single named
+    // file with the pure flibc.Pager core. A proof of the full-screen loop the
+    // way sysinfo proved the print-and-exit kv() renderer. Imports flibc +
+    // console_ui only (no pwfile / build_options). Same recipe as ls / sysinfo
+    // (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
+    // coreutil_linker.ld). Staged at /bin/less; kept out of the CI FSH_SCRIPT
+    // like sysinfo (interactive; the free-page baseline must stay deterministic).
+    const less_mod = b.createModule(.{
+        .root_source_file = b.path("tools/less_elf.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    less_mod.addImport("flibc", flibc_mod);
+    less_mod.addImport("flibc_start", flibc_start_mod);
+    less_mod.addImport("flibc_mem", flibc_mem_mod);
+    less_mod.addImport("console_ui", console_ui_mod);
+    const less = b.addExecutable(.{
+        .name = "less.elf",
+        .root_module = less_mod,
+    });
+    less.pie = false;
+    less.bundle_compiler_rt = false;
+    less.link_z_max_page_size = 0x80;
+    less.link_z_common_page_size = 0x80;
+    less.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    less.entry = .disabled;
+
     // ---- login.elf — credential gate + session supervisor ----
     // PID-1 execs /bin/login instead of /bin/fsh: it prompts for a username
     // (echoed) + password (echo suppressed via SYS_SET_CONSOLE_MODE), has the
@@ -1145,6 +1176,7 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(echo.getEmittedBin(), "bin/echo");
     _ = cpio_stage.addCopyFile(forkbomb.getEmittedBin(), "bin/forkbomb");
     _ = cpio_stage.addCopyFile(fsh.getEmittedBin(), "bin/fsh");
+    _ = cpio_stage.addCopyFile(less.getEmittedBin(), "bin/less");
     _ = cpio_stage.addCopyFile(ls.getEmittedBin(), "bin/ls");
     _ = cpio_stage.addCopyFile(meminfo.getEmittedBin(), "bin/meminfo");
     _ = cpio_stage.addCopyFile(sysinfo.getEmittedBin(), "bin/sysinfo");
@@ -1179,6 +1211,7 @@ pub fn build(b: *std.Build) void {
         .{ .arc = "bin/echo", .mode = 0o100755 },
         .{ .arc = "bin/forkbomb", .mode = 0o100755 },
         .{ .arc = "bin/fsh", .mode = 0o100755 },
+        .{ .arc = "bin/less", .mode = 0o100755 },
         .{ .arc = "bin/login", .mode = 0o100755 },
         .{ .arc = "bin/ls", .mode = 0o100755 },
         .{ .arc = "bin/meminfo", .mode = 0o100755 },
@@ -1629,6 +1662,11 @@ pub fn build(b: *std.Build) void {
     // console_ui screen.zig — panel / kv / cursor renderer host coverage.
     // Pure Sink emitters; imports palette.zig (sibling) only. No stubs.
     _ = addHostTest(b, test_step, .{ .src = "lib/console_ui/screen.zig" });
+
+    // flibc pager.zig — pure scroll / line-index core host coverage (init line
+    // indexing, line slicing, scroll clamping). The screen.enter + readKey
+    // driver lives in tools/less_elf.zig. No stubs, no imports.
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/pager.zig" });
 
     // virt DTB parser — pure big-endian FDT decode + bounds guards.
     // The handoff entry (`fromHandoff`) reads the `dtb_pa` extern and the

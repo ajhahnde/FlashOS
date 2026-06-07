@@ -78,3 +78,5 @@ pub const Key = keys.Key;
 pub const KeyEvent = keys.Event;
 pub const readKey = keys.readKey;
 pub const completion = @import("completion.zig");
+pub const pager = @import("pager.zig");
+pub const Pager = pager.Pager;
