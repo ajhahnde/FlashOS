@@ -194,6 +194,20 @@ pub fn chdir(path: [*:0]const u8) i32 {
         : .{ .memory = true });
 }
 
+/// getcwd(buf, len) — copy the calling task's NUL-terminated working
+/// directory (slot 48, SYS_GETCWD) into `buf`, and return the path
+/// length excluding the NUL. The readback half of `chdir`; `pwd` is the
+/// sole consumer. Returns -1 on a wild buffer UVA or a `len` too small
+/// to hold the path plus its terminator.
+pub fn getcwd(buf: [*]u8, len: u64) i64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i64),
+        : [nr] "{x8}" (defs.SYS_GETCWD),
+          [buf] "{x0}" (buf),
+          [len] "{x1}" (len),
+        : .{ .memory = true });
+}
+
 /// open(path) — resolve `path` through VFS and install a file fd in the
 /// calling task's unified table (slot 7, SYS_OPEN_FILE). `path` is a
 /// NUL-terminated UVA; relative paths are joined against the task's

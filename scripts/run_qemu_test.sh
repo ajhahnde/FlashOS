@@ -51,12 +51,22 @@
 #              the 64 MiB `.sdscratch` buffer; reserve_above caps the
 #              pool at virt's 1 GiB RAM end (0x80000000), well below
 #              MALLOC_END's RPi-derived 0xFC000000. Boot baseline =
-#              0x3be56, per-scenario checkpoint = 0x3be48.
+#              0x3be54, per-scenario checkpoint = 0x3be46.
 #
 # The script accepts either pattern; the active board's pair must
-# match exactly. Net: 32 × {bbff2, 3be48} + 1 × {bc000, 3be56}.
+# match exactly. Net: 32 × {bbff2, 3be46} + 1 × {bc000, 3be54}.
 #
 # Drift history (legitimate free-page baseline shifts, newest first):
+#   * v0.3.0 — virt 0x3be47→0x3be46 (per-scenario), 0x3be55→0x3be54 (boot
+#              baseline): the +strict-align build-target feature replaces
+#              unaligned NEON stores with aligned codegen, growing the kernel
+#              image one page past a 4 KiB boundary so virt's reserve_below
+#              covers one more page; this fixes the /bin/less alignment fault
+#              on real silicon. rpi4b unaffected (reserve calls are no-ops).
+#   * v0.3.0 — virt 0x3be48→0x3be47 (per-scenario), 0x3be56→0x3be55 (boot
+#              baseline): the restructured `help` output (per-command
+#              descriptions) grew fsh.elf one page past a 4 KiB boundary, so
+#              virt's reserve_below covers one more page. rpi4b unaffected.
 #   * v0.3.0 — virt 0x3be49→0x3be48 (per-scenario), 0x3be57→0x3be56 (boot
 #              baseline): the /bin/less pager added one ELF to the initramfs,
 #              growing the kernel image past a page boundary so virt's
@@ -136,11 +146,11 @@ errors=$(grep -cF "ERROR CAUGHT" "$LOG" || true)
 fails=$(grep -cF "[FAIL]" "$LOG" || true)
 
 # Board-specific baseline pair (see header). rpi4b: bbff2 / bc000;
-# virt: 3be48 / 3be56. Pick the board whose checkpoint pattern is
+# virt: 3be46 / 3be54. Pick the board whose checkpoint pattern is
 # present, then require its exact pair (32 checkpoints + 1 boot
 # baseline). Detecting by content keeps this script board-arg-free.
 rpi_chk=$(grep -cF "free_pages: 00000000000bbff2" "$LOG" || true)
-virt_chk=$(grep -cF "free_pages: 000000000003be48" "$LOG" || true)
+virt_chk=$(grep -cF "free_pages: 000000000003be46" "$LOG" || true)
 
 if [ "$rpi_chk" -gt 0 ]; then
     ok_chk=$rpi_chk
@@ -148,10 +158,10 @@ if [ "$rpi_chk" -gt 0 ]; then
     chk_label="0xbbff2"; base_label="0xbc000"
 elif [ "$virt_chk" -gt 0 ]; then
     ok_chk=$virt_chk
-    ok_base=$(grep -cF "free_pages: 000000000003be56" "$LOG" || true)
-    chk_label="0x3be48"; base_label="0x3be56"
+    ok_base=$(grep -cF "free_pages: 000000000003be54" "$LOG" || true)
+    chk_label="0x3be46"; base_label="0x3be54"
 else
-    echo "FAIL (no known checkpoint pattern): neither 0xbbff2 (rpi4b) nor 0x3be48 (virt) found" >&2
+    echo "FAIL (no known checkpoint pattern): neither 0xbbff2 (rpi4b) nor 0x3be46 (virt) found" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

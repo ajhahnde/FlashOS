@@ -22,9 +22,17 @@ Password: *****
 FlashOS [v0.2.0] by ajhahnde - type 'help' for commands
 
 $ help
-fsh built-ins: cd [dir]  exit  help  free  whoami
-external: <cmd> [args]   one pipe: <cmd> | <cmd>
-e.g. ls  cat  echo  dmesg
+Commands:
+  cd [dir]       change working directory
+  pwd            print working directory
+  free           show free page count
+  whoami         print the logged-in user
+  reboot         restart the machine
+  exit / logout  end the session
+  help           show this help
+
+Run a program:  <cmd> [args]    pipe:  <a> | <b>
+TAB completes commands + paths
 
 $ ls
 bin/

@@ -86,6 +86,14 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .aarch64,
         .os_tag = .freestanding,
         .abi = .none,
+        // Force +strict-align so LLVM never widens a byte copy or a
+        // >16-byte by-value return into a NEON `str q` aimed at an
+        // only-8-aligned slot. Those stores fault under SCTLR_EL1.A on real
+        // silicon (data abort, DFSC 0x21) while sailing through QEMU's
+        // lenient TCG. Covers the kernel and every freestanding EL0 program
+        // that shares this target, so the whole class is closed at codegen
+        // instead of with per-site `align(16)` / volatile dodges.
+        .cpu_features_add = std.Target.aarch64.featureSet(&.{.strict_align}),
     });
     // Default .ReleaseSmall keeps the kernel inside its symbol/image
     // budget, but it also compiles out the integer-overflow and

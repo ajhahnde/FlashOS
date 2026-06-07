@@ -38,9 +38,8 @@
 
 > Der Boot oben ist eine echte Serial-Console-Aufnahme von FlashOS
 > beim Booten auf echter Raspberry-Pi-4B-Hardware bis zum
-> `login:`-Prompt; die anschließende `fsh`-Session — `whoami`, `ls`,
-> `cat` und eine einstufige Pipe — spielt die echte Ausgabe der Shell
-> in einer lesbaren Kadenz ab.
+> `login:`-Prompt; die anschließende `fsh`-Session — `help` und `ls`
+> — spielt die echte Ausgabe der Shell in einer lesbaren Kadenz ab.
 
 ## About
 
@@ -105,16 +104,20 @@ Stress-Zyklen hinweg, geprüft durch ein kernelinternes
   bewahrt sie, sodass eine Shell einem Kind umgeleitetes stdio
   übergeben kann. Anonyme Pipes (`sys_pipe`) nutzen dieselbe Tabelle.
 - **Interaktive Shell (`fsh`).** Eine Userland-REPL unter `/bin/fsh`
-  über einer Mini-libc (`flibc`): ein roher `readline`-Zeileneditor,
-  ein Tokenizer mit einer einzelnen `|`-Pipe-Stufe, In-Process-
-  Built-ins (`cd` / `exit` / `help` / `free` / `whoami`), ein
-  Unix-artiger `#`/`$`-Privileg-Prompt und `fork` + `execvp`
-  (`/bin/<name>`-Auflösung) für externe Programme — dazu `/bin/echo`,
-  `/bin/cat`, `/bin/ls` (der zustandslose `sys_readdir`-Konsument),
-  `/bin/meminfo`, `/bin/forkbomb` (eine gedeckelte Leak-Probe) und
-  `/bin/passwd`. Liest beim Start `/etc/fshrc`; `sys_chdir` gibt jedem
-  Task ein Arbeitsverzeichnis. Noch kein Userland-Allocator — jeder
-  Puffer ist fest dimensioniert, stack/static.
+  über einer Mini-libc (`flibc`): ein `readline`-Zeileneditor mit
+  TAB-Vervollständigung (Doppel-TAB listet die Kandidaten auf), ein
+  Tokenizer mit einer einzelnen `|`-Pipe-Stufe, In-Process-Built-ins
+  (`cd` / `pwd` / `exit` / `logout` / `help` / `free` / `whoami` /
+  `reboot`), ein Unix-artiger `#`/`$`-Privileg-Prompt und `fork` +
+  `execvp` (`/bin/<name>`-Auflösung) für externe Programme — dazu
+  `/bin/echo`, `/bin/cat`, `/bin/ls` (der zustandslose
+  `sys_readdir`-Konsument), `/bin/meminfo`, `/bin/forkbomb` (eine
+  gedeckelte Leak-Probe), `/bin/sysinfo` (eine Key/Value-System-
+  Zusammenfassung), `/bin/less` (ein Full-Screen-Pager), `/bin/clear`
+  (eine Bildschirmlöschung) und `/bin/passwd`. Liest beim Start
+  `/etc/fshrc`; `sys_chdir` gibt jedem Task ein Arbeitsverzeichnis.
+  Noch kein Userland-Allocator — jeder Puffer ist fest dimensioniert,
+  stack/static.
 - **Prozess-Identität, Login & Berechtigungen.** Jeder Task
   trägt reale + effektive uid/gid (über `fork` vererbt, über `execve`
   bewahrt) hinter einer ABI der `getuid`/`setuid`-Familie, und jede
@@ -150,8 +153,8 @@ Stress-Zyklen hinweg, geprüft durch ein kernelinternes
   (Laufzeit intakt, aber derzeit inert — Zig hat noch kein Äquivalent
   zu `-fpatchable-function-entry=2`).
 - **Kernelinternes Test-Harness** (`[TEST]/[PASS]/[FAIL]` + Bilanz, 28
-  Szenarien) plus eine host-seitige `zig build test`-Suite (370
-  Host-Tests über 35 Module).
+  Szenarien) plus eine host-seitige `zig build test`-Suite (419
+  Host-Tests über 39 Module).
 
 ## Schnellstart
 
@@ -215,7 +218,7 @@ und das Setup der seriellen Konsole.
 | `zig build -Dboard=virt test-virt`   | virt booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht    |
 | `zig build -Dboard=rpi4b test-rpi4b` | raspi4b booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht |
 | `zig build -Dboard=virt iso`         | Eine GRUB-EFI-Rescue-ISO bauen (nur virt)                            |
-| `zig build test`                     | Host-seitige Unit-Tests (370 tests, 35 modules)                      |
+| `zig build test`                     | Host-seitige Unit-Tests (419 tests, 39 modules)                      |
 | `zig build clean`                    | `.zig-cache/` und `zig-out/` entfernen                                |
 
 Der Standard-Optimierungsmodus ist `ReleaseSmall`. Mit
@@ -261,4 +264,4 @@ Apache License, Version 2.0. Siehe [Lizenz](../../LICENSE.md).
 
 [Als Nächstes: Dokumentation →](DOCUMENTATION.md)
 
-<!-- sync-ref: README.md @ 6d20c0476e67410f1b4cf50b808de364d51953ea | synced 2026-06-06 -->
+<!-- sync-ref: README.md @ d7bc74f0701ffe5de0dc8b6a0597cbf0a8dcfd9d | synced 2026-06-07 -->

@@ -80,10 +80,10 @@ zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
 Für einen selbstvalidierenden Lauf, der mit 0 endet, wenn der Boot den
-interaktiven `fsh`-Prompt erreicht (die dritte Markierung `[ OK ] Reached target Shell`
-— siehe unten) ohne `[FAIL]` / `ERROR CAUGHT` und mit den erwarteten
-Free-Page-Checkpoints, und mit 1 bei einem Fehler oder einem watchdog-Timeout
-(keine manuelle QEMU-Überwachung):
+interaktiven `fsh`-Prompt erreicht (die dritte Homescreen-Markierung
+`type 'help' for commands` — siehe unten) ohne `[FAIL]` / `ERROR CAUGHT` und mit
+den erwarteten Free-Page-Checkpoints, und mit 1 bei einem Fehler oder einem
+watchdog-Timeout (keine manuelle QEMU-Überwachung):
 
 ```bash
 zig build -Dboard=virt  test-virt
@@ -107,11 +107,11 @@ direkt im steuernden Terminal erscheinen. `run-virt` verwendet
 Host-stdio geleiteten PL011.
 
 Ein grüner Lauf auf beiden Boards landet bei `28/28 passed`, 32
-Free-Page-Checkpoints pro Szenario (`0xbbff2` auf rpi4b, `0x3be4a` auf virt)
-plus der passenden Boot-Baseline (`0xbc000` / `0x3be58`) und 0 `ERROR CAUGHT`.
+Free-Page-Checkpoints pro Szenario (`0xbbff2` auf rpi4b, `0x3be46` auf virt)
+plus der passenden Boot-Baseline (`0xbc000` / `0x3be54`) und 0 `ERROR CAUGHT`.
 Der Boot übergibt dann an `/bin/login` → `/bin/fsh`; mit dem
-Login-Lifecycle erscheinen die Markierungen `[ OK ] Authenticated` und
-`[ OK ] Reached target Shell` jeweils dreimal (zwei skriptgesteuerte
+Login-Lifecycle erscheint die Homescreen-Markierung von fsh
+(`type 'help' for commands`) dreimal (zwei skriptgesteuerte
 `[TEST] login`-Sitzungen + der echte Boot-Login), und der CI-watchdog
 (`scripts/run_qemu_test.sh`) zählt genau das. Die Free-Page-Invarianten sind in
 [Dokumentation §8](DOCUMENTATION.md#free-page-invarianten) dokumentiert.
@@ -230,9 +230,12 @@ Kabels also hängt, mache einen Power-Cycle des Pi.
 
 ## 6. Hilfs-Shell-Funktionen
 
-Das Repo liefert [`flashos.env.zsh`](../../flashos.env.zsh) mit einer Handvoll Helfern. Source es
+Das Repo liefert [`flashos.env.zsh`](../../flashos.env.zsh) mit einer Handvoll Helfern,
+bereitgestellt als zwei Verb-Dispatcher — `pi <verb>` (serielle Konsole) und
+`run <mode>` (bauen, emulieren oder verbinden) — plus `build` und `flashos`. Source es
 aus `~/.zshrc` (`source ~/FlashOS/flashos.env.zsh`), um sie in jeder Shell verfügbar
-zu machen.
+zu machen. Die alten flachen Namen (`picapture`, `piconnect`, `piquit`, `pilist`)
+bleiben als dünne Aliase für die entsprechenden `pi`-Verben erhalten.
 
 - **`picapture [usb|mu]`** — führt den kanonischen Boot-Capture-Ablauf aus
   und protokolliert die Sitzung in `boot.log` im Root-Verzeichnis des Repos
@@ -242,9 +245,9 @@ zu machen.
     enumeriert (das Einstecken des C-zu-C-Kabels versorgt den Pi mit Strom,
     sodass das Erscheinen des Nodes selbst das erste Boot-Signal ist), und
     fragt dann die Konsole einmal pro Sekunde ab, bis die Boot-Markierung
-    `[ OK ] Reached target Shell` erscheint (fsh hat seine interaktive REPL erreicht).
+    `type 'help' for commands` erscheint (fsh hat seine interaktive REPL erreicht).
   - `mu`: erfasst den Mini-UART-Trace-Adapter
-    (`/dev/cu.usbserial-*`), bis `[ OK ] Reached target Shell` (der Boot hat die
+    (`/dev/cu.usbserial-*`), bis `type 'help' for commands` (der Boot hat die
     Shell über den MU-Fallback erreicht — kein USB-Host angeschlossen) oder
     `ERROR CAUGHT` erscheint. Mache einen Power-Cycle des Pi, wenn dazu
     aufgefordert.
@@ -260,21 +263,33 @@ zu machen.
 - **`pilist`** — listet die angeschlossenen Konsolengeräte auf: die
   USB-CDC-Konsole (`/dev/cu.usbmodem*`) und alle USB-Serial-Adapter
   (`/dev/cu.usbserial-*`, MU-Trace).
+- **`pi log`** — zeigt die letzte `boot.log`-Aufzeichnung im Pager an.
+- **`pi tail [N]`** — folgt `boot.log` live (letzte `N` Zeilen, default 40)
+  und übersteht die Log-Rotation der nächsten Aufzeichnung.
 - **`build`** — führt `./build.sh` aus dem Root-Verzeichnis des Repos aus
   (funktioniert aus jedem Verzeichnis): clean, Link-Pass 1, `populate-syms`,
   Link-Pass 2, Diff-Prüfung des Symbol-Layouts, optional `deploy`. `BOARD=virt
   build` wählt das virt-Board (deploy wird übersprungen); `NM=llvm-nm build`
   überschreibt das Symbol-Dump-Binary.
-- **`showfns`** — listet die in [`flashos.env.zsh`](../../flashos.env.zsh)
-  definierten Shell-Helfer, die `zig build`-Schritte und die
-  Top-Level-Funktionen in [`build.zig`](../../build.zig) auf. Eine schnelle
-  Inventur der verfügbaren Targets.
+- **`run <mode>`** — baut und startet ein Board, fährt den Boot-Watchdog oder
+  verbindet sich mit Hardware. `run qemu` (Alias `auto`) baut und startet das
+  rpi4b-Modell in QEMU; `run virt` macht dasselbe für das virt-Board; `run test`
+  führt die Host-Unit-Tests aus (`run test --NAME` filtert nach Name); `run hw`
+  verbindet sich über die serielle Konsole mit dem Pi (`--trace` wählt den
+  MU-Adapter).
+- **`run watchdog [virt|rpi4b]`** — fährt den unbeaufsichtigten Boot-Watchdog mit
+  den erforderlichen Flags `-Dci-login-seed=true` und `-Dboot-selftest=true`
+  automatisch gesetzt; default ist das virt-Board (`rpi4b` ist ein langsamerer
+  TCG-Lauf).
+- **`flashos`** — listet die in [`flashos.env.zsh`](../../flashos.env.zsh)
+  definierten Shell-Helfer und die verfügbaren `zig build`-Schritte auf — eine
+  schnelle Inventur der Targets.
 
 Der MU-Trace-Adapter wird automatisch aus `/dev/cu.usbserial-*` erkannt und
 die USB-CDC-Konsole aus `/dev/cu.usbmodem*`; überschreibe mit
 `PI_SERIAL_DEVICE=/dev/cu.usbserial-XXXX` /
 `PI_USB_CONSOLE_DEVICE=/dev/cu.usbmodemXXXX`, wenn mehrere Geräte
-angeschlossen sind. Die `picapture`-Timeouts liegen bei 60 s (gesamt) und
+angeschlossen sind. Die `picapture`-Timeouts liegen bei 120 s (gesamt) und
 30 s (Prompt-Probe); überschreibe mit `PI_CAPTURE_TIMEOUT` / `PI_PROBE_TIMEOUT`.
 
 ### Auto-Source bei `cd` (optional)
@@ -310,12 +325,12 @@ zig build test
 Führt die host-seitigen Unit-Tests gegen Pure-Logic-kernel-Module aus.
 Jedes Modul mit Tests bildet seinen eigenen Test-Root, gelinkt gegen
 `tests/host_stubs.zig` (Stubs für reine Assembly-Externs). Die aktuelle
-Suite deckt 35 Module ab (370 Host-Tests); sie ist weit unter einer Sekunde
+Suite deckt 39 Module ab (419 Host-Tests); sie ist weit unter einer Sekunde
 fertig und ist das schnellste Signal dafür, dass die Kernlogik des kernel
 weiterhin hält.
 
 ---
 
-[← Zurück: Dokumentation](DOCUMENTATION.md) · [Weiter: Migration →](../../MIGRATION.md)
+[← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Migration →](../../MIGRATION.md)
 
-<!-- sync-ref: SETUP.md @ 6d20c0476e67410f1b4cf50b808de364d51953ea | synced 2026-06-06 -->
+<!-- sync-ref: SETUP.md @ d7bc74f0701ffe5de0dc8b6a0597cbf0a8dcfd9d | synced 2026-06-07 -->

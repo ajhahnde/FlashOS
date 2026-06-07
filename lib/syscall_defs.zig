@@ -166,12 +166,21 @@ pub const SYS_PASSWD: u64 = 46;
 // MMIO. No privilege gate yet: any logged-in session may reboot.
 pub const SYS_REBOOT: u64 = 47;
 
+// Working-directory readback ABI. Slot 48 — sys_getcwd(buf, len)
+// copies the calling task's NUL-terminated `cwd` (TaskStruct.cwd) into
+// the user buffer, then returns the path length excluding the NUL, or -1
+// on a wild buffer UVA or a `len` too small to hold the path plus its
+// terminator. The readback half of the slot-36 chdir store — `cwd` is a
+// plain TaskStruct field, so this allocates nothing. `pwd` is the sole
+// consumer. Appended past SYS_REBOOT — see the NR_SYSCALLS note below.
+pub const SYS_GETCWD: u64 = 48;
+
 // Highest slot + 1; equals the `#define NR_SYSCALLS` literal in
 // src/asm_defs_common.inc. Adding a new SYS_* constant past
-// SYS_REBOOT bumps this automatically; the comptime guard in
+// SYS_GETCWD bumps this automatically; the comptime guard in
 // src/sys.zig catches divergence from the asm-side literal at build
 // time.
-pub const NR_SYSCALLS: usize = SYS_REBOOT + 1;
+pub const NR_SYSCALLS: usize = SYS_GETCWD + 1;
 
 // Kernel-log ring capacity in bytes. Shared here because both
 // the kernel ring (src/klog_ring.zig sizes `KlogRing` to it) and userland

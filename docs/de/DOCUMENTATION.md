@@ -465,9 +465,9 @@ unterschiedlich synthetisieren:
   lexikografisch sortiert, sodass doppelte synthetische
   Unterverzeichnisse benachbart sind und mit einer einzelnen
   De-Dup kollabieren. `ls /` → `bin`, `etc`, `sbin`, `test`; `ls /bin` →
-  `cat`, `echo`, `forkbomb`, `fsh`, `ls`, `meminfo`. Der reine
-  `directEntry`-Helper ist host-getestet gegen ein
-  comptime-cpio-Fixture.
+  `cat`, `clear`, `dmesg`, `echo`, `forkbomb`, `fsh`, `less`, `login`, `ls`,
+  `meminfo`, `passwd`, `sysinfo`. Der reine `directEntry`-Helper ist
+  host-getestet gegen ein comptime-cpio-Fixture.
 - **FAT32 — Root-Directory-8.3-Walk (nur Pi).** `readdir` verwendet den
   Root-Walk wieder (16 Einträge/Sektor, überspringt `0x00` Ende / `0xE5`
   gelöscht / `ATTR_LONG_NAME` / `ATTR_VOLUME_ID` — das Volume-Label ist
@@ -602,17 +602,19 @@ R+X-PT_LOAD, in die jede Payload linkt, kein beschreibbares `.bss` trägt.
   Pipe-Grenze ist durch einen `null`-argv-Slot markiert, sodass die
   linken und rechten Kommandos bereits `execve`-fertige
   NULL-terminierte Vektoren sind. Rein + host-getestet.
-- **Built-ins** laufen In-Process (kein Fork): `cd` (`sys_chdir`),
-  `exit`, `help`, `free` (umhüllt `sys_dump_free`). Externe forken +
+- **Built-ins** laufen In-Process (kein Fork): `cd` (`sys_chdir`), `pwd`
+  (`sys_getcwd`), `exit` / `logout`, `help`, `free` (umhüllt
+  `sys_dump_free`), `reboot`
+  (`sys_reboot`, resettet das Board). Externe forken +
   `execvp`; `execvp` löst einen blanken Namen zu `/bin/<name>` auf (noch
   kein `$PATH`, keine Environment) und einen Namen mit Slash wörtlich.
   Ein einzelnes `|` verdrahtet `sys_pipe` + `dup2`: links forken
   (`dup2(wfd,1)`), rechts forken (`dup2(rfd,0)`), beide Enden in der
   Shell schließen, beide reapen.
 - **Working Directory.** Jeder Task trägt `cwd` (`TaskStruct.cwd`,
-  Standard `/`); `cd` aktualisiert es über Slot 36 und relatives
-  `open`/`execve` joint dagegen (§5). Es gibt noch kein `$HOME` / uid;
-  `.fshrc` ist ein fixer initramfs-Pfad.
+  Standard `/`); `cd` aktualisiert es über Slot 36, `pwd` liest es über
+  Slot 48 zurück, und relatives `open`/`execve` joint dagegen (§5). Es
+  gibt noch kein `$HOME` / uid; `.fshrc` ist ein fixer initramfs-Pfad.
 - **Coreutils (`/bin`).** Jedes ist < 100 Zeilen gegen flibc,
   nur Stack-Buffer (Rule 1), und doppelt als Smoke-Test: `echo` (Args →
   fd 1), `cat` (Dateien / stdin → fd 1), `ls` (der erste
@@ -633,25 +635,28 @@ R+X-PT_LOAD, in die jede Payload linkt, kein beschreibbares `.bss` trägt.
   `execve`t `init_main.zig` `/bin/login` *anstatt* `sys_exit`
   (durchfallend zu `sys_exit` nur, falls execve scheitert). login ist ein
   **Session-Supervisor**: es fragt nach einem Username (Kernel-Echo an)
-  und einem Passwort (Kernel-Echo aus — `SYS_SET_CONSOLE_MODE`), bittet
+  und einem Passwort (der Kernel maskiert jedes getippte Zeichen mit `*`
+  über `SYS_SET_CONSOLE_MODE`), bittet
   den Kernel, das Passwort gegen die aktive Shadow-Datenbank zu
   verifizieren (`sys_authenticate`, §5), schlägt den User in `/etc/passwd`
-  nach (der gemeinsame `src/pwfile.zig`-Parser), druckt den
-  per-Session-`[ OK ] Authenticated`-Marker und **forkt** dann ein Child, das
+  nach (der gemeinsame `src/pwfile.zig`-Parser) und **forkt** dann ein
+  Child, das
   Privilegien über `setgid` + `setuid` droppt (gid zuerst, während noch
   root) und die Shell des Users per exec startet — login selbst bleibt root, wartet,
-  reaped und fragt erneut. `exit` in fsh ist daher ein Logout zurück zu
+  reaped und fragt erneut. `exit` (oder sein Alias `logout`) in fsh ist
+  daher ein Logout zurück zu
   `login:`, nicht das Ende des Boots. (Der Drop muss im Child leben:
   setuid ist für Nicht-root einseitig, sodass ein login, das sich selbst
   droppte, niemals eine zweite Session authentifizieren könnte.) Ein
   optionales argv-Session-Limit (`/bin/login 2`) lässt es nach N Sessions
   exiten — der Hook des `[TEST] login`-Schlusssteins (§8). **Das Erreichen
-  des interaktiven Prompts ist das Boot-Erfolgssignal:** fsh druckt
-  `[ OK ] Reached target Shell` beim REPL-Eintritt und zeigt `#` (root) oder `$`
+  des interaktiven Prompts ist das Boot-Erfolgssignal:** fsh druckt sein
+  Homescreen-Banner (die stabile `type 'help' for commands`-Schlusszeile)
+  beim REPL-Eintritt und zeigt `#` (root) oder `$`
   (alle anderen) als seinen Prompt; mit den zwei gescripteten Sessions von
   `[TEST] login` wartet der CI-QEMU-watchdog (`scripts/run_qemu_test.sh`)
-  auf das **dritte** `[ OK ] Reached target Shell` (dann SIGTERMt er) und assertet genau
-  3 × beide Marker. Auf Pi / interaktivem QEMU fällt der Boot auf einen
+  auf den **dritten** Homescreen-Marker (dann SIGTERMt er) und assertet genau
+  drei. Auf Pi / interaktivem QEMU fällt der Boot auf einen
   echten Login-Prompt, dann einen `fsh`-Prompt, der als der
   authentifizierte User läuft. **Unbeaufsichtigte CI:** PID 1 injiziert
   die Test-Credentials per Console (`flash`/`flash`, `SYS_CONSOLE_INJECT`)
@@ -689,10 +694,10 @@ x0       return value
 
 Der Vektor bei `vbar_el1 + 0x400` (`el0_svc` in `src/entry.S`) indexiert
 in `sys_call_table` (`src/sys.zig`) und `blr`t zum ausgewählten Handler.
-`NR_SYSCALLS = 47` (in `src/asm_defs_common.inc`) wird durch einen
+`NR_SYSCALLS = 49` (in `src/asm_defs_common.inc`) wird durch einen
 `b.hs`-Check auf `x8` erzwungen; Out-of-Range-Nummern fallen durch zum
 Invalid-Entry-Pfad. Ein comptime-Guard in `src/sys.zig` reasserted
-`defs.NR_SYSCALLS == 47`, sodass die Zig-Tabelle und das asm-Literal im
+`defs.NR_SYSCALLS == 49`, sodass die Zig-Tabelle und das asm-Literal im
 Gleichschritt bleiben.
 
 Weil die User-PGD zum Zeitpunkt des SVC in TTBR0 installiert ist, wird
@@ -724,7 +729,7 @@ landet statt in den UVA-Space zu jagen.
 |   29   | ~~`pipe_close`~~     | —                                       |                              —                              | **AUSGEMUSTERT** — der veraltete per-Kind-Pipe-Close wurde entfernt, nachdem Slot 34 `close` ihn ersetzte; die Slot-Nummer bleibt für immer reserviert und liefert `-1`                                                                                                                                                                                                                                                                                                                                                                                                                    |
 |   23   | ~~`openConsole`~~    | —             |                         —                         | **AUSGEMUSTERT** — der veraltete Console-Open wurde entfernt; fd 0/1/2 sind echte `console`-Slots, auf PID 1 vorinstalliert (siehe §4 „File-Descriptor-Modell“). Die Slot-Nummer bleibt für immer reserviert und liefert `-1`.                                                                                                                                                                                                                                                                                                              |
 |   24   | ~~`readConsole`~~    | —                    |                —                | **AUSGEMUSTERT** — der veraltete Console-Read wurde entfernt, nachdem Slot 32 `read` auf einem `console`-fd ihn ersetzte; die Slot-Nummer bleibt für immer reserviert und liefert `-1`                                                                                                                                                                                                                                                                                                                                                      |
-|   25   | `setConsoleMode` | `x0 = u64 mode`                                   |                                          `i64` 0                                          | **Console-Echo-Flag.** `mode & CONSOLE_MODE_ECHO` an ⇒ der Kernel echoet drainierte druckbare Console-Bytes durch den Console-TX-Mux zurück (cooked-Stil); aus (der Boot-Default) behält die historische Aufteilung, bei der der Kernel nie echoet und das Userland-`readline` das Echo besitzt. `/bin/login` flippt es um seine Prompts herum (Username echoet, Passwort unterdrückt). Vorerst ein Bit; volle termios / Line Discipline ist weiterhin Zukunftsarbeit                                                                                                                                                                                                                                                                                                                                                                     |
+|   25   | `setConsoleMode` | `x0 = u64 mode`                                   |                                          `i64` 0                                          | **Console-Echo/Mask-Flags.** `mode & CONSOLE_MODE_ECHO` an ⇒ der Kernel echoet drainierte druckbare Console-Bytes durch den Console-TX-Mux zurück (cooked-Stil); `mode & CONSOLE_MODE_MASK` an ⇒ er echoet stattdessen ein `*` pro druckbarem Byte (Passwort-Maskierung; Mask gewinnt, wenn beide gesetzt sind); keines (der Boot-Default) behält die historische Aufteilung, bei der der Kernel nie echoet und das Userland-`readline` das Echo besitzt. `/bin/login` setzt Echo für den Username und Mask für das Passwort und löscht dann beide, bevor es die Shell per exec startet. Vorerst zwei Bits; volle termios / Line Discipline ist weiterhin Zukunftsarbeit                                                                                                                                                                                                                                                                                                                                                                     |
 |   26   | `closeConsole`   | (keine)                                           |                                          void                                          | Inert (fd-Tabellen-Teardown — noch nicht verdrahtet)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 |   30   | `console_inject` | `x0 = byte`                                     |                                          void                                          | **Nur Debug — nicht Teil der stabilen ABI.** Pusht ein Byte in den Kernel-RX-Ring, als wäre es auf der UART angekommen. Treibt deterministische `[TEST] console-echo`-Abdeckung auf QEMU, wo es keinen externen Input-Treiber gibt. Wird entfernt, sobald ein echter Host-Input-Treiber landet                                                                                                                                                                                                                                                              |
 |   31   | `execve`         | `x0 = const char *path` (NUL-terminiert), `x1 = char *const argv[]` (NULL-terminiert) | `i32` 0 (kehrt bei Erfolg nicht zurück), -1 bei Resolve- / Parse- / Alloc- / argv-Fault-Fehler, -13 (`-EACCES`), wenn der mode des Ziels dem Aufrufer exec verweigert | Pfadaufgelöster ELF-Loader (ersetzt Slot 5 `exec`). Der Permission-Layer gated ihn am Exec-Bit: die effektiven IDs des Aufrufers werden gegen mode/owner des Ziels direkt nach dem VFS-Resolve und **vor** dem Adressraum-Teardown geprüft, sodass ein verweigerter exec soft zu `-EACCES` scheitert, mit intaktem Aufrufer (root bypasst). Löst `path` durch den VFS-Shim auf, streamt das gesamte ELF in einen statischen Kernel-Buffer (kein `PAGE_SIZE`-Cap), kopiert argv auf die neue oberste Stack-Page (Entry-Vertrag `x0 = argc`, `x1 = argv`, AAPCS64), reißt den Adressraum des Aufrufers ab und mappt dann das neue Image. Pfad- + argv-UVAs erreichen den Kernel über `copy_from_user`; eine Wild-UVA liefert `-1` über den soft-Pfad in `mm_user.check_and_prefault_user_range` — der Aufrufer zombifiziert **nicht** (jeder Copy schließt vor dem Teardown-Point-of-no-Return ab). Die fd-Tabelle (`current.fds`) wird über den Teardown absichtlich **bewahrt**, sodass eine Shell einem Child sein umgeleitetes stdio übergibt. Ein Post-Teardown-Loader-OOM gibt `[KERN] OOM` aus und zombifiziert den Aufrufer (kontrollierter Zombie — der Adressraum ist bereits abgerissen) |
@@ -783,11 +788,14 @@ einen Code-Pfad pro Backend, nur über die vereinheitlichte ABI
 erreichbar. Das veraltete `write` von Slot 0 (`write_str`) ist ebenfalls
 ausgemustert; der saubere Name `write` ist der vereinheitlichte Slot 33.
 
-**Working Directory (Slot 36).** `sys_chdir` speichert einen
+**Working Directory (Slots 36 + 48).** `sys_chdir` (Slot 36) speichert einen
 normalisierten Pfad in `TaskStruct.cwd`; die open / execve-Grenze joint
 relative Pfade dagegen vor `vfs.resolve` (noch nur-absolut). Der Join +
 `.`/`..`-Collapse ist der reine host-getestete `src/path.zig`-Helper.
-Siehe §4 „Shell & Userland (fsh)“.
+`sys_getcwd` (Slot 48) ist die Readback-Hälfte — es kopiert `cwd` zurück
+in einen User-Buffer (Pfad + NUL, die Länge liefernd), sodass `pwd` es
+drucken kann; allokationsfrei, baseline-neutral. Siehe §4 „Shell &
+Userland (fsh)“.
 
 **Verzeichnis-Enumeration (Slot 37).** `sys_readdir` ist ein
 zustandsloser `(path, index, *Dirent)`-Index-Walk — kein
@@ -944,7 +952,7 @@ Accounts sind `root` (uid 0) und `flash` (uid 1000).
 
 **Authentifizierungs-Fluss.** PID 1 führt die Test-Harness aus und startet
 dann `/bin/login` per exec (§4). login fragt nach einem Username (Console-Echo an)
-und einem Passwort (Echo aus über `setConsoleMode`), bittet dann den
+und einem Passwort (maskiert mit `*` über `setConsoleMode`), bittet dann den
 Kernel, es mit `sys_authenticate` (Slot 45) zu verifizieren. Der Kernel
 liest die Shadow-Datenbank selbst, führt PBKDF2-HMAC-SHA256 über das
 Passwort mit dem gespeicherten Salt und Iterations-Count des Records aus
@@ -1153,7 +1161,7 @@ initramfs-/file-Paar bekommen dedizierte per-Target-Stub-Objekte
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`), um das Doppeldefinieren von Symbolen zu
 vermeiden, die das zu testende Modul bereits exportiert. Die aktuelle
-Suite umfasst insgesamt **370 Host-Tests** über 35 Module — siehe die
+Suite umfasst insgesamt **419 Host-Tests** über 39 Module — siehe die
 Coverage-Matrix unten für die per-Modul-Aufteilung.
 
 **In-Kernel-Runtime-Harness** (`user_space/kernel_tests.zig`).
@@ -1332,9 +1340,9 @@ Kernel-Zustand übt:
   Session-Limit-argv (`"2"`) per exec startet, und reaped es. login authentifiziert
   jede Session, forkt ein Child, das Privilegien droppt und die Shell
   per exec startet, reaped es bei `exit` und fragt erneut — der volle
-  Supervisor-Lifecycle durch das echte Binary. Jede Session gibt die
-  `[ OK ] Authenticated` / `[ OK ] Reached target Shell`-Marker aus, sodass ein grüner
-  Boot drei von jedem trägt (zwei von hier + der echte Boot-Login);
+  Supervisor-Lifecycle durch das echte Binary. Jede Session gibt fshs
+  Homescreen-Marker (`type 'help' for commands`) aus, sodass ein grüner
+  Boot drei trägt (zwei von hier + der echte Boot-Login);
   `scripts/run_qemu_test.sh` keyt sein Erfolgskriterium und guardet auf
   genau diese Counts. Reap-basiert und baseline-neutral — der ganze Baum
   (login + zwei Session-Shells) muss reklamiert werden.
@@ -1360,11 +1368,11 @@ identisch unter QEMU (`zig build -Dboard=virt run-virt` /
 `picapture`); ein grüner Lauf landet `28/28 passed` mit 32
 Baseline-Checkpoints (`0xbbff2` rpi4b / `0x3be4a` virt) und 0
 `ERROR CAUGHT` auf beiden Boards, übergibt dann an `/bin/login` →
-`/bin/fsh`. Mit dem Login-Lifecycle erscheinen die
-`[ OK ] Authenticated`- und `[ OK ] Reached target Shell`-Marker jeweils **dreimal**
+`/bin/fsh`. Mit dem Login-Lifecycle erscheint fshs Homescreen-Marker
+(`type 'help' for commands`) **dreimal**
 pro Boot — zweimal von den gescripteten Sessions von `[TEST] login` und
 einmal vom echten Boot-Login — und der CI-watchdog (§4) zählt genau das
-(sein Early-Exit feuert beim dritten Shell-Marker). (In QEMU ist der
+(sein Early-Exit feuert beim dritten Homescreen-Marker). (In QEMU ist der
 `fs-roundtrip`-Checkpoint sein parity-`sys_dump_free` auf dem SKIP-Pfad;
 auf Pi-HW ist es der echte Write/Verify-Branch. Es gibt kein
 In-Harness-`fsh`-Szenario — die Shell wird durch die Übergabe oben plus
@@ -1393,7 +1401,7 @@ eine absolute `CNTP_CVAL`-Deadline mit einem Catch-up-Clamp um; der Flap
 hat sich seither nicht reproduziert (14 aufeinanderfolgende grüne
 Pi-4-Boots beim Release). QEMU-Läufe waren nie betroffen — beide Boards
 waren durchgehend deterministisch. Das Boot-Erfolgskriterium (der
-`[ OK ] Reached target Shell`-Marker, den der watchdog matcht, siehe §4 PID-1 →
+`type 'help' for commands`-Homescreen-Marker, den der watchdog matcht, siehe §4 PID-1 →
 fsh-Übergabe) ist von der Bilanz so oder so unabhängig: ein einzelner
 später Tick erreicht trotzdem den interaktiven Prompt, und der
 no-`[FAIL]`- / Checkpoint-Count-Guard des watchdogs fängt trotzdem ein
@@ -1519,9 +1527,13 @@ end-to-end auf QEMU + Pi 4 üben.
 | `src/pwfile.zig`              |          7 | `login`, `passwd` (und `/bin/login` / `whoami` zur Laufzeit)                                                                                              | reiner `/etc/passwd`-Parser (Name- + uid-Lookups), geteilt vom Kernel (`sys_passwd`-Autorisierung), `/bin/login`, `/bin/passwd` und fshs `whoami`-Built-in; die Host-Tests pinnen das 5-Felder-Format gegen `user_space/etc/passwd`                              |
 | `scripts/build_initramfs.zig` |          2 | `perm` (über die gestageten initramfs-Modes)                                                             | deterministischer newc-cpio-Encoder (ein Build-Zeit-Host-Tool, kein Kernel-Code); seine Host-Tests pinnen die mode/uid/gid-Byte-Offsets, die mit dem Parser von `src/initramfs.zig` geteilt werden — ein Encoder-/Parser-Drift wäre ein stiller Permission-Bypass                              |
 | `src/hwrng.zig`               |          6 | `rng`                                                                                               | der reine SplitMix64-Mixer ist auf dem Host vektor- und differential-getestet; der Kernel-Glue (`fill` / die `hwrng_init`-Ankündigung) ist von `[TEST] rng` durch den klog-Ring integrationsgetestet                                                  |
-| `user_space/lib/flibc/readline.zig` |   13 | (PID-1-Übergabe)                                                                                  | reine Byte→Buffer-Line-Editor-State-Machine; der SVC-Treiber sitzt hinter einem comptime-`has_driver`-Gate, sodass der Host-Build nie Inline-Asm analysiert; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                          |
+| `user_space/lib/flibc/readline.zig` |   27 | (PID-1-Übergabe)                                                                                  | reine Byte→Buffer-Line-Editor-Kerne: die Append-only-State-Machine (TAB-Completion-Action), die Cursor-Edit-Ops (Insert/Backspace/Move/Replace) und der Command-History-Ring; der SVC-Treiber sitzt hinter einem comptime-`has_driver`-Gate, sodass der Host-Build nie Inline-Asm analysiert; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                          |
 | `user_space/lib/flibc/execvp.zig`   |   13 | (PID-1-Übergabe)                                                                                  | reiner `/bin/<name>`-Path-Build; SVC-Treiber gegated wie `readline`; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                                                                                                          |
-| `user_space/fsh/tokenize.zig`       |   11 | (PID-1-Übergabe)                                                                                  | reiner Whitespace-Split + Single-Pipe-Dekomposition; der Shell-Treiber (`fsh.zig`) ist nur integrationsgetestet über die PID-1 → fsh-Übergabe (der `[ OK ] Reached target Shell`-Boot-Erfolgsmarker)                                                                                                                     |
+| `user_space/lib/flibc/completion.zig` | 12 | (PID-1-Übergabe)                                                                                  | reiner Tab-Completion-Kern (`parse` Command-vs-Path, `commonPrefixLen`, `classify` für die Double-TAB-Entscheidung); das `readdir`-getriebene Kandidaten-Sammeln + Double-TAB-Listing leben im completing-Treiber von `readline`; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                  |
+| `user_space/lib/flibc/keys.zig`     |    7 | — (Full-Screen-Tools)                                                                             | reiner VT100-Input-`Decoder` (`ESC[`-Pfeile / Ctrl / Tab → `Key`); der SVC-`readKey`-Treiber ist gegated wie `readline`; Runtime-Pfad = `/bin/less` (der Full-Screen-Pager) über die serielle Console                                                                                                                  |
+| `user_space/lib/flibc/pager.zig`    |   10 | — (Full-Screen-Tools)                                                                             | reiner Scroll- / Line-Index-Kern (`Pager`: Line-Indexing, `line`-Slicing, Scroll-Clamping); kein SVC — der Render- + Key-Loop leben in `/bin/less`; Runtime-Pfad = `/bin/less` über die serielle Console |
+| `lib/console_ui/screen.zig`         |    6 | — (Full-Screen-Tools)                                                                             | reine ANSI-Screen-Renderer (Alt-Screen-Lifecycle, Cursor, `Panel`-Box, `kv`-Zeilen); `Sink`-geroutet, allokationsfrei; die ersten Konsumenten sind `/bin/sysinfo` (`kv`), `/bin/less` (Alt-Screen + `Panel`) und `/bin/clear` (`clear`)                                                                                                                                         |
+| `user_space/fsh/tokenize.zig`       |   11 | (PID-1-Übergabe)                                                                                  | reiner Whitespace-Split + Single-Pipe-Dekomposition; der Shell-Treiber (`fsh.zig`) ist nur integrationsgetestet über die PID-1 → fsh-Übergabe (der `type 'help' for commands`-Boot-Erfolgsmarker)                                                                                                                     |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | gemeinsamer Bump-Allocator-Helper, von anderen Test-Roots konsumiert; trägt keine eigenen inline-Tests                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | Runtime-Code-Patching; keine ICache-Sync host-seitig                                                                                                                                                                                              |
 | `src/trace/fp_walk.zig`       |          6 | — (rein Host)                                                                                       | AAPCS64-Frame-Record-Decoder für den `-Dtrace`-Sampler; die FP-Walk-Bounds- / Wrap- / Alignment- / Monotonic-Guards sind host-verifiziert (der Live-Sampler feuert nur auf echten Pi-Async-Timer-Ticks)                                                  |
@@ -1533,14 +1545,14 @@ end-to-end auf QEMU + Pi 4 üben.
 | `src/usb_tx_ring.zig`         |          7 | — (USB-C-Console, nur Pi-HW)                                                                     | reine Bulk-IN-TX-Ring-Arithmetik (monotone u64 head/tail, peek-then-advance); der MMIO/FIFO-Konsument in `src/board/rpi4b/usb.zig` bleibt hardware-verifiziert                                                                                    |
 | `src/board/rpi4b/usb.zig`     |          0 | — (USB-C-Console, nur Pi-HW)                                                                     | DWC2-MMIO; QEMU `raspi4b` emuliert den Device-Mode-Datenpfad nicht, sodass Enumeration, der Connection-Manager und die Bulk-Console-Schleife (inkl. Replug-Re-Enumeration) auf echter Pi-4-Hardware verifiziert sind; der Deskriptor-Satz + SETUP-Decode, den er konsumiert, sind in `src/usb_descriptors.zig` host-getestet, der TX-Ring in `src/usb_tx_ring.zig` |
 
-Summen: **370 Host-Tests** (`zig build test`) + **28 In-Kernel-EL0-Szenarien**
+Summen: **419 Host-Tests** (`zig build test`) + **28 In-Kernel-EL0-Szenarien**
 + **1 Pre-PID-1-EL1-Szenario** (`emmc2-block`, `run-virt` / `run`). Die
-35 Per-Modul-Inline-Zähler der Tabelle summieren sich auf **354**; das
-`zig build test`-Total (370) ist genau 16 höher, weil der
+39 Per-Modul-Inline-Zähler der Tabelle summieren sich auf **403**; das
+`zig build test`-Total (419) ist genau 16 höher, weil der
 `fork.zig`-Test-Root die 16 Tests von `src/elf.zig` über seinen direkten
 Datei-Import erneut ausführt — elfs Tests laufen einmal unter ihrer
-eigenen Zeile und einmal innerhalb des Steps von `fork.zig`. 354 + 16 =
-370.
+eigenen Zeile und einmal innerhalb des Steps von `fork.zig`. 403 + 16 =
+419.
 
 ### Output-Marker
 
@@ -1550,14 +1562,13 @@ eigenen Zeile und einmal innerhalb des Steps von `fork.zig`. 354 + 16 =
 | `[PASS] <name>`       | Szenario mit der erwarteten Free-Page-Zahl abgeschlossen           |
 | `[FAIL] <name>`       | Szenario mit einem Leak oder falschem Rückgabewert beendet          |
 | `X/Y passed`          | Finale Bilanz;`X == Y` ist die Green-Run-Bedingung               |
-| `[ OK ] Authenticated`          | Auth-Erfolgsmarker — `/bin/login` hat die Credentials verifiziert und Privilegien gedroppt; der QEMU-watchdog assertet, dass er genau einmal erscheint |
-| `[ OK ] Reached target Shell`          | Boot-Erfolgsmarker — fsh hat seine interaktive REPL erreicht; der QEMU-watchdog und der Real-HW-`picapture`-Helper warten beide darauf |
+| `type 'help' for commands`          | Boot-Erfolgsmarker — fshs Homescreen-Schlusszeile, einmal beim interaktiven REPL-Eintritt gedruckt; der QEMU-watchdog und der Real-HW-`picapture`-Helper warten beide darauf (3× pro Boot) |
 | `ERROR CAUGHT`        | Kernel-seitiger Fault (Data Abort, Instruction Abort usw.)          |
 | `kill ok`, `exec-elf ok` | Per-Szenario-Fortschritts-Prints                                   |
 
 Greens erfordern: `X == Y`, alle `[PASS]` kein `[FAIL]`, 0 `ERROR CAUGHT`,
-32 per-Szenario-Checkpoints + 1 Boot-Baseline und die
-`[ OK ] Authenticated`- und `[ OK ] Reached target Shell`-Marker ausgegeben.
+32 per-Szenario-Checkpoints + 1 Boot-Baseline und fshs Homescreen-Marker
+(`type 'help' for commands`) 3× pro Boot ausgegeben.
 
 ## 9. Build-Artefakte
 
@@ -1570,6 +1581,6 @@ Greens erfordern: `X == Y`, alle `[PASS]` kein `[FAIL]`, 0 `ERROR CAUGHT`,
 
 ---
 
-[← Zurück: README](README.md) · [Weiter: Setup →](SETUP.md)
+[← Zurück: README](README.md) · [Als Nächstes: Setup →](SETUP.md)
 
-<!-- sync-ref: DOCUMENTATION.md @ 6d20c0476e67410f1b4cf50b808de364d51953ea | synced 2026-06-06 -->
+<!-- sync-ref: DOCUMENTATION.md @ d7bc74f0701ffe5de0dc8b6a0597cbf0a8dcfd9d | synced 2026-06-07 -->

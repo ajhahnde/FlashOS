@@ -581,17 +581,18 @@ PT_LOAD each payload links into carries no writable `.bss`.
   boundary is marked by a `null` argv slot, so the left and right
   commands are already `execve`-ready NULL-terminated vectors. Pure +
   host-tested.
-- **Built-ins** run in-process (no fork): `cd` (`sys_chdir`), `exit` /
-  `logout`, `help`, `free` (wraps `sys_dump_free`), `reboot`
+- **Built-ins** run in-process (no fork): `cd` (`sys_chdir`), `pwd`
+  (`sys_getcwd`), `exit` / `logout`, `help`, `free` (wraps
+  `sys_dump_free`), `reboot`
   (`sys_reboot`, resets the board). Externals fork + `execvp`;
   `execvp` resolves a bare name to `/bin/<name>` (no `$PATH` yet, no
   environment) and a slashed name verbatim. A single `|` wires `sys_pipe` +
   `dup2`: fork left (`dup2(wfd,1)`), fork right (`dup2(rfd,0)`), close
   both ends in the shell, reap both.
 - **Working directory.** Each task carries `cwd` (`TaskStruct.cwd`,
-  default `/`); `cd` updates it via slot 36 and relative `open`/`execve`
-  join against it (§5). There is no `$HOME` / uid yet; `.fshrc` is
-  a fixed initramfs path.
+  default `/`); `cd` updates it via slot 36, `pwd` reads it back via
+  slot 48, and relative `open`/`execve` join against it (§5). There is
+  no `$HOME` / uid yet; `.fshrc` is a fixed initramfs path.
 - **Coreutils (`/bin`).** Each is < 100 lines against flibc,
   stack buffers only (Rule 1), and doubles as a smoke test: `echo` (args
   → fd 1), `cat` (files / stdin → fd 1), `ls` (the first `sys_readdir`
@@ -666,10 +667,10 @@ x0       return value
 
 The vector at `vbar_el1 + 0x400` (`el0_svc` in `src/entry.S`)
 indexes into `sys_call_table` (`src/sys.zig`) and `blr`s to the
-selected handler. `NR_SYSCALLS = 48` (in `src/asm_defs_common.inc`)
+selected handler. `NR_SYSCALLS = 49` (in `src/asm_defs_common.inc`)
 is enforced by a `b.hs` check on `x8`; out-of-range numbers fall
 through to the invalid-entry path. A comptime guard in `src/sys.zig`
-re-asserts `defs.NR_SYSCALLS == 48` so the Zig table and the asm
+re-asserts `defs.NR_SYSCALLS == 49` so the Zig table and the asm
 literal stay in lockstep.
 
 Because the user PGD is installed in TTBR0 at the time of the SVC,
@@ -757,11 +758,14 @@ There is now one code path per backend, reached only through the
 unified ABI. Slot 0's legacy `write` (`write_str`) is likewise retired;
 the clean `write` name is the unified slot 33.
 
-**Working directory (slot 36).** `sys_chdir` stores a
+**Working directory (slots 36 + 48).** `sys_chdir` (slot 36) stores a
 normalised path in `TaskStruct.cwd`; the open / execve boundary joins
 relative paths against it before `vfs.resolve` (still absolute-only).
 The join + `.`/`..` collapse is the pure host-tested `src/path.zig`
-helper. See §4 "Shell & userland (fsh)".
+helper. `sys_getcwd` (slot 48) is the readback half — it copies `cwd`
+back into a user buffer (path + NUL, returning the length) so `pwd` can
+print it; allocation-free, baseline-neutral. See §4 "Shell & userland
+(fsh)".
 
 **Directory enumeration (slot 37).** `sys_readdir` is a
 stateless `(path, index, *Dirent)` index walk — no `opendir` handle, no

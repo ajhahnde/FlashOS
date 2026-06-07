@@ -28,7 +28,6 @@
 // PT_LOAD, no heap allocator — only fixed stack buffers).
 
 const flibc = @import("flibc");
-const defs = @import("syscall_defs");
 const pwfile = @import("pwfile");
 
 comptime {
@@ -42,21 +41,30 @@ fn emit(s: []const u8) void {
     _ = flibc.sys.write_fd(1, s.ptr, s.len);
 }
 
-// Read one line from fd 0 (raw, one byte at a time) into `buf`, stopping at
-// CR / LF or EOF. Returns the byte count, excluding the terminator. Echo of
-// the typed bytes is the kernel's job (the console echo flag), so this loop
-// never echoes itself.
-fn readLine(buf: []u8) usize {
-    var n: usize = 0;
-    while (n < buf.len) {
-        var ch: [1]u8 = undefined;
-        const r = flibc.sys.read(0, &ch, 1);
-        if (r <= 0) break;
-        if (ch[0] == '\n' or ch[0] == '\r') break;
-        buf[n] = ch[0];
-        n += 1;
+// Read a masked secret from fd 0 into `buf`. Drives flibc's pure, host-tested
+// line-editor `step` so backspace actually pops a byte, but echoes one '*' per
+// accepted byte and the rubout "\x08 \x08" on backspace instead of the byte
+// itself — the secret never reaches the serial console. Submits on CR / LF,
+// stops on EOF, drops the line on ^C. Returns the byte count, excluding the
+// terminator. The caller leaves the console in echo-off mode, so this loop is
+// the only echo (no kernel double-echo).
+fn readMasked(buf: []u8) usize {
+    var state = flibc.readline_mod.State.init(buf);
+    var ch: [1]u8 = undefined;
+    while (true) {
+        if (flibc.sys.read(0, &ch, 1) <= 0) break;
+        switch (flibc.readline_mod.step(&state, ch[0])) {
+            .echo => emit("*"),
+            .backspace => emit("\x08 \x08"),
+            .submit, .eof => break,
+            .abandon => {
+                state.len = 0;
+                break;
+            },
+            .none, .complete => {},
+        }
     }
-    return n;
+    return state.len;
 }
 
 fn strLen(s: [*:0]const u8) usize {
@@ -125,10 +133,16 @@ export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn
     emit("\n");
 
     while (true) {
-        // Username — kernel echo on so the user sees what they type.
-        _ = flibc.sys.set_console_mode(defs.CONSOLE_MODE_ECHO);
+        // Username — echo off so login owns the echo through flibc's line
+        // editor: it echoes each byte and rubs out a backspace, so a typo is
+        // correctable. The kernel's raw echo could not erase a mistake, which
+        // made a single slip uncorrectable.
+        _ = flibc.sys.set_console_mode(0);
         emit("login: ");
-        const ulen = readLine(&user_buf);
+        const ulen = switch (flibc.readline(&user_buf)) {
+            .line => |l| l.len,
+            .eof, .abandoned => 0,
+        };
         emit("\n");
 
         // A bare Enter / empty username re-prompts silently, getty-style:
@@ -138,18 +152,14 @@ export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn
         // real prompt is a clean `login:` instead of a phantom failed attempt.
         if (ulen == 0) continue;
 
-        // Password — kernel masks each typed char with '*'.
-        _ = flibc.sys.set_console_mode(defs.CONSOLE_MODE_MASK);
+        // Password — still echo off; readMasked owns the echo, printing one
+        // '*' per accepted byte and rubbing it out on backspace, so the secret
+        // stays hidden on the serial console yet a typo is correctable. The
+        // console stays echo-off straight into the shell, where fsh's own
+        // readline owns the echo (no mask leak, no double-echo).
         emit("Password: ");
-        const plen = readLine(&pass_buf);
+        const plen = readMasked(&pass_buf);
         emit("\n");
-
-        // Secret captured — restore the default console mode (kernel echo off,
-        // userland readline owns echo) before the shell starts. Without this
-        // the mask leaks past login: the kernel keeps echoing '*' per keystroke
-        // while fsh's readline also echoes the real character, so every shell
-        // keystroke shows up as '*' + the character.
-        _ = flibc.sys.set_console_mode(0);
 
         if (flibc.sys.authenticate(&user_buf, ulen, &pass_buf, plen) != 0) {
             emit("Login incorrect\n");

@@ -35,6 +35,7 @@ const LINE_MAX: usize = 256; // readline buffer (one input line)
 const TOK_BUF: usize = 256; // tokenizer scratch (NUL-joined argv bytes)
 const FSHRC_MAX: usize = 512; // /etc/fshrc slurp buffer
 const PASSWD_MAX: usize = 512; // /etc/passwd slurp buffer (whoami)
+const CWD_MAX: usize = 256; // getcwd buffer — matches the TaskStruct.cwd ABI ceiling (pwd)
 // Command-history depth. The ring's slots live on the REPL's stack frame
 // (rule 1 — no allocator / no .bss); 16 × HistSlot ≈ 4.2 KiB, comfortable on
 // the 64 KiB user stack. Bumping this only costs stack.
@@ -54,13 +55,22 @@ const PROMPT_USER = "$ ";
 // is a pass.
 const AUTHOR = "ajhahnde";
 const HELP_TEXT =
-    "fsh built-ins: cd [dir]  exit/logout  help  free  whoami  reboot\n" ++
-    "external: <cmd> [args]   one pipe: <cmd> | <cmd>\n" ++
-    "TAB completes commands + paths\n";
+    "Commands:\n" ++
+    "  cd [dir]       change working directory\n" ++
+    "  pwd            print working directory\n" ++
+    "  free           show free page count\n" ++
+    "  whoami         print the logged-in user\n" ++
+    "  reboot         restart the machine\n" ++
+    "  exit / logout  end the session\n" ++
+    "  help           show this help\n" ++
+    "\n" ++
+    "Run a program:  <cmd> [args]    pipe:  <a> | <b>\n" ++
+    "TAB completes commands + paths\n" ++
+    "\n";
 
 // Built-in command names, offered alongside /bin for first-token TAB
 // completion (these dispatch in-process, so they are not in /bin).
-const BUILTINS = [_][]const u8{ "cd", "exit", "logout", "help", "free", "whoami", "reboot" };
+const BUILTINS = [_][]const u8{ "cd", "pwd", "exit", "logout", "help", "free", "whoami", "reboot" };
 
 export fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn {
     _ = argc;
@@ -260,6 +270,17 @@ fn runBuiltin(name: [*:0]const u8, argv: *[tok.MAX_ARGS]?[*:0]u8, argc: usize) b
         if (flibc.chdir(target) < 0) emit(2, "cd: cannot change directory\n");
         return true;
     }
+    if (streq(name, "pwd")) {
+        var buf: [CWD_MAX]u8 = undefined;
+        const n = flibc.sys.getcwd(&buf, buf.len);
+        if (n < 0) {
+            emit(2, "pwd: cannot read working directory\n");
+        } else {
+            emit(1, buf[0..@intCast(n)]);
+            emit(1, "\n");
+        }
+        return true;
+    }
     if (streq(name, "free")) {
         flibc.printf("free pages: %u\n", .{flibc.sys.dump_free()});
         return true;
@@ -275,7 +296,7 @@ fn runBuiltin(name: [*:0]const u8, argv: *[tok.MAX_ARGS]?[*:0]u8, argc: usize) b
 // catalog — a new tool shows up by existing (and TAB completes it too). The
 // Dirent lives on the stack (rule 1); a missing /bin simply lists nothing.
 fn listBin() void {
-    emit(1, "in /bin:");
+    emit(1, "Programs in /bin:\n ");
     var d: flibc.Dirent = .{};
     var i: u64 = 0;
     while (flibc.sys.readdir("/bin", i, &d) == 0) : (i += 1) {

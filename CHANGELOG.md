@@ -92,9 +92,19 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   every matching command or path on a fresh line and redraws the prompt,
   so the choices are visible without abandoning the typed line. Built on a
   new pure, host-tested `completion.classify` helper; no new syscall.
+- **`pwd` shell built-in.** `fsh` gains `pwd`, which prints the current
+  working directory through a new `SYS_GETCWD` syscall (slot 48) — the
+  readback half of the existing `cd` / `SYS_CHDIR` store, copying the
+  per-task `cwd` out of the kernel. It joins the shell's TAB completion
+  and `help` listing.
 
 ### Changed
 
+- **`help` output restructured for readability.** The shell's `help` now
+  lists each built-in with a one-line description in aligned columns under
+  section headers (`Commands:` / `Run a program:` / `Programs in /bin:`),
+  replacing the previous single-line blob. The `/bin` listing is still
+  enumerated live, so new tools keep appearing automatically.
 - **Boot-success marker moved to the fsh homescreen.** The QEMU watchdog
   and the `picapture` helper now key on the stable
   `type 'help' for commands` homescreen tail instead of the retired
@@ -103,10 +113,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `hwrng: fallback (timer mix, weak) ok` to `Initialized hwrng`. These
   change the serial console output format (a breaking change to the boot
   contract).
-- **virt boot-watchdog free-page checkpoints.** They move to `0x3be48`
-  (per scenario) / `0x3be56` (boot baseline) because the larger `fsh` and
-  the new `/bin/sysinfo` and `/bin/less` tools grow the embedded
-  initramfs; rpi4b is unchanged.
+- **virt boot-watchdog free-page checkpoints.** They move to `0x3be46`
+  (per scenario) / `0x3be54` (boot baseline) because the larger `fsh`
+  (TAB completion, history, the restructured `help`), the new `/bin/sysinfo`
+  and `/bin/less` tools, and the `+strict-align` codegen grow the embedded
+  initramfs and kernel image; rpi4b is unchanged (its reserve calls are
+  no-ops).
 
 ### Removed
 
@@ -114,6 +126,26 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   a per-session auth marker; a blank line separates the password prompt
   from the shell homescreen. Boot success is now the homescreen-marker
   count alone.
+
+### Fixed
+
+- **`/bin/less` alignment fault on real hardware.** The pager's by-value
+  `Pager` return was vectorized into a misaligned 16-byte NEON store
+  (`stur q` at struct offset 40), which faulted under `SCTLR_EL1.A` on real
+  silicon (data abort, alignment fault) while passing QEMU's lenient TCG.
+  Instead of another per-site `align(16)` / volatile dodge, the freestanding
+  aarch64 build target now sets `+strict-align`, so LLVM never widens a copy
+  or a by-value return into an unaligned NEON store — closing the class for
+  the kernel and every userland tool at codegen. The virt boot-watchdog
+  checkpoints shift one page as a result (see Changed).
+- **Line editing at the `login:` and password prompt.** `/bin/login` read
+  the username and password through a dumb byte loop that *appended* a
+  backspace byte instead of erasing it, so a single mistype was
+  uncorrectable and the attempt failed as "Login incorrect." Login now
+  drives flibc's line editor in echo-off mode: the username gets full
+  backspace editing, and the password reuses the same host-tested `step`
+  core with masked echo — one `*` per byte, rubbed out on backspace. No
+  kernel or syscall change.
 
 ## [v0.2.0] - 2026-06-06
 

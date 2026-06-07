@@ -639,6 +639,23 @@ export fn sys_chdir(path_ptr: u64) i32 {
     return 0;
 }
 
+// Working-directory readback. Copies the calling task's
+// NUL-terminated `cwd` into the user buffer (path plus terminator) and
+// returns the path length excluding the NUL. The readback half of
+// sys_chdir: `cwd` is a plain TaskStruct field, so this allocates
+// nothing and the harness free-page baseline is untouched. Returns -1 on
+// a wild buffer UVA or a `len` too small to hold the path plus its NUL —
+// a short buffer gets nothing, never a truncated path.
+export fn sys_getcwd(buf_uva: u64, len: u64) i64 {
+    const c = current orelse return -1;
+    const cwd = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&c.cwd)), 0);
+    if (len < cwd.len + 1) return -1;
+    if (copy_to_user(buf_uva, cwd.ptr, cwd.len) < 0) return -1;
+    const nul = [_]u8{0};
+    if (copy_to_user(buf_uva + cwd.len, &nul, 1) < 0) return -1;
+    return @intCast(cwd.len);
+}
+
 // Directory enumeration. Stateless index walk: fill
 // the `index`-th entry of the directory at `path` into the caller's
 // Dirent and return 0; return -1 at end-of-directory, a bad/unmounted
@@ -1158,6 +1175,7 @@ export var sys_call_table = blk: {
     t[defs.SYS_DUP2] = @ptrCast(&sys_dup2);
 
     t[defs.SYS_CHDIR] = @ptrCast(&sys_chdir);
+    t[defs.SYS_GETCWD] = @ptrCast(&sys_getcwd);
     t[defs.SYS_READDIR] = @ptrCast(&sys_readdir);
 
     t[defs.SYS_KLOG_READ] = @ptrCast(&sys_klog_read);
@@ -1185,11 +1203,11 @@ export var sys_call_table = blk: {
 };
 
 // Build-time guard: src/asm_defs_common.inc must declare
-// `#define NR_SYSCALLS 48` to match. If you bump the highest SYS_*
+// `#define NR_SYSCALLS 49` to match. If you bump the highest SYS_*
 // constant in lib/syscall_defs.zig, also bump the asm-side literal,
 // then update this comptime check.
 comptime {
-    if (defs.NR_SYSCALLS != 48) {
+    if (defs.NR_SYSCALLS != 49) {
         @compileError("NR_SYSCALLS drifted from src/asm_defs_common.inc — keep both in lockstep");
     }
 }

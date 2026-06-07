@@ -107,8 +107,8 @@ directly on the controlling terminal. `run-virt` uses
 PL011 routed onto host stdio.
 
 A green run on either board lands `28/28 passed`, 32 per-scenario
-free-page checkpoints (`0xbbff2` on rpi4b, `0x3be48` on virt) plus the
-matching boot baseline (`0xbc000` / `0x3be56`), and 0 `ERROR CAUGHT`.
+free-page checkpoints (`0xbbff2` on rpi4b, `0x3be46` on virt) plus the
+matching boot baseline (`0xbc000` / `0x3be54`), and 0 `ERROR CAUGHT`.
 The boot then hands off to `/bin/login` → `/bin/fsh`; with the login
 lifecycle fsh's homescreen marker (`type 'help' for commands`) appears
 three times (two scripted `[TEST] login` sessions + the real boot
@@ -230,9 +230,11 @@ the Pi.
 ## 6. Helper shell functions
 
 The repo ships [`flashos.env.zsh`](flashos.env.zsh) with a handful of
-helpers. Source it from `~/.zshrc`
-(`source ~/FlashOS/flashos.env.zsh`) to make them available in every
-shell.
+helpers, exposed as two verb dispatchers — `pi <verb>` (serial console) and
+`run <mode>` (build, emulate, or attach) — plus `build` and `flashos`. Source
+it from `~/.zshrc` (`source ~/FlashOS/flashos.env.zsh`) to make them available
+in every shell. The legacy flat names (`picapture`, `piconnect`, `piquit`,
+`pilist`) remain as thin aliases for the corresponding `pi` verbs.
 
 - **`picapture [usb|mu]`** — runs the canonical boot-capture flow,
   logging the session to `boot.log` in the repo root (regardless of
@@ -257,21 +259,31 @@ shell.
 - **`pilist`** — lists attached console devices: the USB CDC console
   (`/dev/cu.usbmodem*`) and any USB-serial adapters
   (`/dev/cu.usbserial-*`, MU trace).
+- **`pi log`** — pages the most recent `boot.log` capture.
+- **`pi tail [N]`** — live-tails `boot.log` (last `N` lines, default 40),
+  following across the next capture's log rotation.
 - **`build`** — runs `./build.sh` from the repo root (works from any
   directory): clean, link pass 1, `populate-syms`, link pass 2,
   diff-check the symbol layout, optionally `deploy`. `BOARD=virt
   build` selects the virt board (deploy is skipped); `NM=llvm-nm
   build` overrides the symbol-dump binary.
-- **`showfns`** — lists the shell helpers defined in
-  [`flashos.env.zsh`](flashos.env.zsh), the `zig build` steps, and the
-  top-level functions in [`build.zig`](build.zig). A quick
-  inventory of available targets.
+- **`run <mode>`** — builds and runs a board, runs the boot watchdog, or
+  attaches to hardware. `run qemu` (alias `auto`) builds and launches the
+  rpi4b model in QEMU; `run virt` does the same for the virt board; `run test`
+  runs the host unit tests (`run test --NAME` filters by name); `run hw`
+  attaches to the Pi over serial (`--trace` selects the MU adapter).
+- **`run watchdog [virt|rpi4b]`** — runs the unattended boot watchdog with the
+  required `-Dci-login-seed=true` and `-Dboot-selftest=true` flags applied
+  automatically; defaults to the virt board (`rpi4b` is a slower TCG run).
+- **`flashos`** — lists the shell helpers defined in
+  [`flashos.env.zsh`](flashos.env.zsh) and the available `zig build` steps —
+  a quick inventory of targets.
 
 The MU trace adapter is auto-detected from `/dev/cu.usbserial-*` and
 the USB CDC console from `/dev/cu.usbmodem*`; override with
 `PI_SERIAL_DEVICE=/dev/cu.usbserial-XXXX` /
 `PI_USB_CONSOLE_DEVICE=/dev/cu.usbmodemXXXX` if multiple devices are
-connected. The `picapture` timeouts default to 60 s (overall) and 30 s
+connected. The `picapture` timeouts default to 120 s (overall) and 30 s
 (prompt probe); override with `PI_CAPTURE_TIMEOUT` / `PI_PROBE_TIMEOUT`.
 
 ### Auto-source on `cd` (optional)
