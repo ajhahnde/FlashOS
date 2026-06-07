@@ -65,6 +65,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   full-reset on Raspberry Pi 4 — and `logout`, a synonym for `exit` that
   ends the session and returns to the `login:` prompt. Both join the
   shell's TAB completion and `help` listing.
+- **Command history and in-line cursor editing in the shell.** `fsh`
+  now decodes the VT100 arrow-key sequences in its line editor
+  (`flibc.readlineEdit`) instead of echoing them as literal characters:
+  Up/Down recall earlier commands from a per-session history ring, and
+  Left/Right move the cursor so a keystroke inserts or backspaces at the
+  cursor rather than only at the end of the line. History lives in a
+  fixed, caller-owned ring (no allocator) and needs no new syscall.
+- **`-Dtest-filter` for the host-test step.** `zig build test
+  -Dtest-filter=<substr>` runs only host tests whose name contains the
+  substring, for faster focused iteration; the default runs the full
+  suite.
 
 ### Changed
 

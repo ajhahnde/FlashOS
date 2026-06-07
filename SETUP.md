@@ -307,7 +307,7 @@ zig build test
 Runs the host-side unit tests against pure-logic kernel modules.
 Each module that has tests is its own test root, linked against
 `tests/host_stubs.zig` (stubs for assembly-only externs). The
-current suite covers 38 modules (392 host tests); it
+current suite covers 38 modules (405 host tests); it
 finishes in well under a second and is the fastest signal that
 core kernel logic still holds.
 

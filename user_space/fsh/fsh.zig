@@ -35,6 +35,10 @@ const LINE_MAX: usize = 256; // readline buffer (one input line)
 const TOK_BUF: usize = 256; // tokenizer scratch (NUL-joined argv bytes)
 const FSHRC_MAX: usize = 512; // /etc/fshrc slurp buffer
 const PASSWD_MAX: usize = 512; // /etc/passwd slurp buffer (whoami)
+// Command-history depth. The ring's slots live on the REPL's stack frame
+// (rule 1 — no allocator / no .bss); 16 × HistSlot ≈ 4.2 KiB, comfortable on
+// the 64 KiB user stack. Bumping this only costs stack.
+const HIST_N: usize = 16;
 
 // Unix-style privilege prompt: `# ` for root (euid 0), `$ ` for
 // everyone else. Selected per REPL iteration via geteuid so a future
@@ -121,11 +125,15 @@ inline fn isSpace(c: u8) bool {
 
 fn repl() void {
     var line_buf: [LINE_MAX]u8 = undefined;
+    // Caller-owned history ring (rule 1). Slots are written by readlineEdit
+    // before they are read back, so `undefined` backing is valid here.
+    var hist_slots: [HIST_N]flibc.HistSlot = undefined;
+    var hist = flibc.History.init(&hist_slots);
     const comp = flibc.Completion{ .builtins = &BUILTINS };
     console_ui.homescreen(consoleSink, build_options.version, AUTHOR);
     while (true) {
         emit(1, if (flibc.sys.geteuid() == 0) PROMPT_ROOT else PROMPT_USER);
-        switch (flibc.readlineCompleting(&line_buf, comp)) {
+        switch (flibc.readlineEdit(&line_buf, comp, &hist)) {
             .eof => return, // ^D on an empty line / stream closed → logout
             .abandoned => emit(1, "\n"), // ^C: readline drew nothing, fsh ends the line
             .line => |l| {

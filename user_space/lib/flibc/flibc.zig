@@ -60,8 +60,11 @@ pub const chdir = process.chdir;
 
 pub const readline = readline_mod.readline;
 pub const readlineCompleting = readline_mod.readlineCompleting;
+pub const readlineEdit = readline_mod.readlineEdit;
 pub const Completion = readline_mod.Completion;
 pub const ReadlineOutcome = readline_mod.Outcome;
+pub const History = readline_mod.History;
+pub const HistSlot = readline_mod.HistSlot;
 
 pub const execvp = execvp_mod.execvp;
 
