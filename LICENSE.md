@@ -6,6 +6,8 @@
 
 <h1>License</h1>
 
+<p><i>Apache License 2.0 — the project's license notice.</i></p>
+
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
@@ -78,4 +80,4 @@ conditions:
 
 ---
 
-[← Prev: Changelog](CHANGELOG.md) · [Back to start (README) ↺](README.md)
+[← Prev: Changelog](CHANGELOG.md)

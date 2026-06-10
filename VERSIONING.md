@@ -6,6 +6,8 @@
 
 <h1>Versioning Policy</h1>
 
+<p><i>The contract for how FlashOS is versioned, released, supported, and retired.</i></p>
+
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·

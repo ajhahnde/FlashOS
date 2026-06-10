@@ -6,6 +6,8 @@
 
 <h1>Dokumentation</h1>
 
+<p><i>Wie Boot-Pfad, Memory-Layout, Scheduler, Syscalls, IRQs, Tracing und Test-Harness zusammenspielen.</i></p>
+
 <p>
     <a href="README.md"><b>README</b></a> ·
     <b>Dokumentation</b> ·

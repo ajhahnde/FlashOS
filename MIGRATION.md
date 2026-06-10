@@ -6,6 +6,8 @@
 
 <h1>Migration</h1>
 
+<p><i>How a C bare-metal kernel became pure Zig + AArch64 assembly, phase by phase.</i></p>
+
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·

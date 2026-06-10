@@ -6,6 +6,8 @@
 
 <h1>Changelog</h1>
 
+<p><i>All notable changes to FlashOS, release by release.</i></p>
+
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·

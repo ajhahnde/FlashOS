@@ -6,6 +6,8 @@
 
 <h1>Setup</h1>
 
+<p><i>Host toolchain, SD-card layout, serial console, QEMU, and the test runner.</i></p>
+
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
