@@ -48,6 +48,11 @@ const Board = enum { rpi4b, virt };
 // module is also pipe's "wait_queue" import.
 const HostTest = struct {
     src: []const u8,
+    // When set, the test compiles this generated source instead of b.path(src).
+    // Used for Flash-transpiled modules whose .zig lives in the build cache (a
+    // composed WriteFiles directory) rather than on disk; `src` stays the
+    // human-readable label.
+    src_lazy: ?std.Build.LazyPath = null,
     stubs: ?*std.Build.Step.Compile = null,
     extra_stubs: []const *std.Build.Step.Compile = &.{},
     imports: []const struct {
@@ -65,7 +70,7 @@ var host_test_filter: ?[]const u8 = null;
 
 fn addHostTest(b: *std.Build, step: *std.Build.Step, cfg: HostTest) *std.Build.Module {
     const m = b.createModule(.{
-        .root_source_file = b.path(cfg.src),
+        .root_source_file = if (cfg.src_lazy) |lp| lp else b.path(cfg.src),
         .target = b.graph.host,
         .optimize = .Debug,
     });
@@ -253,8 +258,13 @@ pub fn build(b: *std.Build) void {
     // wrappers (user_space/kernel_tests.zig). Exposed as a named module
     // because Zig 0.16 forbids `@import` reaching outside the importing
     // module's root directory.
+    // lib/syscall_defs.flash is the source of truth; flashc transpiles it to
+    // Zig at build time via addFlashSource. The generated .zig is shared by
+    // the kernel/userspace module here and the host-test module below, so the
+    // transpile runs once.
+    const syscall_defs_src = addFlashSource(b, "lib/syscall_defs.flash");
     const syscall_defs_mod = b.createModule(.{
-        .root_source_file = b.path("lib/syscall_defs.zig"),
+        .root_source_file = syscall_defs_src,
         .target = target,
         .optimize = optimize,
     });
@@ -268,8 +278,24 @@ pub fn build(b: *std.Build) void {
     // neither kernel internals nor flibc. Added to consumers below
     // (kernel_mod, fsh_mod); unused until a call site @imports it, so staging
     // it leaves every image byte-identical.
+    // console_ui is a multi-file Flash module: console_ui.flash re-exports its
+    // palette / tags / screen siblings through relative imports. flashc
+    // transpiles one file at a time, so compose the generated .zig into a single
+    // directory where each `@import("palette.zig")` sibling resolves — the same
+    // per-stage WriteFiles composition the Flash toolchain uses for its own
+    // std/selfhost modules. lib/console_ui/*.flash is the source of truth.
+    const console_ui_dir = b.addWriteFiles();
+    const console_ui_files = [_][]const u8{ "palette", "tags", "screen", "console_ui" };
+    var console_ui_root: std.Build.LazyPath = undefined;
+    var console_ui_screen_src: std.Build.LazyPath = undefined;
+    for (console_ui_files) |name| {
+        const gen = addFlashSource(b, b.fmt("lib/console_ui/{s}.flash", .{name}));
+        const dest = console_ui_dir.addCopyFile(gen, b.fmt("{s}.zig", .{name}));
+        if (std.mem.eql(u8, name, "console_ui")) console_ui_root = dest;
+        if (std.mem.eql(u8, name, "screen")) console_ui_screen_src = dest;
+    }
     const console_ui_mod = b.createModule(.{
-        .root_source_file = b.path("lib/console_ui/console_ui.zig"),
+        .root_source_file = console_ui_root,
     });
 
     // User-space virtual address layout (text/data/heap/stack bases +
@@ -1691,7 +1717,7 @@ pub fn build(b: *std.Build) void {
     // can satisfy its `@import("syscall_defs")` for the Dirent type
     // Pure comptime constants — no externs, no stubs.
     const syscall_defs_test_mod = b.createModule(.{
-        .root_source_file = b.path("lib/syscall_defs.zig"),
+        .root_source_file = syscall_defs_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
@@ -1762,9 +1788,10 @@ pub fn build(b: *std.Build) void {
     // readline's driver. No stubs, no imports.
     _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/completion.zig" });
 
-    // console_ui screen.zig — panel / kv / cursor renderer host coverage.
-    // Pure Sink emitters; imports palette.zig (sibling) only. No stubs.
-    _ = addHostTest(b, test_step, .{ .src = "lib/console_ui/screen.zig" });
+    // console_ui screen — panel / kv / cursor renderer host coverage. The
+    // test blocks live in the Flash source; compile the generated screen.zig
+    // from the composed console_ui directory so its sibling import resolves.
+    _ = addHostTest(b, test_step, .{ .src = "lib/console_ui/screen.flash", .src_lazy = console_ui_screen_src });
 
     // flibc pager.zig — pure scroll / line-index core host coverage (init line
     // indexing, line slicing, scroll clamping). The screen.enter + readKey
