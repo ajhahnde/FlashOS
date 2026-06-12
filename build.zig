@@ -756,8 +756,33 @@ pub fn build(b: *std.Build) void {
     // payloads) can `addImport("flibc", flibc_mod)` and stay one
     // `@import` deep. Pulls in syscall_defs for the SVC IDs — same
     // module the kernel and the kernel_tests user-side wrappers consume.
+    // flibc is a multi-file module: flibc.zig pulls its siblings in by relative
+    // import. As the port advances each module flips from a copied-verbatim .zig
+    // to a flashc-generated one; both land in a single composed WriteFiles
+    // directory so every `@import("sibling.zig")` resolves there (the same
+    // composition console_ui uses above). Until a module is ported it is copied
+    // straight from the source tree; ported modules are transpiled from .flash.
+    const flibc_dir = b.addWriteFiles();
+    const flibc_flash = [_][]const u8{ "heap", "io", "keys", "completion", "pager", "readline", "syscalls", "process", "execvp", "flibc" };
+    const flibc_zig = [_][]const u8{};
+    // Every composed sibling's in-dir LazyPath, keyed by module name. A flibc
+    // host test compiles the in-dir copy (where each `@import("sibling.zig")`
+    // resolves) rather than the on-disk file, which breaks the moment a sibling
+    // flips from a copied .zig to a flashc-generated one.
+    var flibc_srcs = std.StringHashMap(std.Build.LazyPath).init(b.allocator);
+    for (flibc_flash) |name| {
+        const gen = addFlashSource(b, b.fmt("user_space/lib/flibc/{s}.flash", .{name}));
+        flibc_srcs.put(name, flibc_dir.addCopyFile(gen, b.fmt("{s}.zig", .{name}))) catch @panic("OOM");
+    }
+    for (flibc_zig) |name| {
+        const dest = flibc_dir.addCopyFile(
+            b.path(b.fmt("user_space/lib/flibc/{s}.zig", .{name})),
+            b.fmt("{s}.zig", .{name}),
+        );
+        flibc_srcs.put(name, dest) catch @panic("OOM");
+    }
     const flibc_mod = b.createModule(.{
-        .root_source_file = b.path("user_space/lib/flibc/flibc.zig"),
+        .root_source_file = flibc_srcs.get("flibc").?,
         .target = target,
         .optimize = .ReleaseSmall,
     });
@@ -793,7 +818,7 @@ pub fn build(b: *std.Build) void {
 
     // ---- argv_echo.elf — payload for [TEST] execve ----
     // Same recipe as flibc_demo.elf, but its entry is the flibc _start
-    // argc/argv shim (user_space/lib/flibc/start.zig) rather than a bespoke
+    // argc/argv shim (user_space/lib/flibc/start.flash) rather than a bespoke
     // _start, and it carries a 4 KiB .rodata PAD so the linked ELF crosses
     // one page — proving sys_execve's PT_LOAD streaming path loads payloads
     // the long-retired PAGE_SIZE snapshot cap could not. The shim lives
@@ -803,7 +828,7 @@ pub fn build(b: *std.Build) void {
     // the `link "flibc_start"` in argv_echo.flash. Source is Flash —
     // flashc transpiles it to Zig at build time via addFlashSource.
     const flibc_start_mod = b.createModule(.{
-        .root_source_file = b.path("user_space/lib/flibc/start.zig"),
+        .root_source_file = addFlashSource(b, "user_space/lib/flibc/start.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
     });
@@ -813,7 +838,7 @@ pub fn build(b: *std.Build) void {
     // unprovided. Opt-in (imported only by fsh / echo / cat), so the
     // payloads that dodge the idiom (argv_echo, flibc_demo) stay lean.
     const flibc_mem_mod = b.createModule(.{
-        .root_source_file = b.path("user_space/lib/flibc/mem.zig"),
+        .root_source_file = addFlashSource(b, "user_space/lib/flibc/mem.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
     });
@@ -1766,12 +1791,12 @@ pub fn build(b: *std.Build) void {
     // Pure `step` transition + `State` buffer; the SVC
     // driver sits behind a comptime `has_driver` gate so the host
     // build never analyses inline asm. No stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/readline.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/readline.flash", .src_lazy = flibc_srcs.get("readline").? });
 
-    // flibc execvp.zig — bare-name → `/bin/<name>` resolver host
+    // flibc execvp.flash — bare-name → `/bin/<name>` resolver host
     // coverage. Pure `resolve` path-build; the SVC driver
     // sits behind the same `has_driver` gate as readline.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/execvp.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/execvp.flash", .src_lazy = flibc_srcs.get("execvp").? });
 
     // fsh tokenize.zig — whitespace splitter + single-`|` split host
     // coverage. Pure `tokenize`: fills a caller argv array
@@ -1781,12 +1806,12 @@ pub fn build(b: *std.Build) void {
     // flibc keys.zig — VT100 input Decoder host coverage (arrows / ctrl / tab).
     // Pure `Decoder.feed`; the SVC readKey driver sits behind the same
     // has_driver gate as readline. No stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/keys.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/keys.flash", .src_lazy = flibc_srcs.get("keys").? });
 
     // flibc completion.zig — tab-completion core host coverage (parse,
     // hasPrefix, commonPrefixLen). Pure; the readdir-driven gathering lives in
     // readline's driver. No stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/completion.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/completion.flash", .src_lazy = flibc_srcs.get("completion").? });
 
     // console_ui screen — panel / kv / cursor renderer host coverage. The
     // test blocks live in the Flash source; compile the generated screen.zig
@@ -1796,7 +1821,7 @@ pub fn build(b: *std.Build) void {
     // flibc pager.zig — pure scroll / line-index core host coverage (init line
     // indexing, line slicing, scroll clamping). The screen.enter + readKey
     // driver lives in tools/less_elf.zig. No stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/pager.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/pager.flash", .src_lazy = flibc_srcs.get("pager").? });
 
     // virt DTB parser — pure big-endian FDT decode + bounds guards.
     // The handoff entry (`fromHandoff`) reads the `dtb_pa` extern and the

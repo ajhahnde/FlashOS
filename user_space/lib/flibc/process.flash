@@ -1,33 +1,33 @@
-// Process-glue layer of flibc — fork / wait / exit / execve / chdir as
-// thin wrappers around the kernel ABI. fork / wait / exit / chdir are
-// direct sys-* passthroughs; `execve` is the path-form that resolves
-// the binary through VFS.
+// process — flibc's process-glue layer (fork / wait / exit / execve / chdir),
+// ported to Flash from the hand-written Zig. The wrappers are thin C-ABI calls
+// over the kernel syscall surface: fork / wait / exit / chdir pass straight
+// through, and execve is the path-resolved form that goes through the VFS.
 //
-// All wrappers run from EL0 in an ELF-loaded process — the only
-// context flibc supports. PID 1 (still blob-loaded) cannot link against
-// flibc until initramfs lands; for now PID 1 keeps using the
-// `sys_*` wrappers in user_space/kernel_tests.zig.
+// The first port to use a sibling file import: `use "syscalls" as sys` lowers
+// to `const sys = @import("syscalls.zig")` — the file form (a quoted stem;
+// lowering supplies the backend `.zig`) distinct from a bare-name module `use`.
+// The `///` doc comments carry through verbatim; the `//` header is dropped.
 
-const sys = @import("syscalls.zig");
+use "syscalls" as sys
 
 /// fork() — clone the current process. Returns the child's pid in the
 /// parent and 0 in the child. -1 on failure (NR_TASKS exhausted,
 /// out-of-memory, etc.).
 pub fn fork() i32 {
-    return sys.fork();
+    return sys.fork()
 }
 
 /// wait() — block until any child terminates and reap it. Returns the
 /// reaped child's pid, or -1 if the caller has no children.
 pub fn wait() i32 {
-    return sys.wait();
+    return sys.wait()
 }
 
 /// exit() — terminate the current process. Never returns. The kernel
 /// flips the task to TASK_ZOMBIE; the parent's wait reaps it (frees
 /// every user/kernel page tracked by `mm`).
 pub fn exit() noreturn {
-    sys.exit();
+    sys.exit()
 }
 
 /// execve(path, argv) — path-resolved exec on slot 31. `path` is a
@@ -39,8 +39,8 @@ pub fn exit() noreturn {
 /// return; the kernel erets to the new entry point with `x0 = argc`,
 /// `x1 = argv` (AAPCS64). Returns -1 on failure (path not found, parse
 /// error, alloc failure) with the caller's address space untouched.
-pub fn execve(path: [*:0]const u8, argv: [*]const ?[*:0]const u8) i32 {
-    return sys.exec_path(path, argv);
+pub fn execve(path cstr, argv argv) i32 {
+    return sys.exec_path(path, argv)
 }
 
 /// chdir(path) — replace the calling task's working directory with the
@@ -48,6 +48,6 @@ pub fn execve(path: [*:0]const u8, argv: [*]const ?[*:0]const u8) i32 {
 /// (sys_chdir); the kernel handles the join against the existing `cwd`
 /// and the `.`/`..` collapse. Returns 0 on success, -1 on wild user
 /// pointer / un-NUL-terminated input / oversize composition.
-pub fn chdir(path: [*:0]const u8) i32 {
-    return sys.chdir(path);
+pub fn chdir(path cstr) i32 {
+    return sys.chdir(path)
 }

@@ -1,0 +1,65 @@
+// flibc — FlashOS userland mini-libc, the re-export hub, ported to Flash from
+// the hand-written Zig. It pulls the sub-modules (sys / io / heap / process /
+// readline / execvp / keys / completion / pager) one level deep and re-exports
+// the userland-facing surface so a demo program can `use flibc` and reach
+// `flibc.printf`, `flibc.malloc`, `flibc.readline`, … without naming each leaf.
+//
+// The port that surfaces `pub use`: a re-exported import (`pub use "io" as io`
+// → `pub const io = @import("io.zig")`; the quoted target names the module stem
+// and lowering supplies the backend `.zig`). Bare-name `use syscall_defs as
+// defs` stays a module import; the quoted targets are sibling files. The value
+// re-exports (`pub const printf = io.printf`) are ordinary `pub const`s over a
+// member-access expression. All comments here are `//` trivia, dropped on
+// lowering; Flash lays out each top-level declaration one blank line apart.
+
+pub use "syscalls" as sys
+pub use "io" as io
+
+// Shared user↔kernel ABI types, surfaced at the top level so coreutils name
+// `flibc.Dirent` / `flibc.DT_DIR` without reaching into syscall_defs directly.
+// The raw call stays `flibc.sys.readdir`. Canonical home is syscall_defs.
+use syscall_defs as defs
+pub const Dirent = defs.Dirent
+pub const DT_REG = defs.DT_REG
+pub const DT_DIR = defs.DT_DIR
+// Kernel-log ring capacity, surfaced so /bin/dmesg sizes its read buffer to
+// KLOG_SIZE without reaching into syscall_defs; the raw call stays
+// `flibc.sys.klog_read`.
+pub const KLOG_SIZE = defs.KLOG_SIZE
+
+pub use "heap" as heap
+pub use "process" as process
+pub use "readline" as readline_mod
+pub use "execvp" as execvp_mod
+
+pub const printf = io.printf
+pub const puts = io.puts
+
+pub const malloc = heap.malloc
+pub const free = heap.free
+
+pub const fork = process.fork
+pub const wait = process.wait
+pub const exit = process.exit
+pub const execve = process.execve
+pub const chdir = process.chdir
+
+pub const readline = readline_mod.readline
+pub const readlineCompleting = readline_mod.readlineCompleting
+pub const readlineEdit = readline_mod.readlineEdit
+pub const Completion = readline_mod.Completion
+pub const ReadlineOutcome = readline_mod.Outcome
+pub const History = readline_mod.History
+pub const HistSlot = readline_mod.HistSlot
+
+pub const execvp = execvp_mod.execvp
+
+// Navigation seams — the key decoder + completion + pager core, re-exported so
+// a full-screen tool reaches them one module deep.
+pub use "keys" as keys
+pub const Key = keys.Key
+pub const KeyEvent = keys.Event
+pub const readKey = keys.readKey
+pub use "completion" as completion
+pub use "pager" as pager
+pub const Pager = pager.Pager

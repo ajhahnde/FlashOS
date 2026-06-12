@@ -10,14 +10,14 @@
 //                            candidates and shrink them to a shared extension.
 // The candidate gathering itself (a sys_readdir walk over /bin or the path's
 // directory, plus fsh's injected built-in names) is the SVC-driven half and
-// lives in readline.zig behind its has_driver gate, so this file stays pure,
+// lives in readline.flash behind its has_driver gate, so this file stays pure,
 // allocator-free, and target-agnostic.
 
 /// What a TAB is completing.
 pub const Kind = enum {
     command, // the first token — match against /bin + the shell's built-ins
     path, // a later token — match against entries of `dir`
-};
+}
 
 /// A parsed completion request. `dir` and `prefix` are slices into the caller's
 /// line buffer (or static literals). For a command, `dir` is "" (the driver
@@ -25,63 +25,79 @@ pub const Kind = enum {
 /// cwd, "/" the root, "/bin" an absolute dir — and `prefix` the partial
 /// basename to extend.
 pub const Context = struct {
-    kind: Kind,
-    dir: []const u8,
-    prefix: []const u8,
-};
+    kind Kind,
+    dir []u8,
+    prefix []u8,
+}
 
 /// Parse the completion context from the current line. The token under
 /// completion is the last whitespace-delimited run; if no earlier token
 /// precedes it, it is a command, otherwise a path.
-pub fn parse(line: []const u8) Context {
+pub fn parse(line []u8) Context {
     // Start of the last token = one past the last space/tab.
-    var tok_start: usize = 0;
-    var i: usize = 0;
-    while (i < line.len) : (i += 1) {
-        if (line[i] == ' ' or line[i] == '\t') tok_start = i + 1;
+    var tok_start usize = 0
+    var i usize = 0
+    while i < line.len {
+        if line[i] == ' ' || line[i] == '\t' {
+            tok_start = i + 1
+        }
+        i += 1
     }
     // Is there a non-space byte before the token? (an earlier token exists)
-    var earlier = false;
-    var j: usize = 0;
-    while (j < tok_start) : (j += 1) {
-        if (line[j] != ' ' and line[j] != '\t') {
-            earlier = true;
-            break;
+    var earlier = false
+    var j usize = 0
+    while j < tok_start {
+        if line[j] != ' ' && line[j] != '\t' {
+            earlier = true
+            break
         }
+        j += 1
     }
-    const token = line[tok_start..];
+    const token = line[tok_start..]
 
-    if (!earlier) return .{ .kind = .command, .dir = "", .prefix = token };
+    if !earlier {
+        return .{ .kind = .command, .dir = "", .prefix = token }
+    }
 
     // Path token: split at the last '/'.
-    var slash: ?usize = null;
-    var k: usize = 0;
-    while (k < token.len) : (k += 1) {
-        if (token[k] == '/') slash = k;
+    var slash ?usize = null
+    var k usize = 0
+    while k < token.len {
+        if token[k] == '/' {
+            slash = k
+        }
+        k += 1
     }
-    if (slash) |s| {
-        const dir: []const u8 = if (s == 0) "/" else token[0..s];
-        return .{ .kind = .path, .dir = dir, .prefix = token[s + 1 ..] };
+    if slash |s| {
+        const dir []u8 = if (s == 0) "/" else token[0..s]
+        return .{ .kind = .path, .dir = dir, .prefix = token[s + 1 ..] }
     }
-    return .{ .kind = .path, .dir = "", .prefix = token };
+    return .{ .kind = .path, .dir = "", .prefix = token }
 }
 
 /// True when `name` starts with `prefix`.
-pub fn hasPrefix(name: []const u8, prefix: []const u8) bool {
-    if (name.len < prefix.len) return false;
-    var i: usize = 0;
-    while (i < prefix.len) : (i += 1) {
-        if (name[i] != prefix[i]) return false;
+pub fn hasPrefix(name []u8, prefix []u8) bool {
+    if name.len < prefix.len {
+        return false
     }
-    return true;
+    var i usize = 0
+    while i < prefix.len {
+        if name[i] != prefix[i] {
+            return false
+        }
+        i += 1
+    }
+    return true
 }
 
 /// Length of the longest common prefix of `a` and `b`.
-pub fn commonPrefixLen(a: []const u8, b: []const u8) usize {
-    const m = @min(a.len, b.len);
-    var i: usize = 0;
-    while (i < m and a[i] == b[i]) : (i += 1) {}
-    return i;
+pub fn commonPrefixLen(a []u8, b []u8) usize {
+    const m = #min(a.len, b.len)
+    var i usize = 0
+    while i < m && a[i] == b[i] {
+        i += 1
+    }
+    return i
 }
 
 /// What a TAB press did to the line — the driver's branch point for double-TAB
@@ -97,95 +113,99 @@ pub const TabClass = enum {
     stuck,
     /// Nothing matched; the TAB is inert.
     empty,
-};
+}
 
 /// Classify a completion attempt from its candidate tally. A unique match always
 /// progresses (the driver appends a ' ' / '/' even when the typed token already
 /// equals the name); multiple candidates progress only while their common prefix
 /// runs past the typed prefix, otherwise they are `stuck` and a redraw-listing is
 /// the only forward move.
-pub fn classify(count: usize, best_len: usize, prefix_len: usize) TabClass {
-    if (count == 0) return .empty;
-    if (count == 1) return .progressed;
-    return if (best_len > prefix_len) .progressed else .stuck;
+pub fn classify(count usize, best_len usize, prefix_len usize) TabClass {
+    if count == 0 {
+        return .empty
+    }
+    if count == 1 {
+        return .progressed
+    }
+    return if (best_len > prefix_len) .progressed else .stuck
 }
 
 // ---- host tests ------------------------------------------------------------
 
-const std = @import("std");
-const testing = std.testing;
+const std = #import("std")
+const testing = std.testing
 
 test "parse: a first token is a command" {
-    const c = parse("ls");
-    try testing.expectEqual(Kind.command, c.kind);
-    try testing.expectEqualStrings("ls", c.prefix);
-    try testing.expectEqualStrings("", c.dir);
+    const c = parse("ls")
+    try testing.expectEqual(Kind.command, c.kind)
+    try testing.expectEqualStrings("ls", c.prefix)
+    try testing.expectEqualStrings("", c.dir)
 }
 
 test "parse: an empty line is an empty command" {
-    const c = parse("");
-    try testing.expectEqual(Kind.command, c.kind);
-    try testing.expectEqualStrings("", c.prefix);
+    const c = parse("")
+    try testing.expectEqual(Kind.command, c.kind)
+    try testing.expectEqualStrings("", c.prefix)
 }
 
 test "parse: a token after a space is a path in the cwd" {
-    const c = parse("cat fo");
-    try testing.expectEqual(Kind.path, c.kind);
-    try testing.expectEqualStrings("", c.dir);
-    try testing.expectEqualStrings("fo", c.prefix);
+    const c = parse("cat fo")
+    try testing.expectEqual(Kind.path, c.kind)
+    try testing.expectEqualStrings("", c.dir)
+    try testing.expectEqualStrings("fo", c.prefix)
 }
 
 test "parse: an absolute path token splits dir and prefix" {
-    const c = parse("cat /bin/l");
-    try testing.expectEqual(Kind.path, c.kind);
-    try testing.expectEqualStrings("/bin", c.dir);
-    try testing.expectEqualStrings("l", c.prefix);
+    const c = parse("cat /bin/l")
+    try testing.expectEqual(Kind.path, c.kind)
+    try testing.expectEqualStrings("/bin", c.dir)
+    try testing.expectEqualStrings("l", c.prefix)
 }
 
 test "parse: a root-level path token keeps dir as /" {
-    const c = parse("ls /b");
-    try testing.expectEqual(Kind.path, c.kind);
-    try testing.expectEqualStrings("/", c.dir);
-    try testing.expectEqualStrings("b", c.prefix);
+    const c = parse("ls /b")
+    try testing.expectEqual(Kind.path, c.kind)
+    try testing.expectEqualStrings("/", c.dir)
+    try testing.expectEqualStrings("b", c.prefix)
 }
 
 test "parse: a trailing slash yields an empty prefix" {
-    const c = parse("ls /bin/");
-    try testing.expectEqual(Kind.path, c.kind);
-    try testing.expectEqualStrings("/bin", c.dir);
-    try testing.expectEqualStrings("", c.prefix);
+    const c = parse("ls /bin/")
+    try testing.expectEqual(Kind.path, c.kind)
+    try testing.expectEqualStrings("/bin", c.dir)
+    try testing.expectEqualStrings("", c.prefix)
 }
 
 test "hasPrefix" {
-    try testing.expect(hasPrefix("login", "lo"));
-    try testing.expect(hasPrefix("ls", "ls"));
-    try testing.expect(!hasPrefix("a", "ab"));
-    try testing.expect(hasPrefix("anything", ""));
+    try testing.expect(hasPrefix("login", "lo"))
+    try testing.expect(hasPrefix("ls", "ls"))
+    try testing.expect(!hasPrefix("a", "ab"))
+    try testing.expect(hasPrefix("anything", ""))
 }
 
 test "commonPrefixLen" {
-    try testing.expectEqual(@as(usize, 3), commonPrefixLen("login", "logout")); // "log"
-    try testing.expectEqual(@as(usize, 0), commonPrefixLen("a", "b"));
-    try testing.expectEqual(@as(usize, 3), commonPrefixLen("cat", "cat"));
+    try testing.expectEqual(#as(usize, 3), commonPrefixLen("login", "logout")) // "log"
+    try testing.expectEqual(#as(usize, 0), commonPrefixLen("a", "b"))
+    try testing.expectEqual(#as(usize, 3), commonPrefixLen("cat", "cat"))
 }
 
 test "classify: no candidates is empty" {
-    try testing.expectEqual(TabClass.empty, classify(0, 0, 3));
+    try testing.expectEqual(TabClass.empty, classify(0, 0, 3))
 }
 
 test "classify: a unique match always progresses" {
     // Extends ("l" -> "ls") and exact ("ls" with only "ls" matching) both
     // progress — the exact case still earns its trailing separator.
-    try testing.expectEqual(TabClass.progressed, classify(1, 2, 1));
-    try testing.expectEqual(TabClass.progressed, classify(1, 2, 2));
+    try testing.expectEqual(TabClass.progressed, classify(1, 2, 1))
+    try testing.expectEqual(TabClass.progressed, classify(1, 2, 2))
 }
 
 test "classify: ambiguous but still extendable progresses" {
     // Typed "l", three candidates share "lo": the common prefix runs ahead.
-    try testing.expectEqual(TabClass.progressed, classify(3, 2, 1));
+    try testing.expectEqual(TabClass.progressed, classify(3, 2, 1))
 }
 
 test "classify: ambiguous at the common prefix is stuck" {
     // Typed "lo", three candidates share exactly "lo": nothing left to insert.
-    try testing.expectEqual(TabClass.stuck, classify(3, 2, 2));
+    try testing.expectEqual(TabClass.stuck, classify(3, 2, 2))
 }

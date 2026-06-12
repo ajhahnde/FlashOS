@@ -15,20 +15,20 @@
 // grade by design; richer formatting belongs to future fsh /
 // coreutils work once a real userland exercises it.
 
-const sys = @import("syscalls.zig");
+use "syscalls" as sys
 
-const BUF_LEN: usize = 256;
+const BUF_LEN usize = 256
 
 /// puts — write a null-terminated string followed by a newline. Mirrors
 /// the C library shape (line-buffered, sentinel-terminated input).
-pub fn puts(s: [*:0]const u8) void {
-    var buf: [BUF_LEN]u8 = undefined;
-    var pos: usize = 0;
+pub fn puts(s [*:0]u8) void {
+    var buf [BUF_LEN]u8 = undefined
+    var pos usize = 0
     // Same BUF_LEN-1 truncation bound printf enforces: copy the input,
     // append the newline, then flush `pos` bytes in one syscall.
-    buf_put_zstr(&buf, &pos, s);
-    buf_put_byte(&buf, &pos, '\n');
-    _ = sys.write_fd(1, &buf, pos);
+    buf_put_zstr(&buf, &pos, s)
+    buf_put_byte(&buf, &pos, '\n')
+    _ = sys.write_fd(1, &buf, pos)
 }
 
 /// printf(fmt, .{args...}) — format and emit. The format string is
@@ -39,34 +39,34 @@ pub fn puts(s: [*:0]const u8) void {
 /// Output longer than BUF_LEN-1 (255 bytes) is silently truncated.
 /// This matches the demo-grade scope of flibc; production code
 /// requiring large prints should use a more robust IO layer.
-pub fn printf(comptime fmt: []const u8, args: anytype) void {
-    var buf: [BUF_LEN]u8 = undefined;
-    var pos: usize = 0;
+pub fn printf(comptime fmt []u8, args anytype) void {
+    var buf [BUF_LEN]u8 = undefined
+    var pos usize = 0
 
     // Scale evaluation quota linearly with format string length; the
     // + 1000 covers the comptime walker's fixed per-spec overhead.
-    @setEvalBranchQuota(8 * fmt.len + 1000);
-    comptime var i: usize = 0;
-    comptime var arg_idx: usize = 0;
-    inline while (i < fmt.len) {
-        const c = fmt[i];
-        if (c == '%' and i + 1 < fmt.len) {
-            const spec = fmt[i + 1];
-            if (spec == '%') {
-                buf_put_byte(&buf, &pos, '%');
+    #setEvalBranchQuota(8 * fmt.len + 1000)
+    comptime var i usize = 0
+    comptime var arg_idx usize = 0
+    inline while i < fmt.len {
+        const c = fmt[i]
+        if c == '%' && i + 1 < fmt.len {
+            const spec = fmt[i + 1]
+            if spec == '%' {
+                buf_put_byte(&buf, &pos, '%')
             } else {
-                emit_spec(&buf, &pos, spec, args[arg_idx]);
-                arg_idx += 1;
+                emit_spec(&buf, &pos, spec, args[arg_idx])
+                arg_idx += 1
             }
-            i += 2;
+            i += 2
         } else {
-            buf_put_byte(&buf, &pos, c);
-            i += 1;
+            buf_put_byte(&buf, &pos, c)
+            i += 1
         }
     }
 
-    const len = if (pos < BUF_LEN) pos else BUF_LEN - 1;
-    _ = sys.write_fd(1, &buf, len);
+    const len = if (pos < BUF_LEN) pos else BUF_LEN - 1
+    _ = sys.write_fd(1, &buf, len)
 }
 
 // Dispatch a single arg-consuming spec. Inline so each call site is
@@ -76,14 +76,14 @@ pub fn printf(comptime fmt: []const u8, args: anytype) void {
 // switch inside printf) keeps the comptime tuple index away from
 // arg-less specs (`%%`, literals): if no arg-consuming spec runs in a
 // given iteration, args is never indexed at all.
-inline fn emit_spec(buf: *[BUF_LEN]u8, pos: *usize, comptime spec: u8, arg: anytype) void {
-    switch (spec) {
+inline fn emit_spec(buf *mut [BUF_LEN]u8, pos *mut usize, comptime spec u8, arg anytype) void {
+    switch spec {
         's' => buf_put_zstr(buf, pos, arg),
-        'd', 'i' => buf_put_signed(buf, pos, @intCast(arg)),
-        'u' => buf_put_unsigned(buf, pos, @intCast(arg)),
-        'x' => buf_put_hex(buf, pos, @intCast(arg)),
-        'c' => buf_put_byte(buf, pos, @intCast(arg)),
-        else => @compileError("flibc.printf: unsupported %" ++ &[_]u8{spec}),
+        'd', 'i' => buf_put_signed(buf, pos, #intCast(arg)),
+        'u' => buf_put_unsigned(buf, pos, #intCast(arg)),
+        'x' => buf_put_hex(buf, pos, #intCast(arg)),
+        'c' => buf_put_byte(buf, pos, #intCast(arg)),
+        else => #compileError("flibc.printf: unsupported %" ++ &[_]u8{spec}),
     }
 }
 
@@ -92,68 +92,71 @@ inline fn emit_spec(buf: *[BUF_LEN]u8, pos: *usize, comptime spec: u8, arg: anyt
 // flushing. Truncating-on-overflow matches the demo-grade scope; the
 // alternative (a syscall-per-flush mid-format) would push complexity
 // disproportionate to the use case.
-fn buf_put_byte(buf: *[BUF_LEN]u8, pos: *usize, c: u8) void {
-    if (pos.* < BUF_LEN - 1) {
-        buf[pos.*] = c;
-        pos.* += 1;
+fn buf_put_byte(buf *mut [BUF_LEN]u8, pos *mut usize, c u8) void {
+    if pos.* < BUF_LEN - 1 {
+        buf[pos.*] = c
+        pos.* += 1
     }
 }
 
-fn buf_put_zstr(buf: *[BUF_LEN]u8, pos: *usize, s: [*:0]const u8) void {
-    var k: usize = 0;
-    while (s[k] != 0) : (k += 1) {
-        buf_put_byte(buf, pos, s[k]);
+fn buf_put_zstr(buf *mut [BUF_LEN]u8, pos *mut usize, s [*:0]u8) void {
+    var k usize = 0
+    while s[k] != 0 {
+        buf_put_byte(buf, pos, s[k])
+        k += 1
     }
 }
 
-fn buf_put_signed(buf: *[BUF_LEN]u8, pos: *usize, val: i64) void {
-    if (val < 0) {
-        buf_put_byte(buf, pos, '-');
+fn buf_put_signed(buf *mut [BUF_LEN]u8, pos *mut usize, val i64) void {
+    if val < 0 {
+        buf_put_byte(buf, pos, '-')
         // i64.min would overflow `-val`; bitcast to u64 to recover the
         // magnitude in two's complement (-i64.min == i64.min reinterpret).
         // Branchless and avoids the IntegerOverflow runtime check.
-        const mag: u64 = @bitCast(-(val +% 1));
-        buf_put_unsigned(buf, pos, mag + 1);
+        const mag u64 = #bitCast(-(val +% 1))
+        buf_put_unsigned(buf, pos, mag + 1)
     } else {
-        buf_put_unsigned(buf, pos, @intCast(val));
+        buf_put_unsigned(buf, pos, #intCast(val))
     }
 }
 
-fn buf_put_unsigned(buf: *[BUF_LEN]u8, pos: *usize, val: u64) void {
-    if (val == 0) {
-        buf_put_byte(buf, pos, '0');
-        return;
+fn buf_put_unsigned(buf *mut [BUF_LEN]u8, pos *mut usize, val u64) void {
+    if val == 0 {
+        buf_put_byte(buf, pos, '0')
+        return
     }
     // u64.max is 20 decimal digits; 20 + slack rounds to the nearest
     // power-of-two stack slot.
-    var tmp: [20]u8 = undefined;
-    var n: usize = 0;
-    var v = val;
-    while (v > 0) : (v /= 10) {
-        tmp[n] = @intCast('0' + (v % 10));
-        n += 1;
+    var tmp [20]u8 = undefined
+    var n usize = 0
+    var v = val
+    while v > 0 {
+        tmp[n] = #intCast('0' + (v % 10))
+        n += 1
+        v /= 10
     }
-    while (n > 0) {
-        n -= 1;
-        buf_put_byte(buf, pos, tmp[n]);
+    while n > 0 {
+        n -= 1
+        buf_put_byte(buf, pos, tmp[n])
     }
 }
 
-fn buf_put_hex(buf: *[BUF_LEN]u8, pos: *usize, val: u64) void {
-    if (val == 0) {
-        buf_put_byte(buf, pos, '0');
-        return;
+fn buf_put_hex(buf *mut [BUF_LEN]u8, pos *mut usize, val u64) void {
+    if val == 0 {
+        buf_put_byte(buf, pos, '0')
+        return
     }
-    const digits = "0123456789abcdef";
-    var tmp: [16]u8 = undefined;
-    var n: usize = 0;
-    var v = val;
-    while (v > 0) : (v >>= 4) {
-        tmp[n] = digits[@as(usize, @intCast(v & 0xf))];
-        n += 1;
+    const digits = "0123456789abcdef"
+    var tmp [16]u8 = undefined
+    var n usize = 0
+    var v = val
+    while v > 0 {
+        tmp[n] = digits[#as(usize, #intCast(v & 0xf))]
+        n += 1
+        v >>= 4
     }
-    while (n > 0) {
-        n -= 1;
-        buf_put_byte(buf, pos, tmp[n]);
+    while n > 0 {
+        n -= 1
+        buf_put_byte(buf, pos, tmp[n])
     }
 }

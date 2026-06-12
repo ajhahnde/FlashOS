@@ -12,21 +12,21 @@
 // uses. The kernel's loader places these wrappers wherever the ELF's
 // PT_LOAD segments dictate, not in the .text.user blob region.
 
-const defs = @import("syscall_defs");
+const defs = #import("syscall_defs")
 
 pub fn fork() i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_FORK),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 pub fn exit() noreturn {
     asm volatile ("svc #0"
         :
         : [nr] "{x8}" (defs.SYS_EXIT),
-        : .{ .memory = true });
-    unreachable;
+        : .{ .memory = true })
+    unreachable
 }
 
 // Reset the machine (SYS_REBOOT). The kernel performs a board-specific
@@ -36,22 +36,22 @@ pub fn reboot() noreturn {
     asm volatile ("svc #0"
         :
         : [nr] "{x8}" (defs.SYS_REBOOT),
-        : .{ .memory = true });
-    unreachable;
+        : .{ .memory = true })
+    unreachable
 }
 
 pub fn wait() i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_WAIT),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 pub fn dump_free() u64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> u64),
         : [nr] "{x8}" (defs.SYS_DUMP_FREE),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// exec_path(path, argv) — path-resolved ELF exec on slot 31. `path` is
@@ -60,21 +60,21 @@ pub fn dump_free() u64 {
 /// segments from the resolved VFS file and lays an argv block on the
 /// new user stack, then erets with `x0 = argc`, `x1 = argv`. Returns
 /// only on failure (-1); on success the caller's image is replaced.
-pub fn exec_path(path: [*:0]const u8, argv: [*]const ?[*:0]const u8) i32 {
+pub fn exec_path(path [*:0]u8, argv [*]?[*:0]u8) i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_EXECVE),
           [path] "{x0}" (path),
           [argv] "{x1}" (argv),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
-pub fn kill(pid: i32) i32 {
+pub fn kill(pid i32) i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_KILL),
           [pid] "{x0}" (pid),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// brk(addr) — set the heap break to `addr` (rounded up to PAGE_SIZE by
@@ -82,12 +82,12 @@ pub fn kill(pid: i32) i32 {
 /// Negative on out-of-range (below HEAP_BASE, or above
 /// STACK_TOP - STACK_BUDGET). i64 because the heap range covers UVAs
 /// that don't fit in i32.
-pub fn brk(addr: u64) i64 {
+pub fn brk(addr u64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_BRK),
           [addr] "{x0}" (addr),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// sbrk(delta) — bump the break by `delta` bytes (kernel rounds the
@@ -95,12 +95,12 @@ pub fn brk(addr: u64) i64 {
 /// start of the freshly-allocated region on grow) or -1 on
 /// overflow / out-of-range. Negative `delta` shrinks; the kernel frees
 /// released pages and flushes the TLB.
-pub fn sbrk(delta: i64) i64 {
+pub fn sbrk(delta i64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_SBRK),
           [delta] "{x0}" (delta),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 // ---- Unified fd-table ABI (slots 32..35) ----
@@ -119,52 +119,52 @@ pub fn sbrk(delta: i64) i64 {
 /// on an invalid fd / wild UVA. Backend-aware: console blocks on the
 /// RX ring, pipe blocks on the SPSC ring, file copies from the open
 /// VFS file.
-pub fn read(fd: i32, buf: [*]u8, len: u64) i64 {
+pub fn read(fd i32, buf [*]mut u8, len u64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_READ),
           [fd] "{x0}" (fd),
           [buf] "{x1}" (buf),
           [len] "{x2}" (len),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// write_fd(fd, buf, len) — emit `len` bytes from `buf` to `fd`. Returns
 /// the byte count or -1. Carries an explicit length and routes through
 /// the unified fd table by fd kind (console / pipe / file).
-pub fn write_fd(fd: i32, buf: [*]const u8, len: u64) i64 {
+pub fn write_fd(fd i32, buf [*]u8, len u64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_WRITE),
           [fd] "{x0}" (fd),
           [buf] "{x1}" (buf),
           [len] "{x2}" (len),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// close(fd) — release `fd` from the calling task's table. File fds run
 /// the backend's vfs_close flush before the slot clears; pipe fds drop
 /// the page-refcount (last close frees the pipe page); console is
 /// refcount-exempt. Returns 0 on success, -1 on bad fd.
-pub fn close(fd: i32) i32 {
+pub fn close(fd i32) i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_CLOSE),
           [fd] "{x0}" (fd),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// dup2(old, new) — redirect `new` to point at `old`'s backend, closing
 /// whatever `new` previously held. Returns `new` on success, -1 on bad
 /// old fd / out-of-range new. The mechanic that powers `fsh`'s pipe
 /// wiring (dup2 the pipe end onto fd 0/1 before `exec_path`).
-pub fn dup2(oldfd: i32, newfd: i32) i32 {
+pub fn dup2(oldfd i32, newfd i32) i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_DUP2),
           [old] "{x0}" (oldfd),
           [new] "{x1}" (newfd),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// pipe() — allocate a pipe page and install two fds (read end + write
@@ -176,7 +176,7 @@ pub fn pipe() i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_PIPE),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// chdir(path) — replace the calling task's `cwd` with the joined +
@@ -186,12 +186,12 @@ pub fn pipe() i64 {
 /// the open/execve boundary trusts the stored value. Returns 0 on
 /// success, -1 on wild user pointer / un-NUL-terminated input /
 /// oversize composition past CWD_SIZE (256).
-pub fn chdir(path: [*:0]const u8) i32 {
+pub fn chdir(path [*:0]u8) i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_CHDIR),
           [path] "{x0}" (path),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// getcwd(buf, len) — copy the calling task's NUL-terminated working
@@ -199,13 +199,13 @@ pub fn chdir(path: [*:0]const u8) i32 {
 /// length excluding the NUL. The readback half of `chdir`; `pwd` is the
 /// sole consumer. Returns -1 on a wild buffer UVA or a `len` too small
 /// to hold the path plus its terminator.
-pub fn getcwd(buf: [*]u8, len: u64) i64 {
+pub fn getcwd(buf [*]mut u8, len u64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_GETCWD),
           [buf] "{x0}" (buf),
           [len] "{x1}" (len),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// open(path) — resolve `path` through VFS and install a file fd in the
@@ -221,12 +221,12 @@ pub fn getcwd(buf: [*]u8, len: u64) i64 {
 /// (34) handlers, which dispatch the file-kind fd this returns. There is
 /// no unified "open" — slot 7 stays canonical. fsh uses it to slurp
 /// `/etc/fshrc` at startup (open → read → close).
-pub fn open(path: [*:0]const u8) i32 {
+pub fn open(path [*:0]u8) i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_OPEN_FILE),
           [path] "{x0}" (path),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// readdir(path, index, out) — fill `out` with the `index`-th entry of
@@ -237,14 +237,14 @@ pub fn open(path: [*:0]const u8) i32 {
 /// at end-of-directory / bad path / wild pointer. The kernel
 /// copy_to_user's the whole Dirent on a hit, so `out` must point at a
 /// writable 40-byte object. `ls` loops `index` 0.. until -1.
-pub fn readdir(path: [*:0]const u8, index: u64, out: *defs.Dirent) i32 {
+pub fn readdir(path [*:0]u8, index u64, out *mut defs.Dirent) i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
         : [nr] "{x8}" (defs.SYS_READDIR),
           [path] "{x0}" (path),
           [index] "{x1}" (index),
           [out] "{x2}" (out),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 /// klog_read(buf, len) — snapshot the most-recent min(len, retained) bytes
@@ -253,13 +253,13 @@ pub fn readdir(path: [*:0]const u8, index: u64, out: *defs.Dirent) i32 {
 /// wild buffer UVA. Consume-free — the ring is unchanged, so repeated
 /// reads re-see the live log. `/bin/dmesg` sizes `buf` to KLOG_SIZE to
 /// capture the whole retained log in one call.
-pub fn klog_read(buf: [*]u8, len: u64) i64 {
+pub fn klog_read(buf [*]mut u8, len u64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_KLOG_READ),
           [buf] "{x0}" (buf),
           [len] "{x1}" (len),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 // ---- Process credentials (slots 39..44) ----
@@ -275,44 +275,44 @@ pub fn getuid() i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_GETUID),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 pub fn geteuid() i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_GETEUID),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 pub fn getgid() i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_GETGID),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 pub fn getegid() i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_GETEGID),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
-pub fn setuid(uid: u32) i64 {
+pub fn setuid(uid u32) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_SETUID),
           [uid] "{x0}" (uid),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
-pub fn setgid(gid: u32) i64 {
+pub fn setgid(gid u32) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_SETGID),
           [gid] "{x0}" (gid),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 // authenticate(user, user_len, pass, pass_len) — kernel-side credential
@@ -320,7 +320,7 @@ pub fn setgid(gid: u32) i64 {
 // match, -1 otherwise. The KDF lives in the kernel; the caller passes a
 // plaintext password once and never sees a salt or hash. /bin/login is
 // the sole consumer.
-pub fn authenticate(user: [*]const u8, user_len: u64, pass: [*]const u8, pass_len: u64) i64 {
+pub fn authenticate(user [*]u8, user_len u64, pass [*]u8, pass_len u64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_AUTHENTICATE),
@@ -328,7 +328,7 @@ pub fn authenticate(user: [*]const u8, user_len: u64, pass: [*]const u8, pass_le
           [ul] "{x1}" (user_len),
           [p] "{x2}" (pass),
           [pl] "{x3}" (pass_len),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 // passwd(user, user_len, old, old_len, new, new_len) — kernel-side
@@ -338,7 +338,7 @@ pub fn authenticate(user: [*]const u8, user_len: u64, pass: [*]const u8, pass_le
 // record with the correct old password (-EACCES otherwise). Returns 0 on
 // success, -1 when no writable shadow exists (QEMU virt / fresh card) or
 // the input is malformed. /bin/passwd is the interactive consumer.
-pub fn passwd(user: [*]const u8, user_len: u64, old: [*]const u8, old_len: u64, new: [*]const u8, new_len: u64) i64 {
+pub fn passwd(user [*]u8, user_len u64, old [*]u8, old_len u64, new [*]u8, new_len u64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_PASSWD),
@@ -348,16 +348,16 @@ pub fn passwd(user: [*]const u8, user_len: u64, old: [*]const u8, old_len: u64, 
           [ol] "{x3}" (old_len),
           [n] "{x4}" (new),
           [nl] "{x5}" (new_len),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }
 
 // set_console_mode(mode) — toggle the kernel console echo flag (slot 25).
 // CONSOLE_MODE_ECHO on => the kernel echoes typed printable bytes; off
 // suppresses echo (used around /bin/login's password prompt). Returns 0.
-pub fn set_console_mode(mode: u64) i64 {
+pub fn set_console_mode(mode u64) i64 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i64),
         : [nr] "{x8}" (defs.SYS_SET_CONSOLE_MODE),
           [m] "{x0}" (mode),
-        : .{ .memory = true });
+        : .{ .memory = true })
 }

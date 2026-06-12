@@ -12,9 +12,9 @@
 // sub-allocator is future work once `fsh` and the demo programs need
 // many small allocations.
 
-const sys = @import("syscalls.zig");
+use "syscalls" as sys
 
-const ALIGN: u64 = 8;
+const ALIGN u64 = 8
 
 /// malloc(n) — return a pointer to a freshly-allocated region of at
 /// least `n` bytes (rounded up to 8). Returns null on failure
@@ -25,12 +25,16 @@ const ALIGN: u64 = 8;
 /// C `malloc(0)` is implementation-defined; flibc returns null.
 /// Callers must distinguish `len == 0` themselves before treating
 /// null as failure.
-pub fn malloc(n: u64) ?[*]u8 {
-    if (n == 0) return null;
-    const aligned: u64 = (n + ALIGN - 1) & ~(ALIGN - 1);
-    const prev = sys.sbrk(@intCast(aligned));
-    if (prev < 0) return null;
-    return @ptrFromInt(@as(u64, @bitCast(prev)));
+pub fn malloc(n u64) ?[*]mut u8 {
+    if n == 0 {
+        return null
+    }
+    const aligned u64 = (n + ALIGN - 1) & ~(ALIGN - 1)
+    const prev = sys.sbrk(#intCast(aligned))
+    if prev < 0 {
+        return null
+    }
+    return #ptrFromInt(#as(u64, #bitCast(prev)))
 }
 
 /// free — no-op. The bump allocator never reclaims individual
@@ -38,4 +42,4 @@ pub fn malloc(n: u64) ?[*]u8 {
 /// (do_wait clears every page in `mm.user_pages`). Provided so consumers
 /// can keep the alloc/free pairing readable even though the call is
 /// inert.
-pub fn free(_: ?[*]u8) void {}
+pub fn free(_ ?[*]mut u8) void {}

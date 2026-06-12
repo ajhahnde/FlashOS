@@ -25,12 +25,12 @@
 // argv_echo demo and the future fsh coreutils take the shim; the legacy
 // hello/stackbomb/flibc_demo payloads keep their own entry.
 
-extern fn main(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn;
+extern fn main(argc usize, argv argv) callconv(.c) noreturn
 
-fn _start_shim(argc: usize, argv: [*]const ?[*:0]const u8) callconv(.c) noreturn {
-    main(argc, argv);
+fn _start_shim(argc usize, argv argv) callconv(.c) noreturn {
+    main(argc, argv)
 }
 
 comptime {
-    @export(&_start_shim, .{ .name = "_start", .linkage = .strong });
+    #export(&_start_shim, .{ .name = "_start", .linkage = .strong })
 }
