@@ -183,7 +183,7 @@ flowchart TD
    stack page, and `eret`s to the ELF entry point.
 6. `user_space/init_main.zig` is the `pid1.elf` root: `_start`
    calls `pid1_main`, which runs `run_all()` from
-   `kernel_tests.zig`. The harness runs the twenty-seven scenarios and
+   `kernel_tests.zig`. The harness runs the twenty-eight scenarios and
    prints an `X/Y passed` tally, then hands PID 1 to `/bin/login`:
    the login gate authenticates against `/etc/shadow`,
    drops privilege per `/etc/passwd`, and execs the user's shell —
@@ -1110,7 +1110,7 @@ exports. The current suite totals **419 host tests** across 39
 modules — see the coverage matrix below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.zig`).
-PID 1 enters `run_all()`, which exercises twenty-seven scenarios on real
+PID 1 enters `run_all()`, which exercises twenty-eight scenarios on real
 kernel state:
 
 - `fork-stress` — 3 × 5 fork/reap rounds with per-round and final
