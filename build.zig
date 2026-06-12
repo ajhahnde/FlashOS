@@ -1055,8 +1055,10 @@ pub fn build(b: *std.Build) void {
     // (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
     // coreutil_linker.ld). Staged at /bin/less; kept out of the CI FSH_SCRIPT
     // like sysinfo (interactive; the free-page baseline must stay deterministic).
+    // Source is Flash (tools/less.flash) — flashc transpiles it to Zig at build
+    // time via addFlashSource.
     const less_mod = b.createModule(.{
-        .root_source_file = b.path("tools/less_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/less.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -1115,8 +1117,10 @@ pub fn build(b: *std.Build) void {
     // waits, reaps, and re-prompts (the logout lifecycle). Same coreutil
     // recipe as dmesg / ls; imports syscall_defs for the echo mode bit and
     // pwfile for the /etc/passwd lookup.
+    // Source is Flash (tools/login.flash) — flashc transpiles it to Zig at
+    // build time via addFlashSource.
     const login_mod = b.createModule(.{
-        .root_source_file = b.path("tools/login_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/login.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -1142,8 +1146,10 @@ pub fn build(b: *std.Build) void {
     // off) and calls sys_passwd; the KDF + splice-safe shadow rewrite
     // live in the kernel. Same coreutil recipe as login; imports pwfile
     // for the uid -> own-login-name default and syscall_defs for EACCES.
+    // Source is Flash (tools/passwd.flash) — flashc transpiles it to Zig at
+    // build time via addFlashSource.
     const passwd_bin_mod = b.createModule(.{
-        .root_source_file = b.path("tools/passwd_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/passwd.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
