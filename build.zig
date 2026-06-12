@@ -700,8 +700,10 @@ pub fn build(b: *std.Build) void {
     // the guard-zone fault, prints a kernel-side diagnostic and zombies
     // the task; the parent's sys_wait reaps it so the per-process page
     // balance returns to baseline (which is what the harness verifies).
+    // Source is Flash (tools/stackbomb.flash) — flashc transpiles it to
+    // Zig at build time via addFlashSource.
     const stackbomb_mod = b.createModule(.{
-        .root_source_file = b.path("tools/stackbomb_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/stackbomb.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -987,8 +989,10 @@ pub fn build(b: *std.Build) void {
     meminfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     meminfo.entry = .disabled;
 
+    // forkbomb's source is Flash (tools/forkbomb.flash) — flashc
+    // transpiles it to Zig at build time via addFlashSource.
     const forkbomb_mod = b.createModule(.{
-        .root_source_file = b.path("tools/forkbomb_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/forkbomb.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,

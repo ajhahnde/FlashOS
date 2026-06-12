@@ -11,29 +11,33 @@
 // Output is a single summary line via flibc.printf (legacy slot-0 console
 // write); kept out of the CI FSH_SCRIPT for the same reason as meminfo
 // (Pi-interactive demo). flibc_mem imported for coreutil parity.
+//
+// Source is Flash (tools/forkbomb.flash) — flashc transpiles it to Zig
+// at build time via addFlashSource.
 
-const flibc = @import("flibc");
+use flibc
 
-comptime {
-    _ = @import("flibc_start");
-    _ = @import("flibc_mem");
-}
+link "flibc_start"
+link "flibc_mem"
 
-const FORKS: u32 = 16;
+const FORKS u32 = 16
 
-export fn main(_: usize, _: [*]const ?[*:0]const u8) callconv(.c) noreturn {
-    var reaped: u32 = 0;
-    var i: u32 = 0;
-    while (i < FORKS) : (i += 1) {
-        const pid = flibc.fork();
-        if (pid == 0) {
+export fn main(_ usize, _ argv) noreturn {
+    var reaped u32 = 0
+    var i u32 = 0
+    while i < FORKS {
+        pid := flibc.fork()
+        if pid == 0 {
             // Child: exit at once — keeps at most one child live.
-            flibc.exit();
+            flibc.exit()
         }
-        if (pid < 0) break; // fork failed (must not happen while capped)
-        _ = flibc.wait(); // parent reaps immediately
-        reaped += 1;
+        if pid < 0 {
+            break // fork failed (must not happen while capped)
+        }
+        _ = flibc.wait() // parent reaps immediately
+        reaped += 1
+        i += 1
     }
-    flibc.printf("forkbomb: spawned and reaped %u children\n", .{reaped});
-    flibc.exit();
+    flibc.printf("forkbomb: spawned and reaped %u children\n", .{reaped})
+    flibc.exit()
 }

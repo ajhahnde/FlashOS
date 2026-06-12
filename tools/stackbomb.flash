@@ -10,26 +10,28 @@
 // the next store enters the guard page; the kernel's do_data_abort
 // detects the guard fault, prints `[KERN] stack overflow at 0x<hex>`,
 // and zombies the task. The parent's sys_wait then reaps as usual.
+//
+// Source is Flash (tools/stackbomb.flash) — flashc transpiles it to Zig
+// at build time via addFlashSource.
 
-const user_layout = @import("user_layout");
+use user_layout
 
 comptime {
     // Each frame pushes 1 KiB; ensure the stack budget allows at
     // least 16 frames so the recursion depth is representative
     // before it crosses STACK_LOW into the guard. Current budget
     // (16 pages = 64 KiB) allows 64 frames.
-    if (user_layout.STACK_BUDGET / 1024 < 16) {
-        @compileError("STACK_BUDGET too small for representative recursion depth");
+    if user_layout.STACK_BUDGET / 1024 < 16 {
+        #compileError("STACK_BUDGET too small for representative recursion depth")
     }
 }
 
 export fn _start() callconv(.naked) noreturn {
-
     asm volatile (
         \\.balign 8
         \\1:
         \\    sub sp, sp, #1024
         \\    str x30, [sp]
         \\    bl 1b
-    );
+    )
 }
