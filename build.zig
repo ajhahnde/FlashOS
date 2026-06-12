@@ -1067,9 +1067,12 @@ pub fn build(b: *std.Build) void {
     // (console_ui.screen.clear) and exits, so the escape bytes stay
     // single-sourced. Imports flibc + console_ui only, like less. Same recipe
     // (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
-    // coreutil_linker.ld). Staged at /bin/clear.
+    // coreutil_linker.ld). Staged at /bin/clear. Source is Flash
+    // (tools/clear.flash) — flashc transpiles it to Zig at build time via
+    // addFlashSource; the cross-import proves a Flash program can consume the
+    // existing Zig flibc + console_ui modules.
     const clear_mod = b.createModule(.{
-        .root_source_file = b.path("tools/clear_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/clear.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,

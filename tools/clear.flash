@@ -1,0 +1,22 @@
+// clear — wipe the terminal for /bin/clear.
+//
+// The cross-import proof: a Flash program that imports the existing Zig
+// `console_ui` and `flibc` modules from the FlashOS tree and lowers to a
+// byte-equivalent of the reference clear tool. If the existing /bin/clear boot
+// scenario stays green with this as its source, Flash and Zig provably coexist
+// and incremental porting is unlocked.
+
+use flibc
+use console_ui
+
+link "flibc_start"
+link "flibc_mem"
+
+fn sink(bytes []u8) {
+    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
+}
+
+export fn main(_ usize, _ argv) noreturn {
+    console_ui.screen.clear(sink)
+    flibc.exit()
+}
