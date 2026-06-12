@@ -1293,7 +1293,7 @@ Each scenario emits `[TEST] name` … `[PASS] name` (or `[FAIL]`), and
 identically under QEMU (`zig build -Dboard=virt run-virt` /
 `-Dboard=rpi4b run`) and on real hardware (`./build.sh` → SD-flash →
 `picapture`); a green run lands `28/28 passed` with 32 baseline
-checkpoints (`0xbbff2` rpi4b / `0x3be4a` virt) and 0 `ERROR CAUGHT`
+checkpoints (`0xbbff2` rpi4b / `0x3be46` virt) and 0 `ERROR CAUGHT`
 on both boards, then hands off to
 `/bin/login` → `/bin/fsh`. With the login lifecycle fsh's homescreen
 marker (`type 'help' for commands`) appears **three times** per boot —
