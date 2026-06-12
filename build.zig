@@ -28,7 +28,7 @@ comptime {
 //   * src/start.zig                   — root, comptime-imports every kernel module
 //   * src/*.S                         — boot/entry/sched/timer/etc. assembly
 //   * src/board/<board>/*             — per-board driver bag + linker script
-//   * user_space/init_main.zig        — pid1.elf root, staged into the initramfs
+//   * user_space/init_main.flash      — pid1.elf root, staged into the initramfs
 //   * src/board/<board>/linker.ld     — per-board link script (.initramfs section)
 //
 // The build produces:
@@ -864,15 +864,21 @@ pub fn build(b: *std.Build) void {
     // ---- fsh.elf — the FlashOS shell (/bin/fsh) ----
     // Same recipe as argv_echo.elf (flibc _start argc/argv shim entry,
     // pie=false, ReleaseSmall, strip, own single R+X PT_LOAD linker
-    // script — no PAD; fsh need not cross a page). fsh.zig imports the
-    // pure tokenizer (user_space/fsh/tokenize.zig) as a sibling file;
-    // that module is host-tested separately in the test section below.
+    // script — no PAD; fsh need not cross a page). fsh and its pure
+    // tokenizer are both Flash now; fsh.flash imports the tokenizer as a
+    // relative sibling, so the two flashc-generated files are composed into
+    // one WriteFiles directory (the same composition console_ui / flibc use)
+    // for that @import("tokenize.zig") to resolve. The tokenizer is
+    // host-tested separately in the test section below.
     // Staged into the initramfs at /bin/fsh and exec'd by the PID-1
     // hand-off after the harness tally; the boot watchdog keys on fsh's
-    // `[ OK ] Reached target Shell.` marker as the success signal. (The in-harness
+    // homescreen marker as the success signal. (The in-harness
     // [TEST] fsh scenario is disabled — see user_space/kernel_tests.zig.)
+    const fsh_dir = b.addWriteFiles();
+    const tokenize_gen = addFlashSource(b, "user_space/fsh/tokenize.flash");
+    _ = fsh_dir.addCopyFile(tokenize_gen, "tokenize.zig");
     const fsh_mod = b.createModule(.{
-        .root_source_file = b.path("user_space/fsh/fsh.zig"),
+        .root_source_file = fsh_dir.addCopyFile(addFlashSource(b, "user_space/fsh/fsh.flash"), "fsh.zig"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -1237,8 +1243,14 @@ pub fn build(b: *std.Build) void {
     // loaded by kernel_process directly at boot, so there is no
     // snapshot cap on its size — prepare_move_to_user_elf walks the
     // PT_LOAD page by page.
+    // init_main (PID 1) is Flash now; it imports the in-kernel test harness
+    // (kernel_tests.zig, still Zig) as a relative sibling, so the generated
+    // init_main.zig and the on-disk kernel_tests.zig are composed into one
+    // WriteFiles directory for that @import("kernel_tests.zig") to resolve.
+    const pid1_dir = b.addWriteFiles();
+    _ = pid1_dir.addCopyFile(b.path("user_space/kernel_tests.zig"), "kernel_tests.zig");
     const pid1_mod = b.createModule(.{
-        .root_source_file = b.path("user_space/init_main.zig"),
+        .root_source_file = pid1_dir.addCopyFile(addFlashSource(b, "user_space/init_main.flash"), "init_main.zig"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -1798,10 +1810,11 @@ pub fn build(b: *std.Build) void {
     // sits behind the same `has_driver` gate as readline.
     _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/execvp.flash", .src_lazy = flibc_srcs.get("execvp").? });
 
-    // fsh tokenize.zig — whitespace splitter + single-`|` split host
+    // fsh tokenize — whitespace splitter + single-`|` split host
     // coverage. Pure `tokenize`: fills a caller argv array
-    // from a line + scratch buffer; no externs, no stubs, no SVC.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/fsh/tokenize.zig" });
+    // from a line + scratch buffer; no externs, no stubs, no SVC. Compiles
+    // the flashc-generated module (tokenize.flash is the source of truth).
+    _ = addHostTest(b, test_step, .{ .src = "user_space/fsh/tokenize.flash", .src_lazy = tokenize_gen });
 
     // flibc keys.zig — VT100 input Decoder host coverage (arrows / ctrl / tab).
     // Pure `Decoder.feed`; the SVC readKey driver sits behind the same

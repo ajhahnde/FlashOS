@@ -10,12 +10,12 @@
 // linker script's job (`tools/pid1_linker.ld`, single PT_LOAD at
 // 0x100000) — no manual section pinning.
 
-const tests = @import("kernel_tests.zig");
-const build_options = @import("build_options");
+use "kernel_tests" as tests
+use build_options
 
-const OK = "[ \x1b[32mOK\x1b[0m ] ";
-const PID1_MSG: [*:0]const u8 = OK ++ "Reached target Userspace\n";
-const LOGIN_PATH: [*:0]const u8 = "/bin/login";
+const OK = "[ \x1b[32mOK\x1b[0m ] "
+const PID1_MSG [*:0]u8 = OK ++ "Reached target Userspace\n"
+const LOGIN_PATH [*:0]u8 = "/bin/login"
 
 // CI credential script. When the `ci-login-seed` build flag is set,
 // PID-1 injects these bytes into the console RX ring before exec'ing
@@ -25,7 +25,7 @@ const LOGIN_PATH: [*:0]const u8 = "/bin/login";
 // `flash`/`flash` exercises the privilege drop to uid 1000. The flag is OFF
 // by default and `zig build deploy` omits it, so a hardware boot does NOT
 // seed — it stops at the `login:` prompt and demands a real password.
-const LOGIN_SCRIPT: []const u8 = "flash\nflash\n";
+const LOGIN_SCRIPT []u8 = "flash\nflash\n"
 
 // ELF entry. Naked: the loader zeroes x0..x30, sets SP = STACK_TOP
 // (top stack page eagerly mapped) and jumps here. `bl pid1_main`
@@ -37,18 +37,18 @@ export fn _start() callconv(.naked) noreturn {
         \\bl pid1_main
         \\mov x8, #2
         \\svc #0
-    );
+    )
 }
 
 export fn pid1_main() noreturn {
-    tests.sys_writeConsole(PID1_MSG);
+    tests.sys_writeConsole(PID1_MSG)
     // The in-kernel [TEST] harness is the boot-as-test path the QEMU
     // watchdog asserts (28 scenarios + 32 free-page checkpoints). Gated so
     // deploy/run boot clean straight to login; -Dboot-selftest=true
     // (CI/validation) runs it, the default skips it.
-    if (build_options.boot_selftest) {
-        const result = tests.run_all();
-        tests.print_tally(result.passed, result.total);
+    if build_options.boot_selftest {
+        result := tests.run_all()
+        tests.print_tally(result.passed, result.total)
     }
     // Hand PID 1 to /bin/login. login authenticates against
     // /etc/shadow, drops privilege per /etc/passwd, then execs the user's
@@ -63,10 +63,12 @@ export fn pid1_main() noreturn {
     // deterministic. Gated on the ci-login-seed flag: a hardware deploy omits
     // it and the boot stops at the real `login:` prompt. sys_execve only
     // returns on failure — fall through to sys_exit then.
-    if (build_options.ci_login_seed) {
-        for (LOGIN_SCRIPT) |b| tests.sys_console_inject(b);
+    if build_options.ci_login_seed {
+        for b in LOGIN_SCRIPT {
+            tests.sys_console_inject(b)
+        }
     }
-    const argv = [_:null]?[*:0]const u8{LOGIN_PATH};
-    _ = tests.sys_execve(@intFromPtr(LOGIN_PATH), @intFromPtr(&argv));
-    tests.sys_exit();
+    const argv = [_:null]?[*:0]u8{ LOGIN_PATH }
+    _ = tests.sys_execve(#intFromPtr(LOGIN_PATH), #intFromPtr(&argv))
+    tests.sys_exit()
 }
