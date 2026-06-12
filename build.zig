@@ -742,9 +742,11 @@ pub fn build(b: *std.Build) void {
     // (tools/flibc_demo_linker.ld) folds .rodata / .data / .bss into the
     // single R+X PT_LOAD so flibc's state-free heap design carries
     // through to a one-segment ELF that once fit inside the retired
-    // loader's PAGE_SIZE snapshot cap.
+    // loader's PAGE_SIZE snapshot cap. Source is Flash
+    // (tools/flibc_demo.flash) — flashc transpiles it to Zig at build time
+    // via addFlashSource.
     const flibc_demo_mod = b.createModule(.{
-        .root_source_file = b.path("tools/flibc_demo_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/flibc_demo.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -933,9 +935,10 @@ pub fn build(b: *std.Build) void {
     // ReleaseSmall, strip, shared coreutil_linker.ld). Staged at /bin/dmesg;
     // Pi-interactive surface — the CI harness asserts the ring + syscall
     // directly via [TEST] klog, the way meminfo / forkbomb stay out of the
-    // FSH_SCRIPT.
+    // FSH_SCRIPT. Source is Flash (tools/dmesg.flash) — flashc transpiles it
+    // to Zig at build time via addFlashSource.
     const dmesg_mod = b.createModule(.{
-        .root_source_file = b.path("tools/dmesg_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/dmesg.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -961,9 +964,11 @@ pub fn build(b: *std.Build) void {
     // console write and are Pi-interactive only — kept out of the CI
     // FSH_SCRIPT (meminfo's live value breaks the baseline count; forkbomb
     // must not approach exhaustion while OOM still panics today). Same
-    // recipe as echo / cat / ls.
+    // recipe as echo / cat / ls. meminfo's source is Flash
+    // (tools/meminfo.flash) — flashc transpiles it to Zig at build time via
+    // addFlashSource.
     const meminfo_mod = b.createModule(.{
-        .root_source_file = b.path("tools/meminfo_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/meminfo.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -1011,8 +1016,10 @@ pub fn build(b: *std.Build) void {
     // recipe as ls / meminfo (flibc _start shim, flibc_mem, pie=false,
     // ReleaseSmall, strip, shared coreutil_linker.ld). Staged at /bin/sysinfo;
     // kept out of the CI FSH_SCRIPT like meminfo (its free-page value is live).
+    // Source is Flash (tools/sysinfo.flash) — flashc transpiles it to Zig at
+    // build time via addFlashSource.
     const sysinfo_mod = b.createModule(.{
-        .root_source_file = b.path("tools/sysinfo_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/sysinfo.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,

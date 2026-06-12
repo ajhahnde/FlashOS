@@ -14,41 +14,49 @@
 // user_space/kernel_tests.zig:
 //   "flibc hello 42\n"      — printf %d round-trip
 //   "flibc malloc ok\n"     — bump-allocate 32 B, write+verify pattern
+//
+// Bespoke `_start` (entry .disabled in build.zig, no flibc_start shim):
+// a Flash `export fn` lowers to the C-ABI export Zig already gives an
+// `export fn`, and the kernel erets straight to the symbol, so the
+// calling convention of a no-arg noreturn entry is immaterial. Uses an
+// `orelse { … }` block handler on malloc and a value `if` for the
+// pass/fail string — both land 1:1 in the lowered Zig.
 
-const flibc = @import("flibc");
+use flibc
 
-const ALLOC_BYTES: u64 = 32;
+const ALLOC_BYTES u64 = 32
 
-// Naked entry: kernel sets sp = STACK_TOP, regs zeroed. _start runs as
-// a normal Zig function (no `callconv(.naked)`) because flibc_main below
-// uses Zig features (loops with locals, malloc fallthrough) that require
-// a real frame; the AAPCS64 prologue Zig emits is fine on the eagerly-
-// mapped top stack page.
 export fn _start() noreturn {
-    flibc.printf("flibc hello %d\n", .{@as(u32, 42)});
+    flibc.printf("flibc hello %d\n", .{#as(u32, 42)})
 
-    const buf = flibc.malloc(ALLOC_BYTES) orelse {
-        flibc.puts("flibc malloc fail");
-        flibc.exit();
-    };
+    maybe := flibc.malloc(ALLOC_BYTES)
+    if maybe == null {
+        flibc.puts("flibc malloc fail")
+        flibc.exit()
+    }
+    buf := maybe.?
 
     // Demand-allocate the heap page on first write — do_data_abort
     // classifies the fault as in-range heap and stamps a fresh RW+UXN
     // page before retrying. The pattern is round-trip-verified below
     // so a stale TLB / wrong-PA bug surfaces as a "flibc malloc bad"
     // line in the trace instead of a silent pass.
-    var i: u64 = 0;
-    while (i < ALLOC_BYTES) : (i += 1) {
-        buf[i] = @as(u8, @intCast(i)) +% 0x55;
+    var i u64 = 0
+    while i < ALLOC_BYTES {
+        buf[i] = #as(u8, #intCast(i)) +% 0x55
+        i += 1
     }
 
-    var ok = true;
-    i = 0;
-    while (i < ALLOC_BYTES) : (i += 1) {
-        const expected: u8 = @as(u8, @intCast(i)) +% 0x55;
-        if (buf[i] != expected) ok = false;
+    var ok bool = true
+    i = 0
+    while i < ALLOC_BYTES {
+        expected := #as(u8, #intCast(i)) +% 0x55
+        if buf[i] != expected {
+            ok = false
+        }
+        i += 1
     }
 
-    flibc.puts(if (ok) "flibc malloc ok" else "flibc malloc bad");
-    flibc.exit();
+    flibc.puts(if (ok) "flibc malloc ok" else "flibc malloc bad")
+    flibc.exit()
 }
