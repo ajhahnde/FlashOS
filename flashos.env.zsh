@@ -4,6 +4,7 @@
 # Public interface — two verb dispatchers plus a build wrapper:
 #   pi    connect|capture|list|quit|log|tail   serial-console helpers (Raspberry Pi)
 #   run   qemu|virt|test|watchdog|hw|auto       build-and-run a board, the boot-watchdog, or attach to HW
+#   port  check|diff|gates|pin                  Flash-port helpers (transpile, review-diff, gate battery)
 #   build                                       two-pass kernel build (wraps ./build.sh)
 #   flashos                                     list shell helpers + zig build steps
 # Legacy flat names (piconnect/picapture/pilist/piquit) stay as thin aliases.
@@ -550,6 +551,139 @@ run() {
   esac
 }
 
+# ── flash port ──────────────────────────────────────────────────────────────
+# Helpers for porting modules to Flash (*.flash transpiled to Zig at build
+# time). A module counts as ported only when it transpiles clean, its
+# generated Zig review-diffs against the original down to mechanical lowering
+# noise, and the full gate battery is green. The flashc binary resolves like
+# build.zig's -Dflashc default: $FLASHC if set, else
+# $HOME/Flash/zig-out/bin/flashc-stage1 (override the checkout location with
+# $FLASH_DIR). The pinned compiler revision lives in flash-toolchain.lock.
+
+_flashos_flashc() {
+  local bin="${FLASHC:-${FLASH_DIR:-$HOME/Flash}/zig-out/bin/flashc-stage1}"
+  if [[ ! -x "$bin" ]]; then
+    _flashos_err "flashc not found: $bin (set \$FLASHC, or build the Flash checkout with 'zig build')"
+    return 1
+  fi
+  print -- "$bin"
+}
+
+_flashos_port_check() {
+  local src="$1"
+  [[ -n "$src" ]] || { _flashos_err "usage: port check <module.flash>"; return 1; }
+  local bin; bin="$(_flashos_flashc)" || return 1
+  local tmpd; tmpd="$(mktemp -d "${TMPDIR:-/tmp}/flashport.XXXXXX")" || return 1
+  if "$bin" "$src" -o "$tmpd/out.zig"; then
+    _flashos_ok "transpile clean: $src"
+    rm -rf "$tmpd"
+  else
+    rm -rf "$tmpd"
+    return 1
+  fi
+}
+
+_flashos_port_diff() {
+  local src="$1" orig="${2:-}"
+  [[ -n "$src" ]] || { _flashos_err "usage: port diff <module.flash> [original.zig]"; return 1; }
+  # Default original: same directory, same stem, .zig extension. The pilot
+  # already breaks that guess (hello.flash vs hello_elf.zig), so the second
+  # arg stays first-class.
+  [[ -n "$orig" ]] || orig="${src:r}.zig"
+  if [[ ! -f "$orig" ]]; then
+    _flashos_err "port diff: original not found: $orig (pass it explicitly)"
+    return 1
+  fi
+  local bin; bin="$(_flashos_flashc)" || return 1
+  local tmpd; tmpd="$(mktemp -d "${TMPDIR:-/tmp}/flashport.XXXXXX")" || return 1
+  local gen="$tmpd/${src:t:r}.zig"
+  if ! "$bin" "$src" -o "$gen"; then
+    rm -rf "$tmpd"
+    return 1
+  fi
+  # Lowering drops comments, so hunks are expected; the review bar is that
+  # every hunk is mechanical (comments, formatting), never semantic.
+  if diff -u "$orig" "$gen"; then
+    _flashos_ok "port diff: generated Zig is identical to $orig"
+  else
+    _flashos_warn "port diff: review the hunks above — only mechanical lowering differences are acceptable"
+  fi
+  rm -rf "$tmpd"
+}
+
+_flashos_port_gates() {
+  # The per-module gate battery: host tests, then the boot watchdog(s).
+  # Fail-fast — a red gate stops the run so the log tail is the culprit's.
+  local board="${1:-all}"
+  case "$board" in
+    virt|rpi4b|all) ;;
+    *) _flashos_err "port gates: unknown board '$board' (virt|rpi4b|all)"; return 1 ;;
+  esac
+  run test || { _flashos_err "port gates: host tests FAILED"; return 1; }
+  if [[ "$board" == virt || "$board" == all ]]; then
+    run watchdog virt || return 1
+  fi
+  if [[ "$board" == rpi4b || "$board" == all ]]; then
+    run watchdog rpi4b || return 1
+  fi
+  _flashos_ok "port gates: all green ($board)"
+}
+
+_flashos_port_pin() {
+  # Compare flash-toolchain.lock against the live Flash checkout. The port
+  # must never ride a moving compiler: drift means rebuild at the pin, or
+  # bump the lock as its own deliberate commit.
+  local lock="$_FLASHOS_DIR/flash-toolchain.lock"
+  [[ -f "$lock" ]] || { _flashos_err "port pin: no flash-toolchain.lock in the tree (not on the port branch?)"; return 1; }
+  local flash_dir="${FLASH_DIR:-$HOME/Flash}"
+  local pinned live
+  pinned="$(grep -E '^flash-commit' "$lock" | sed 's/.*= *//')"
+  live="$(git -C "$flash_dir" rev-parse HEAD 2>/dev/null)" || {
+    _flashos_err "port pin: no Flash checkout at $flash_dir (set \$FLASH_DIR)"
+    return 1
+  }
+  if [[ "$pinned" != "$live" ]]; then
+    _flashos_warn "port pin: DRIFT — lock $pinned, live $live"
+    _flashos_warn "  rebuild the Flash checkout at the pin, or bump the lock in its own commit"
+    return 1
+  fi
+  if [[ -n "$(git -C "$flash_dir" status --porcelain 2>/dev/null)" ]]; then
+    _flashos_warn "port pin: commit matches but the Flash tree is DIRTY — flashc may not match the pin"
+    return 1
+  fi
+  _flashos_ok "port pin: OK ($pinned)"
+}
+
+_flashos_port_usage() {
+  print -- "usage: port [check|diff|gates|pin]"
+  print -- "  check <module.flash>          transpile-only; show flashc diagnostics"
+  print -- "  diff  <module.flash> [orig.zig]"
+  print -- "                                transpile and diff the generated Zig against"
+  print -- "                                the original (default: <stem>.zig next to it)"
+  print -- "  gates [virt|rpi4b|all]        per-module gate battery: host tests, then the"
+  print -- "                                boot watchdog(s); fail-fast (default: all)"
+  print -- "  pin                           verify flash-toolchain.lock against the live"
+  print -- "                                Flash checkout (\$FLASH_DIR, default ~/Flash)"
+}
+
+port() {
+  emulate -L zsh
+  local verb="${1:-help}"
+  (( $# > 0 )) && shift
+  case "$verb" in
+    check) _flashos_port_check "$@" ;;
+    diff)  _flashos_port_diff "$@" ;;
+    gates) _flashos_port_gates "$@" ;;
+    pin)   _flashos_port_pin "$@" ;;
+    help|-h|--help) _flashos_port_usage ;;
+    *)
+      _flashos_err "port: unknown verb '$verb'"
+      _flashos_port_usage >&2
+      return 1
+      ;;
+  esac
+}
+
 # ── introspection ──────────────────────────────────────────────────────────
 
 # List the public shell helpers and the zig build steps. Named `flashos` rather
@@ -620,7 +754,30 @@ _flashos_run_completion() {
   fi
 }
 
+_flashos_port_completion() {
+  local -a verbs=(
+    'check:transpile-only, show flashc diagnostics'
+    'diff:diff generated Zig against the original'
+    'gates:host tests + boot watchdog(s), fail-fast'
+    'pin:verify flash-toolchain.lock against the live checkout'
+    'help:usage'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t verbs 'port verb' verbs
+  elif (( CURRENT == 3 )); then
+    case "${words[2]}" in
+      check|diff) _files -g '*.flash' ;;
+      gates)      _values 'board' virt rpi4b all ;;
+    esac
+  elif (( CURRENT == 4 )); then
+    case "${words[2]}" in
+      diff) _files -g '*.zig' ;;
+    esac
+  fi
+}
+
 if (( $+functions[compdef] )); then
   compdef _flashos_pi_completion pi
   compdef _flashos_run_completion run
+  compdef _flashos_port_completion port
 fi

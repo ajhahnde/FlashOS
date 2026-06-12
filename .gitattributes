@@ -1,2 +1,3 @@
 # Force .inc files to be recognized as Assembly to prevent misidentification as C++
 *.inc linguist-language=Assembly
+*.flash linguist-language=Zig

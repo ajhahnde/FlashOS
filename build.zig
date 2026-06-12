@@ -81,6 +81,26 @@ fn addHostTest(b: *std.Build, step: *std.Build.Step, cfg: HostTest) *std.Build.M
     return m;
 }
 
+// Set from the -Dflashc option in build(); read by addFlashSource below.
+var flashc_path: []const u8 = "flashc";
+
+// Flash transpile helper. Registers a flashc run step (Flash -> Zig) and
+// returns the generated .zig as a LazyPath usable as a module root. The
+// .flash file is the source of truth: the generated Zig lands in the
+// build cache and is never committed. The step always re-runs
+// (has_side_effects): flashc is an external binary the cache cannot
+// fingerprint, so a stale cached output could otherwise green a boot
+// that no longer matches its source.
+fn addFlashSource(b: *std.Build, src: []const u8) std.Build.LazyPath {
+    const run = b.addSystemCommand(&.{flashc_path});
+    run.setName(b.fmt("flashc {s}", .{src}));
+    run.addFileArg(b.path(src));
+    run.addArg("-o");
+    const out = run.addOutputFileArg(b.fmt("{s}.zig", .{std.fs.path.stem(src)}));
+    run.has_side_effects = true;
+    return out;
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
@@ -205,6 +225,19 @@ pub fn build(b: *std.Build) void {
         "test-filter",
         "Run only host tests whose name contains this substring",
     );
+
+    // Path to the flashc transpiler (Flash -> Zig). Modules ported to
+    // Flash (*.flash) transpile at build time via addFlashSource; the
+    // pinned compiler revision lives in flash-toolchain.lock. The default
+    // expects that checkout at ~/Flash, built with `zig build`.
+    flashc_path = b.option(
+        []const u8,
+        "flashc",
+        "Path to the flashc transpiler binary (default: ~/Flash/zig-out/bin/flashc-stage1)",
+    ) orelse blk: {
+        const home = b.graph.environ_map.get("HOME") orelse break :blk "flashc-stage1";
+        break :blk b.pathJoin(&.{ home, "Flash", "zig-out", "bin", "flashc-stage1" });
+    };
 
     // ---- hygiene checks (trailing space, hard tabs, lowercase hex) ----
     const hygiene_step = b.step("check-hygiene", "Fail on whitespace or hex-literal regressions");
@@ -631,9 +664,10 @@ pub fn build(b: *std.Build) void {
     // Built as a standalone aarch64-freestanding ET_EXEC, staged into
     // the initramfs at /test/hello.elf. The exec-elf scenario opens it
     // via sys_openFile, reads it into an EL0 buffer, and hands the
-    // bytes to sys_exec.
+    // bytes to sys_exec. Source is Flash (tools/hello.flash) — flashc
+    // transpiles it to Zig at build time via addFlashSource.
     const hello_mod = b.createModule(.{
-        .root_source_file = b.path("tools/hello_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/hello.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,

@@ -1,0 +1,13 @@
+# Flash toolchain pin
+#
+# The flashc revision this tree is transpiled with. Flash modules
+# (`*.flash`) are rebuilt through this exact compiler; port progress
+# must never depend on a moving toolchain. Bumping the pin is a
+# deliberate, single-commit step (rebuild + both boot watchdogs green).
+#
+# The build resolves the binary via -Dflashc=<path>; the default
+# expects a Flash checkout at ~/Flash built with `zig build`.
+
+flash-version = 0.6.1
+flash-commit  = c5a3c5aa6fac81292567d92ff31258777b7befe0
+flashc-binary = zig-out/bin/flashc-stage1
