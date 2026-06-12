@@ -469,6 +469,22 @@ pub fn build(b: *std.Build) void {
     });
     klog_ring_mod.addImport("syscall_defs", syscall_defs_mod);
 
+    // utilc — kernel utility exports (hex render, byte mem*, UART tee,
+    // panic). Ported to Flash; flashc transpiles it to Zig at build time
+    // via addFlashSource. start.zig pulls the symbols into the ELF with
+    // `_ = @import("utilc")` (named, like sched/execve); every other
+    // consumer reaches them through a C-ABI `extern fn` declaration, so the
+    // import graph needs only this one named module. The one transpile is
+    // shared with the host-test build below (src_lazy).
+    const utilc_src = addFlashSource(b, "src/utilc.flash");
+    const utilc_mod = b.createModule(.{
+        .root_source_file = utilc_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    utilc_mod.addImport("task_layout", task_layout_mod);
+    utilc_mod.addImport("klog_ring", klog_ring_mod);
+
     // sha256 — SHA-256 / HMAC / PBKDF2 / constant-time compare.
     // Target-agnostic (no .target) so both the freestanding kernel and the
     // host-side gen_shadow tool import the one source. Pure, no imports.
@@ -488,26 +504,31 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/sha256.zig"),
         .optimize = .ReleaseSmall,
     });
-    // shadow — /etc/shadow line parser + hex decoder. Pure.
+    // shadow — /etc/shadow line parser + hex decoder. Pure. Ported to
+    // Flash; the one transpile is shared with the host-test build below.
+    const shadow_src = addFlashSource(b, "src/shadow.flash");
     const shadow_mod = b.createModule(.{
-        .root_source_file = b.path("src/shadow.zig"),
+        .root_source_file = shadow_src,
     });
     // perm — Unix discretionary access check. Pure decision
     // function (checkAccess) shared by the syscall-layer enforcement
     // sites; the truth-table host test below is the gate.
+    const perm_src = addFlashSource(b, "src/perm.flash");
     const perm_mod = b.createModule(.{
-        .root_source_file = b.path("src/perm.zig"),
+        .root_source_file = perm_src,
     });
     // overlay — FAT32 permission-overlay parser. Pure parse +
     // lookup consumed by fat32_backend (PERMS.TAB -> per-file mode/uid/gid).
+    const overlay_src = addFlashSource(b, "src/overlay.flash");
     const overlay_mod = b.createModule(.{
-        .root_source_file = b.path("src/overlay.zig"),
+        .root_source_file = overlay_src,
     });
     // pwfile — /etc/passwd parser. Pure name/uid lookups shared
     // by the kernel (sys_passwd authorization), /bin/login, and fsh's
     // whoami builtin.
+    const pwfile_src = addFlashSource(b, "src/pwfile.flash");
     const pwfile_mod = b.createModule(.{
-        .root_source_file = b.path("src/pwfile.zig"),
+        .root_source_file = pwfile_src,
     });
 
     // FAT32 on-disk layout decode + cluster/FAT/dir helpers.
@@ -568,8 +589,11 @@ pub fn build(b: *std.Build) void {
     // by sys_chdir, sys_openFile, and execveKernel. Pure — no imports,
     // no externs — so the freestanding kernel module and the host-test
     // module reach the same source through this single named module.
+    // Ported to Flash; the one transpile feeds the kernel module, the
+    // execve host-test "path" alias, and path's own host test below.
+    const path_src = addFlashSource(b, "src/path.flash");
     const path_mod = b.createModule(.{
-        .root_source_file = b.path("src/path.zig"),
+        .root_source_file = path_src,
         .target = target,
         .optimize = optimize,
     });
@@ -675,6 +699,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("usb_descriptors", usb_descriptors_mod);
     kernel_mod.addImport("usb_tx_ring", usb_tx_ring_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
+    kernel_mod.addImport("utilc", utilc_mod);
     kernel_mod.addImport("sha256", sha256_mod);
     kernel_mod.addImport("shadow", shadow_mod);
     kernel_mod.addImport("perm", perm_mod);
@@ -1745,7 +1770,7 @@ pub fn build(b: *std.Build) void {
     // joinResolve helper itself is host-tested via the standalone
     // src/path.zig target wired below.
     const path_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/path.zig"),
+        .root_source_file = path_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
@@ -1789,7 +1814,7 @@ pub fn build(b: *std.Build) void {
     // Pure joinResolve: no externs, no stubs. The freestanding kernel
     // and the host test exercise the same source through the `path`
     // module wired above.
-    _ = addHostTest(b, test_step, .{ .src = "src/path.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/path.flash", .src_lazy = path_src });
 
     // trace/fp_walk.zig — the -Dtrace sampler's AAPCS64 frame-pointer
     // chain decoder. Pure `walkChain` over a flat stack-page view (no
@@ -2133,7 +2158,7 @@ pub fn build(b: *std.Build) void {
     // "overlay" import below (mirroring the klog_ring/utilc pattern). Pins
     // the format shared with the seed file (user_space/etc/perms.tab) and
     // the deploy / make_test_disk seeding.
-    const overlay_test_mod = addHostTest(b, test_step, .{ .src = "src/overlay.zig" });
+    const overlay_test_mod = addHostTest(b, test_step, .{ .src = "src/overlay.flash", .src_lazy = overlay_src });
 
     _ = addHostTest(b, test_step, .{
         .src = "src/fat32_backend.zig",
@@ -2172,7 +2197,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
     _ = addHostTest(b, test_step, .{
-        .src = "src/utilc.zig",
+        .src = "src/utilc.flash",
+        .src_lazy = utilc_src,
         .stubs = utilc_stubs_obj,
         .imports = &.{
             .{ .name = "task_layout", .mod = task_layout_test_mod },
@@ -2191,19 +2217,19 @@ pub fn build(b: *std.Build) void {
 
     // shadow.zig — /etc/shadow line parser + hex decoder. Pure,
     // no imports; pins the format shared by sys_authenticate + gen_shadow.
-    _ = addHostTest(b, test_step, .{ .src = "src/shadow.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/shadow.flash", .src_lazy = shadow_src });
 
     // perm.zig — VFS permission check host coverage. Pure
     // checkAccess truth table (owner/group/other × read/write/exec ×
     // root bypass) — the gate for the permission layer: no enforcement
     // site ships until every row passes.
-    _ = addHostTest(b, test_step, .{ .src = "src/perm.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/perm.flash", .src_lazy = perm_src });
 
     // pwfile.zig — /etc/passwd parser host coverage. Pure
     // name/uid lookups shared by sys_passwd (kernel), /bin/login, and
     // fsh's whoami builtin; pins the 5-field format against
     // user_space/etc/passwd.
-    _ = addHostTest(b, test_step, .{ .src = "src/pwfile.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/pwfile.flash", .src_lazy = pwfile_src });
 
     // build_initramfs.zig — newc encoder host coverage. Pins the
     // mode/uid/gid byte offsets shared with the kernel parser
