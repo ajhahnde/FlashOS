@@ -770,7 +770,8 @@ pub fn build(b: *std.Build) void {
     // in its own module (not flibc/process.zig) because flibc.zig re-exports
     // process into every flibc program, and Zig 0.16 rejects two _start
     // exports in one compilation; argv_echo opts in via addImport below plus
-    // the `comptime _ = @import("flibc_start")` in argv_echo_elf.zig.
+    // the `link "flibc_start"` in argv_echo.flash. Source is Flash —
+    // flashc transpiles it to Zig at build time via addFlashSource.
     const flibc_start_mod = b.createModule(.{
         .root_source_file = b.path("user_space/lib/flibc/start.zig"),
         .target = target,
@@ -787,7 +788,7 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
     });
     const argv_echo_mod = b.createModule(.{
-        .root_source_file = b.path("tools/argv_echo_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/argv_echo.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -852,9 +853,11 @@ pub fn build(b: *std.Build) void {
     // flibc_mem, pie=false, ReleaseSmall, strip) over a shared
     // single-PT_LOAD linker script. Staged at /bin/echo and /bin/cat;
     // exercised interactively via fsh (the `echo hi | cat` acceptance).
-    // The coreutil set also carries ls / meminfo / forkbomb.
+    // The coreutil set also carries ls / meminfo / forkbomb. echo / cat /
+    // ls source from Flash (tools/{echo,cat,ls}.flash) — flashc transpiles
+    // them to Zig at build time via addFlashSource.
     const echo_mod = b.createModule(.{
-        .root_source_file = b.path("tools/echo_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/echo.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -874,7 +877,7 @@ pub fn build(b: *std.Build) void {
     echo.entry = .disabled;
 
     const cat_mod = b.createModule(.{
-        .root_source_file = b.path("tools/cat_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/cat.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
@@ -903,7 +906,7 @@ pub fn build(b: *std.Build) void {
     // exercised by `ls /bin` in FSH_SCRIPT + [TEST] readdir in the stage-
     // closing commit.
     const ls_mod = b.createModule(.{
-        .root_source_file = b.path("tools/ls_elf.zig"),
+        .root_source_file = addFlashSource(b, "tools/ls.flash"),
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,

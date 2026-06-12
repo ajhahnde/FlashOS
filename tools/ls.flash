@@ -1,0 +1,50 @@
+// ls — list directory entries for /bin/ls.
+//
+// With no arguments it lists the current directory; with arguments it lists each
+// path in turn. Each entry's basename is written to fd 1, a trailing '/'
+// appended for a directory, then a newline. No flags, no recursion.
+//
+// Exercises `if`/`else`, nested `while` loops, a `.{}` struct literal for the
+// stack-allocated directory entry, a `&d.name` address-of on a member, and a
+// `&&` condition (which lowers to Zig's `and`). flibc_mem is imported because
+// the basename-length scan can lower to a libcall.
+
+use flibc
+
+link "flibc_start"
+link "flibc_mem"
+
+fn emit(s []u8) {
+    _ = flibc.sys.write_fd(1, s.ptr, s.len)
+}
+
+fn listDir(path cstr) {
+    var d flibc.Dirent = .{}
+    var i u64 = 0
+    while flibc.sys.readdir(path, i, &d) == 0 {
+        var n usize = 0
+        while n < d.name.len && d.name[n] != 0 {
+            n += 1
+        }
+        _ = flibc.sys.write_fd(1, &d.name, n)
+        if d.d_type == flibc.DT_DIR {
+            emit("/")
+        }
+        emit("\n")
+        i += 1
+    }
+}
+
+export fn main(argc usize, argv argv) noreturn {
+    if argc <= 1 {
+        listDir(".")
+    } else {
+        var a usize = 1
+        while a < argc {
+            path := argv[a] orelse break
+            listDir(path)
+            a += 1
+        }
+    }
+    flibc.exit()
+}

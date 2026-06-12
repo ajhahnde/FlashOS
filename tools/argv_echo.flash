@@ -1,0 +1,42 @@
+// Payload for [TEST] execve — proves the sys_execve path end to end:
+// argv arrives on the freshly mapped user stack as x0 = argc, x1 = argv
+// (AAPCS64), and the ELF is deliberately > 4 KiB so it can only load
+// through sys_execve's PT_LOAD streaming. A single-page demo would also
+// fit the legacy sys_exec snapshot cap and prove nothing about the cap
+// being gone. The body walks argv[0..argc] and printf("%s\n", …) each,
+// then exits.
+//
+// Entry: the flibc _start argc/argv shim, pulled into the compilation by
+// the `link "flibc_start"` below. The shim's `extern fn main` binds to
+// the `export fn main` here.
+//
+// Build: aarch64-freestanding ET_EXEC via build.zig (pie=false, strip,
+// ReleaseSmall, hello-style page caps), staged at /test/argv_echo.elf.
+
+use flibc
+
+link "flibc_start"
+
+// .rodata padding that forces the linked ELF past one 4 KiB page so it
+// can only travel sys_execve's streaming loader. keep_pad() makes &PAD
+// escape via a volatile-asm memory clobber so --gc-sections cannot drop
+// the otherwise-unreferenced global.
+const PAD [4096]u8 linksection(".rodata") = .{0xAB} ** 4096
+
+inline fn keep_pad() {
+    asm volatile (""
+        :
+        : [p] "r" (&PAD),
+        : .{ .memory = true })
+}
+
+export fn main(argc usize, argv argv) noreturn {
+    keep_pad()
+    var i usize = 0
+    while i < argc {
+        s := argv[i] orelse break
+        flibc.printf("%s\n", .{s})
+        i += 1
+    }
+    flibc.exit()
+}
