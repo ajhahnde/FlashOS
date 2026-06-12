@@ -448,10 +448,12 @@ pub fn build(b: *std.Build) void {
 
     // Bulk-IN TX byte-ring for the DWC2 CDC-ACM gadget. Pure
     // data + logic; src/board/rpi4b/usb.zig imports it as "usb_tx_ring"
-    // and keeps only the MMIO FIFO push. Host tests build a separate
-    // test-only Module from the same source.
+    // and keeps only the MMIO FIFO push. Ported to Flash; flashc transpiles
+    // it via addFlashSource and the one transpile is shared with the
+    // host-test build below (src_lazy).
+    const usb_tx_ring_src = addFlashSource(b, "src/usb_tx_ring.flash");
     const usb_tx_ring_mod = b.createModule(.{
-        .root_source_file = b.path("src/usb_tx_ring.zig"),
+        .root_source_file = usb_tx_ring_src,
         .target = target,
         .optimize = optimize,
     });
@@ -460,10 +462,12 @@ pub fn build(b: *std.Build) void {
     // data + logic; src/utilc.zig tees main_output into it and src/sys.zig
     // snapshots it for sys_klog_read — both reach the one `klog` global
     // through this single named module. Imports syscall_defs for KLOG_SIZE
-    // (the ring capacity is ABI-shared with userland dmesg). Host tests
-    // build a separate test-only Module from the same source.
+    // (the ring capacity is ABI-shared with userland dmesg). Ported to Flash;
+    // flashc transpiles it via addFlashSource and the one transpile is shared
+    // with the host-test build below (src_lazy).
+    const klog_ring_src = addFlashSource(b, "src/klog_ring.flash");
     const klog_ring_mod = b.createModule(.{
-        .root_source_file = b.path("src/klog_ring.zig"),
+        .root_source_file = klog_ring_src,
         .target = target,
         .optimize = optimize,
     });
@@ -499,9 +503,12 @@ pub fn build(b: *std.Build) void {
     // makes the boot-path KDF an order of magnitude faster under QEMU TCG).
     // The module is pure wrapping arithmetic (+%), so no Debug safety
     // checks are lost that the host-test target (its own Debug module)
-    // doesn't still run.
+    // doesn't still run. Ported to Flash; flashc transpiles it via
+    // addFlashSource and the one transpile is shared with the host-test
+    // build below (src_lazy). The .ReleaseSmall pin stays on this module.
+    const sha256_src = addFlashSource(b, "src/sha256.flash");
     const sha256_mod = b.createModule(.{
-        .root_source_file = b.path("src/sha256.zig"),
+        .root_source_file = sha256_src,
         .optimize = .ReleaseSmall,
     });
     // shadow — /etc/shadow line parser + hex decoder. Pure. Ported to
@@ -2100,9 +2107,9 @@ pub fn build(b: *std.Build) void {
     // (DWC2 gadget). No externs; pure data + pure functions.
     _ = addHostTest(b, test_step, .{ .src = "src/usb_descriptors.zig" });
 
-    // usb_tx_ring.zig — bulk-IN TX byte-ring (DWC2 gadget).
+    // usb_tx_ring.flash — bulk-IN TX byte-ring (DWC2 gadget).
     // No externs; pure ring arithmetic (push/peek/advance/clear).
-    _ = addHostTest(b, test_step, .{ .src = "src/usb_tx_ring.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/usb_tx_ring.flash", .src_lazy = usb_tx_ring_src });
 
     // klog_ring.zig — kernel-log byte-ring (overwrite-oldest) host coverage.
     // Pure ring arithmetic (push / overwrite-oldest / snapshot);
@@ -2111,7 +2118,8 @@ pub fn build(b: *std.Build) void {
     // main_output into the ring), mirroring how wait_queue's test module
     // doubles as pipe's import.
     const klog_ring_test_mod = addHostTest(b, test_step, .{
-        .src = "src/klog_ring.zig",
+        .src = "src/klog_ring.flash",
+        .src_lazy = klog_ring_src,
         .imports = &.{.{ .name = "syscall_defs", .mod = syscall_defs_test_mod }},
     });
 
@@ -2213,7 +2221,7 @@ pub fn build(b: *std.Build) void {
     // vector tests (NIST FIPS 180-2, RFC 4231, the published PBKDF2 set,
     // plus std.crypto differentials) are the gate for the authentication
     // work: no kernel consumer of these primitives ships until they pass.
-    _ = addHostTest(b, test_step, .{ .src = "src/sha256.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/sha256.flash", .src_lazy = sha256_src });
 
     // shadow.zig — /etc/shadow line parser + hex decoder. Pure,
     // no imports; pins the format shared by sys_authenticate + gen_shadow.
