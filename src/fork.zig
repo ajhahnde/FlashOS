@@ -20,11 +20,12 @@ const fdtable = @import("fdtable");
 // pages on a fault.
 const user_layout = @import("user_layout");
 
-// ELF parser — same module the host tests cover (src/elf.zig). Keeping
-// it as a sibling @import (instead of a named module) means the host
-// test build keeps working without extra wiring; the kernel build pulls
-// in only the symbols prepare_move_to_user_elf actually references.
-const elf = @import("elf.zig");
+// ELF parser — the named module "elf" (src/elf.flash), also the module
+// the host tests cover. It moved from a sibling @import to a named
+// module when it was ported to Flash: the generated .zig lives in the
+// build cache, so a file-relative import can no longer resolve it.
+// build.zig wires the same module into the kernel and host-test builds.
+const elf = @import("elf");
 
 // Argv-on-stack block type, encoded by execve.encodeArgvBlock and
 // written into the top stack page by the argv-aware loader below. Named

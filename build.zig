@@ -346,12 +346,29 @@ pub fn build(b: *std.Build) void {
     // Initramfs parser module. Pure-data newc cpio
     // walker with linker-provided section bounds; no external imports
     // needed in freestanding (the host-test build flips a comptime
-    // branch onto fixture globals — see src/initramfs.zig).
+    // branch onto fixture globals — see src/initramfs.flash). Ported to
+    // Flash; the one flashc transpile is shared with the host-test builds
+    // below (src_lazy), including initramfs_backend's test module.
+    const initramfs_src = addFlashSource(b, "src/initramfs.flash");
     const initramfs_mod = b.createModule(.{
-        .root_source_file = b.path("src/initramfs.zig"),
+        .root_source_file = initramfs_src,
         .target = target,
         .optimize = optimize,
     });
+
+    // ELF64 header + program-header parser. The loader in src/fork.zig
+    // imports it as the named module "elf". Ported to Flash and promoted
+    // to a named module: the generated .zig lives in the flashc cache, so
+    // fork.zig's former file-relative @import("elf.zig") could no longer
+    // resolve. Imports user_layout for the TEXT_BASE / DATA_BASE /
+    // STACK_LOW bounds the validators pin against.
+    const elf_src = addFlashSource(b, "src/elf.flash");
+    const elf_mod = b.createModule(.{
+        .root_source_file = elf_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    elf_mod.addImport("user_layout", user_layout_mod);
 
     // File handle module. Owns the open_files
     // lifetime helpers (alloc / unref / fdAlloc / fdGet / fdClose /
@@ -700,6 +717,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("execve", execve_mod);
     kernel_mod.addImport("path", path_mod);
     kernel_mod.addImport("initramfs", initramfs_mod);
+    kernel_mod.addImport("elf", elf_mod);
     kernel_mod.addImport("file", file_mod);
     kernel_mod.addImport("vfs", vfs_mod);
     kernel_mod.addImport("initramfs_backend", initramfs_backend_mod);
@@ -1880,6 +1898,16 @@ pub fn build(b: *std.Build) void {
     // plus the corrupt-length guard. Imports only std → no stubs.
     _ = addHostTest(b, test_step, .{ .src = "src/board/virt/dtb.zig" });
 
+    // Host-target build of the Flash-sourced elf module for fork.zig's
+    // @import("elf"). Shares the one flashc transpile (elf_src); the kernel
+    // build's elf_mod is aarch64-freestanding, so the test needs its own.
+    const elf_for_fork_mod = b.createModule(.{
+        .root_source_file = elf_src,
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    elf_for_fork_mod.addImport("user_layout", user_layout_test_mod);
+
     const fork_test_mod = addHostTest(b, test_step, .{
         .src = "src/fork.zig",
         .stubs = b.addObject(.{
@@ -1891,6 +1919,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "user_layout", .mod = user_layout_test_mod },
             .{ .name = "fdtable", .mod = fork_stubs_mod },
             .{ .name = "execve", .mod = execve_test_mod },
+            .{ .name = "elf", .mod = elf_for_fork_mod },
         },
     });
     // fork.zig top-level @imports build_options for the verbose-fork gate;
@@ -1919,7 +1948,8 @@ pub fn build(b: *std.Build) void {
     // vanilla single-module test targets — shared stubs, no named imports.
     _ = addHostTest(b, test_step, .{ .src = "src/page_alloc.zig", .stubs = stubs_obj });
     _ = addHostTest(b, test_step, .{
-        .src = "src/elf.zig",
+        .src = "src/elf.flash",
+        .src_lazy = elf_src,
         .stubs = stubs_obj,
         .imports = &.{.{ .name = "user_layout", .mod = user_layout_test_mod }},
     });
@@ -2025,7 +2055,8 @@ pub fn build(b: *std.Build) void {
     // linked for parity with the other test targets, not because the
     // module needs it.
     _ = addHostTest(b, test_step, .{
-        .src = "src/initramfs.zig",
+        .src = "src/initramfs.flash",
+        .src_lazy = initramfs_src,
         .stubs = stubs_obj,
     });
 
@@ -2190,7 +2221,7 @@ pub fn build(b: *std.Build) void {
         .stubs = stubs_obj,
         .imports = &.{
             .{ .name = "initramfs", .mod = b.createModule(.{
-                .root_source_file = b.path("src/initramfs.zig"),
+                .root_source_file = initramfs_src,
                 .target = b.graph.host,
                 .optimize = .Debug,
             }) },
