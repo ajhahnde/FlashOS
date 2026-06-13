@@ -13,6 +13,7 @@
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
+    <a href="PORT.md"><b>Port</b></a> ·
     <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <b>Changelog</b> ·
     <a href="LICENSE.md"><b>License</b></a>
@@ -28,6 +29,27 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 [releases page](https://github.com/ajhahnde/FlashOS/releases).
 
 ## [Unreleased]
+
+### Changed
+
+- **The OS-image source is now written in
+  [Flash](https://github.com/ajhahnde/Flash).** The kernel core, board
+  drivers, user space, and the in-kernel test harness were ported from
+  Zig to Flash — a self-hosted systems language that transpiles to Zig —
+  and now carry the `.flash` extension. `flashc` lowers them to Zig at
+  build time, so the kernel image is behaviourally identical to the
+  pre-port build: both boot watchdogs assert the same 28-scenario /
+  32-checkpoint contract and the same per-board free-page checkpoints,
+  with no re-capture across the port. See [PORT.md](PORT.md) for the full
+  lineage.
+- **New build dependency: the Flash compiler (`flashc`).** Builds now
+  transpile the `.flash` modules through `flashc`, pinned by
+  `flash-toolchain.lock` and resolved via `-Dflashc=<path>` (default
+  `~/Flash/zig-out/bin/flashc-stage1`). Build it once from the pinned
+  commit — see [Setup §1](SETUP.md#1-host-toolchain). The AArch64
+  assembly, the tracing subsystem, the host build tooling, and two kernel
+  modules awaiting a compiler feature stay Zig (see
+  [PORT.md §4](PORT.md#4-what-stays-zig)).
 
 ## [v0.3.0] - 2026-06-07
 

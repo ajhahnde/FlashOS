@@ -13,6 +13,7 @@
     <b>Documentation</b> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
+    <a href="PORT.md"><b>Port</b></a> ·
     <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
@@ -48,7 +49,7 @@ in the repository.
 ```text
 src/                       Kernel core (Zig + AArch64 assembly)
   start.zig                Build root: comptime-imports every kernel module
-  kernel.zig               kernel_main + bring-up
+  kernel.flash               kernel_main + bring-up
   boot.S                   _start, EL3→EL1, MMU bring-up, jump to high VAs
   entry.S                  Exception vector table + syscall dispatch
   utils.S, mm.S            Assembly helpers
@@ -58,40 +59,40 @@ src/                       Kernel core (Zig + AArch64 assembly)
   asm_defs.inc             Bridge header — pulls in board_asm_defs.inc
   asm_defs_common.inc      Shared assembler-only macros (board-independent)
 
-  board.zig                Comptime alias: build_options.board → board/<board>/*
-  generic_timer.zig        ARM generic timer
-  page_alloc.zig           Physical page allocator
-  mm_user.zig              map_page, copy_virt_memory, do_data_abort
-  fork.zig                 copy_process, prepare_move_to_user[_elf]
-  sched.zig                Priority round-robin scheduler
-  sys.zig                  Syscall table + handlers
-  utilc.zig                memcpy/memset/panic + main_output helpers
-  elf.zig                  ELF64 header + program-header parser (host-testable)
-  task_layout.zig          Canonical extern-struct layouts (TaskStruct, MmStruct, …)
-  user_layout.zig          User VA constants (TEXT/DATA/HEAP/STACK bases + flags)
-  block_dev.zig            BlockDev vtable: board-agnostic LBA read/write indirection
-  sdhci_cmd.zig            SDHCI CMDTM bit layout, CMDx constants, CSD v2 parser, clock divisor
-  mailbox.zig              VideoCore property-tag message layout + parsing (board-agnostic)
-  fat32.zig                FAT32 BPB/FAT/dir-entry decode + cluster-chain walk (host-testable)
-  fat32_backend.zig        FAT32 VfsOps backend: read + writeBack over block_dev (real SD I/O — Pi-HW path; replaced the earlier fat32_stub.zig)
-  usb_descriptors.zig      USB CDC-ACM descriptor set + SETUP-packet decode (host-testable)
+  board.flash                Comptime alias: build_options.board → board/<board>/*
+  generic_timer.flash        ARM generic timer
+  page_alloc.flash           Physical page allocator
+  mm_user.flash              map_page, copy_virt_memory, do_data_abort
+  fork.flash                 copy_process, prepare_move_to_user[_elf]
+  sched.flash                Priority round-robin scheduler
+  sys.flash                  Syscall table + handlers
+  utilc.flash                memcpy/memset/panic + main_output helpers
+  elf.flash                  ELF64 header + program-header parser (host-testable)
+  task_layout.flash          Canonical extern-struct layouts (TaskStruct, MmStruct, …)
+  user_layout.flash          User VA constants (TEXT/DATA/HEAP/STACK bases + flags)
+  block_dev.flash            BlockDev vtable: board-agnostic LBA read/write indirection
+  sdhci_cmd.flash            SDHCI CMDTM bit layout, CMDx constants, CSD v2 parser, clock divisor
+  mailbox.flash              VideoCore property-tag message layout + parsing (board-agnostic)
+  fat32.flash                FAT32 BPB/FAT/dir-entry decode + cluster-chain walk (host-testable)
+  fat32_backend.flash        FAT32 VfsOps backend: read + writeBack over block_dev (real SD I/O — Pi-HW path; replaced the earlier fat32_stub.zig)
+  usb_descriptors.flash      USB CDC-ACM descriptor set + SETUP-packet decode (host-testable)
 
   board/rpi4b/             Raspberry Pi 4 driver bag
-    uart.zig               Mini-UART driver (console)
-    gpio.zig               GPIO pin function/enable
-    timer.zig              BCM2711 system timer
-    irq.zig                BCM2711 GIC + dispatch + invalid-entry reporter
-    emmc2.zig              BCM2711 EMMC2 SDHCI driver — PIO single-block read/write
-    mailbox.zig            VideoCore mailbox MMIO doorbell (pairs with src/mailbox.zig)
-    usb.zig                BCM2711 DWC2 USB-OTG device (gadget) — CDC-ACM console
+    uart.flash               Mini-UART driver (console)
+    gpio.flash               GPIO pin function/enable
+    timer.flash              BCM2711 system timer
+    irq.flash                BCM2711 GIC + dispatch + invalid-entry reporter
+    emmc2.flash              BCM2711 EMMC2 SDHCI driver — PIO single-block read/write
+    mailbox.flash            VideoCore mailbox MMIO doorbell (pairs with src/mailbox.flash)
+    usb.flash                BCM2711 DWC2 USB-OTG device (gadget) — CDC-ACM console
     boot_quirks.S          Pi-specific boot fixups
     board_asm_defs.inc     Pi memory-layout addresses + macros
     linker.ld              Per-board kernel link script
 
   board/virt/              QEMU `-M virt` driver bag
-    uart.zig, gpio.zig, timer.zig, irq.zig   (virt MMIO addresses)
-    dtb.zig                Minimal DTB walker for runtime device-address discovery
-    usb.zig                No-op USB gadget stub (board-API parity with rpi4b)
+    uart.flash, gpio.flash, timer.flash, irq.flash   (virt MMIO addresses)
+    dtb.flash                Minimal DTB walker for runtime device-address discovery
+    usb.flash                No-op USB gadget stub (board-API parity with rpi4b)
     image_header.S         Linux arm64 image header (UEFI/GRUB compatibility)
     boot_quirks.S          virt-specific boot fixups
     board_asm_defs.inc     virt memory-layout addresses + macros
@@ -105,17 +106,17 @@ src/                       Kernel core (Zig + AArch64 assembly)
     hook.S                 Trace hook stub (saves regs, calls 'traced')
 
 user_space/
-  init_main.zig            PID 1 ELF root (staged at /sbin/init)
-  kernel_tests.zig         In-kernel test harness ([TEST]/[PASS]/[FAIL])
+  init_main.flash            PID 1 ELF root (staged at /sbin/init)
+  kernel_tests.flash         In-kernel test harness ([TEST]/[PASS]/[FAIL])
   lib/flibc/               Userland mini-libc for ELF-loaded programs
-    flibc.zig              Root re-exports (printf, malloc, fork, ...)
-    syscalls.zig           Raw SVC wrappers (sys.write/fork/exit/...)
-    io.zig                 printf / puts / write on sys_writeConsole
-    heap.zig               Bump allocator over sys_brk / sys_sbrk
-    process.zig            fork / wait / exit / execve glue
+    flibc.flash              Root re-exports (printf, malloc, fork, ...)
+    syscalls.flash           Raw SVC wrappers (sys.write/fork/exit/...)
+    io.flash                 printf / puts / write on sys_writeConsole
+    heap.flash               Bump allocator over sys_brk / sys_sbrk
+    process.flash            fork / wait / exit / execve glue
 
 lib/
-  syscall_defs.zig         Shared SYS_* IDs (kernel + user side)
+  syscall_defs.flash         Shared SYS_* IDs (kernel + user side)
 
 tools/
   hello_elf.zig + .S       Hand-rolled ELF for [TEST] exec-elf
@@ -155,9 +156,9 @@ config.txt                 RPi 4 firmware configuration
 flowchart TD
     A[GPU bootloader] -->|loads to RAM| B[armstub8.bin · EL3]
     B -->|configures GIC, ERET| C[boot.S · _start · EL1]
-    C -->|builds page tables, enables MMU, jumps to high VA| D[kernel_main · src/kernel.zig]
+    C -->|builds page tables, enables MMU, jumps to high VA| D[kernel_main · src/kernel.flash]
     D -->|inits UARTs, GIC, ksyms, syscall table, generic timer| E[forks PID 1]
-    E -->|reads /sbin/init from initramfs, prepare_move_to_user_elf, ERET| F[pid1.elf · init_main.zig · EL0]
+    E -->|reads /sbin/init from initramfs, prepare_move_to_user_elf, ERET| F[pid1.elf · init_main.flash · EL0]
     F -->|run_all| G[kernel_tests harness · EL0]
 ```
 
@@ -172,7 +173,7 @@ flowchart TD
    these in a sane state), enables the MMU with an `ISB` after
    `SCTLR.M=1`, and jumps to `kernel_main` via the high virtual
    mapping.
-4. `kernel_main` (`src/kernel.zig`) initialises the mini-UART, the
+4. `kernel_main` (`src/kernel.flash`) initialises the mini-UART, the
    PL011 trace UART, the GIC, the kernel symbol table, the syscall
    table, and the generic timer, then forks PID 1 and enters the
    scheduler loop.
@@ -181,9 +182,9 @@ flowchart TD
    `prepare_move_to_user_elf`, which walks the PT_LOAD segments,
    maps each with per-region permissions, eagerly maps the top
    stack page, and `eret`s to the ELF entry point.
-6. `user_space/init_main.zig` is the `pid1.elf` root: `_start`
+6. `user_space/init_main.flash` is the `pid1.elf` root: `_start`
    calls `pid1_main`, which runs `run_all()` from
-   `kernel_tests.zig`. The harness runs the twenty-eight scenarios and
+   `kernel_tests.flash`. The harness runs the twenty-eight scenarios and
    prints an `X/Y passed` tally, then hands PID 1 to `/bin/login`:
    the login gate authenticates against `/etc/shadow`,
    drops privilege per `/etc/passwd`, and execs the user's shell —
@@ -213,12 +214,12 @@ A four-level translation regime: PGD → PUD → PMD → PTE, 4 KiB pages.
 | Device high  | `0xffff0000FC000000` | `0xFC000000` | Device-nGnRnE         |
 
 Translation between physical and the linear-high mapping uses
-`PA_TO_KVA` / `KVA_TO_PA` from `src/mm_user.zig`.
+`PA_TO_KVA` / `KVA_TO_PA` from `src/mm_user.flash`.
 
 ### User virtual layout (EL0)
 
-Constants are defined in `src/user_layout.zig` (Zig-authoritative,
-imported by both `src/fork.zig` and `src/mm_user.zig`).
+Constants are defined in `src/user_layout.flash` (Zig-authoritative,
+imported by both `src/fork.flash` and `src/mm_user.flash`).
 
 | Region | Virtual base           | Direction      | Attributes (post-loader) |
 | :----- | :--------------------- | :------------- | :----------------------- |
@@ -237,14 +238,14 @@ stack guard implicit — any access in that range is a wild pointer
 and `do_data_abort` panics with `[KERN] invalid uva at 0x<hex>` after
 zombie-ing the offending task (the parent's `sys_wait` reaps as
 usual). Region classification keys off `mm.brk` plus the static
-layout constants in `src/user_layout.zig`; see `do_data_abort` in
-`src/mm_user.zig` for the full dispatch.
+layout constants in `src/user_layout.flash`; see `do_data_abort` in
+`src/mm_user.flash` for the full dispatch.
 
 Per-region attributes (text RX, data/heap/stack RW with UXN) apply
 universally now that PID 1 is ELF-loaded from initramfs:
-`prepare_move_to_user_elf` (`src/fork.zig`) maps each PT_LOAD
+`prepare_move_to_user_elf` (`src/fork.flash`) maps each PT_LOAD
 segment with flags derived from `p_flags`, and `do_data_abort`
-(`src/mm_user.zig`) stamps demand-allocated heap and stack pages
+(`src/mm_user.flash`) stamps demand-allocated heap and stack pages
 with `TD_USER_PAGE_FLAGS_DEFAULT | TD_USER_XN`. The non-ELF blob
 path (`prepare_move_to_user`) backed the retired blob loader and no
 longer has a live caller; every task today is ELF-loaded with
@@ -279,7 +280,7 @@ link-time address, no longer exists.
 ### Out-of-memory policy
 
 `get_free_page` returns the page PA on success, **`0` on exhaustion**
-(`src/page_alloc.zig`). `0` is an unambiguous sentinel — the pool starts
+(`src/page_alloc.flash`). `0` is an unambiguous sentinel — the pool starts
 at `MALLOC_START` (`0x40000000`), so no live allocation is ever PA 0 —
 and `get_kernel_page` propagates it as a raw `0` (never `pa_to_kva(0)`,
 which would be a valid-looking KVA and hide the failure). Every
@@ -324,7 +325,7 @@ plus the per-task mm sweep on reap; a general allocator is v1.x.
 
 ### Kernel-resident IPC pages
 
-Anonymous pipes (`src/pipe.zig`) allocate one
+Anonymous pipes (`src/pipe.flash`) allocate one
 4 KiB page per `Pipe`: header (refs + head/tail + readers/writers
 wait queues) at the front, byte ring filling the rest. The page is
 **not** tracked in `mm.user_pages` or `mm.kernel_pages` — its
@@ -335,7 +336,7 @@ unclosed fds drop their refs cleanly. This is the only category of
 kernel page today whose lifetime is decoupled from the per-task
 mm sweep.
 
-The console RX layer (`src/console.zig`) keeps a
+The console RX layer (`src/console.flash`) keeps a
 256-byte ring in BSS — no `get_free_page` allocation on the IRQ →
 syscall path. Single producer (IRQ-side `console_push`) / single
 consumer (`sys_read` on a `console`-tagged fd) by construction on
@@ -352,7 +353,7 @@ between `__initramfs_start` / `__initramfs_end` labels; the build
 stages `pid1.elf` at `/sbin/init` and `hello.elf` / `stackbomb.elf`
 / `flibc_demo.elf` at `/test/*.elf` via the hand-rolled `scripts/build_initramfs.zig` encoder over a
 sorted arc list (fixed mtime/uid/gid/ino so the archive is a pure
-function of contents + name list). `src/initramfs.zig`
+function of contents + name list). `src/initramfs.flash`
 exposes an `Iterator` + `locate(path)` walker over the newc bytes
 through the TTBR1 alias of the section, host-tested against
 synthetic fixtures. PID 1 (`kernel_process`) reads `/sbin/init` from
@@ -376,12 +377,12 @@ a fixed two-slot mount table and routes each path by prefix:
 
 | Path prefix     | Slot | Backend                                    |
 | :-------------- | :--: | :----------------------------------------- |
-| `/mnt/…`     |  1  | FAT32 —`src/fat32_backend.zig`          |
-| everything else |  0  | initramfs —`src/initramfs_backend.zig`  |
+| `/mnt/…`     |  1  | FAT32 —`src/fat32_backend.flash`          |
+| everything else |  0  | initramfs —`src/initramfs_backend.flash`  |
 
 initramfs is the root `/`; FAT32 mounts at `/mnt` (the system still boots if the SD card is
 unreadable). The EMMC2 driver
-(`src/board/rpi4b/emmc2.zig`) is **verified on real Pi-4 hardware**:
+(`src/board/rpi4b/emmc2.flash`) is **verified on real Pi-4 hardware**:
 init + write_block + read_block + byte
 compare all green against a 64 GB SDXC formatted FAT32 (MBR, name
 `BOOT`), Pi booting FlashOS off EMMC2 with the Toshiba USB removed.
@@ -393,7 +394,7 @@ words through `DATAPORT`, then waits for `DATA_DONE` (the canonical
 SDHCI single-block PIO pattern).
 
 The `/mnt` slot is backed by the real
-`src/fat32_backend.zig` (it replaced `fat32_stub.zig`): `fat32.zig`
+`src/fat32_backend.flash` (it replaced `fat32_stub.zig`): `fat32.flash`
 decodes the BPB / FAT / root-dir on `init()`, and the backend's
 `open` / `read` / `seek` / `close` / `write` walk and mutate the
 cluster chain over `block_dev.sd_dev`. **On-disk layout** matches
@@ -414,8 +415,8 @@ mount-detected SKIP path (`[PASS] fs-roundtrip (skip)`, tally still
 on boot 1, `[PASS] fs-roundtrip` after a power-cycle on boot 2) and
 all of `fat32_backend.writeBack` / `sys_write` are validated on
 **real Pi-4 hardware only**;
-`zig build test` covers `src/fat32.zig`'s decode units but not
-`fat32_backend.zig`. Dispatch is a
+`zig build test` covers `src/fat32.flash`'s decode units but not
+`fat32_backend.flash`. Dispatch is a
 single `startsWith("/mnt/")` branch; the trailing slash is
 load-bearing, so `/mnt2/foo` stays an initramfs path and `/mnt` with
 no slash does too. `sys_mount`, longest-prefix matching, and path
@@ -481,7 +482,7 @@ ABI type is documented in §5.
 
 ## 4. Process management & scheduling
 
-- **Scheduler.** Priority round-robin in `src/sched.zig`. `_schedule`
+- **Scheduler.** Priority round-robin in `src/sched.flash`. `_schedule`
   picks the runnable task with the largest counter via
   `pick_next_running`; if that task's counter is zero (round end) it
   invokes `refill_counters`, which rewrites every non-null slot as
@@ -503,7 +504,7 @@ ABI type is documented in §5.
   applies the same `zombify_and_wake_parent` helper. Self-kill is
   rejected — the running task is its own kernel page; `sys_exit` is
   the safe self-cancel path.
-- **Exec.** `sys_execve(path, argv)` (slot 31, `src/execve.zig`) is the
+- **Exec.** `sys_execve(path, argv)` (slot 31, `src/execve.flash`) is the
   path-resolved ELF loader. It resolves `path` through the VFS, validates
   the ELF header, then — past the point of no return — tears down the
   caller's address space and installs a fresh PGD, streaming each
@@ -515,11 +516,11 @@ ABI type is documented in §5.
 ### File-descriptor model
 
 Each task carries a **single tagged fd table** —
-`fds: [FD_TABLE_SIZE]FdSlot` on `TaskStruct` (`src/task_layout.zig`),
+`fds: [FD_TABLE_SIZE]FdSlot` on `TaskStruct` (`src/task_layout.flash`),
 `FD_TABLE_SIZE = 8`. It replaces the two parallel `?*anyopaque` /
 `?*File` arrays (pipes + files) that an earlier design indexed
 independently, plus the synthetic console fd. The mechanics live in
-`src/fdtable.zig` (`install` / `get` / `getPipe` / `getFile` /
+`src/fdtable.flash` (`install` / `get` / `getPipe` / `getFile` /
 `isConsole` / `close` / `dup2` / `dupAll` / `closeAll`), which is
 kernel + host-testable pure pointer bookkeeping.
 
@@ -543,12 +544,12 @@ pub const FdSlot = extern struct {        // 16 B; 8 slots = 128 B
   page. This keeps the free-page invariant neutral across every fd
   operation on stdio.
 - **fd 0/1/2 pre-installed.** PID 1 bring-up (`kernel_process` in
-  `src/kernel.zig`) installs three `console` slots before entering
+  `src/kernel.flash`) installs three `console` slots before entering
   user space. No page is allocated, so the PID-1 baseline
   `0xbbff2` is unchanged.
 - **fork inherits, execve preserves.** `copy_process`
-  (`src/fork.zig`) calls `fdtable.dupAll`, bumping the pipe/file ref of
-  every non-console slot; `do_wait` (`src/sched.zig`) calls
+  (`src/fork.flash`) calls `fdtable.dupAll`, bumping the pipe/file ref of
+  every non-console slot; `do_wait` (`src/sched.flash`) calls
   `fdtable.closeAll` on the zombie. `execve` tears down only the
   address space (`mm.*`) and **leaves `fds` intact**, so a shell hands
   a child its redirected stdio across the `exec` boundary.
@@ -566,7 +567,7 @@ The syscall surface is assembled into an interactive shell,
 (`user_space/lib/flibc/`), the userland mini-libc: SVC wrappers, a
 comptime-format `printf`, the `_start` argc/argv shim, and — for payloads
 that trip LLVM's `memcpy` / `strlen` idiom lowering — a freestanding
-`mem.zig` provider. Every buffer is fixed-size stack/static; there is no
+`mem.flash` provider. Every buffer is fixed-size stack/static; there is no
 userland allocator this release (heap is future work), so the single R+X
 PT_LOAD each payload links into carries no writable `.bss`.
 
@@ -609,14 +610,14 @@ PT_LOAD each payload links into carries no writable `.bss`.
   `ls` listing and the backend mechanics it surfaces are documented in §3
   "Directory enumeration".
 - **PID-1 → login → fsh hand-off.** PID 1 stays the test harness:
-  after `run_all` prints the `N/N passed` tally, `init_main.zig` `execve`s
+  after `run_all` prints the `N/N passed` tally, `init_main.flash` `execve`s
   `/bin/login` *instead of* `sys_exit` (falling through to `sys_exit` only
   if execve fails). login is a **session supervisor**: it prompts for a
   username (kernel echo on) and a password (kernel masks each typed
   character with `*` via `SYS_SET_CONSOLE_MODE`), asks the kernel to
   verify the password against the active shadow database
   (`sys_authenticate`, §5), looks the user up
-  in `/etc/passwd` (the shared `src/pwfile.zig` parser), then **forks** a
+  in `/etc/passwd` (the shared `src/pwfile.flash` parser), then **forks** a
   child that drops privilege via `setgid` + `setuid` (gid first, while
   still root) and
   execs the user's shell — login itself stays root, waits, reaps, and
@@ -644,14 +645,14 @@ PT_LOAD each payload links into carries no writable `.bss`.
 The vector table is in `src/entry.S` and is loaded into `vbar_el1` by
 `irq_init_vectors` (`src/irq.S`). Synchronous exceptions from EL0 are
 dispatched in `handle_sync_el0_64`. SVCs go through `el0_svc` →
-indexed lookup in `sys_call_table` (`src/sys.zig`); data aborts call
+indexed lookup in `sys_call_table` (`src/sys.flash`); data aborts call
 `do_data_abort`.
 
-`enable_interrupt_gic` (`src/board/<board>/irq.zig`) wires interrupt IDs to a
+`enable_interrupt_gic` (`src/board/<board>/irq.flash`) wires interrupt IDs to a
 specific core. The kernel currently routes the auxiliary IRQ
 (mini-UART RX) and the non-secure physical timer. The mini-UART RX
 handler drains the FIFO to empty in a single IRQ slot and feeds each
-byte into the `console.zig` RX ring; the same pattern lives in the
+byte into the `console.flash` RX ring; the same pattern lives in the
 `virt` PL011 path. See `### Console subsystem` below.
 
 ### Syscall ABI
@@ -668,10 +669,10 @@ x0       return value
 ```
 
 The vector at `vbar_el1 + 0x400` (`el0_svc` in `src/entry.S`)
-indexes into `sys_call_table` (`src/sys.zig`) and `blr`s to the
+indexes into `sys_call_table` (`src/sys.flash`) and `blr`s to the
 selected handler. `NR_SYSCALLS = 49` (in `src/asm_defs_common.inc`)
 is enforced by a `b.hs` check on `x8`; out-of-range numbers fall
-through to the invalid-entry path. A comptime guard in `src/sys.zig`
+through to the invalid-entry path. A comptime guard in `src/sys.flash`
 re-asserts `defs.NR_SYSCALLS == 49` so the Zig table and the asm
 literal stay in lockstep.
 
@@ -712,17 +713,17 @@ mapping rather than chasing into UVA space.
 |   33   | `write`          | `x0 = fd`, `x1 = const u8 *buf`, `x2 = len` | `i64` bytes written, `-1` on bad fd, -13 (`-EACCES`) when a `file` fd's mode denies the caller write | **Unified write** (owns the clean `write` name — the legacy NUL-terminated console printer formerly at slot 0 `write_str` is retired). Dispatches on the `current.fds` slot tag (`console`/`pipe`/`file`). On a `file` fd the permission layer checks write-intent against the mode/uid/gid carried on the `File` since open (open is read-intent only in this ABI, so a readable-but-not-writable file opens fine and is refused here; root bypasses). Superseded the per-kind write shims (retired slots 9/0/28). `buf` UVA reaches the kernel via `copy_from_user`; a wild UVA returns `-1` via the soft path, no zombification |
 |   34   | `close`          | `x0 = fd`                                       | `i32` 0 on hit, -1 on miss | **Unified close.** Clears the `current.fds` slot and drops the backing object's ref by kind (`pipe`/`file`); `console` slots are refcount-exempt (no per-fd object). `file` fds also route through `vfs_close`. Superseded the per-kind close shims (retired slots 11/29) |
 |   35   | `dup2`           | `x0 = oldfd`, `x1 = newfd`                      | `i32` `newfd` on success, -1 on bad `oldfd`/`newfd` | **POSIX `dup2`.** If `newfd` is open it is closed (ref dropped by kind) first; `newfd` then points at `oldfd`'s backend and its ref is bumped (`console` is refcount-exempt). `dup2(fd, fd)` is a no-op returning `fd`. The primitive behind shell fd redirection |
-|   36   | `chdir`          | `x0 = const u8 *path` (NUL-terminated)          | `i32` 0 on success, -1 on wild UVA / un-terminated / oversize | **Working directory.** Normalises `path` against the task's `cwd` (`TaskStruct.cwd`, 256 B, default `/`) — relative paths are joined and `.`/`..`-collapsed by the pure host-tested `src/path.zig:joinResolve`, absolute paths collapse in place — and stores the result. No backend existence check this release (deferred to `sys_readdir`); the open/execve boundary joins relative paths against this stored `cwd` before the still-absolute-only `vfs.resolve`. `cwd` is inherited across `fork` and preserved across `execve` |
+|   36   | `chdir`          | `x0 = const u8 *path` (NUL-terminated)          | `i32` 0 on success, -1 on wild UVA / un-terminated / oversize | **Working directory.** Normalises `path` against the task's `cwd` (`TaskStruct.cwd`, 256 B, default `/`) — relative paths are joined and `.`/`..`-collapsed by the pure host-tested `src/path.flash:joinResolve`, absolute paths collapse in place — and stores the result. No backend existence check this release (deferred to `sys_readdir`); the open/execve boundary joins relative paths against this stored `cwd` before the still-absolute-only `vfs.resolve`. `cwd` is inherited across `fork` and preserved across `execve` |
 |   37   | `readdir`        | `x0 = const u8 *path` (NUL-terminated), `x1 = u64 index`, `x2 = Dirent *out` | `i32` 0 with `*out` filled on a hit, -1 at end-of-directory / bad path / wild UVA | **Directory enumeration.** Stateless index walk — fills the `index`-th entry of the directory at `path` and returns 0, or -1 past the last entry. No fd cursor / `opendir` handle (the POSIX shape is a future portable-userland revisit). `path` is `cwd`-joined like `open`/`chdir`, then `vfs.resolve`d (null → -1, e.g. `/mnt/*` under QEMU where FAT32 does not mount). The initramfs backend synthesises directory listings from cpio path prefixes; the FAT32 backend renders 8.3 root-directory entries (Pi-only). Path UVA in and `Dirent` UVA out both cross via the soft `copy_from_user` / `copy_to_user`; a wild UVA returns -1, no zombify. Allocates nothing — the stateless ABI adds no OOM site |
-|   38   | `klog_read`      | `x0 = u8 *buf`, `x1 = u64 len` | `i64` byte count (0 on an empty ring), -1 on wild UVA | **Kernel log read.** Snapshots the most-recent `min(len, retained)` bytes of the kernel byte-ring (`src/klog_ring.zig`) into `buf`, oldest-first, and returns the count. `main_output` (`src/utilc.zig`) tees every emitted line into the 16 KiB overwrite-oldest ring, so the boot log survives in RAM; `/bin/dmesg` reads it back over the USB-C console without the Mini-UART adapter. Consume-free + stateless — every call sees the live ring, so it never blocks and holds no per-fd cursor. `buf` crosses via the soft `copy_to_user` (wild UVA → -1, no zombify); allocates nothing (the ring is static BSS, baseline-neutral). Ring capacity `KLOG_SIZE` is the shared ABI constant `dmesg` sizes its buffer to |
+|   38   | `klog_read`      | `x0 = u8 *buf`, `x1 = u64 len` | `i64` byte count (0 on an empty ring), -1 on wild UVA | **Kernel log read.** Snapshots the most-recent `min(len, retained)` bytes of the kernel byte-ring (`src/klog_ring.flash`) into `buf`, oldest-first, and returns the count. `main_output` (`src/utilc.flash`) tees every emitted line into the 16 KiB overwrite-oldest ring, so the boot log survives in RAM; `/bin/dmesg` reads it back over the USB-C console without the Mini-UART adapter. Consume-free + stateless — every call sees the live ring, so it never blocks and holds no per-fd cursor. `buf` crosses via the soft `copy_to_user` (wild UVA → -1, no zombify); allocates nothing (the ring is static BSS, baseline-neutral). Ring capacity `KLOG_SIZE` is the shared ABI constant `dmesg` sizes its buffer to |
 |   39   | `getuid`         | (none)                                            | `i64` real uid | **Process credentials.** Reports the calling task's real uid (`TaskStruct.uid`). Credentials are inherited across `fork` and preserved across `execve` |
 |   40   | `geteuid`        | (none)                                            | `i64` effective uid | As `getuid`, for the effective uid — the id the VFS permission checks test against |
 |   41   | `getgid`         | (none)                                            | `i64` real gid | As `getuid`, for the real group id |
 |   42   | `getegid`        | (none)                                            | `i64` effective gid | As `getuid`, for the effective group id |
 |   43   | `setuid`         | `x0 = u32 uid`                                    | `i64` 0 on success, -1 (EPERM) | **Privilege drop.** Root (euid 0) sets both the real and effective uid to any value — this is how `/bin/login` becomes the authenticated user. A non-root caller may only set its euid to an id it already holds (real or effective); anything else returns -1, so a dropped process can never climb back to root. No saved-uid (setresuid) this release |
 |   44   | `setgid`         | `x0 = u32 gid`                                    | `i64` 0 on success, -1 (EPERM) | Mirror of `setuid` over the group ids. `/bin/login` calls it *before* `setuid` (gid first, while still root — after the uid drop it would be denied) |
-|   45   | `authenticate`   | `x0 = const u8 *user`, `x1 = u64 user_len`, `x2 = const u8 *pass`, `x3 = u64 pass_len` | `i64` 0 on a match, -1 otherwise | **Kernel-owned credential verify.** Reads the active shadow database in-kernel (the execve-style no-alloc VFS recipe — baseline-neutral): the writable FAT32 copy `/mnt/shadow` first (that is where `passwd` writes), falling back to the initramfs `/etc/shadow` seed when `/mnt` is unmounted (QEMU virt), the file is absent (fresh card), or it is corrupt — the latter announced loudly (the anti-brick rule: corruption never locks the operator out, the baked-in seed credentials still work). Finds the user's line (`user:iterations:salt_hex:hash_hex`, parsed by the host-tested `src/shadow.zig`), runs PBKDF2-HMAC-SHA256 (`src/sha256.zig`) over the password with the stored salt + iteration count, and constant-time-compares (`ctEql`) against the stored verifier. The KDF and every salt/hash byte stay inside the kernel — userland sees only pass/fail. The plaintext password crosses the user→kernel boundary exactly once into a static kernel buffer (overwritten by the next call). Credential UVAs cross via the soft `copy_from_user` (wild UVA / over-long input → -1, no zombify) |
-|   46   | `passwd`         | `x0 = const u8 *user`, `x1 = u64 user_len`, `x2 = const u8 *old`, `x3 = u64 old_len`, `x4 = const u8 *new`, `x5 = u64 new_len` | `i64` 0 on success, -13 (`-EACCES`) on an authorization failure, -1 otherwise | **Kernel-owned password change.** Rewrites `user`'s record in the writable FAT32 shadow (`/mnt/shadow`) with a fresh kernel-minted salt (`src/hwrng.zig`) and a PBKDF2 re-hash of the new password. Authorization: root (euid 0) may reset any record without the old password (the forgotten-password recovery path); everyone else only the record whose name maps to their own uid (`/etc/passwd` lookup via the host-tested `src/pwfile.zig`) and only with the correct old password. The rewrite is splice-safe by construction: the iteration count is kept and salt/hash are fixed-width hex, so the new line is byte-identical in length and the whole-file in-place write never changes the file size (no FAT32 dir-entry resize). Returns -1 when no writable shadow exists (QEMU virt / fresh card — the initramfs seed is immutable), the user has no record, or the rewrite would change the record length. `/bin/passwd` is the interactive consumer |
+|   45   | `authenticate`   | `x0 = const u8 *user`, `x1 = u64 user_len`, `x2 = const u8 *pass`, `x3 = u64 pass_len` | `i64` 0 on a match, -1 otherwise | **Kernel-owned credential verify.** Reads the active shadow database in-kernel (the execve-style no-alloc VFS recipe — baseline-neutral): the writable FAT32 copy `/mnt/shadow` first (that is where `passwd` writes), falling back to the initramfs `/etc/shadow` seed when `/mnt` is unmounted (QEMU virt), the file is absent (fresh card), or it is corrupt — the latter announced loudly (the anti-brick rule: corruption never locks the operator out, the baked-in seed credentials still work). Finds the user's line (`user:iterations:salt_hex:hash_hex`, parsed by the host-tested `src/shadow.flash`), runs PBKDF2-HMAC-SHA256 (`src/sha256.flash`) over the password with the stored salt + iteration count, and constant-time-compares (`ctEql`) against the stored verifier. The KDF and every salt/hash byte stay inside the kernel — userland sees only pass/fail. The plaintext password crosses the user→kernel boundary exactly once into a static kernel buffer (overwritten by the next call). Credential UVAs cross via the soft `copy_from_user` (wild UVA / over-long input → -1, no zombify) |
+|   46   | `passwd`         | `x0 = const u8 *user`, `x1 = u64 user_len`, `x2 = const u8 *old`, `x3 = u64 old_len`, `x4 = const u8 *new`, `x5 = u64 new_len` | `i64` 0 on success, -13 (`-EACCES`) on an authorization failure, -1 otherwise | **Kernel-owned password change.** Rewrites `user`'s record in the writable FAT32 shadow (`/mnt/shadow`) with a fresh kernel-minted salt (`src/hwrng.flash`) and a PBKDF2 re-hash of the new password. Authorization: root (euid 0) may reset any record without the old password (the forgotten-password recovery path); everyone else only the record whose name maps to their own uid (`/etc/passwd` lookup via the host-tested `src/pwfile.flash`) and only with the correct old password. The rewrite is splice-safe by construction: the iteration count is kept and salt/hash are fixed-width hex, so the new line is byte-identical in length and the whole-file in-place write never changes the file size (no FAT32 dir-entry resize). Returns -1 when no writable shadow exists (QEMU virt / fresh card — the initramfs seed is immutable), the user has no record, or the rewrite would change the record length. `/bin/passwd` is the interactive consumer |
 
 `sys_console_inject` is a documented debug syscall, not part of the
 forward-stable ABI surface. It is retained because the in-kernel test
@@ -736,7 +737,7 @@ initramfs backend. The former per-kind read/write/close legs (slots
 8/9/11) are **retired** — the unified read/write/close (slots 32/34)
 replaced them, and those slot numbers stay reserved and return `-1`. Slots
 `14..17` (`sys_mmap`, `sys_munmap`, `sys_mlock`, `sys_munlock`) and
-`19..22` (socket / IPC stubs) are present in `src/sys.zig` for forward
+`19..22` (socket / IPC stubs) are present in `src/sys.flash` for forward
 compatibility but return immediately. Slot `18` is the active
 `sys_pipe`. The legacy console open/read (`sys_openConsole` /
 `sys_readConsole`, slots 23/24) and the legacy per-kind pipe
@@ -763,7 +764,7 @@ the clean `write` name is the unified slot 33.
 **Working directory (slots 36 + 48).** `sys_chdir` (slot 36) stores a
 normalised path in `TaskStruct.cwd`; the open / execve boundary joins
 relative paths against it before `vfs.resolve` (still absolute-only).
-The join + `.`/`..` collapse is the pure host-tested `src/path.zig`
+The join + `.`/`..` collapse is the pure host-tested `src/path.flash`
 helper. `sys_getcwd` (slot 48) is the readback half — it copies `cwd`
 back into a user buffer (path + NUL, returning the length) so `pwd` can
 print it; allocation-free, baseline-neutral. See §4 "Shell & userland
@@ -772,7 +773,7 @@ print it; allocation-free, baseline-neutral. See §4 "Shell & userland
 **Directory enumeration (slot 37).** `sys_readdir` is a
 stateless `(path, index, *Dirent)` index walk — no `opendir` handle, no
 fd cursor (deferred to a future portable-userland revisit). The shared
-`Dirent` ABI type (`lib/syscall_defs.zig`, the user↔kernel definition both
+`Dirent` ABI type (`lib/syscall_defs.flash`, the user↔kernel definition both
 sides import) crosses the boundary by pointer: `name` (32-byte
 NUL-terminated basename — initramfs cpio names run longer than 8.3; FAT32
 fills ≤ 12 rendered 8.3 chars), `d_type` (`DT_REG` 0 / `DT_DIR` 1), and 7
@@ -785,9 +786,9 @@ for the `ls` consumer.
 
 **Kernel log (slot 38).** `sys_klog_read(buf, len)` snapshots the
 most-recent `min(len, retained)` bytes of the kernel byte-ring
-(`src/klog_ring.zig`) into `buf`, oldest-first. `main_output`
-(`src/utilc.zig`) tees every emitted line into the 16 KiB overwrite-oldest
-ring (`KLOG_SIZE`, shared in `lib/syscall_defs.zig`), so the boot log
+(`src/klog_ring.flash`) into `buf`, oldest-first. `main_output`
+(`src/utilc.flash`) tees every emitted line into the 16 KiB overwrite-oldest
+ring (`KLOG_SIZE`, shared in `lib/syscall_defs.flash`), so the boot log
 survives in RAM and `/bin/dmesg` reads it back over the USB-C console —
 retiring the Mini-UART/FTDI adapter for boot diagnosis. The ring is
 lock-free and static BSS: the tee never allocates (baseline-neutral) and
@@ -797,11 +798,11 @@ garble a byte, never escape the masked buffer. The read is consume-free and
 stateless — every call sees the live ring. See §4 "Shell & userland (fsh)"
 for the `dmesg` consumer.
 
-**Kernel crypto + entropy.** `src/sha256.zig`
+**Kernel crypto + entropy.** `src/sha256.flash`
 (SHA-256, HMAC-SHA256, PBKDF2-HMAC-SHA256, and the constant-time `ctEql`
 compare — host-test-gated against NIST FIPS 180-2, RFC 4231, and the
 published PBKDF2-HMAC-SHA256 vectors, plus `std.crypto` differential
-checks) and `src/hwrng.zig` (the kernel entropy source) are the crypto
+checks) and `src/hwrng.flash` (the kernel entropy source) are the crypto
 foundation for the identity work. Both are kernel-internal by
 design: hashing happens inside `sys_authenticate` (slot 45, above), so key
 material never crosses the user/kernel boundary and no getrandom-style
@@ -816,9 +817,9 @@ canary guards (§8).
 
 **Identity files.** `/etc/passwd` (`user:uid:gid:home:shell`,
 world-readable, a committed file — parsed everywhere by the host-tested
-`src/pwfile.zig`) and `/etc/shadow`
+`src/pwfile.flash`) and `/etc/shadow`
 (`user:iterations:salt_hex:hash_hex`, generated at build time by
-`tools/gen_shadow.zig` running the same `src/sha256.zig` PBKDF2 the kernel
+`tools/gen_shadow.zig` running the same `src/sha256.flash` PBKDF2 the kernel
 verifies with) ship in the initramfs. `/etc/shadow` is mode `0o100600`
 root:root — the cpio encoder stamps per-file modes from the build's policy
 list (`build.zig`), and the VFS permission layer (below) refuses a
@@ -853,7 +854,7 @@ ring.
 **VFS permission layer.** Every file carries `mode` / `uid` /
 `gid` metadata, reported by its backend at open time (`vfs.OpenResult`)
 and enforced at the syscall boundary by the pure, host-test-gated
-`src/perm.zig:checkAccess`:
+`src/perm.flash:checkAccess`:
 
 - **Where the metadata comes from.** initramfs entries carry the newc
   cpio header's mode/uid/gid fields; the deterministic encoder
@@ -864,7 +865,7 @@ and enforced at the syscall boundary by the pure, host-test-gated
   owner/mode concept, so `/mnt` metadata comes from the **permission
   overlay**: a root-level text file (`PERMS.TAB`, format
   `NAME MODE UID GID` per line, parsed by the host-tested
-  `src/overlay.zig`) that the backend reads once at mount time. Annotated
+  `src/overlay.flash`) that the backend reads once at mount time. Annotated
   basenames get their entry; un-annotated paths keep the documented
   default `0o100666` root:root (rw-rw-rw-, no exec bit — the historical
   "any process may read/write SD-card files" contract) — except the
@@ -878,7 +879,7 @@ and enforced at the syscall boundary by the pure, host-test-gated
   `write` (slot 33) checks write-intent against the metadata carried on
   the `File` since open; `execve` (slot 31) checks the exec bit before
   its point of no return. Denial returns `-EACCES` (-13, the first and
-  so far only errno constant, `lib/syscall_defs.zig`); every other
+  so far only errno constant, `lib/syscall_defs.flash`); every other
   failure keeps the historical `-1`.
 - **The rules** (classic Unix, lean): effective uid 0 bypasses
   everything (including exec of a file with no x bit — a documented
@@ -940,7 +941,7 @@ names it.
 initramfs files take their modes from the cpio headers (the build stamps
 `0600` on shadow, `0755` on binaries, `0644` on the rest, all
 root:root); FAT32 files default to `0666 root:root` unless the optional
-root-level `PERMS.TAB` overlay (`src/overlay.zig`) names them. The checks
+root-level `PERMS.TAB` overlay (`src/overlay.flash`) names them. The checks
 run at the syscall boundary — `open` for read intent, `write` for write
 intent, `execve` for the exec bit — and decide by the first matching
 triad (owner if `euid` matches the file's uid, else group, else other),
@@ -987,16 +988,16 @@ security model, not a hardened isolation boundary.
 
 ### Console subsystem
 
-The board IRQ handler (`src/board/{rpi4b,virt}/irq.zig`) drains the
+The board IRQ handler (`src/board/{rpi4b,virt}/irq.flash`) drains the
 UART RX FIFO on every IRQ slot and pushes each byte into a 256-byte
-BSS-resident ring in `src/console.zig` via `console_push`. The ring
+BSS-resident ring in `src/console.flash` via `console_push`. The ring
 is single-producer (IRQ) / single-consumer (syscall) by construction
 on single core. `console_push` wakes the per-ring `WaitQueue`
-(`src/wait_queue.zig`); the console read path blocks on it when the
+(`src/wait_queue.flash`); the console read path blocks on it when the
 ring is empty and drains a short read on wake. Echo policy lives in
 user space — the kernel does *not* loop the byte back through the
 TX path. When the ring is full `console_push`
-(`src/console.zig:54`) silently drops the incoming byte; this is
+(`src/console.flash:54`) silently drops the incoming byte; this is
 correct for the current human-typing-rate use case and a future line-
 buffered terminal mode will not change it. Console
 and pipe reads are unified behind a single `sys_read(fd, buf, len)`
@@ -1008,12 +1009,12 @@ reserved and returns `-1`).
 
 The Pi's USB-C port is a second console transport. The
 BCM2711's DWC2 USB-OTG controller is brought up as a Full-Speed USB
-*device* by `src/board/rpi4b/usb.zig`: `kernel_main` calls
+*device* by `src/board/rpi4b/usb.flash`: `kernel_main` calls
 `usb_init()` after GIC bring-up, and the PID-0 idle loop services the
 controller by polling `GINTSTS` (`board.usb.poll()`) next to the UART
 RX backstop — no IRQ line, slave/PIO mode, no DMA. The device
 enumerates as a CDC-ACM serial function (byte-exact descriptors in
-`src/usb_descriptors.zig`, host-tested); macOS binds its built-in
+`src/usb_descriptors.flash`, host-tested); macOS binds its built-in
 `AppleUSBCDCACM` driver and creates `/dev/tty.usbmodemXXXX`.
 
 **Connection management.** The gadget does not become
@@ -1022,7 +1023,7 @@ the host sends its first SETUP ~20 ms after a reset ends — so
 enumeration only works while the idle loop polls at microsecond rate,
 which is never the case during the boot test harness (and macOS
 permanently disables a port after a few failed enumeration attempts).
-`usb.zig` therefore keeps the device electrically detached
+`usb.flash` therefore keeps the device electrically detached
 (`DCTL.SftDiscon`) until `poll()` has run gap-free for 2 s (sustained
 idle, measured off CNTPCT), and only then asserts the D+ pull-up. A
 stuck enumeration (10 s attached without `SET_CONFIGURATION`)
@@ -1039,7 +1040,7 @@ Console flow once enumerated:
   so `sys_read(0, …)`, the wait-queue blocking, and fsh need no
   changes; the byte source is invisible to user space.
 - **TX (fsh → host).** The user write path (`writeConsoleBytes` /
-  `sys_writeConsole` in `src/sys.zig`) goes through a `console_tx`
+  `sys_writeConsole` in `src/sys.flash`) goes through a `console_tx`
   mux: `board.usb.cdc_tx` when `enumerated()`, else the Mini-UART
   (a switch, not a tee). `cdc_tx` enqueues into a bounded
   preempt-guarded TX ring; the poll loop drains it into the EP2 IN
@@ -1101,7 +1102,7 @@ Each tested kernel module is its own test root, linked against a
 host-stub object that fills in the assembly-only externs (`memzero`,
 `panic`, `main_output*`, `core_switch_to`, `set_pgd`, the IRQ
 masking pair, the page-allocator entry points). The shared stub set
-lives in `tests/host_stubs.zig`; `sched.zig` and the
+lives in `tests/host_stubs.zig`; `sched.flash` and the
 initramfs/file pair get dedicated per-target stub objects
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`) to
@@ -1109,7 +1110,7 @@ avoid double-defining symbols that the module under test already
 exports. The current suite totals **419 host tests** across 39
 modules — see the coverage matrix below for the per-module split.
 
-**In-kernel runtime harness** (`user_space/kernel_tests.zig`).
+**In-kernel runtime harness** (`user_space/kernel_tests.flash`).
 PID 1 enters `run_all()`, which exercises twenty-eight scenarios on real
 kernel state:
 
@@ -1305,13 +1306,13 @@ on Pi-HW it is the real write/verify branch. There is no in-harness
 `fsh` scenario — the shell is exercised by the hand-off above plus the
 `[TEST] login` capstone.)
 
-**Pre-PID-1 EL1 smoke** (`run_emmc2_smoke` in `src/kernel.zig`).
+**Pre-PID-1 EL1 smoke** (`run_emmc2_smoke` in `src/kernel.flash`).
 A single scenario `emmc2-block` runs before PID 1 is forked,
 writing a deterministic 512-byte pattern to LBA 2064 through
 `board.emmc2.write_block`, reading it back via `read_block`, and
 byte-comparing. Emits `[TEST] emmc2-block` … `[PASS] emmc2-block`
 or `[FAIL] emmc2-block (write|read|mismatch)`. On QEMU it
-exercises the virt fake (`src/board/virt/emmc2.zig`); on Pi 4 it
+exercises the virt fake (`src/board/virt/emmc2.flash`); on Pi 4 it
 exercises the real BCM2711 EMMC2 driver (verified on a 64 GB SDXC).
 The EL0 28/28 tally is unaffected — both
 buffers live on the kernel stack and the scenario runs in kernel
@@ -1339,7 +1340,7 @@ The harness uses `sys_dump_free` to verify every scenario is
 leak-free:
 
 - **Kernel boot baseline:** `0xbc000` — emitted once by `kernel_main`
-  (`src/kernel.zig`) before PID 1 is created. Equals 4 GiB Pi minus
+  (`src/kernel.flash`) before PID 1 is created. Equals 4 GiB Pi minus
   VC reservation, kernel image, and the identity + high page tables.
 - **User-space baseline:** `0xbbff2` — emitted by PID 1 on entry to
   `run_all`. Equals the boot baseline minus 14 pages claimed by PID 1
@@ -1415,67 +1416,67 @@ virt `0x3be46` / `0x3be54`.
 
 The Host column counts inline `test "…"` blocks in each module (run
 via `zig build test`). The Kernel-harness column lists the `[TEST]`
-scenarios in `user_space/kernel_tests.zig` that exercise the module
+scenarios in `user_space/kernel_tests.flash` that exercise the module
 end-to-end on QEMU + Pi 4.
 
 | Module                          | Host tests | Kernel-harness scenarios                                                                            | Reason if host-untested                                                                                                                                                                                                                      |
 | ------------------------------- | ---------: | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/page_alloc.zig`          |         12 | every (free-page baseline)                                                                          | —                                                                                                                                                                                                                                           |
-| `src/elf.zig`                 |         16 | `exec-elf`, `stack-overflow`, `flibc`                                                         | —                                                                                                                                                                                                                                           |
-| `src/wait_queue.zig`          |          4 | `pipe`, `console-echo`, `fd-redirect`                                                       | —                                                                                                                                                                                                                                           |
-| `src/pipe.zig`                |          5 | `pipe`, `fd-redirect`                                                                   | —                                                                                                                                                                                                                                           |
-| `src/fdtable.zig`             |          5 | `fd-redirect`, `pipe`, `console-echo`                                                 | —                                                                                                                                                                                                                                           |
-| `src/console.zig`             |          7 | `console-echo`, `fd-redirect`                                                          | —                                                                                                                                                                                                                                           |
-| `src/sched.zig`               |         13 | every fork/kill/wait scenario                                                                       | —                                                                                                                                                                                                                                           |
-| `src/initramfs.zig`           |         13 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
-| `src/file.zig`                |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `fd-redirect`   | fd-table helpers live in `src/fdtable.zig`; the `alloc`/`ref`/`unref` lifetime tests remain here                                                                                                                       |
+| `src/page_alloc.flash`          |         12 | every (free-page baseline)                                                                          | —                                                                                                                                                                                                                                           |
+| `src/elf.flash`                 |         16 | `exec-elf`, `stack-overflow`, `flibc`                                                         | —                                                                                                                                                                                                                                           |
+| `src/wait_queue.flash`          |          4 | `pipe`, `console-echo`, `fd-redirect`                                                       | —                                                                                                                                                                                                                                           |
+| `src/pipe.flash`                |          5 | `pipe`, `fd-redirect`                                                                   | —                                                                                                                                                                                                                                           |
+| `src/fdtable.flash`             |          5 | `fd-redirect`, `pipe`, `console-echo`                                                 | —                                                                                                                                                                                                                                           |
+| `src/console.flash`             |          7 | `console-echo`, `fd-redirect`                                                          | —                                                                                                                                                                                                                                           |
+| `src/sched.flash`               |         13 | every fork/kill/wait scenario                                                                       | —                                                                                                                                                                                                                                           |
+| `src/initramfs.flash`           |         13 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
+| `src/file.zig`                |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `fd-redirect`   | fd-table helpers live in `src/fdtable.flash`; the `alloc`/`ref`/`unref` lifetime tests remain here                                                                                                                       |
 | `src/vfs.zig`                 |         13 | `vfs-dispatch`, `fs-roundtrip`, `initramfs-open`, `exec-elf`, `stack-overflow`, `flibc`, `readdir` | —                                                                                                                                                                                                                                           |
-| `src/sdhci_cmd.zig`           |         13 | `emmc2-block` (CMD17/CMD24 encoding, CSD v2 parse, clock divisor)                                 | —                                                                                                                                                                                                                                           |
-| `src/mailbox.zig`             |         14 | `emmc2-block` (clock-rate query for SDHCI divider; SD VDD power-on and 3.3 V I/O rail at init); USB-C console (`usb_init`'s USB-HCD power-on)    | —                                                                                                                                                                                                                                           |
-| `src/board/virt/dtb.zig`      |          4 | (virt boot hand-off)                                                                                | —                                                                                                                                                                                                                                           |
-| `src/fat32.zig`               |         27 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
-| `src/initramfs_backend.zig`   |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
-| `src/fat32_backend.zig`       |         11 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | thin VfsOps wrapper over `src/fat32.zig`; the real SD read/write path runs on Pi-4 hardware only (QEMU `raspi4b` EMMC2 dies at CMD8, `virt` has no SD), so the on-disk decode logic is covered by `src/fat32.zig` host tests instead. The splice contract (sub-sector + whole-file same-length writes) and the permission-overlay parse/apply are host-tested here; FAT32 `readdir` is exercised by `[TEST] readdir` on the Pi-only leg (`/mnt/*` returns -1 cleanly under QEMU; FAT32 host tests cover the `decode8_3` helper) |
-| `src/block_dev.zig`           |          0 | `emmc2-block`                                                                                     | pure vtable indirection; logic ≈ fn-pointer forwarding                                                                                                                                                                                      |
-| `src/sys.zig`                 |          0 | every syscall scenario                                                                              | extern-heavy dispatch; logic ≈ argument forwarding                                                                                                                                                                                          |
-| `src/fork.zig`                |          5 | `fork-stress`, `oom-graceful`, `exec-elf`, `brk`                                                    | —                                                                                                                                                                                                                                           |
-| `src/execve.zig`              |          6 | `execve`, `perm`                                                                                          | argv-block encoder (`encodeArgvBlock`) is host-tested; the path-resolve + PT_LOAD stream + teardown paths are extern-heavy and integration-tested via `[TEST] execve` + the PID-1 hand-off to `/bin/fsh` (same posture as `sys.zig` / `fork.zig`); the exec-bit permission gate is exercised by `[TEST] perm`            |
-| `src/path.zig`                |         16 | (PID-1 hand-off)                                                                                  | pure cwd-aware join + `.`/`..` collapse (`joinResolve`); the kernel open/execve boundary and the host test share this source; the runtime path is driven by the interactive fsh shell after the harness                                                                                                              |
-| `src/mm_user.zig`             |         11 | `brk`, `stack-overflow`, `wild-pointer`, `efault-syscall`                                   | —                                                                                                                                                                                                                                           |
-| `src/utilc.zig`               |         11 | every (every print path)                                                                            | —                                                                                                                                                                                                                                           |
-| `src/klog_ring.zig`           |          8 | `klog`                                                                                              | pure overwrite-oldest ring arithmetic (push / snapshot, monotone u64 head/tail); the `main_output` tee (`src/utilc.zig`) and the slot-38 snapshot (`src/sys.zig`) are integration-tested by `[TEST] klog`                                  |
-| `src/sha256.zig`              |         17 | `authenticate` (via `sys_authenticate`)                                                             | pure compute (SHA-256 / HMAC-SHA256 / PBKDF2-HMAC-SHA256 / `ctEql`); the host vector tests (NIST FIPS 180-2, RFC 4231, published PBKDF2 set) plus `std.crypto` differentials are the gate; `sys_authenticate` and the build-time `tools/gen_shadow.zig` are the consumers                              |
-| `src/shadow.zig`              |         15 | `authenticate`, `passwd` (via `sys_authenticate` / `sys_passwd`)                                                             | pure `/etc/shadow` line parser + hex encode/decode + the same-length in-place rewrite (`rewriteLineInPlace`); the host tests pin the `user:iterations:salt_hex:hash_hex` format shared by `sys_authenticate` (verify), `sys_passwd` (rewrite), and `tools/gen_shadow.zig` (generate)                              |
-| `src/perm.zig`                |          9 | `perm`                                                                                              | pure `checkAccess` decision function; the host truth table (owner/group/other × read/write/exec × root bypass) is the gate for the permission layer; the three syscall-boundary enforcement sites (`sys_openFile` / `sys_write` / `execve`) are integration-tested by `[TEST] perm`                              |
-| `src/overlay.zig`             |         14 | `passwd` (via the seeded `PERMS.TAB`)                                                                                              | pure FAT32 permission-overlay parser + case-insensitive lookup; the host truth table (well-formed / comments / CRLF / malformed-rejects-wholesale / capacity / self-entry) is the gate for the overlay; the mount-time apply + open-time lookup live in `src/fat32_backend.zig` and are host-tested there                              |
-| `src/pwfile.zig`              |          7 | `login`, `passwd` (and `/bin/login` / `whoami` at runtime)                                                                                              | pure `/etc/passwd` parser (name + uid lookups) shared by the kernel (`sys_passwd` authorization), `/bin/login`, `/bin/passwd`, and fsh's `whoami` builtin; the host tests pin the 5-field format against `user_space/etc/passwd`                              |
-| `scripts/build_initramfs.zig` |          2 | `perm` (via the staged initramfs modes)                                                             | deterministic newc cpio encoder (a build-time host tool, not kernel code); its host tests pin the mode/uid/gid byte offsets shared with `src/initramfs.zig`'s parser — an encoder/parser drift would be a silent permission bypass                              |
-| `src/hwrng.zig`               |          6 | `rng`                                                                                               | the pure SplitMix64 mixer is vector- and differential-tested on the host; the kernel glue (`fill` / the `hwrng_init` announce) is integration-tested by `[TEST] rng` through the klog ring                                                  |
-| `user_space/lib/flibc/readline.zig` |   27 | (PID-1 hand-off)                                                                                  | pure byte→buffer line-editor cores: the append-only state machine (TAB completion action), the cursor-edit ops (insert/backspace/move/replace), and the command-history ring; the SVC driver sits behind a comptime `has_driver` gate so the host build never analyses inline asm; runtime path = the interactive fsh shell after the harness                                                                                          |
-| `user_space/lib/flibc/execvp.zig`   |   13 | (PID-1 hand-off)                                                                                  | pure `/bin/<name>` path-build; SVC driver gated like `readline`; runtime path = the interactive fsh shell after the harness                                                                                                                                                                          |
-| `user_space/lib/flibc/completion.zig` | 12 | (PID-1 hand-off)                                                                                  | pure tab-completion core (`parse` command-vs-path, `commonPrefixLen`, `classify` for the double-TAB decision); the `readdir`-driven candidate gathering + double-TAB listing live in `readline`'s completing driver; runtime path = the interactive fsh shell after the harness                                                                                  |
-| `user_space/lib/flibc/keys.zig`     |    7 | — (full-screen tools)                                                                             | pure VT100 input `Decoder` (`ESC[` arrows / ctrl / tab → `Key`); the SVC `readKey` driver is gated like `readline`; runtime path = `/bin/less` (the full-screen pager) over the serial console                                                                                                                  |
-| `user_space/lib/flibc/pager.zig`    |   10 | — (full-screen tools)                                                                             | pure scroll / line-index core (`Pager`: line indexing, `line` slicing, scroll clamping); no SVC — the render + key loop live in `/bin/less`; runtime path = `/bin/less` over the serial console |
-| `lib/console_ui/screen.zig`         |    6 | — (full-screen tools)                                                                             | pure ANSI screen renderers (alt-screen lifecycle, cursor, `Panel` box, `kv` rows); `Sink`-routed, allocator-free; the first consumers are `/bin/sysinfo` (`kv`), `/bin/less` (alt-screen + `Panel`), and `/bin/clear` (`clear`)                                                                                                                                         |
-| `user_space/fsh/tokenize.zig`       |   11 | (PID-1 hand-off)                                                                                  | pure whitespace split + single-pipe decomposition; the shell driver (`fsh.zig`) is integration-only via the PID-1 → fsh hand-off (the `type 'help' for commands` boot success marker)                                                                                                                     |
+| `src/sdhci_cmd.flash`           |         13 | `emmc2-block` (CMD17/CMD24 encoding, CSD v2 parse, clock divisor)                                 | —                                                                                                                                                                                                                                           |
+| `src/mailbox.flash`             |         14 | `emmc2-block` (clock-rate query for SDHCI divider; SD VDD power-on and 3.3 V I/O rail at init); USB-C console (`usb_init`'s USB-HCD power-on)    | —                                                                                                                                                                                                                                           |
+| `src/board/virt/dtb.flash`      |          4 | (virt boot hand-off)                                                                                | —                                                                                                                                                                                                                                           |
+| `src/fat32.flash`               |         27 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
+| `src/initramfs_backend.flash`   |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
+| `src/fat32_backend.flash`       |         11 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | thin VfsOps wrapper over `src/fat32.flash`; the real SD read/write path runs on Pi-4 hardware only (QEMU `raspi4b` EMMC2 dies at CMD8, `virt` has no SD), so the on-disk decode logic is covered by `src/fat32.flash` host tests instead. The splice contract (sub-sector + whole-file same-length writes) and the permission-overlay parse/apply are host-tested here; FAT32 `readdir` is exercised by `[TEST] readdir` on the Pi-only leg (`/mnt/*` returns -1 cleanly under QEMU; FAT32 host tests cover the `decode8_3` helper) |
+| `src/block_dev.flash`           |          0 | `emmc2-block`                                                                                     | pure vtable indirection; logic ≈ fn-pointer forwarding                                                                                                                                                                                      |
+| `src/sys.flash`                 |          0 | every syscall scenario                                                                              | extern-heavy dispatch; logic ≈ argument forwarding                                                                                                                                                                                          |
+| `src/fork.flash`                |          5 | `fork-stress`, `oom-graceful`, `exec-elf`, `brk`                                                    | —                                                                                                                                                                                                                                           |
+| `src/execve.flash`              |          6 | `execve`, `perm`                                                                                          | argv-block encoder (`encodeArgvBlock`) is host-tested; the path-resolve + PT_LOAD stream + teardown paths are extern-heavy and integration-tested via `[TEST] execve` + the PID-1 hand-off to `/bin/fsh` (same posture as `sys.flash` / `fork.flash`); the exec-bit permission gate is exercised by `[TEST] perm`            |
+| `src/path.flash`                |         16 | (PID-1 hand-off)                                                                                  | pure cwd-aware join + `.`/`..` collapse (`joinResolve`); the kernel open/execve boundary and the host test share this source; the runtime path is driven by the interactive fsh shell after the harness                                                                                                              |
+| `src/mm_user.flash`             |         11 | `brk`, `stack-overflow`, `wild-pointer`, `efault-syscall`                                   | —                                                                                                                                                                                                                                           |
+| `src/utilc.flash`               |         11 | every (every print path)                                                                            | —                                                                                                                                                                                                                                           |
+| `src/klog_ring.flash`           |          8 | `klog`                                                                                              | pure overwrite-oldest ring arithmetic (push / snapshot, monotone u64 head/tail); the `main_output` tee (`src/utilc.flash`) and the slot-38 snapshot (`src/sys.flash`) are integration-tested by `[TEST] klog`                                  |
+| `src/sha256.flash`              |         17 | `authenticate` (via `sys_authenticate`)                                                             | pure compute (SHA-256 / HMAC-SHA256 / PBKDF2-HMAC-SHA256 / `ctEql`); the host vector tests (NIST FIPS 180-2, RFC 4231, published PBKDF2 set) plus `std.crypto` differentials are the gate; `sys_authenticate` and the build-time `tools/gen_shadow.zig` are the consumers                              |
+| `src/shadow.flash`              |         15 | `authenticate`, `passwd` (via `sys_authenticate` / `sys_passwd`)                                                             | pure `/etc/shadow` line parser + hex encode/decode + the same-length in-place rewrite (`rewriteLineInPlace`); the host tests pin the `user:iterations:salt_hex:hash_hex` format shared by `sys_authenticate` (verify), `sys_passwd` (rewrite), and `tools/gen_shadow.zig` (generate)                              |
+| `src/perm.flash`                |          9 | `perm`                                                                                              | pure `checkAccess` decision function; the host truth table (owner/group/other × read/write/exec × root bypass) is the gate for the permission layer; the three syscall-boundary enforcement sites (`sys_openFile` / `sys_write` / `execve`) are integration-tested by `[TEST] perm`                              |
+| `src/overlay.flash`             |         14 | `passwd` (via the seeded `PERMS.TAB`)                                                                                              | pure FAT32 permission-overlay parser + case-insensitive lookup; the host truth table (well-formed / comments / CRLF / malformed-rejects-wholesale / capacity / self-entry) is the gate for the overlay; the mount-time apply + open-time lookup live in `src/fat32_backend.flash` and are host-tested there                              |
+| `src/pwfile.flash`              |          7 | `login`, `passwd` (and `/bin/login` / `whoami` at runtime)                                                                                              | pure `/etc/passwd` parser (name + uid lookups) shared by the kernel (`sys_passwd` authorization), `/bin/login`, `/bin/passwd`, and fsh's `whoami` builtin; the host tests pin the 5-field format against `user_space/etc/passwd`                              |
+| `scripts/build_initramfs.zig` |          2 | `perm` (via the staged initramfs modes)                                                             | deterministic newc cpio encoder (a build-time host tool, not kernel code); its host tests pin the mode/uid/gid byte offsets shared with `src/initramfs.flash`'s parser — an encoder/parser drift would be a silent permission bypass                              |
+| `src/hwrng.flash`               |          6 | `rng`                                                                                               | the pure SplitMix64 mixer is vector- and differential-tested on the host; the kernel glue (`fill` / the `hwrng_init` announce) is integration-tested by `[TEST] rng` through the klog ring                                                  |
+| `user_space/lib/flibc/readline.flash` |   27 | (PID-1 hand-off)                                                                                  | pure byte→buffer line-editor cores: the append-only state machine (TAB completion action), the cursor-edit ops (insert/backspace/move/replace), and the command-history ring; the SVC driver sits behind a comptime `has_driver` gate so the host build never analyses inline asm; runtime path = the interactive fsh shell after the harness                                                                                          |
+| `user_space/lib/flibc/execvp.flash`   |   13 | (PID-1 hand-off)                                                                                  | pure `/bin/<name>` path-build; SVC driver gated like `readline`; runtime path = the interactive fsh shell after the harness                                                                                                                                                                          |
+| `user_space/lib/flibc/completion.flash` | 12 | (PID-1 hand-off)                                                                                  | pure tab-completion core (`parse` command-vs-path, `commonPrefixLen`, `classify` for the double-TAB decision); the `readdir`-driven candidate gathering + double-TAB listing live in `readline`'s completing driver; runtime path = the interactive fsh shell after the harness                                                                                  |
+| `user_space/lib/flibc/keys.flash`     |    7 | — (full-screen tools)                                                                             | pure VT100 input `Decoder` (`ESC[` arrows / ctrl / tab → `Key`); the SVC `readKey` driver is gated like `readline`; runtime path = `/bin/less` (the full-screen pager) over the serial console                                                                                                                  |
+| `user_space/lib/flibc/pager.flash`    |   10 | — (full-screen tools)                                                                             | pure scroll / line-index core (`Pager`: line indexing, `line` slicing, scroll clamping); no SVC — the render + key loop live in `/bin/less`; runtime path = `/bin/less` over the serial console |
+| `lib/console_ui/screen.flash`         |    6 | — (full-screen tools)                                                                             | pure ANSI screen renderers (alt-screen lifecycle, cursor, `Panel` box, `kv` rows); `Sink`-routed, allocator-free; the first consumers are `/bin/sysinfo` (`kv`), `/bin/less` (alt-screen + `Panel`), and `/bin/clear` (`clear`)                                                                                                                                         |
+| `user_space/fsh/tokenize.flash`       |   11 | (PID-1 hand-off)                                                                                  | pure whitespace split + single-pipe decomposition; the shell driver (`fsh.flash`) is integration-only via the PID-1 → fsh hand-off (the `type 'help' for commands` boot success marker)                                                                                                                     |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | shared bump-allocator helper consumed by other test roots; carries no inline tests of its own                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | runtime code patching; no ICache sync host-side                                                                                                                                                                                              |
 | `src/trace/fp_walk.zig`       |          6 | — (pure host)                                                                                       | AAPCS64 frame-record decoder for the `-Dtrace` sampler; the FP-walk bounds / wrap / alignment / monotonic guards are host-verified (the live sampler only fires on real-Pi async timer ticks)                                                  |
-| `src/board/*/irq.zig`         |          0 | timer ticks,`console-echo` RX                                                                     | pure MMIO; stubs would identity-read                                                                                                                                                                                                         |
-| `src/board/*/uart.zig`        |          0 | every print                                                                                         | pure MMIO                                                                                                                                                                                                                                    |
-| `src/board/*/emmc2.zig`       |          0 | `emmc2-block`                                                                                     | pure MMIO + board-specific (BCM2711 SDHCI vs. virt fake); behaviour verified on real Pi-4 hardware                                                                                                                 |
-| `src/board/rpi4b/mailbox.zig` |          0 | `emmc2-block` (via the driver's clock-rate / GPIO / power-state calls)                            | pure MMIO doorbell; message layout + parsing tested in `src/mailbox.zig`                                                                                                                                                                   |
-| `src/usb_descriptors.zig`     |         16 | — (USB-C console, Pi-HW only)                                                                     | —                                                                                                                                                                                                                                           |
-| `src/usb_tx_ring.zig`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.zig` stays hardware-verified                                                                                    |
-| `src/board/rpi4b/usb.zig`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.zig`, the TX ring in `src/usb_tx_ring.zig` |
+| `src/board/*/irq.flash`         |          0 | timer ticks,`console-echo` RX                                                                     | pure MMIO; stubs would identity-read                                                                                                                                                                                                         |
+| `src/board/*/uart.flash`        |          0 | every print                                                                                         | pure MMIO                                                                                                                                                                                                                                    |
+| `src/board/*/emmc2.flash`       |          0 | `emmc2-block`                                                                                     | pure MMIO + board-specific (BCM2711 SDHCI vs. virt fake); behaviour verified on real Pi-4 hardware                                                                                                                 |
+| `src/board/rpi4b/mailbox.flash` |          0 | `emmc2-block` (via the driver's clock-rate / GPIO / power-state calls)                            | pure MMIO doorbell; message layout + parsing tested in `src/mailbox.flash`                                                                                                                                                                   |
+| `src/usb_descriptors.flash`     |         16 | — (USB-C console, Pi-HW only)                                                                     | —                                                                                                                                                                                                                                           |
+| `src/usb_tx_ring.flash`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.flash` stays hardware-verified                                                                                    |
+| `src/board/rpi4b/usb.flash`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.flash`, the TX ring in `src/usb_tx_ring.flash` |
 
 Totals: **419 host tests** (`zig build test`) + **28 in-kernel
 EL0 scenarios** + **1 pre-PID-1 EL1 scenario** (`emmc2-block`,
 `run-virt` / `run`). The table's 39 per-module inline counts sum to
 **403**; the `zig build test` total (419) is exactly 16 higher
-because the `fork.zig` test root re-runs `src/elf.zig`'s 16 tests
+because the `fork.flash` test root re-runs `src/elf.flash`'s 16 tests
 through its direct file import — elf's tests run once under their own
-row and once inside `fork.zig`'s step. 403 + 16 = 419.
+row and once inside `fork.flash`'s step. 403 + 16 = 419.
 
 ### Output markers
 

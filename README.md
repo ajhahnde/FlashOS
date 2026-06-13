@@ -19,6 +19,7 @@
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="MIGRATION.md"><b>Migration</b></a> ·
+    <a href="PORT.md"><b>Port</b></a> ·
     <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
@@ -44,9 +45,12 @@
 ## About
 
 FlashOS is a bare-metal AArch64 kernel that boots on Raspberry Pi 4B
-hardware and under QEMU. The kernel core is written in Zig; the boot
-path, exception vectors, and context switch are AArch64 assembly. The
-build is driven entirely by `build.zig`.
+hardware and under QEMU. The kernel core is written in
+[Flash](https://github.com/ajhahnde/Flash) — a systems language that
+transpiles to Zig — with the boot path, exception vectors, and context
+switch in AArch64 assembly. The build is driven entirely by
+`build.zig`, which transpiles the `.flash` modules through a pinned
+`flashc`.
 The current release ships with a complete uniprocessor process
 lifecycle (`fork`, `exec`, `exit`, `wait`, `kill`), leak-free across
 stress cycles, exercised by an in-kernel `[TEST]/[PASS]/[FAIL]`
@@ -58,8 +62,8 @@ harness and a host-side unit test suite.
 | :--------------- | :------------------------------------------------------------------------------------ |
 | **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                      |
 | **Architecture** | AArch64 (ARMv8-A)                                                                     |
-| **Languages**    | Zig + AArch64 assembly                                                                |
-| **Toolchain**    | Zig 0.16.0 +`aarch64-elf` binutils                                                    |
+| **Languages**    | Flash (transpiled to Zig) + AArch64 assembly                                          |
+| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils                                |
 | **Targets**      | RPi 4B hardware,`qemu-system-aarch64 -M raspi4b`, _and_ `qemu-system-aarch64 -M virt` |
 
 ## Features
@@ -155,6 +159,18 @@ Install the toolchain:
 brew install zig aarch64-elf-binutils qemu
 ```
 
+FlashOS's source modules are written in
+[Flash](https://github.com/ajhahnde/Flash) and transpiled to Zig at
+build time by `flashc`. Build the pinned compiler once — `build.zig`
+looks for it at `~/Flash/zig-out/bin/flashc-stage1` by default
+(override with `-Dflashc=<path>`):
+
+```bash
+git clone https://github.com/ajhahnde/Flash.git ~/Flash
+git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
+( cd ~/Flash && zig build stage1 )   # → ~/Flash/zig-out/bin/flashc-stage1
+```
+
 Build everything for the Pi (`kernel8.img` + `armstub8.bin` land in
 `zig-out/`):
 
@@ -218,7 +234,7 @@ The default optimisation mode is `ReleaseSmall`. Override with
 ## Repository layout
 
 ```text
-src/                kernel core (Zig + AArch64 assembly)
+src/                kernel core (Flash + AArch64 assembly)
 src/board/<name>/   per-board driver bag (rpi4b / virt) + linker script
 user_space/         PID 1 image + in-kernel test harness
 user_space/lib/flibc/  userland mini-libc for ELF demos
@@ -231,6 +247,7 @@ scripts/            symbol-table generation, iso, QEMU test watchdog,
 assets/             logo and visual assets
 build.zig           the only build entry point
 build.sh            two-pass build orchestrator + deploy prompt
+flash-toolchain.lock  pinned flashc revision (Flash→Zig transpiler)
 config.txt          RPi 4 firmware configuration
 ```
 

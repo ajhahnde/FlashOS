@@ -13,6 +13,7 @@
     <a href="DOCUMENTATION.md"><b>Dokumentation</b></a> ·
     <b>Setup</b> ·
     <a href="../../MIGRATION.md"><b>Migration</b></a> ·
+    <a href="../../PORT.md"><b>Port</b></a> ·
     <a href="../../VERSIONING.md"><b>Versionierung</b></a> ·
     <a href="../../CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="../../LICENSE.md"><b>Lizenz</b></a>
@@ -47,6 +48,7 @@ Referenz:
 | Tool                       | Mindestversion | Zweck                                     |
 | :------------------------- | :-------------- | :---------------------------------------- |
 | Zig                        | 0.16.0          | Zig + Assembly kompilieren, `build.zig` ausführen |
+| `flashc`                   | pinned          | Flash-Quellen (`.flash`) nach Zig transpilieren |
 | `aarch64-elf-objcopy`    | 2.40+           | ELF → Roh-Binary                         |
 | `aarch64-elf-nm`         | 2.40+           | Symbol-Extraktion für `populate-syms`   |
 | `qemu-system-aarch64`    | 11.0.0+         | Den kernel unter QEMU ausführen           |
@@ -58,7 +60,32 @@ Unter macOS:
 brew install zig aarch64-elf-binutils qemu
 ```
 
+### Flash-Compiler (`flashc`)
+
+Die Source-Module von FlashOS sind in
+[Flash](https://github.com/ajhahnde/Flash) geschrieben und werden zur
+Build-Zeit nach Zig transpiliert. `build.zig` löst das `flashc`-Binary
+standardmäßig unter `~/Flash/zig-out/bin/flashc-stage1` auf; überschreibe
+den Pfad mit `-Dflashc=<path>`. Flash veröffentlicht keine vorgebauten
+Binaries, also baue den gepinnten, selbst-gehosteten Compiler aus dem
+Source — führe dies aus dem FlashOS-Checkout aus, damit der Pin aus
+`flash-toolchain.lock` gelesen wird:
+
+```bash
+git clone https://github.com/ajhahnde/Flash.git ~/Flash
+git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
+( cd ~/Flash && zig build stage1 )   # → ~/Flash/zig-out/bin/flashc-stage1
+```
+
+`zig build stage1` — nicht das bloße `zig build`, das nur den
+stage0-Bootstrap-Seed `flashc` ausgibt — erzeugt `flashc-stage1`, die in
+`flash-toolchain.lock` gepinnte Revision. Baue es nur dann neu, wenn sich
+dieser Pin verschiebt.
+
 ## 2. Bauen
+
+Jeder Build transpiliert die `.flash`-Source-Module mit `flashc`, also
+baue ihn zuerst (siehe §1).
 
 ```bash
 zig build                 # default: kernel8.img + armstub8.bin → zig-out/
@@ -168,7 +195,7 @@ GPIO 14/15 wird absichtlich mit der firmware geteilt. `config.txt`
 aktiviert `uart_2ndstage=1` und `dtoverlay=miniuart-bt`, was das PL011_0
 der firmware auf GPIO 14/15 leitet, sodass die `MESS:…`-Zeilen von
 `start4.elf` auf demselben Kabel sichtbar sind. Sobald der kernel läuft,
-konfiguriert `mini_uart_init` (`src/board/rpi4b/uart.zig`) die Pins auf alt5
+konfiguriert `mini_uart_init` (`src/board/rpi4b/uart.flash`) die Pins auf alt5
 (Mini-UART) um — der letzte Schreibzugriff auf den GPIO-Funktionsselektor
 gewinnt, sodass das firmware-seitige PL011_0-Routing stillschweigend ersetzt
 wird. Dies ist eine sequentielle Übergabe, kein Konflikt.
@@ -204,7 +231,7 @@ führe `piquit` aus (siehe §6).
 
 Der eigene USB-C-Port des Pi dient zugleich als Konsole. Der kernel bringt
 den DWC2-OTG-Controller des BCM2711 als **CDC-ACM-USB-Gerät**
-(`src/board/rpi4b/usb.zig`) hoch, sodass ein USB-C-↔-USB-C-Kabel zum Mac
+(`src/board/rpi4b/usb.flash`) hoch, sodass ein USB-C-↔-USB-C-Kabel zum Mac
 sowohl **Strom als auch die interaktive `fsh`-Konsole** überträgt. macOS
 bindet seinen eingebauten `AppleUSBCDCACM`-Treiber — nichts zu installieren.
 
@@ -335,4 +362,4 @@ weiterhin hält.
 
 [← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Migration →](../../MIGRATION.md)
 
-<!-- sync-ref: SETUP.md @ 4225962b633ff46a8cf0c8d5713622be836de031 | synced 2026-06-07 -->
+<!-- sync-ref: SETUP.md @ e06f2f0724a207b7327749e3bf218e1cac18a774 | synced 2026-06-13 -->
