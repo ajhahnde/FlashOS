@@ -20,7 +20,7 @@ comptime {
     _ = @import("fork.zig");
     _ = @import("execve");
     _ = @import("sys.zig");
-    _ = @import("page_alloc.zig");
+    _ = @import("page_alloc");
     _ = @import("mm_user.zig");
     _ = @import("utilc");
     _ = @import("hwrng.zig");

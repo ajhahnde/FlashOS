@@ -377,6 +377,20 @@ pub fn build(b: *std.Build) void {
     });
     elf_mod.addImport("user_layout", user_layout_mod);
 
+    // Physical page allocator (bitmap over the MALLOC pool). A leaf
+    // module — its only dependencies are assembly-side externs
+    // (memzero / main_output*). Ported to Flash and promoted to a named
+    // module: the generated .zig lives in the flashc cache, so
+    // start.zig's former file-relative @import("page_alloc.zig") could
+    // no longer resolve. The one transpile is shared with the host-test
+    // build below (src_lazy).
+    const page_alloc_src = addFlashSource(b, "src/page_alloc.flash");
+    const page_alloc_mod = b.createModule(.{
+        .root_source_file = page_alloc_src,
+        .target = target,
+        .optimize = optimize,
+    });
+
     // File handle module. Owns the open_files
     // lifetime helpers (alloc / unref / fdAlloc / fdGet / fdClose /
     // dupAll / closeAll). Imports task_layout for TaskStruct + File
@@ -629,8 +643,11 @@ pub fn build(b: *std.Build) void {
     // zombify_and_wake_parent) without re-declaring extern signatures.
     // Imports pipe + task_layout because sched.zig consumes both
     // (pipe.closeAll in do_wait_impl; TaskStruct from task_layout).
+    // Ported to Flash; the one transpile feeds the kernel module and
+    // sched's own host test below (src_lazy).
+    const sched_src = addFlashSource(b, "src/sched.flash");
     const sched_mod = b.createModule(.{
-        .root_source_file = b.path("src/sched.zig"),
+        .root_source_file = sched_src,
         .target = target,
         .optimize = optimize,
     });
@@ -748,6 +765,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("fat32_backend", fat32_backend_mod);
     kernel_mod.addImport("fat32", fat32_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
+    kernel_mod.addImport("page_alloc", page_alloc_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
     kernel_mod.addImport("mailbox", mailbox_mod);
     kernel_mod.addImport("usb_descriptors", usb_descriptors_mod);
@@ -1970,7 +1988,7 @@ pub fn build(b: *std.Build) void {
     });
 
     // vanilla single-module test targets — shared stubs, no named imports.
-    _ = addHostTest(b, test_step, .{ .src = "src/page_alloc.zig", .stubs = stubs_obj });
+    _ = addHostTest(b, test_step, .{ .src = "src/page_alloc.flash", .src_lazy = page_alloc_src, .stubs = stubs_obj });
     _ = addHostTest(b, test_step, .{
         .src = "src/elf.flash",
         .src_lazy = elf_src,
@@ -2069,7 +2087,8 @@ pub fn build(b: *std.Build) void {
     fdtable_sched_mod.addImport("file", file_sched_mod);
 
     _ = addHostTest(b, test_step, .{
-        .src = "src/sched.zig",
+        .src = "src/sched.flash",
+        .src_lazy = sched_src,
         .stubs = sched_stubs_obj,
         .imports = &.{
             .{ .name = "task_layout", .mod = task_layout_test_mod },

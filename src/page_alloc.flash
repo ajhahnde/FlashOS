@@ -1,0 +1,267 @@
+// page_alloc: physical page allocator for kernel memory.
+// Isolated from scheduler state — no dependency on task_struct.
+
+// Constants
+pub const PAGE_SIZE u64 = 1 << 12
+pub const MALLOC_START u64 = 0x40000000
+pub const MALLOC_END u64 = 0xFC000000
+pub const MALLOC_SIZE u64 = MALLOC_END - MALLOC_START
+pub const MALLOC_PAGES u64 = MALLOC_SIZE / PAGE_SIZE
+
+const LINEAR_MAP_BASE u64 = 0xFFFF000000000000
+
+fn pa_to_kva(pa u64) u64 {
+    return pa + LINEAR_MAP_BASE
+}
+
+fn kva_to_pa(kva u64) u64 {
+    return kva - LINEAR_MAP_BASE
+}
+
+// Memory map: tracks which physical pages are allocated (1 = allocated, 0 = free)
+// Stored in kernel BSS section. Must be initialized once via mem_map_init
+// from the boot path before any get_free_page / free_page / dump_free_count
+// call. The init is idempotent (re-zeroes the bitmap), so callers in test
+// code can reset state by calling it again.
+var mem_map [MALLOC_PAGES]u8 = undefined
+
+// Zero the memory bitmap. Called eagerly from kernel_main on core 0
+// before any allocator user runs.
+export fn mem_map_init() void {
+    for i in 0..MALLOC_PAGES {
+        mem_map[i] = 0
+    }
+}
+
+// Mark every page whose PA is below `end_pa` as allocated. Boot-only
+// (called from kernel_main after mem_map_init) — prevents get_free_page
+// from handing out PAs that overlap the kernel image and its reserved
+// regions. The `_kernel_pa_end` linker symbol is the canonical input on
+// each board: on virt the kernel image is loaded inside the pool window
+// (PA 0x40080000, MALLOC_START = 0x40000000), so reserving up to and
+// including the 64 MiB `.sdscratch` buffer is what keeps memzero from
+// scribbling over its own code on a deep enough allocator run (the
+// original ~9–12-fork stall). On rpi4b the kernel sits at PA 0x80000
+// — below the pool — so the reserved range is empty and this is a
+// no-op aside from the linear scan.
+export fn mem_map_reserve_below(end_pa u64) void {
+    if end_pa <= MALLOC_START { return }
+    var i usize = 0
+    while i < MALLOC_PAGES {
+        const pa u64 = MALLOC_START + #as(u64, #intCast(i)) * PAGE_SIZE
+        if pa >= end_pa { break }
+        mem_map[i] = 1
+        i += 1
+    }
+}
+
+// Mark every page whose PA is at or above `start_pa` as allocated. Used
+// on virt (`-m 1G` ⇒ RAM ends at 0x80000000) to cap the pool at the
+// actual RAM end, since MALLOC_END's RPi-derived 0xFC000000 sits beyond
+// the virt RAM window — without this, get_free_page would hand out PAs
+// that map to nothing once allocations exhausted the in-RAM half.
+export fn mem_map_reserve_above(start_pa u64) void {
+    if start_pa >= MALLOC_END { return }
+    var i usize = 0
+    while i < MALLOC_PAGES {
+        const pa u64 = MALLOC_START + #as(u64, #intCast(i)) * PAGE_SIZE
+        if pa >= start_pa { mem_map[i] = 1 }
+        i += 1
+    }
+}
+
+// Allocate a physical page; returns its physical address, or `0` on
+// exhaustion. `0` is an unambiguous sentinel: the pool starts at
+// `MALLOC_START` (0x40000000), so no live allocation is ever PA 0.
+// Callers must check `== 0` and fail their operation cleanly rather
+// than relying on the allocator to abort.
+export fn get_free_page() u64 {
+    for i in 0..MALLOC_PAGES {
+        if mem_map[i] == 0 {
+            mem_map[i] = 1 // Mark as allocated
+
+            const ret u64 = MALLOC_START + #as(u64, #intCast(i)) * PAGE_SIZE
+
+            // Zero the page before handing it out.
+            memzero(pa_to_kva(ret), PAGE_SIZE)
+
+            return ret
+        }
+    }
+
+    // Out of physical memory — return the sentinel; the caller handles it.
+    return 0
+}
+
+// Free a physical page. Argument must be a PA from get_free_page.
+export fn free_page(p u64) void {
+    const index usize = #intCast((p - MALLOC_START) / PAGE_SIZE)
+    if index < MALLOC_PAGES {
+        mem_map[index] = 0
+    }
+}
+
+// Allocate a page and return its kernel virtual address, or `0` on
+// exhaustion. The sentinel must propagate as a raw `0`: `pa_to_kva(0)`
+// is `LINEAR_MAP_BASE` (≠ 0), so wrapping the zero PA would hide the
+// failure behind a valid-looking KVA.
+export fn get_kernel_page() u64 {
+    const phys_page = get_free_page()
+    if phys_page == 0 { return 0 }
+    return pa_to_kva(phys_page)
+}
+
+// Free a kernel page. Argument must be a KVA from get_kernel_page.
+export fn free_kernel_page(kp u64) void {
+    const pa = kva_to_pa(kp)
+    free_page(pa)
+}
+
+// Print the count of currently-free physical pages over Mini-UART and
+// return it. Format: `free_pages: <16-hex>\n`. Cheap (linear scan of
+// mem_map) but only invoked at sync points by the leak-test path — a
+// kernel boot baseline in kernel_main and again from user space via
+// sys_dump_free before/after each scenario. The returned value powers
+// the in-kernel test harness's [PASS]/[FAIL] decision; void callers
+// (kernel_main) ignore it.
+export fn dump_free_count() u64 {
+    var free_count u64 = 0
+    for i in 0..MALLOC_PAGES {
+        if mem_map[i] == 0 { free_count += 1 }
+    }
+    main_output(MU, "free_pages: ")
+    main_output_u64(MU, free_count)
+    main_output(MU, "\n")
+    return free_count
+}
+
+// External C function declarations
+extern fn memzero(start u64, size u64) void
+extern fn main_output(interface i32, str [*:0]u8) void
+extern fn main_output_u64(interface i32, inw u64) void
+
+const MU i32 = 0
+
+// ---------------------------------------------------------------------------
+// Host-only unit tests. Compiled out of the kernel binary; `zig build test`
+// links each per-module test target against `tests/host_stubs.zig`, which
+// stubs the assembly-only externs (`memzero`, `panic`, `main_output*`)
+// the kernel modules normally depend on.
+// ---------------------------------------------------------------------------
+
+const std = #import("std")
+
+fn reset_for_test() void {
+    mem_map_init()
+}
+
+test "pa_to_kva / kva_to_pa round-trip" {
+    const pa u64 = MALLOC_START + 7 * PAGE_SIZE
+    try std.testing.expectEqual(pa, kva_to_pa(pa_to_kva(pa)))
+}
+
+test "mem_map_init zeroes the bitmap" {
+    for i in 0..MALLOC_PAGES { mem_map[i] = 0xFF }
+    mem_map_init()
+    for i in 0..MALLOC_PAGES {
+        try std.testing.expectEqual(#as(u8, 0), mem_map[i])
+    }
+}
+
+test "get_free_page returns sequential pages from MALLOC_START" {
+    reset_for_test()
+    const a = get_free_page()
+    const b = get_free_page()
+    const c = get_free_page()
+    try std.testing.expectEqual(#as(u64, MALLOC_START), a)
+    try std.testing.expectEqual(#as(u64, MALLOC_START + PAGE_SIZE), b)
+    try std.testing.expectEqual(#as(u64, MALLOC_START + 2 * PAGE_SIZE), c)
+}
+
+test "free_page reuses the slot on next allocation" {
+    reset_for_test()
+    const a = get_free_page()
+    _ = get_free_page()
+    free_page(a)
+    const reused = get_free_page()
+    try std.testing.expectEqual(a, reused)
+}
+
+test "dump_free_count tracks allocations" {
+    reset_for_test()
+    try std.testing.expectEqual(MALLOC_PAGES, dump_free_count())
+    _ = get_free_page()
+    _ = get_free_page()
+    _ = get_free_page()
+    try std.testing.expectEqual(MALLOC_PAGES - 3, dump_free_count())
+}
+
+test "free_page silently ignores above-range PA" {
+    reset_for_test()
+    const before = dump_free_count()
+    free_page(MALLOC_END + PAGE_SIZE)
+    free_page(MALLOC_END + 1024 * PAGE_SIZE)
+    const after = dump_free_count()
+    try std.testing.expectEqual(before, after)
+}
+
+test "get_kernel_page returns KVA of a free physical page" {
+    reset_for_test()
+    const kva = get_kernel_page()
+    try std.testing.expect(kva >= LINEAR_MAP_BASE + MALLOC_START)
+    free_kernel_page(kva)
+    try std.testing.expectEqual(MALLOC_PAGES, dump_free_count())
+}
+
+test "get_free_page returns the 0 sentinel when the pool is exhausted" {
+    reset_for_test()
+    // Mark every page allocated directly. Draining via get_free_page
+    // would rescan from index 0 on each call (O(n^2) over ~770k pages).
+    for i in 0..MALLOC_PAGES { mem_map[i] = 1 }
+    try std.testing.expectEqual(#as(u64, 0), get_free_page())
+}
+
+test "get_kernel_page propagates the 0 sentinel (not LINEAR_MAP_BASE)" {
+    reset_for_test()
+    for i in 0..MALLOC_PAGES { mem_map[i] = 1 }
+    // The raw sentinel must survive: pa_to_kva(0) == LINEAR_MAP_BASE is a
+    // non-zero, valid-looking KVA that would hide the exhaustion.
+    try std.testing.expectEqual(#as(u64, 0), get_kernel_page())
+}
+
+test "mem_map_reserve_below marks the kernel-image prefix allocated" {
+    reset_for_test()
+    // Simulate virt: the kernel image ends 5 pages into the pool. The
+    // first free page handed out must be the 6th, never a PA inside the
+    // image (the page_alloc/memzero self-corruption the fix prevents).
+    const end_pa = MALLOC_START + 5 * PAGE_SIZE
+    mem_map_reserve_below(end_pa)
+    try std.testing.expectEqual(MALLOC_PAGES - 5, dump_free_count())
+    try std.testing.expectEqual(end_pa, get_free_page())
+}
+
+test "mem_map_reserve_below is a no-op when end_pa <= MALLOC_START (rpi4b)" {
+    reset_for_test()
+    // rpi4b: kernel at PA 0x80000, far below the pool — nothing reserved.
+    mem_map_reserve_below(MALLOC_START)
+    try std.testing.expectEqual(MALLOC_PAGES, dump_free_count())
+    mem_map_reserve_below(0x80000)
+    try std.testing.expectEqual(MALLOC_PAGES, dump_free_count())
+    try std.testing.expectEqual(#as(u64, MALLOC_START), get_free_page())
+}
+
+test "mem_map_reserve_above caps the pool at the RAM end" {
+    reset_for_test()
+    // virt: RAM ends at 0x80000000, below MALLOC_END (0xFC000000). Pages
+    // at or above the cap must never be handed out (they map to nothing).
+    const ram_end u64 = 0x80000000
+    mem_map_reserve_above(ram_end)
+    const in_ram_pages = (ram_end - MALLOC_START) / PAGE_SIZE
+    try std.testing.expectEqual(in_ram_pages, dump_free_count())
+    // Drain to the cap; the page just below ram_end is the last legal one.
+    for _ in 0..(in_ram_pages - 1) { _ = get_free_page() }
+    const last = get_free_page()
+    try std.testing.expectEqual(ram_end - PAGE_SIZE, last)
+    // Pool now exhausted within the RAM window — sentinel, no OOB PA.
+    try std.testing.expectEqual(#as(u64, 0), get_free_page())
+}
