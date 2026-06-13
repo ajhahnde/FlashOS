@@ -13,13 +13,15 @@
 // raw A64 encoding through `.inst`: hvc #0 = 0xD4000002. x0 carries the
 // function id, pinned by the input constraint.
 
-const PSCI_SYSTEM_RESET: u64 = 0x8400_0009;
+const PSCI_SYSTEM_RESET u64 = 0x8400_0009
 
 pub fn reboot() noreturn {
     asm volatile (".inst 0xD4000002" // hvc #0
         :
         : [fn_id] "{x0}" (PSCI_SYSTEM_RESET),
-        : .{ .memory = true });
+        : .{ .memory = true })
     // PSCI SYSTEM_RESET does not return; spin if QEMU ever ignored it.
-    while (true) asm volatile ("wfe");
+    while true {
+        asm volatile ("wfe")
+    }
 }

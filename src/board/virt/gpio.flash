@@ -5,11 +5,11 @@
 // for the secondary tracing UART; these no-op exports satisfy those
 // symbols. No virt code path invokes them at runtime.
 
-export fn gpio_pin_set_func(pin: u8, func: u8) void {
-    _ = pin;
-    _ = func;
+export fn gpio_pin_set_func(pin u8, func u8) void {
+    _ = pin
+    _ = func
 }
 
-export fn gpio_pin_enable(pin: u8) void {
-    _ = pin;
+export fn gpio_pin_enable(pin u8) void {
+    _ = pin
 }

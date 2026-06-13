@@ -42,7 +42,7 @@
 const usb_desc = @import("usb_descriptors"); // pure: descriptors + SETUP decode
 const usb_tx_ring = @import("usb_tx_ring"); //   pure: bulk-IN TX byte-ring (host-tested)
 const mailbox = @import("mailbox"); //          pure: DEVICE_ID_USB_HCD, POWER_STATE_*
-const mbox = @import("mailbox.zig"); //          board: VideoCore MMIO doorbell
+const mbox = @import("rpi4b_mailbox"); //        board: VideoCore MMIO doorbell
 const console = @import("console"); //           board-agnostic console RX ring
 
 extern fn main_output(interface: i32, str: [*:0]const u8) void;

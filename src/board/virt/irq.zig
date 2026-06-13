@@ -18,8 +18,8 @@
 // (SPI 1, INTID 33). PSCI-driven SMP and any further peripherals
 // extend the switch in handle_irq.
 
-const Dtb = @import("dtb.zig").Dtb;
-const uart = @import("uart.zig");
+const Dtb = @import("virt_dtb").Dtb;
+const uart = @import("virt_uart");
 
 const LINEAR_MAP_BASE: u64 = 0xFFFF000000000000;
 

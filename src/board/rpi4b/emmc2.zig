@@ -39,7 +39,7 @@ const std = @import("std");
 const sdhci = @import("sdhci_cmd");
 const block_dev = @import("block_dev");
 const mailbox = @import("mailbox"); //      pure: clock-id constants
-const mbox = @import("mailbox.zig"); //     board: VideoCore MMIO doorbell
+const mbox = @import("rpi4b_mailbox"); //   board: VideoCore MMIO doorbell
 
 // Per-step debug-print: needed to know which SDHCI init step fails on
 // real hardware. main_output is the same UART sink kernel.zig uses;

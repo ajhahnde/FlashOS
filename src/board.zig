@@ -10,18 +10,18 @@
 const build_options = @import("build_options");
 
 pub const uart = switch (build_options.board) {
-    .rpi4b => @import("board/rpi4b/uart.zig"),
-    .virt => @import("board/virt/uart.zig"),
+    .rpi4b => @import("rpi4b_uart"),
+    .virt => @import("virt_uart"),
 };
 
 pub const gpio = switch (build_options.board) {
-    .rpi4b => @import("board/rpi4b/gpio.zig"),
-    .virt => @import("board/virt/gpio.zig"),
+    .rpi4b => @import("rpi4b_gpio"),
+    .virt => @import("virt_gpio"),
 };
 
 pub const timer = switch (build_options.board) {
-    .rpi4b => @import("board/rpi4b/timer.zig"),
-    .virt => @import("board/virt/timer.zig"),
+    .rpi4b => @import("rpi4b_timer"),
+    .virt => @import("virt_timer"),
 };
 
 pub const irq = switch (build_options.board) {
@@ -34,7 +34,7 @@ pub const irq = switch (build_options.board) {
 // src/board/virt/emmc2.zig).
 pub const emmc2 = switch (build_options.board) {
     .rpi4b => @import("board/rpi4b/emmc2.zig"),
-    .virt => @import("board/virt/emmc2.zig"),
+    .virt => @import("virt_emmc2"),
 };
 
 // usb: BCM2711 DWC2 USB-OTG gadget (CDC-ACM console) on rpi4b; no-op
@@ -42,7 +42,7 @@ pub const emmc2 = switch (build_options.board) {
 // src/board/virt/usb.zig).
 pub const usb = switch (build_options.board) {
     .rpi4b => @import("board/rpi4b/usb.zig"),
-    .virt => @import("board/virt/usb.zig"),
+    .virt => @import("virt_usb"),
 };
 
 // power: machine reset. BCM2711 watchdog full-reset on rpi4b; PSCI
@@ -50,6 +50,6 @@ pub const usb = switch (build_options.board) {
 // (SYS_REBOOT) — power.zig exports no driver `export fn`, so the call
 // site pulls it in, not a start.zig side-effect import.
 pub const power = switch (build_options.board) {
-    .rpi4b => @import("board/rpi4b/power.zig"),
-    .virt => @import("board/virt/power.zig"),
+    .rpi4b => @import("rpi4b_power"),
+    .virt => @import("virt_power"),
 };

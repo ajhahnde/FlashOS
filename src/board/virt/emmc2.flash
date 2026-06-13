@@ -14,9 +14,9 @@
 // virt storage. The on-disk abstraction (`block_dev.BlockDev`) is
 // stable enough that the swap is a one-file change.
 
-const block_dev = @import("block_dev");
+const block_dev = #import("block_dev")
 
-const SCRATCH_BLOCKS: u32 = 128 * 1024; // 64 MiB / 512 B per block
+const SCRATCH_BLOCKS u32 = 128 * 1024 // 64 MiB / 512 B per block
 
 // `linksection(".sdscratch")`: keep this 64 MiB fake disk OUT of
 // `.bss`. With `scratch` alive in `.bss`, `bss_end` lands 64 MiB past
@@ -25,7 +25,7 @@ const SCRATCH_BLOCKS: u32 = 128 * 1024; // 64 MiB / 512 B per block
 // section (placed outside bss_begin..bss_end in src/board/virt/
 // linker.ld) keeps bss_end reachable. init() @memsets the buffer
 // itself, so it does not need boot.S's bss memzero — safe to exclude.
-var scratch: [@as(usize, SCRATCH_BLOCKS) * 512]u8 linksection(".sdscratch") = undefined;
+var scratch [#as(usize, SCRATCH_BLOCKS) * 512]u8 linksection(".sdscratch") = undefined
 
 // Init signature mirrors the rpi4b counterpart's i32 return
 // so kernel.zig can branch uniformly on failure. The virt fake has
@@ -33,21 +33,25 @@ var scratch: [@as(usize, SCRATCH_BLOCKS) * 512]u8 linksection(".sdscratch") = un
 // negative-return as a soft failure (log + continue) so the contract
 // holds across boards.
 pub fn init() i32 {
-    @memset(&scratch, 0);
-    block_dev.sd_dev = .{ .read_fn = read_block, .write_fn = write_block };
-    return 0;
+    #memset(&scratch, 0)
+    block_dev.sd_dev = .{ .read_fn = read_block, .write_fn = write_block }
+    return 0
 }
 
-pub fn read_block(lba: u32, buf: *[512]u8) callconv(.c) i32 {
-    if (lba >= SCRATCH_BLOCKS) return -1;
-    const off: usize = @as(usize, lba) * 512;
-    @memcpy(buf, scratch[off..][0..512]);
-    return 0;
+pub fn read_block(lba u32, buf *mut [512]u8) callconv(.c) i32 {
+    if lba >= SCRATCH_BLOCKS {
+        return -1
+    }
+    const off usize = #as(usize, lba) * 512
+    #memcpy(buf, scratch[off..][0..512])
+    return 0
 }
 
-pub fn write_block(lba: u32, buf: *const [512]u8) callconv(.c) i32 {
-    if (lba >= SCRATCH_BLOCKS) return -1;
-    const off: usize = @as(usize, lba) * 512;
-    @memcpy(scratch[off..][0..512], buf);
-    return 0;
+pub fn write_block(lba u32, buf *[512]u8) callconv(.c) i32 {
+    if lba >= SCRATCH_BLOCKS {
+        return -1
+    }
+    const off usize = #as(usize, lba) * 512
+    #memcpy(scratch[off..][0..512], buf)
+    return 0
 }

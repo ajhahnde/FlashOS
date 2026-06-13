@@ -533,6 +533,60 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Per-board driver leaves (src/board/<board>/*). Ported to Flash, these
+    // can no longer be reached by src/board.zig's relative `@import(
+    // "board/<board>/x.zig")` — the generated .zig lives in the build cache.
+    // Each is promoted to a named module; board.zig's comptime switch selects
+    // the active board's prong via the named import below. The non-selected
+    // prong is dead comptime code, so registering both boards' leaves here is
+    // harmless (the unused module is never compiled).
+    const virt_timer_src = addFlashSource(b, "src/board/virt/timer.flash");
+    const virt_timer_mod = b.createModule(.{
+        .root_source_file = virt_timer_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    const virt_gpio_src = addFlashSource(b, "src/board/virt/gpio.flash");
+    const virt_gpio_mod = b.createModule(.{
+        .root_source_file = virt_gpio_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    const virt_power_src = addFlashSource(b, "src/board/virt/power.flash");
+    const virt_power_mod = b.createModule(.{
+        .root_source_file = virt_power_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    const virt_usb_src = addFlashSource(b, "src/board/virt/usb.flash");
+    const virt_usb_mod = b.createModule(.{
+        .root_source_file = virt_usb_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    const virt_emmc2_src = addFlashSource(b, "src/board/virt/emmc2.flash");
+    const virt_emmc2_mod = b.createModule(.{
+        .root_source_file = virt_emmc2_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    virt_emmc2_mod.addImport("block_dev", block_dev_mod);
+    // FDT parser — a sibling of uart/irq, not a board.zig switch prong;
+    // virt_uart and virt_irq reach it as the named "virt_dtb" import.
+    const virt_dtb_src = addFlashSource(b, "src/board/virt/dtb.flash");
+    const virt_dtb_mod = b.createModule(.{
+        .root_source_file = virt_dtb_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    const virt_uart_src = addFlashSource(b, "src/board/virt/uart.flash");
+    const virt_uart_mod = b.createModule(.{
+        .root_source_file = virt_uart_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    virt_uart_mod.addImport("virt_dtb", virt_dtb_mod);
+
     // Kernel-log byte-ring (overwrite-oldest) backing dmesg. Pure
     // data + logic; src/utilc.zig tees main_output into it and src/sys.zig
     // snapshots it for sys_klog_read — both reach the one `klog` global
@@ -820,6 +874,46 @@ pub fn build(b: *std.Build) void {
     kernel_kmod.addImport("console_ui", console_ui_mod);
     kernel_kmod.addImport("build_options", build_options_mod);
 
+    // rpi4b board driver leaves promoted to Flash named modules (same
+    // pattern as the virt set above). gpio/timer/power/uart are board.zig
+    // switch prongs; rpi4b_mailbox is the VideoCore MMIO doorbell consumed
+    // by the still-Zig rpi4b emmc2/usb drivers (it can't take the name
+    // "mailbox" — that's the pure message-layout data module it imports).
+    // Created here so rpi4b_uart can reach console_mod and rpi4b_mailbox
+    // can reach mailbox_mod.
+    const rpi4b_gpio_src = addFlashSource(b, "src/board/rpi4b/gpio.flash");
+    const rpi4b_gpio_mod = b.createModule(.{
+        .root_source_file = rpi4b_gpio_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    const rpi4b_timer_src = addFlashSource(b, "src/board/rpi4b/timer.flash");
+    const rpi4b_timer_mod = b.createModule(.{
+        .root_source_file = rpi4b_timer_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    const rpi4b_power_src = addFlashSource(b, "src/board/rpi4b/power.flash");
+    const rpi4b_power_mod = b.createModule(.{
+        .root_source_file = rpi4b_power_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    const rpi4b_mailbox_src = addFlashSource(b, "src/board/rpi4b/mailbox.flash");
+    const rpi4b_mailbox_mod = b.createModule(.{
+        .root_source_file = rpi4b_mailbox_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    rpi4b_mailbox_mod.addImport("mailbox", mailbox_mod);
+    const rpi4b_uart_src = addFlashSource(b, "src/board/rpi4b/uart.flash");
+    const rpi4b_uart_mod = b.createModule(.{
+        .root_source_file = rpi4b_uart_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    rpi4b_uart_mod.addImport("console", console_mod);
+
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/start.zig"),
@@ -909,6 +1003,26 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("mailbox", mailbox_mod);
     kernel_mod.addImport("usb_descriptors", usb_descriptors_mod);
     kernel_mod.addImport("usb_tx_ring", usb_tx_ring_mod);
+    // Per-board driver leaves promoted to named modules (see comment above
+    // their createModule). board.zig's comptime switch picks the active set.
+    kernel_mod.addImport("virt_timer", virt_timer_mod);
+    kernel_mod.addImport("virt_gpio", virt_gpio_mod);
+    kernel_mod.addImport("virt_power", virt_power_mod);
+    kernel_mod.addImport("virt_usb", virt_usb_mod);
+    kernel_mod.addImport("virt_emmc2", virt_emmc2_mod);
+    // virt_dtb + virt_uart: board.zig's uart prong selects virt_uart; the
+    // still-Zig virt/irq.zig reaches both by name (its dtb.zig/uart.zig
+    // siblings moved to Flash). virt/irq.flash is written but its wiring
+    // waits on the trace-cluster named-module promotion (Phase H trace step).
+    kernel_mod.addImport("virt_dtb", virt_dtb_mod);
+    kernel_mod.addImport("virt_uart", virt_uart_mod);
+    // rpi4b board leaves: gpio/timer/power/uart are board.zig prongs;
+    // rpi4b_mailbox is reached by the still-Zig rpi4b emmc2/usb drivers.
+    kernel_mod.addImport("rpi4b_gpio", rpi4b_gpio_mod);
+    kernel_mod.addImport("rpi4b_timer", rpi4b_timer_mod);
+    kernel_mod.addImport("rpi4b_power", rpi4b_power_mod);
+    kernel_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
+    kernel_mod.addImport("rpi4b_uart", rpi4b_uart_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
     kernel_mod.addImport("utilc", utilc_mod);
     kernel_mod.addImport("sha256", sha256_mod);
@@ -2081,7 +2195,7 @@ pub fn build(b: *std.Build) void {
     // linear map, so it stays kernel-only; the tests build a `Dtb` over a
     // hand-written blob and exercise findNode/getProp/findReg/findInterrupt
     // plus the corrupt-length guard. Imports only std → no stubs.
-    _ = addHostTest(b, test_step, .{ .src = "src/board/virt/dtb.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/board/virt/dtb.flash", .src_lazy = virt_dtb_src });
 
     // Host-target build of the Flash-sourced elf module for fork.zig's
     // @import("elf"). Shares the one flashc transpile (elf_src); the kernel

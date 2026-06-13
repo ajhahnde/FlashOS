@@ -10,7 +10,7 @@
 // Nothing to initialize; report success so the kernel boot log reads
 // clean on virt (the rpi4b driver fails soft with -1 on a missing core).
 pub fn usb_init() i32 {
-    return 0;
+    return 0
 }
 
 // No controller to service.
@@ -18,11 +18,11 @@ pub fn poll() void {}
 
 // Never enumerates on virt — the console mux falls back to UART.
 pub fn enumerated() bool {
-    return false;
+    return false
 }
 
 // No bulk-IN endpoint on virt; the console mux never routes here (enumerated()
 // is always false). Present only so board.usb.cdc_tx type-checks on both boards.
-pub fn cdc_tx(data: []const u8) void {
-    _ = data;
+pub fn cdc_tx(data []u8) void {
+    _ = data
 }
