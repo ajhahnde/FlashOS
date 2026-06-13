@@ -17,11 +17,11 @@ comptime {
     _ = board.emmc2;
     _ = board.usb;
     _ = @import("sched");
-    _ = @import("fork.zig");
+    _ = @import("fork");
     _ = @import("execve");
     _ = @import("sys.zig");
     _ = @import("page_alloc");
-    _ = @import("mm_user.zig");
+    _ = @import("mm_user");
     _ = @import("utilc");
     _ = @import("hwrng");
 

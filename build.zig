@@ -212,6 +212,16 @@ pub fn build(b: *std.Build) void {
     ) orelse false;
     build_options.addOption(bool, "trace", trace);
 
+    // One shared build_options module for every module that links into the
+    // kernel ELF. `addOptions` would mint a *new* module from the same
+    // generated options.zig per call; once fork.zig became its own Flash
+    // module (it imports build_options for the verbose-fork gate) that second
+    // module collided with kernel_mod's — "file exists in modules
+    // 'build_options' and 'build_options0'". A single createModule() shared
+    // via addImport keeps the file in exactly one module. Standalone
+    // executables / host tests are separate compilations and keep addOptions.
+    const build_options_mod = build_options.createModule();
+
     // Coverage builds force the LLVM backend for host test binaries:
     // zig's self-hosted x86_64 backend (the Debug-mode default on
     // x86_64-linux) emits DWARF that kcov cannot read, so coverage data
@@ -390,6 +400,21 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    // User-page mapping + page-table walk + the EL0 fault handlers.
+    // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
+    // pulls the export fns into the ELF with `_ = @import("mm_user")`;
+    // sys.zig / fork.zig reach copy_from_user / map_page / do_data_abort
+    // through C-ABI `extern fn`. The one transpile is shared with the
+    // host-test build below (src_lazy).
+    const mm_user_src = addFlashSource(b, "src/mm_user.flash");
+    const mm_user_mod = b.createModule(.{
+        .root_source_file = mm_user_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    mm_user_mod.addImport("task_layout", task_layout_mod);
+    mm_user_mod.addImport("user_layout", user_layout_mod);
 
     // File handle module. Owns the open_files
     // lifetime helpers (alloc / unref / fdAlloc / fdGet / fdClose /
@@ -698,6 +723,27 @@ pub fn build(b: *std.Build) void {
     execve_mod.addImport("perm", perm_mod);
     execve_mod.addImport("syscall_defs", syscall_defs_mod);
 
+    // Process creation + move-to-user ELF loader. Ported to Flash; flashc
+    // transpiles it via addFlashSource. start.zig pulls the export fns
+    // (copy_process_impl / prepare_move_to_user_elf / move_to_user_elf_argv)
+    // into the ELF with `_ = @import("fork")`; sys.zig / kernel.zig reach
+    // them through C-ABI `extern fn`. fork imports execve for the ArgvBlock
+    // type (execve itself reaches back through the exported trampoline, so
+    // there is no import cycle). The one transpile is shared with the
+    // host-test build below (src_lazy).
+    const fork_src = addFlashSource(b, "src/fork.flash");
+    const fork_mod = b.createModule(.{
+        .root_source_file = fork_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    fork_mod.addImport("task_layout", task_layout_mod);
+    fork_mod.addImport("fdtable", fdtable_mod);
+    fork_mod.addImport("user_layout", user_layout_mod);
+    fork_mod.addImport("elf", elf_mod);
+    fork_mod.addImport("execve", execve_mod);
+    fork_mod.addImport("build_options", build_options_mod);
+
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/start.zig"),
@@ -760,7 +806,7 @@ pub fn build(b: *std.Build) void {
     // so the default kernel image is byte-identical.
     if (trace) kernel_mod.addCMacro("FLASHOS_TRACE", "1");
 
-    kernel_mod.addOptions("build_options", build_options);
+    kernel_mod.addImport("build_options", build_options_mod);
     kernel_mod.addImport("syscall_defs", syscall_defs_mod);
     kernel_mod.addImport("user_layout", user_layout_mod);
     kernel_mod.addImport("task_layout", task_layout_mod);
@@ -780,6 +826,8 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("fat32", fat32_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
     kernel_mod.addImport("page_alloc", page_alloc_mod);
+    kernel_mod.addImport("mm_user", mm_user_mod);
+    kernel_mod.addImport("fork", fork_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
     kernel_mod.addImport("mailbox", mailbox_mod);
     kernel_mod.addImport("usb_descriptors", usb_descriptors_mod);
@@ -1966,7 +2014,8 @@ pub fn build(b: *std.Build) void {
     elf_for_fork_mod.addImport("user_layout", user_layout_test_mod);
 
     const fork_test_mod = addHostTest(b, test_step, .{
-        .src = "src/fork.zig",
+        .src = "src/fork.flash",
+        .src_lazy = fork_src,
         .stubs = b.addObject(.{
             .name = "host_stubs_fork",
             .root_module = host_stubs_fork_mod,
@@ -1991,7 +2040,8 @@ pub fn build(b: *std.Build) void {
     });
     mm_user_stubs_mod.addImport("task_layout", task_layout_test_mod);
     _ = addHostTest(b, test_step, .{
-        .src = "src/mm_user.zig",
+        .src = "src/mm_user.flash",
+        .src_lazy = mm_user_src,
         .stubs = b.addObject(.{
             .name = "host_stubs_mm_user",
             .root_module = mm_user_stubs_mod,
