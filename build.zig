@@ -627,6 +627,19 @@ pub fn build(b: *std.Build) void {
     });
     hwrng_mod.addImport("console_ui", console_ui_mod);
 
+    // generic_timer — generic ARM timer driver (absolute CNTP_CVAL cadence).
+    // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
+    // pulls generic_timer_init / handle_generic_timer into the ELF with
+    // `_ = @import("generic_timer")`; kernel.zig calls generic_timer_init via
+    // a C-ABI `extern fn` and irq.S reaches handle_generic_timer by symbol.
+    // Pure externs — no module imports.
+    const generic_timer_src = addFlashSource(b, "src/generic_timer.flash");
+    const generic_timer_mod = b.createModule(.{
+        .root_source_file = generic_timer_src,
+        .target = target,
+        .optimize = optimize,
+    });
+
     // FAT32 on-disk layout decode + cluster/FAT/dir helpers.
     // Pure data-shape module — no VFS / file / page
     // imports; takes the BlockDev vtable by runtime pointer so the
@@ -755,11 +768,12 @@ pub fn build(b: *std.Build) void {
     // start.zig to a named module — the generated .zig lives in the build
     // cache, so the path import no longer resolves. start.zig force-includes
     // it (`_ = @import("sys")`) so the dispatch table + every export fn land
-    // in the ELF; entry.S reaches sys_call_table by symbol and kernel.zig
+    // in the ELF; entry.S reaches sys_call_table by symbol and kernel.flash
     // calls sys_call_table_relocate through a C-ABI `extern fn`. The board
     // driver bag is not imported here — sys reaches its three board entry
-    // points through C-ABI trampolines in src/kernel.zig (board stays in the
-    // kernel root module). No host test: sys.zig carries no test blocks.
+    // points through C-ABI trampolines in src/start.zig (the kernel root
+    // module, which still imports board.zig). No host test: sys.zig carries
+    // no test blocks.
     const sys_src = addFlashSource(b, "src/sys.flash");
     const sys_mod = b.createModule(.{
         .root_source_file = sys_src,
@@ -782,6 +796,29 @@ pub fn build(b: *std.Build) void {
     sys_mod.addImport("perm", perm_mod);
     sys_mod.addImport("pwfile", pwfile_mod);
     sys_mod.addImport("hwrng", hwrng_mod);
+
+    // Boot sequence + main loop. Ported to Flash; flashc transpiles it via
+    // addFlashSource. Moved from a relative `@import("kernel.zig")` in
+    // start.zig to a named module — the generated .zig lives in the build
+    // cache, so the path import no longer resolves. start.zig force-includes
+    // it (`_ = @import("kernel")`) so kernel_main_impl + the other export fns
+    // land in the ELF; boot.S/entry.S reach kernel_main by symbol. The board
+    // driver bag is not imported here — kernel reaches its board entry points
+    // through C-ABI trampolines in src/start.zig (the kernel root still
+    // imports board.zig directly). No host test: kernel.zig carries no tests.
+    const kernel_src = addFlashSource(b, "src/kernel.flash");
+    const kernel_kmod = b.createModule(.{
+        .root_source_file = kernel_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    kernel_kmod.addImport("initramfs", initramfs_mod);
+    kernel_kmod.addImport("initramfs_backend", initramfs_backend_mod);
+    kernel_kmod.addImport("fat32_backend", fat32_backend_mod);
+    kernel_kmod.addImport("fdtable", fdtable_mod);
+    kernel_kmod.addImport("task_layout", task_layout_mod);
+    kernel_kmod.addImport("console_ui", console_ui_mod);
+    kernel_kmod.addImport("build_options", build_options_mod);
 
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
@@ -885,6 +922,8 @@ pub fn build(b: *std.Build) void {
     // @imported by any kernel source, so the kernel image stays byte-identical
     // until the migration call sites land.
     kernel_mod.addImport("console_ui", console_ui_mod);
+    kernel_mod.addImport("generic_timer", generic_timer_mod);
+    kernel_mod.addImport("kernel", kernel_kmod);
 
     // ---- hello.elf — payload for [TEST] exec-elf ----
     // Built as a standalone aarch64-freestanding ET_EXEC, staged into
