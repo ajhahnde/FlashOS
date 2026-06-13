@@ -4,69 +4,75 @@
 // Syscall IDs come from lib/syscall_defs.zig — the single source of
 // truth shared with user_space/kernel_tests.zig.
 
-const std = @import("std");
-const layout = @import("task_layout");
-const defs = @import("syscall_defs");
-const user_layout = @import("user_layout");
-const pipe_mod = @import("pipe");
-const console = @import("console");
-const sched = @import("sched");
-const vfs = @import("vfs");
-const file_mod = @import("file");
-const fdtable = @import("fdtable");
-const path_mod = @import("path");
-const klog_ring = @import("klog_ring");
-const sha256 = @import("sha256");
-const shadow = @import("shadow");
-const perm = @import("perm");
-const pwfile = @import("pwfile");
+const std = #import("std")
+const layout = #import("task_layout")
+const defs = #import("syscall_defs")
+const user_layout = #import("user_layout")
+const pipe_mod = #import("pipe")
+const console = #import("console")
+const sched = #import("sched")
+const vfs = #import("vfs")
+const file_mod = #import("file")
+const fdtable = #import("fdtable")
+const path_mod = #import("path")
+const klog_ring = #import("klog_ring")
+const sha256 = #import("sha256")
+const shadow = #import("shadow")
+const perm = #import("perm")
+const pwfile = #import("pwfile")
 // Kernel entropy source (salt minting for sys_passwd). Named module —
 // hwrng was promoted to a named module when it moved to Flash (the
 // generated .zig lives in the build cache, so a path import would not
 // resolve); start.zig force-includes the same module for the exported
 // hwrng_init, same pattern as sched/execve/utilc.
-const hwrng = @import("hwrng");
-// USB-C gadget console: board bag, for the console_tx mux below.
-// Path-import — sys.zig shares the kernel root module with board.zig
-// (kernel.zig imports it the same way). No cycle: board's driver modules
-// reach the kernel via `extern fn main_output`, they never @import sys.
-const board = @import("board.zig");
-const TaskStruct = layout.TaskStruct;
-const UTHREAD = layout.UTHREAD;
-const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT;
+const hwrng = #import("hwrng")
+const TaskStruct = layout.TaskStruct
+const UTHREAD = layout.UTHREAD
+const MAX_PAGE_COUNT = layout.MAX_PAGE_COUNT
 
-const MU: i32 = 0;
-const NR_TASKS: usize = 64;
-const PAGE_SIZE: u64 = 1 << 12;
+const MU i32 = 0
+const NR_TASKS usize = 64
+const PAGE_SIZE u64 = 1 << 12
 
-extern var current: ?*TaskStruct;
-extern var task: [NR_TASKS]?*TaskStruct;
-extern fn preempt_disable() void;
-extern fn preempt_enable() void;
+extern var current ?*mut TaskStruct
+extern var task [NR_TASKS]?*mut TaskStruct
+extern fn preempt_disable() void
+extern fn preempt_enable() void
 
-extern fn main_output(interface: i32, str: [*:0]const u8) void;
-extern fn copy_process(clone_flags: u64, fn_ptr: u64, arg: u64) i32;
-extern fn exit_process() void;
-extern fn do_wait() i32;
-extern fn dump_free_count() u64;
+extern fn main_output(interface i32, str [*:0]u8) void
+extern fn copy_process(clone_flags u64, fn_ptr u64, arg u64) i32
+extern fn exit_process() void
+extern fn do_wait() i32
+extern fn dump_free_count() u64
 // Body lives in src/execve.zig; sys_execve below is the dispatch-table
 // wrapper. Activates the real path-resolve → stream-PT_LOAD →
 // encode-argv flow.
-extern fn execve_impl(path_ptr: u64, argv_ptr: u64) i32;
-extern fn unmap_user_range(t: *TaskStruct, start_uva: u64, end_uva: u64) void;
-extern fn set_pgd(pgd: u64) void;
-extern fn check_and_prefault_user_range(uva: u64, len: u64) i32;
-extern fn copy_from_user(kbuf: [*]u8, uva: u64, len: u64) i32;
-extern fn copy_to_user(uva: u64, kbuf: [*]const u8, len: u64) i32;
+extern fn execve_impl(path_ptr u64, argv_ptr u64) i32
+extern fn unmap_user_range(t *mut TaskStruct, start_uva u64, end_uva u64) void
+extern fn set_pgd(pgd u64) void
+extern fn check_and_prefault_user_range(uva u64, len u64) i32
+extern fn copy_from_user(kbuf [*]mut u8, uva u64, len u64) i32
+extern fn copy_to_user(uva u64, kbuf [*]u8, len u64) i32
 
-const builtin = @import("builtin");
+// Board driver bag, reached through C-ABI trampolines in src/kernel.zig.
+// board.zig is imported relatively into the kernel root module (drivers
+// pull their siblings via relative paths), so a leaf Flash module — whose
+// generated .zig lives in the build cache — cannot @import it. kernel.zig
+// (which is in the root and imports board) exports these thin wrappers, the
+// same boundary fork.zig bridges with move_to_user_elf_argv. The usb pair
+// backs console_tx; board_power_reboot backs sys_reboot.
+extern fn board_usb_enumerated() bool
+extern fn board_usb_cdc_tx(ptr [*]u8, len u64) void
+extern fn board_power_reboot() noreturn
+
+const builtin = #import("builtin")
 
 // Syscalls run at EL1h with TTBR0 holding the *user* pgd (set by
 // prepare_move_to_user_elf). Each function pointer is ORed with
 // LINEAR_MAP_BASE so the `blr` in el0_svc lands in the kernel's
 // high-mem mapping. Replaces the earlier broken `cur + &_start`
 // formula, which doubled the address into .bss.
-const LINEAR_MAP_BASE: u64 = if (builtin.target.os.tag == .freestanding) 0xFFFF000000000000 else 0;
+const LINEAR_MAP_BASE u64 = if (builtin.target.os.tag == .freestanding) 0xFFFF000000000000 else 0
 
 // Console echo flags. Default off preserves the historical
 // split — the kernel never echoes, userland readline owns echo (so fsh is
@@ -75,12 +81,12 @@ const LINEAR_MAP_BASE: u64 = if (builtin.target.os.tag == .freestanding) 0xFFFF0
 // echoes a '*' per printable byte instead (password masking). /bin/login
 // turns echo on for the username prompt and mask on for the password, then
 // leaves both off before exec'ing the shell.
-var console_echo: bool = false;
-var console_mask: bool = false;
+var console_echo bool = false
+var console_mask bool = false
 
 // SYS CALL PROCESS CONTROL
 export fn sys_fork() i32 {
-    return copy_process(UTHREAD, 0, 0);
+    return copy_process(UTHREAD, 0, 0)
 }
 // Path-resolved ELF loader. Thin wrapper over execve_impl
 // in src/execve.zig — keeps the dispatch-table binding adjacent to
@@ -88,14 +94,14 @@ export fn sys_fork() i32 {
 // absolute UVA), x1 = argv_ptr (UVA of NULL-terminated argv array).
 // Returns 0 (does-not-return on success — eret jumps to e_entry),
 // -1 on resolve / parse / alloc / argv-fault failure.
-export fn sys_execve(path_ptr: u64, argv_ptr: u64) i32 {
-    return execve_impl(path_ptr, argv_ptr);
+export fn sys_execve(path_ptr u64, argv_ptr u64) i32 {
+    return execve_impl(path_ptr, argv_ptr)
 }
 export fn sys_wait() i32 {
-    return do_wait();
+    return do_wait()
 }
 export fn sys_exit() void {
-    exit_process();
+    exit_process()
 }
 // SYS_REBOOT — reset the board. board.power.reboot() is the per-board
 // reset (PSCI SYSTEM_RESET on virt, the BCM2711 watchdog on rpi4b) and
@@ -103,7 +109,7 @@ export fn sys_exit() void {
 // eret back to the caller. EL0 cannot do this itself (privileged SMC /
 // MMIO), which is why it is a syscall. No privilege gate yet.
 export fn sys_reboot() noreturn {
-    board.power.reboot();
+    board_power_reboot()
 }
 // Walk task[] under preempt_disable for a matching .pid. On hit: flip to
 // TASK_ZOMBIE and wake any TASK_INTERRUPTIBLE parent (mirrors exit_process
@@ -111,27 +117,28 @@ export fn sys_reboot() noreturn {
 // reaps it (frees user/kernel pages + the kernel page itself). Returns 0
 // on hit, -1 on miss. Self-kill is rejected — the running task is its own
 // kernel page; sys_exit is the safe self-cancel path.
-export fn sys_kill(pid: i32) i32 {
-    if (current) |c| {
-        if (c.pid == pid) return -1;
+export fn sys_kill(pid i32) i32 {
+    if current |c| {
+        if c.pid == pid { return -1 }
     }
 
-    preempt_disable();
-    var i: usize = 0;
-    while (i < NR_TASKS) : (i += 1) {
-        if (task[i]) |t| {
-            if (t.pid == pid) {
-                sched.zombify_and_wake_parent(t);
-                preempt_enable();
-                return 0;
+    preempt_disable()
+    var i usize = 0
+    while i < NR_TASKS {
+        if task[i] |t| {
+            if t.pid == pid {
+                sched.zombify_and_wake_parent(t)
+                preempt_enable()
+                return 0
             }
         }
+        i += 1
     }
-    preempt_enable();
-    return -1;
+    preempt_enable()
+    return -1
 }
 export fn sys_dump_free() u64 {
-    return dump_free_count();
+    return dump_free_count()
 }
 
 // SYS CALL FILE SYSTEM
@@ -149,9 +156,9 @@ export fn sys_dump_free() u64 {
 
 // Re-type File.sb (an `?*anyopaque`, opaque to break the vfs<->file
 // import cycle) back to `*vfs.SuperBlock` for vtable dispatch.
-inline fn vfsSb(f: *file_mod.File) ?*vfs.SuperBlock {
-    const raw = f.sb orelse return null;
-    return @ptrCast(@alignCast(raw));
+inline fn vfsSb(f *mut file_mod.File) ?*mut vfs.SuperBlock {
+    const raw = f.sb orelse return null
+    return #ptrCast(#alignCast(raw))
 }
 
 // sys_openFile + joinResolve form the deepest kernel-stack chain on the
@@ -163,24 +170,25 @@ inline fn vfsSb(f: *file_mod.File) ?*vfs.SuperBlock {
 // credentials. Keeping the buffers off the stack bounds the frame well
 // clear of the creds. preempt_disable serialises the shared statics across
 // the whole resolve + open; the defer covers every early-return error path.
-var open_path_buf: [1024]u8 = undefined;
-var open_join_buf: [layout.CWD_SIZE]u8 = undefined;
+var open_path_buf [1024]u8 = undefined
+var open_join_buf [layout.CWD_SIZE]u8 = undefined
 
-export fn sys_openFile(path_ptr: u64) i32 {
-    const c = current orelse return -1;
+export fn sys_openFile(path_ptr u64) i32 {
+    const c = current orelse return -1
 
-    preempt_disable();
-    defer preempt_enable();
+    preempt_disable()
+    defer preempt_enable()
 
-    var i: usize = 0;
-    while (i < 1023) : (i += 1) {
-        var b: u8 = 0;
-        if (copy_from_user(@ptrCast(&b), path_ptr + i, 1) < 0) return -1;
-        open_path_buf[i] = b;
-        if (b == 0) break;
+    var i usize = 0
+    while i < 1023 {
+        var b u8 = 0
+        if copy_from_user(#ptrCast(&b), path_ptr + i, 1) < 0 { return -1 }
+        open_path_buf[i] = b
+        if b == 0 { break }
+        i += 1
     }
-    open_path_buf[i] = 0;
-    const raw_path = std.mem.span(@as([*:0]const u8, @ptrCast(&open_path_buf)));
+    open_path_buf[i] = 0
+    const raw_path = std.mem.span(#as([*:0]u8, #ptrCast(&open_path_buf)))
 
     // Relative paths (no leading '/') are joined against current.cwd
     // and `.` / `..` collapsed into a kernel scratch buffer; absolute
@@ -188,76 +196,77 @@ export fn sys_openFile(path_ptr: u64) i32 {
     // (still absolute-only) sees. The pure helper is host-tested. Join
     // buffer is sized to one CWD_SIZE — over-long resolved paths
     // (cwd 256B + rel 256B before collapse) return -1.
-    const resolved: []const u8 = if (raw_path.len > 0 and raw_path[0] == '/')
-        raw_path
-    else blk: {
-        const cwd_slice = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&c.cwd)), 0);
-        break :blk path_mod.joinResolve(cwd_slice, raw_path, &open_join_buf) orelse return -1;
-    };
+    var resolved []u8 = undefined
+    if raw_path.len > 0 && raw_path[0] == '/' {
+        resolved = raw_path
+    } else {
+        const cwd_slice = std.mem.sliceTo(#as([*:0]u8, #ptrCast(&c.cwd)), 0)
+        resolved = path_mod.joinResolve(cwd_slice, raw_path, &open_join_buf) orelse return -1
+    }
 
-    var open_result: vfs.OpenResult = .{};
-    const sb = vfs.vfs_open(resolved, &open_result);
+    var open_result vfs.OpenResult = .{}
+    const sb = vfs.vfs_open(resolved, &open_result)
 
-    if (sb == null) return -1;
+    if sb == null { return -1 }
 
     // Permission gate: open is read-intent (this ABI has no
     // open flags — write permission is re-checked per write). A denied
     // read returns -EACCES, distinguishable from the -1 miss above, and
     // costs no File page since the check runs before the alloc.
-    if (!perm.checkAccess(
+    if !perm.checkAccess(
         open_result.mode,
         open_result.uid,
         open_result.gid,
         c.euid,
         c.egid,
-        .read,
-    )) return -defs.EACCES;
+        .read
+    ) { return -defs.EACCES }
 
-    const f = file_mod.alloc() orelse return -1;
-    f.refs = 1;
-    f.private = open_result.private;
-    f.size = open_result.size;
-    f.offset = 0;
-    f.sb = sb;
+    const f = file_mod.alloc() orelse return -1
+    f.refs = 1
+    f.private = open_result.private
+    f.size = open_result.size
+    f.offset = 0
+    f.sb = sb
     // Carry the backend's permission metadata on the handle so the
     // per-write check in sys_write needs no fresh VFS lookup.
-    f.mode = open_result.mode;
-    f.uid = open_result.uid;
-    f.gid = open_result.gid;
+    f.mode = open_result.mode
+    f.uid = open_result.uid
+    f.gid = open_result.gid
     // Directory-entry location: FAT32 write() rewrites the entry's
     // first-cluster / size through it. Only writable handles (this path)
     // need it; the read-only open sites below leave the alloc-zeroed
     // default, and non-FAT backends never set it.
-    f.dirent_lba = open_result.dirent_lba;
-    f.dirent_off = open_result.dirent_off;
+    f.dirent_lba = open_result.dirent_lba
+    f.dirent_off = open_result.dirent_off
 
-    const fd = fdtable.install(c, .file, f);
-    if (fd < 0) {
-        file_mod.unref(f);
-        return -1;
+    const fd = fdtable.install(c, .file, f)
+    if fd < 0 {
+        file_mod.unref(f)
+        return -1
     }
-    return fd;
+    return fd
 }
 
 // Post-lookup body for file reads. The VFS vtable walks
 // chunks of <=512 bytes and copies them to the caller's UVA. Returns
 // total bytes copied, -1 on copy_to_user fault with no progress so
 // far. Reached through the unified sys_read dispatcher.
-fn readFileBacked(f: *file_mod.File, sb: *vfs.SuperBlock, buf_uva: u64, len: u64) i64 {
-    var total_copied: u64 = 0;
-    while (total_copied < len) {
-        var kbuf: [512]u8 = undefined;
-        const take = @min(len - total_copied, @as(u64, @intCast(kbuf.len)));
-        preempt_disable();
-        const n = vfs.vfs_read(sb, f, &kbuf, take);
-        preempt_enable();
-        if (n < 0) return if (total_copied > 0) @intCast(total_copied) else -1;
-        if (n == 0) break;
-        if (copy_to_user(buf_uva + total_copied, &kbuf, @intCast(n)) < 0) return -1;
-        total_copied += @intCast(n);
-        if (n < take) break;
+fn readFileBacked(f *mut file_mod.File, sb *mut vfs.SuperBlock, buf_uva u64, len u64) i64 {
+    var total_copied u64 = 0
+    while total_copied < len {
+        var kbuf [512]u8 = undefined
+        const take = #min(len - total_copied, #as(u64, #intCast(kbuf.len)))
+        preempt_disable()
+        const n = vfs.vfs_read(sb, f, &kbuf, take)
+        preempt_enable()
+        if n < 0 { return if (total_copied > 0) #intCast(total_copied) else -1 }
+        if n == 0 { break }
+        if copy_to_user(buf_uva + total_copied, &kbuf, #intCast(n)) < 0 { return -1 }
+        total_copied += #intCast(n)
+        if n < take { break }
     }
-    return @intCast(total_copied);
+    return #intCast(total_copied)
 }
 
 // Post-lookup body for file writes. Pulls up to 512 bytes
@@ -265,33 +274,33 @@ fn readFileBacked(f: *file_mod.File, sb: *vfs.SuperBlock, buf_uva: u64, len: u64
 // backend's vfs_write vtable. Initramfs returns -1 (EROFS); FAT32
 // honours the write via writeBack. Reached through the unified
 // sys_write dispatcher.
-fn writeFileBacked(f: *file_mod.File, sb: *vfs.SuperBlock, buf_uva: u64, len: u64) i64 {
-    var total_pushed: u64 = 0;
-    while (total_pushed < len) {
-        var kbuf: [512]u8 = undefined;
-        const take = @min(len - total_pushed, @as(u64, @intCast(kbuf.len)));
-        if (copy_from_user(&kbuf, buf_uva + total_pushed, take) < 0) return -1;
-        preempt_disable();
-        const n = vfs.vfs_write(sb, f, &kbuf, take);
-        preempt_enable();
-        if (n < 0) return if (total_pushed > 0) @intCast(total_pushed) else -1;
-        if (n == 0) break;
-        total_pushed += @intCast(n);
-        if (n < take) break;
+fn writeFileBacked(f *mut file_mod.File, sb *mut vfs.SuperBlock, buf_uva u64, len u64) i64 {
+    var total_pushed u64 = 0
+    while total_pushed < len {
+        var kbuf [512]u8 = undefined
+        const take = #min(len - total_pushed, #as(u64, #intCast(kbuf.len)))
+        if copy_from_user(&kbuf, buf_uva + total_pushed, take) < 0 { return -1 }
+        preempt_disable()
+        const n = vfs.vfs_write(sb, f, &kbuf, take)
+        preempt_enable()
+        if n < 0 { return if (total_pushed > 0) #intCast(total_pushed) else -1 }
+        if n == 0 { break }
+        total_pushed += #intCast(n)
+        if n < take { break }
     }
-    return @intCast(total_pushed);
+    return #intCast(total_pushed)
 }
 
-export fn sys_seek(fd: i32, off: i64, whence: i32) i64 {
-    const c = current orelse return -1;
-    const f = fdtable.getFile(c, fd) orelse return -1;
-    const sb = vfsSb(f) orelse return -1;
+export fn sys_seek(fd i32, off i64, whence i32) i64 {
+    const c = current orelse return -1
+    const f = fdtable.getFile(c, fd) orelse return -1
+    const sb = vfsSb(f) orelse return -1
 
-    preempt_disable();
-    const ret = vfs.vfs_seek(sb, f, off, whence);
-    preempt_enable();
+    preempt_disable()
+    const ret = vfs.vfs_seek(sb, f, off, whence)
+    preempt_enable()
 
-    return ret;
+    return ret
 }
 
 // MEMORY MANAGEMENT
@@ -310,41 +319,41 @@ export fn sys_seek(fd: i32, off: i64, whence: i32) i64 {
 // `mm.user_pages` for entries in [new_brk, old_brk) and clears the
 // PTE + frees the PA + zeros the slot. set_pgd at the tail flushes the
 // TLB so a re-grow re-faults cleanly.
-export fn sys_brk(addr: u64) i64 {
-    const c = current orelse return -1;
-    if (addr == 0) return @bitCast(c.mm.brk);
+export fn sys_brk(addr u64) i64 {
+    const c = current orelse return -1
+    if addr == 0 { return #bitCast(c.mm.brk) }
 
-    const new_brk: u64 = (addr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    if (new_brk < user_layout.HEAP_BASE) return -1;
-    if (new_brk > user_layout.STACK_TOP - user_layout.STACK_BUDGET) return -1;
+    const new_brk u64 = (addr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)
+    if new_brk < user_layout.HEAP_BASE { return -1 }
+    if new_brk > user_layout.STACK_TOP - user_layout.STACK_BUDGET { return -1 }
 
-    const old_brk: u64 = c.mm.brk;
-    if (new_brk < old_brk) {
-        unmap_user_range(c, new_brk, old_brk);
+    const old_brk u64 = c.mm.brk
+    if new_brk < old_brk {
+        unmap_user_range(c, new_brk, old_brk)
         // Re-install the same pgd to drive the full-TLB-flush path in
         // set_pgd (sched.S). Targeted `tlbi vae1is` would be surgical;
         // the heap-shrink path is rare enough that a full flush is fine.
-        set_pgd(c.mm.pgd);
+        set_pgd(c.mm.pgd)
     }
-    c.mm.brk = new_brk;
-    return @bitCast(new_brk);
+    c.mm.brk = new_brk
+    return #bitCast(new_brk)
 }
 
 // Convenience wrapper: brk(current_break + delta), returns the previous
 // break. Negative `delta` shrinks. The sys_brk path itself enforces
 // bounds (HEAP_BASE / STACK_TOP - user_layout.STACK_BUDGET); sbrk only
 // guards against signed-overflow on the addition.
-export fn sys_sbrk(delta: i64) i64 {
-    const c = current orelse return -1;
-    const cur_brk: u64 = c.mm.brk;
-    const cur_signed: i64 = @bitCast(cur_brk);
-    const new_signed = @addWithOverflow(cur_signed, delta);
-    if (new_signed[1] != 0) return -1;
-    if (new_signed[0] < 0) return -1;
-    const target: u64 = @bitCast(new_signed[0]);
-    const ret = sys_brk(target);
-    if (ret < 0) return -1;
-    return @bitCast(cur_brk);
+export fn sys_sbrk(delta i64) i64 {
+    const c = current orelse return -1
+    const cur_brk u64 = c.mm.brk
+    const cur_signed i64 = #bitCast(cur_brk)
+    const new_signed = #addWithOverflow(cur_signed, delta)
+    if new_signed[1] != 0 { return -1 }
+    if new_signed[0] < 0 { return -1 }
+    const target u64 = #bitCast(new_signed[0])
+    const ret = sys_brk(target)
+    if ret < 0 { return -1 }
+    return #bitCast(cur_brk)
 }
 
 export fn sys_mmap() void {}
@@ -363,51 +372,51 @@ export fn sys_munlock() void {}
 // `buf` reaches the kernel through copy_from_user / copy_to_user; a
 // wild UVA returns -1 to the caller without zombifying the task.
 export fn sys_pipe() i64 {
-    const c = current orelse return -1;
-    const p = pipe_mod.alloc() orelse return -1;
-    p.refs = 2; // one ref per fd installed below
+    const c = current orelse return -1
+    const p = pipe_mod.alloc() orelse return -1
+    p.refs = 2 // one ref per fd installed below
 
-    const rfd = fdtable.install(c, .pipe, p);
-    if (rfd < 0) {
+    const rfd = fdtable.install(c, .pipe, p)
+    if rfd < 0 {
         // Two unrefs: refs was set to 2 above before either fd was
         // installed; the page leaks otherwise.
-        pipe_mod.unref(p);
-        pipe_mod.unref(p);
-        return -1;
+        pipe_mod.unref(p)
+        pipe_mod.unref(p)
+        return -1
     }
-    const wfd = fdtable.install(c, .pipe, p);
-    if (wfd < 0) {
+    const wfd = fdtable.install(c, .pipe, p)
+    if wfd < 0 {
         // close() clears the read-end slot and drops its ref; one more
         // unref drops the write-end ref that was never installed.
-        _ = fdtable.close(c, rfd);
-        pipe_mod.unref(p);
-        return -1;
+        _ = fdtable.close(c, rfd)
+        pipe_mod.unref(p)
+        return -1
     }
-    return (@as(i64, wfd) << 32) | (@as(i64, rfd) & 0xFFFF_FFFF);
+    return (#as(i64, wfd) << 32) | (#as(i64, rfd) & 0xFFFF_FFFF)
 }
 
 // Post-lookup body for pipe reads. One 512-byte kbuf-bounded drain
 // per call (POSIX short-read for pipes); the blocking is inside
 // pipe_mod.read. Reached through the unified sys_read dispatcher.
-fn readPipeBacked(p: *pipe_mod.Pipe, buf_uva: u64, len: u64) i64 {
-    var kbuf: [512]u8 = undefined;
-    const n = @min(len, @as(u64, @intCast(kbuf.len)));
-    const copied = pipe_mod.read(p, &kbuf, n);
-    if (copied > 0) {
-        if (copy_to_user(buf_uva, &kbuf, @intCast(copied)) < 0) return -1;
+fn readPipeBacked(p *mut pipe_mod.Pipe, buf_uva u64, len u64) i64 {
+    var kbuf [512]u8 = undefined
+    const n = #min(len, #as(u64, #intCast(kbuf.len)))
+    const copied = pipe_mod.read(p, &kbuf, n)
+    if copied > 0 {
+        if copy_to_user(buf_uva, &kbuf, #intCast(copied)) < 0 { return -1 }
     }
-    return copied;
+    return copied
 }
 
 // Post-lookup body for pipe writes. Mirrors readPipeBacked:
 // 512-byte kbuf, single push per call (no loop — caller iterates if
 // it has more data than fits the ring). Reached through the unified
 // sys_write dispatcher.
-fn writePipeBacked(p: *pipe_mod.Pipe, buf_uva: u64, len: u64) i64 {
-    var kbuf: [512]u8 = undefined;
-    const n = @min(len, @as(u64, @intCast(kbuf.len)));
-    if (copy_from_user(&kbuf, buf_uva, n) < 0) return -1;
-    return pipe_mod.write(p, &kbuf, n);
+fn writePipeBacked(p *mut pipe_mod.Pipe, buf_uva u64, len u64) i64 {
+    var kbuf [512]u8 = undefined
+    const n = #min(len, #as(u64, #intCast(kbuf.len)))
+    if copy_from_user(&kbuf, buf_uva, n) < 0 { return -1 }
+    return pipe_mod.write(p, &kbuf, n)
 }
 
 export fn sys_socket() void {}
@@ -428,32 +437,33 @@ export fn sys_shmget() void {}
 // design — see src/console.zig:console_read for the blocking and
 // POSIX-TTY semantics. Reached through the unified sys_read
 // dispatcher.
-fn readConsoleBytes(buf_uva: u64, len: u64) i64 {
-    var kbuf: [256]u8 = undefined;
-    const n = @min(len, @as(u64, @intCast(kbuf.len)));
-    const copied = console.console_read(&kbuf, n);
-    if (copied > 0) {
-        if (copy_to_user(buf_uva, &kbuf, @intCast(copied)) < 0) return -1;
+fn readConsoleBytes(buf_uva u64, len u64) i64 {
+    var kbuf [256]u8 = undefined
+    const n = #min(len, #as(u64, #intCast(kbuf.len)))
+    const copied = console.console_read(&kbuf, n)
+    if copied > 0 {
+        if copy_to_user(buf_uva, &kbuf, #intCast(copied)) < 0 { return -1 }
         // Cooked-style echo/mask when enabled: printable bytes only,
         // one NUL-terminated byte at a time through the console mux. Control
         // bytes (CR/LF, and the [TEST] console-echo 0xC0..0xC7 injects) are
         // never emitted, so with both flags off (the default) this filter
         // leaves every existing scenario's serial output byte-identical; with
         // mask on, each printable byte is echoed as '*' instead of itself.
-        if (console_echo or console_mask) {
-            var j: i64 = 0;
-            while (j < copied) : (j += 1) {
-                const ch = kbuf[@intCast(j)];
-                if (ch >= 0x20 and ch < 0x7F) {
+        if console_echo || console_mask {
+            var j i64 = 0
+            while j < copied {
+                const ch = kbuf[#intCast(j)]
+                if ch >= 0x20 && ch < 0x7F {
                     // mask wins over echo: show '*' instead of the secret.
-                    const out: u8 = if (console_mask) '*' else ch;
-                    var one = [2]u8{ out, 0 };
-                    console_tx(@ptrCast(&one), 1);
+                    const out u8 = if (console_mask) '*' else ch
+                    var one [2]u8 = [2]u8{ out, 0 }
+                    console_tx(#ptrCast(&one), 1)
                 }
+                j += 1
             }
         }
     }
-    return copied;
+    return copied
 }
 
 // Console-output sink (USB-C gadget console). Only the *user*
@@ -472,11 +482,11 @@ fn readConsoleBytes(buf_uva: u64, len: u64) i64 {
 // walker; `len` carries the true byte count for the length-framed USB
 // bulk path. On virt, enumerated() is always false → MU fallback, so CI
 // over QEMU is unaffected.
-fn console_tx(s: [*:0]const u8, len: u64) void {
-    if (board.usb.enumerated()) {
-        board.usb.cdc_tx(s[0..len]);
+fn console_tx(s [*:0]u8, len u64) void {
+    if board_usb_enumerated() {
+        board_usb_cdc_tx(s, len)
     } else {
-        main_output(MU, s);
+        main_output(MU, s)
     }
 }
 
@@ -491,19 +501,19 @@ fn console_tx(s: [*:0]const u8, len: u64) void {
 // pl011_uart_send_string, both NUL-terminated walkers. The
 // fd-redirect coverage is text-only; binary console output is future
 // work alongside a length-aware UART send path.
-fn writeConsoleBytes(buf_uva: u64, len: u64) i64 {
-    var kbuf: [256]u8 = undefined;
-    var done: u64 = 0;
-    while (done < len) {
-        const take = @min(len - done, @as(u64, @intCast(kbuf.len - 1)));
-        if (copy_from_user(&kbuf, buf_uva + done, take) < 0) {
-            return if (done > 0) @intCast(done) else -1;
+fn writeConsoleBytes(buf_uva u64, len u64) i64 {
+    var kbuf [256]u8 = undefined
+    var done u64 = 0
+    while done < len {
+        const take = #min(len - done, #as(u64, #intCast(kbuf.len - 1)))
+        if copy_from_user(&kbuf, buf_uva + done, take) < 0 {
+            return if (done > 0) #intCast(done) else -1
         }
-        kbuf[take] = 0;
-        console_tx(@ptrCast(&kbuf), take);
-        done += take;
+        kbuf[take] = 0
+        console_tx(#ptrCast(&kbuf), take)
+        done += take
     }
-    return @intCast(done);
+    return #intCast(done)
 }
 
 // SYS_SET_CONSOLE_MODE (slot 25) — sets the
@@ -515,10 +525,10 @@ fn writeConsoleBytes(buf_uva: u64, len: u64) i64 {
 // username and MASK to acknowledge the password without revealing it. Full
 // termios / line discipline is still future work. SYS_CLOSE_CONSOLE stays
 // inert (the unified ABI absorbs the close side via SYS_CLOSE on a console fd).
-export fn sys_setConsoleMode(mode: u64) i64 {
-    console_echo = (mode & defs.CONSOLE_MODE_ECHO) != 0;
-    console_mask = (mode & defs.CONSOLE_MODE_MASK) != 0;
-    return 0;
+export fn sys_setConsoleMode(mode u64) i64 {
+    console_echo = (mode & defs.CONSOLE_MODE_ECHO) != 0
+    console_mask = (mode & defs.CONSOLE_MODE_MASK) != 0
+    return 0
 }
 export fn sys_closeConsole() void {}
 
@@ -527,14 +537,14 @@ export fn sys_closeConsole() void {}
 // the UART. Powers deterministic [TEST] console-echo coverage on
 // QEMU where there is no external input driver. Document as debug-only
 // in DOCUMENTATION.md §5 and remove once a real host-input driver lands.
-export fn sys_console_inject(byte: u64) void {
-    console.console_test_push(@truncate(byte));
+export fn sys_console_inject(byte u64) void {
+    console.console_test_push(#truncate(byte))
 }
 
 // Retired ABI slots. The numbers stay reserved forever — a stale binary
 // invoking one gets a clean -1, never a silently different syscall.
 export fn sys_retired() i64 {
-    return -1;
+    return -1
 }
 
 // ---- Unified fd-table ABI ----
@@ -547,41 +557,42 @@ export fn sys_retired() i64 {
 // file I/O; the legacy per-kind shims that once shared these helpers
 // were retired (see the retired-slots note at sys_retired).
 
-export fn sys_read(fd: i32, buf_uva: u64, len: u64) i64 {
-    const c = current orelse return -1;
-    const s = fdtable.get(c, fd) orelse return -1;
-    return switch (@as(fdtable.Kind, @enumFromInt(s.kind))) {
+export fn sys_read(fd i32, buf_uva u64, len u64) i64 {
+    const c = current orelse return -1
+    const s = fdtable.get(c, fd) orelse return -1
+    return switch #as(fdtable.Kind, #enumFromInt(s.kind)) {
         .console => readConsoleBytes(buf_uva, len),
-        .pipe => readPipeBacked(@ptrCast(@alignCast(s.ptr.?)), buf_uva, len),
+        .pipe => readPipeBacked(#ptrCast(#alignCast(s.ptr.?)), buf_uva, len),
         .file => blk: {
-            const f: *file_mod.File = @ptrCast(@alignCast(s.ptr.?));
-            const sb = vfsSb(f) orelse break :blk @as(i64, -1);
-            break :blk readFileBacked(f, sb, buf_uva, len);
+            const f *mut file_mod.File = #ptrCast(#alignCast(s.ptr.?))
+            const sb = vfsSb(f) orelse break :blk #as(i64, -1)
+            break :blk readFileBacked(f, sb, buf_uva, len)
         },
         .none => -1,
-    };
+    }
 }
 
-export fn sys_write(fd: i32, buf_uva: u64, len: u64) i64 {
-    const c = current orelse return -1;
-    const s = fdtable.get(c, fd) orelse return -1;
-    return switch (@as(fdtable.Kind, @enumFromInt(s.kind))) {
+export fn sys_write(fd i32, buf_uva u64, len u64) i64 {
+    const c = current orelse return -1
+    const s = fdtable.get(c, fd) orelse return -1
+    return switch #as(fdtable.Kind, #enumFromInt(s.kind)) {
         .console => writeConsoleBytes(buf_uva, len),
-        .pipe => writePipeBacked(@ptrCast(@alignCast(s.ptr.?)), buf_uva, len),
+        .pipe => writePipeBacked(#ptrCast(#alignCast(s.ptr.?)), buf_uva, len),
         .file => blk: {
-            const f: *file_mod.File = @ptrCast(@alignCast(s.ptr.?));
-            const sb = vfsSb(f) orelse break :blk @as(i64, -1);
+            const f *mut file_mod.File = #ptrCast(#alignCast(s.ptr.?))
+            const sb = vfsSb(f) orelse break :blk #as(i64, -1)
             // Permission gate: write-intent check against the
             // metadata carried on the File since open. Open is read-
             // intent only in this ABI, so a readable-but-not-writable
             // file (0644 root, non-root caller) opens fine and fails
             // here with -EACCES instead of a backend -1.
-            if (!perm.checkAccess(f.mode, f.uid, f.gid, c.euid, c.egid, .write))
-                break :blk @as(i64, -defs.EACCES);
-            break :blk writeFileBacked(f, sb, buf_uva, len);
+            if !perm.checkAccess(f.mode, f.uid, f.gid, c.euid, c.egid, .write) {
+                break :blk #as(i64, -defs.EACCES)
+            }
+            break :blk writeFileBacked(f, sb, buf_uva, len)
         },
         .none => -1,
-    };
+    }
 }
 
 // Unified close. File fds need an extra step before the slot is
@@ -589,21 +600,21 @@ export fn sys_write(fd: i32, buf_uva: u64, len: u64) i64 {
 // dir-entry / FSInfo writeback; initramfs no-op). Pipe and console
 // slots route straight through fdtable.close — refcount handles the
 // pipe-page free, console is refcount-exempt.
-export fn sys_close(fd: i32) i32 {
-    const c = current orelse return -1;
-    if (fdtable.getFile(c, fd)) |f| {
-        if (vfsSb(f)) |sb| {
-            preempt_disable();
-            vfs.vfs_close(sb, f);
-            preempt_enable();
+export fn sys_close(fd i32) i32 {
+    const c = current orelse return -1
+    if fdtable.getFile(c, fd) |f| {
+        if vfsSb(f) |sb| {
+            preempt_disable()
+            vfs.vfs_close(sb, f)
+            preempt_enable()
         }
     }
-    return fdtable.close(c, fd);
+    return fdtable.close(c, fd)
 }
 
-export fn sys_dup2(oldfd: i32, newfd: i32) i32 {
-    const c = current orelse return -1;
-    return fdtable.dup2(c, oldfd, newfd);
+export fn sys_dup2(oldfd i32, newfd i32) i32 {
+    const c = current orelse return -1
+    return fdtable.dup2(c, oldfd, newfd)
 }
 
 // Working-directory ABI. Stores a NUL-terminated,
@@ -614,31 +625,37 @@ export fn sys_dup2(oldfd: i32, newfd: i32) i32 {
 // then `chdir` is a pure store the open/execve boundary trusts.
 // Returns 0 on success, -1 on a wild user pointer / un-NUL-terminated
 // input / oversize composition / oversize resolved path.
-export fn sys_chdir(path_ptr: u64) i32 {
-    const c = current orelse return -1;
+export fn sys_chdir(path_ptr u64) i32 {
+    const c = current orelse return -1
 
-    var kpath: [layout.CWD_SIZE]u8 = undefined;
-    var i: usize = 0;
-    while (i < kpath.len - 1) : (i += 1) {
-        var b: u8 = 0;
-        if (copy_from_user(@ptrCast(&b), path_ptr + i, 1) < 0) return -1;
-        kpath[i] = b;
-        if (b == 0) break;
-    } else return -1;
+    var kpath [layout.CWD_SIZE]u8 = undefined
+    var i usize = 0
+    var nul_found bool = false
+    while i < kpath.len - 1 {
+        var b u8 = 0
+        if copy_from_user(#ptrCast(&b), path_ptr + i, 1) < 0 { return -1 }
+        kpath[i] = b
+        if b == 0 {
+            nul_found = true
+            break
+        }
+        i += 1
+    }
+    if !nul_found { return -1 }
 
-    const rel = std.mem.span(@as([*:0]const u8, @ptrCast(&kpath)));
-    const cwd_slice = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&c.cwd)), 0);
+    const rel = std.mem.span(#as([*:0]u8, #ptrCast(&kpath)))
+    const cwd_slice = std.mem.sliceTo(#as([*:0]u8, #ptrCast(&c.cwd)), 0)
 
     // Resolve into a fresh scratch buffer first, then swap into the
     // task slot only after a successful normalisation — keeps `cwd`
     // intact on overflow / overlong-collapse failure.
-    var resolved_buf: [layout.CWD_SIZE]u8 = undefined;
+    var resolved_buf [layout.CWD_SIZE]u8 = undefined
     // Leave one byte for the trailing NUL in cwd[].
-    const resolved = path_mod.joinResolve(cwd_slice, rel, resolved_buf[0 .. layout.CWD_SIZE - 1]) orelse return -1;
+    const resolved = path_mod.joinResolve(cwd_slice, rel, resolved_buf[0 .. layout.CWD_SIZE - 1]) orelse return -1
 
-    @memcpy(c.cwd[0..resolved.len], resolved);
-    c.cwd[resolved.len] = 0;
-    return 0;
+    #memcpy(c.cwd[0..resolved.len], resolved)
+    c.cwd[resolved.len] = 0
+    return 0
 }
 
 // Working-directory readback. Copies the calling task's
@@ -648,14 +665,14 @@ export fn sys_chdir(path_ptr: u64) i32 {
 // nothing and the harness free-page baseline is untouched. Returns -1 on
 // a wild buffer UVA or a `len` too small to hold the path plus its NUL —
 // a short buffer gets nothing, never a truncated path.
-export fn sys_getcwd(buf_uva: u64, len: u64) i64 {
-    const c = current orelse return -1;
-    const cwd = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&c.cwd)), 0);
-    if (len < cwd.len + 1) return -1;
-    if (copy_to_user(buf_uva, cwd.ptr, cwd.len) < 0) return -1;
-    const nul = [_]u8{0};
-    if (copy_to_user(buf_uva + cwd.len, &nul, 1) < 0) return -1;
-    return @intCast(cwd.len);
+export fn sys_getcwd(buf_uva u64, len u64) i64 {
+    const c = current orelse return -1
+    const cwd = std.mem.sliceTo(#as([*:0]u8, #ptrCast(&c.cwd)), 0)
+    if len < cwd.len + 1 { return -1 }
+    if copy_to_user(buf_uva, cwd.ptr, cwd.len) < 0 { return -1 }
+    const nul = [_]u8{0}
+    if copy_to_user(buf_uva + cwd.len, &nul, 1) < 0 { return -1 }
+    return #intCast(cwd.len)
 }
 
 // Directory enumeration. Stateless index walk: fill
@@ -668,35 +685,42 @@ export fn sys_getcwd(buf_uva: u64, len: u64) i64 {
 // current.cwd exactly as sys_openFile does, since vfs.resolve is still
 // absolute-only. Allocates nothing — a future OOM audit inherits no
 // new site from readdir (the core reason the ABI is stateless).
-export fn sys_readdir(path_ptr: u64, index: u64, dirent_uva: u64) i32 {
-    const c = current orelse return -1;
+export fn sys_readdir(path_ptr u64, index u64, dirent_uva u64) i32 {
+    const c = current orelse return -1
 
-    var kpath: [layout.CWD_SIZE]u8 = undefined;
-    var i: usize = 0;
-    while (i < kpath.len - 1) : (i += 1) {
-        var b: u8 = 0;
-        if (copy_from_user(@ptrCast(&b), path_ptr + i, 1) < 0) return -1;
-        kpath[i] = b;
-        if (b == 0) break;
-    } else return -1;
-    const raw_path = std.mem.span(@as([*:0]const u8, @ptrCast(&kpath)));
+    var kpath [layout.CWD_SIZE]u8 = undefined
+    var i usize = 0
+    var nul_found bool = false
+    while i < kpath.len - 1 {
+        var b u8 = 0
+        if copy_from_user(#ptrCast(&b), path_ptr + i, 1) < 0 { return -1 }
+        kpath[i] = b
+        if b == 0 {
+            nul_found = true
+            break
+        }
+        i += 1
+    }
+    if !nul_found { return -1 }
+    const raw_path = std.mem.span(#as([*:0]u8, #ptrCast(&kpath)))
 
-    var join_buf: [layout.CWD_SIZE]u8 = undefined;
-    const resolved: []const u8 = if (raw_path.len > 0 and raw_path[0] == '/')
-        raw_path
-    else blk: {
-        const cwd_slice = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&c.cwd)), 0);
-        break :blk path_mod.joinResolve(cwd_slice, raw_path, &join_buf) orelse return -1;
-    };
+    var join_buf [layout.CWD_SIZE]u8 = undefined
+    var resolved []u8 = undefined
+    if raw_path.len > 0 && raw_path[0] == '/' {
+        resolved = raw_path
+    } else {
+        const cwd_slice = std.mem.sliceTo(#as([*:0]u8, #ptrCast(&c.cwd)), 0)
+        resolved = path_mod.joinResolve(cwd_slice, raw_path, &join_buf) orelse return -1
+    }
 
-    var dirent: defs.Dirent = .{};
-    preempt_disable();
-    const r = vfs.vfs_readdir(resolved, index, &dirent);
-    preempt_enable();
-    if (r < 0) return -1;
+    var dirent defs.Dirent = .{}
+    preempt_disable()
+    const r = vfs.vfs_readdir(resolved, index, &dirent)
+    preempt_enable()
+    if r < 0 { return -1 }
 
-    if (copy_to_user(dirent_uva, std.mem.asBytes(&dirent), @sizeOf(defs.Dirent)) < 0) return -1;
-    return 0;
+    if copy_to_user(dirent_uva, std.mem.asBytes(&dirent), #sizeOf(defs.Dirent)) < 0 { return -1 }
+    return 0
 }
 
 // Kernel-log read. Snapshots the most-recent min(len, retained)
@@ -709,31 +733,32 @@ export fn sys_readdir(path_ptr: u64, index: u64, dirent_uva: u64) i32 {
 // like readFileBacked. Allocates nothing (the ring is static BSS), so the
 // harness free-page baseline is untouched. A wild buffer UVA returns -1
 // via the soft copy_to_user path; the task does not zombify.
-export fn sys_klog_read(buf_uva: u64, len: u64) i64 {
-    _ = current orelse return -1;
+export fn sys_klog_read(buf_uva u64, len u64) i64 {
+    _ = current orelse return -1
 
     // Snapshot the window bounds together: head/tail are monotone, so even
     // if a push lands mid-copy the indices stay masked and in-bounds, and
     // reading them as a pair keeps `start` consistent with `total`.
-    const head = klog_ring.klog.head;
-    const tail = klog_ring.klog.tail;
-    const total = @min(len, head -% tail);
-    const start = head -% total; // most recent `total` bytes
+    const head = klog_ring.klog.head
+    const tail = klog_ring.klog.tail
+    const total = #min(len, head -% tail)
+    const start = head -% total // most recent `total` bytes
 
-    var copied: u64 = 0;
-    while (copied < total) {
-        var kbuf: [512]u8 = undefined;
-        const take = @min(total - copied, @as(u64, @intCast(kbuf.len)));
-        var i: u64 = 0;
-        while (i < take) : (i += 1) {
-            kbuf[@intCast(i)] = klog_ring.klog.byteAt(start +% copied +% i);
+    var copied u64 = 0
+    while copied < total {
+        var kbuf [512]u8 = undefined
+        const take = #min(total - copied, #as(u64, #intCast(kbuf.len)))
+        var i u64 = 0
+        while i < take {
+            kbuf[#intCast(i)] = klog_ring.klog.byteAt(start +% copied +% i)
+            i += 1
         }
-        if (copy_to_user(buf_uva + copied, &kbuf, take) < 0) {
-            return if (copied > 0) @intCast(copied) else -1;
+        if copy_to_user(buf_uva + copied, &kbuf, take) < 0 {
+            return if (copied > 0) #intCast(copied) else -1
         }
-        copied += take;
+        copied += take
     }
-    return @intCast(copied);
+    return #intCast(copied)
 }
 
 // ---- Process credentials ----
@@ -748,57 +773,57 @@ export fn sys_klog_read(buf_uva: u64, len: u64) i64 {
 // the sentinel representable. `current` is always set in EL0 syscall
 // context — the orelse -1 is for the impossible null only.
 export fn sys_getuid() i64 {
-    const c = current orelse return -1;
-    return @intCast(c.uid);
+    const c = current orelse return -1
+    return #intCast(c.uid)
 }
 export fn sys_geteuid() i64 {
-    const c = current orelse return -1;
-    return @intCast(c.euid);
+    const c = current orelse return -1
+    return #intCast(c.euid)
 }
 export fn sys_getgid() i64 {
-    const c = current orelse return -1;
-    return @intCast(c.gid);
+    const c = current orelse return -1
+    return #intCast(c.gid)
 }
 export fn sys_getegid() i64 {
-    const c = current orelse return -1;
-    return @intCast(c.egid);
+    const c = current orelse return -1
+    return #intCast(c.egid)
 }
-export fn sys_setuid(uid: u32) i64 {
-    const c = current orelse return -1;
-    if (c.euid == 0) {
-        c.uid = uid;
-        c.euid = uid;
-        return 0;
+export fn sys_setuid(uid u32) i64 {
+    const c = current orelse return -1
+    if c.euid == 0 {
+        c.uid = uid
+        c.euid = uid
+        return 0
     }
-    if (uid == c.uid or uid == c.euid) {
-        c.euid = uid;
-        return 0;
+    if (uid == c.uid) || (uid == c.euid) {
+        c.euid = uid
+        return 0
     }
-    return -1;
+    return -1
 }
-export fn sys_setgid(gid: u32) i64 {
-    const c = current orelse return -1;
-    if (c.euid == 0) {
-        c.gid = gid;
-        c.egid = gid;
-        return 0;
+export fn sys_setgid(gid u32) i64 {
+    const c = current orelse return -1
+    if c.euid == 0 {
+        c.gid = gid
+        c.egid = gid
+        return 0
     }
-    if (gid == c.gid or gid == c.egid) {
-        c.egid = gid;
-        return 0;
+    if (gid == c.gid) || (gid == c.egid) {
+        c.egid = gid
+        return 0
     }
-    return -1;
+    return -1
 }
 
 // ---- Authentication ----
 
 // The initramfs seed copy — read-only, baked into the kernel image, always
 // present. The recovery anchor of the anti-brick design.
-const SHADOW_PATH: []const u8 = "/etc/shadow";
+const SHADOW_PATH []u8 = "/etc/shadow"
 // The writable FAT32 copy — what /bin/passwd rewrites. Consulted first so
 // password changes take effect; absent on QEMU virt (no SD card) and on a
 // freshly formatted card, in which case auth falls back to the seed.
-const MNT_SHADOW_PATH: []const u8 = "/mnt/shadow";
+const MNT_SHADOW_PATH []u8 = "/mnt/shadow"
 
 // Auth working buffers — static, NOT stack. The per-task kernel stack
 // shares its 4 KiB page with TaskStruct (~2.4 KiB usable above KeRegs),
@@ -811,16 +836,17 @@ const MNT_SHADOW_PATH: []const u8 = "/mnt/shadow";
 // callers are PID-1's [TEST] scenarios, /bin/login, and /bin/passwd — never
 // concurrent. The password copy is overwritten by the next call; nothing
 // here persists secrets beyond the syscall that wrote them.
-var auth_scratch: struct {
-    user: [64]u8,
-    pass: [128]u8,
-    fbuf: [1024]u8,
-    salt: [64]u8,
-    stored: [64]u8,
-    derived: [32]u8,
-} = undefined;
+const AuthScratch = struct {
+    user [64]u8,
+    pass [128]u8,
+    fbuf [1024]u8,
+    salt [64]u8,
+    stored [64]u8,
+    derived [32]u8,
+}
+var auth_scratch AuthScratch = undefined
 
-const ReadFileError = error{ OpenFailed, ReadFailed };
+const ReadFileError = error{ OpenFailed, ReadFailed }
 
 // In-kernel whole-file read through the privileged VFS door (the
 // execve.zig stack-File recipe: no file_mod.alloc → no page → the harness
@@ -828,36 +854,36 @@ const ReadFileError = error{ OpenFailed, ReadFailed };
 // the filled prefix of `buf`. OpenFailed = path does not resolve (not
 // mounted / absent); ReadFailed = it resolved but a backend read errored
 // (the corruption signal the fallback chain reports loudly).
-fn readWholeFile(path: []const u8, buf: []u8) ReadFileError![]const u8 {
-    var open_result: vfs.OpenResult = .{};
-    preempt_disable();
-    const sb_opt = vfs.vfs_open(path, &open_result);
-    preempt_enable();
-    const sb = sb_opt orelse return error.OpenFailed;
+fn readWholeFile(path []u8, buf []mut u8) ReadFileError![]u8 {
+    var open_result vfs.OpenResult = .{}
+    preempt_disable()
+    const sb_opt = vfs.vfs_open(path, &open_result)
+    preempt_enable()
+    const sb = sb_opt orelse return error.OpenFailed
 
-    var f: file_mod.File = .{};
-    f.private = open_result.private;
-    f.size = open_result.size;
-    f.offset = 0;
-    var off: usize = 0;
-    var failed = false;
-    while (off < buf.len) {
-        const take: u64 = buf.len - off;
-        preempt_disable();
-        const got = vfs.vfs_read(sb, &f, buf[off..].ptr, take);
-        preempt_enable();
-        if (got < 0) {
-            failed = true;
-            break;
+    var f file_mod.File = .{}
+    f.private = open_result.private
+    f.size = open_result.size
+    f.offset = 0
+    var off usize = 0
+    var failed bool = false
+    while off < buf.len {
+        const take u64 = buf.len - off
+        preempt_disable()
+        const got = vfs.vfs_read(sb, &f, buf[off..].ptr, take)
+        preempt_enable()
+        if got < 0 {
+            failed = true
+            break
         }
-        if (got == 0) break;
-        off += @intCast(got);
+        if got == 0 { break }
+        off += #intCast(got)
     }
-    preempt_disable();
-    vfs.vfs_close(sb, &f);
-    preempt_enable();
-    if (failed) return error.ReadFailed;
-    return buf[0..off];
+    preempt_disable()
+    vfs.vfs_close(sb, &f)
+    preempt_enable()
+    if failed { return error.ReadFailed }
+    return buf[0..off]
 }
 
 // Outcome of checking one credential pair against one shadow database.
@@ -865,46 +891,50 @@ fn readWholeFile(path: []const u8, buf: []u8) ReadFileError![]const u8 {
 // a parseable file that simply lacks the user is an authoritative denial,
 // while a file with nothing parseable in it (truncation, garbage, a
 // half-finished rewrite) falls back to the initramfs seed.
-const VerifyResult = enum { match, mismatch, no_user, corrupt };
+const VerifyResult = enum { match, mismatch, no_user, corrupt }
 
 // Walk `content` line by line and verify `password` against the first
 // line whose user field equals `username`. Uses auth_scratch.salt /
 // .stored / .derived as decode + KDF scratch (single-caller discipline,
 // see auth_scratch above).
-fn verifyAgainst(content: []const u8, username: []const u8, password: []const u8) VerifyResult {
-    var any_parseable = false;
-    var line_start: usize = 0;
-    var k: usize = 0;
-    while (k <= content.len) : (k += 1) {
-        if (k != content.len and content[k] != '\n') continue;
-        const line = content[line_start..k];
-        line_start = k + 1;
-        if (line.len == 0) continue;
-        const entry = shadow.parseLine(line) orelse continue;
-        any_parseable = true;
-        // Demo-grade ceiling: PBKDF2 runs only after a username match, so
-        // a miss returns sooner than a hit — a username-enumeration timing
-        // oracle. Left unmitigated on purpose: the shipped accounts are
-        // build-time public (named in the README), so the oracle reveals
-        // nothing secret. If accounts ever become private, run a dummy KDF
-        // on the miss path so a miss costs the same as a hit.
-        if (!std.mem.eql(u8, entry.user, username)) continue;
+fn verifyAgainst(content []u8, username []u8, password []u8) VerifyResult {
+    var any_parseable bool = false
+    var line_start usize = 0
+    var k usize = 0
+    while k <= content.len {
+        if (k == content.len) || (content[k] == '\n') {
+            const line = content[line_start..k]
+            line_start = k + 1
+            if line.len != 0 {
+                if shadow.parseLine(line) |entry| {
+                    any_parseable = true
+                    // Demo-grade ceiling: PBKDF2 runs only after a username match, so
+                    // a miss returns sooner than a hit — a username-enumeration timing
+                    // oracle. Left unmitigated on purpose: the shipped accounts are
+                    // build-time public (named in the README), so the oracle reveals
+                    // nothing secret. If accounts ever become private, run a dummy KDF
+                    // on the miss path so a miss costs the same as a hit.
+                    if std.mem.eql(u8, entry.user, username) {
+                        // A matching line with undecodable hex is corruption, not denial.
+                        const salt_n = shadow.hexDecode(entry.salt_hex, &auth_scratch.salt) orelse return .corrupt
+                        const hash_n = shadow.hexDecode(entry.hash_hex, &auth_scratch.stored) orelse return .corrupt
+                        if (hash_n == 0) || (hash_n > 32) { return .corrupt }
 
-        // A matching line with undecodable hex is corruption, not denial.
-        const salt_n = shadow.hexDecode(entry.salt_hex, &auth_scratch.salt) orelse return .corrupt;
-        const hash_n = shadow.hexDecode(entry.hash_hex, &auth_scratch.stored) orelse return .corrupt;
-        if (hash_n == 0 or hash_n > 32) return .corrupt;
-
-        sha256.pbkdf2HmacSha256(
-            password,
-            auth_scratch.salt[0..salt_n],
-            entry.iterations,
-            auth_scratch.derived[0..hash_n],
-        );
-        if (sha256.ctEql(auth_scratch.derived[0..hash_n], auth_scratch.stored[0..hash_n])) return .match;
-        return .mismatch;
+                        sha256.pbkdf2HmacSha256(
+                            password,
+                            auth_scratch.salt[0..salt_n],
+                            entry.iterations,
+                            auth_scratch.derived[0..hash_n]
+                        )
+                        if sha256.ctEql(auth_scratch.derived[0..hash_n], auth_scratch.stored[0..hash_n]) { return .match }
+                        return .mismatch
+                    }
+                }
+            }
+        }
+        k += 1
     }
-    return if (any_parseable) .no_user else .corrupt;
+    return if (any_parseable) .no_user else .corrupt
 }
 
 // sys_authenticate — the kernel-owned credential verifier. /bin/login
@@ -925,8 +955,8 @@ fn verifyAgainst(content: []const u8, username: []const u8, password: []const u8
 //
 // The plaintext password crosses the user→kernel boundary exactly once,
 // into a static scratch buffer that the next call overwrites.
-export fn sys_authenticate(user_uva: u64, user_len: u64, pass_uva: u64, pass_len: u64) i64 {
-    _ = current orelse return -1;
+export fn sys_authenticate(user_uva u64, user_len u64, pass_uva u64, pass_len u64) i64 {
+    _ = current orelse return -1
 
     // Scrub the plaintext password and the derived verifier on every exit
     // path. These live in static BSS (single-caller scratch), so
@@ -937,22 +967,22 @@ export fn sys_authenticate(user_uva: u64, user_len: u64, pass_uva: u64, pass_len
     // Mirrors execve.zig's argv_scratch scrub. Runs after the result is
     // computed, so pass/fail timing is unchanged.
     defer {
-        @memset(&auth_scratch.pass, 0);
-        @memset(&auth_scratch.derived, 0);
+        #memset(&auth_scratch.pass, 0)
+        #memset(&auth_scratch.derived, 0)
     }
 
     // Copy the credentials under hard caps. Soft-fail on overflow or a wild
     // UVA (same contract as sys_openFile — no zombify).
-    if (user_len == 0 or user_len > auth_scratch.user.len) return -1;
-    if (pass_len > auth_scratch.pass.len) return -1;
-    if (copy_from_user(&auth_scratch.user, user_uva, user_len) < 0) return -1;
-    if (pass_len > 0 and copy_from_user(&auth_scratch.pass, pass_uva, pass_len) < 0) return -1;
-    const username = auth_scratch.user[0..user_len];
-    const password = auth_scratch.pass[0..pass_len];
+    if (user_len == 0) || (user_len > auth_scratch.user.len) { return -1 }
+    if pass_len > auth_scratch.pass.len { return -1 }
+    if copy_from_user(&auth_scratch.user, user_uva, user_len) < 0 { return -1 }
+    if (pass_len > 0) && (copy_from_user(&auth_scratch.pass, pass_uva, pass_len) < 0) { return -1 }
+    const username = auth_scratch.user[0..user_len]
+    const password = auth_scratch.pass[0..pass_len]
 
     // 1. The writable FAT32 shadow, when it exists and is intact.
-    if (readWholeFile(MNT_SHADOW_PATH, &auth_scratch.fbuf)) |content| {
-        switch (verifyAgainst(content, username, password)) {
+    if readWholeFile(MNT_SHADOW_PATH, &auth_scratch.fbuf) |content| {
+        switch verifyAgainst(content, username, password) {
             .match => return 0,
             .mismatch, .no_user => return -1,
             // Nothing parseable → announce + fall through to the seed.
@@ -961,16 +991,21 @@ export fn sys_authenticate(user_uva: u64, user_len: u64, pass_uva: u64, pass_len
     } else |err| {
         // OpenFailed is the normal miss (virt / fresh card) → silent.
         // ReadFailed means the file is there but unreadable → announce.
-        if (err == error.ReadFailed)
-            main_output(MU, "[Debug] /mnt/shadow unreadable - falling back to initramfs seed\n");
+        // (`unreadable` is bound first so the else-block holds two
+        // statements: a lone `if` in an error-capture else lowers to a
+        // capture-less `else if` in stage1, dropping the `|err|` binding.)
+        const unreadable = err == error.ReadFailed
+        if unreadable {
+            main_output(MU, "[Debug] /mnt/shadow unreadable - falling back to initramfs seed\n")
+        }
     }
 
     // 2. The initramfs seed (always present, read-only).
-    const content = readWholeFile(SHADOW_PATH, &auth_scratch.fbuf) catch return -1;
-    return switch (verifyAgainst(content, username, password)) {
+    const content = readWholeFile(SHADOW_PATH, &auth_scratch.fbuf) catch return -1
+    return switch verifyAgainst(content, username, password) {
         .match => 0,
         else => -1,
-    };
+    }
 }
 
 // ---- Password change ----
@@ -979,7 +1014,7 @@ export fn sys_authenticate(user_uva: u64, user_len: u64, pass_uva: u64, pass_len
 // reads it to map the caller's uid back to a login name for the
 // "non-root may only change its own record" rule. The account LIST is
 // build-time-immutable; only passwords are mutable state.
-const PASSWD_PATH: []const u8 = "/etc/passwd";
+const PASSWD_PATH []u8 = "/etc/passwd"
 
 // sys_passwd working buffers — static for the same stack-budget and
 // single-caller reasons as auth_scratch above (the PBKDF2 frames plus
@@ -987,47 +1022,48 @@ const PASSWD_PATH: []const u8 = "/etc/passwd";
 // and the KDF decode/derive scratch live in auth_scratch (fbuf / salt /
 // stored / derived) — sys_passwd and sys_authenticate never run
 // concurrently, so sharing those buffers is free.
-var passwd_scratch: struct {
-    user: [64]u8,
-    old_pass: [128]u8,
-    new_pass: [128]u8,
-    pwbuf: [512]u8,
-    salt_raw: [16]u8,
-    salt_hex: [32]u8,
-    hash_hex: [64]u8,
-} = undefined;
+const PasswdScratch = struct {
+    user [64]u8,
+    old_pass [128]u8,
+    new_pass [128]u8,
+    pwbuf [512]u8,
+    salt_raw [16]u8,
+    salt_hex [32]u8,
+    hash_hex [64]u8,
+}
+var passwd_scratch PasswdScratch = undefined
 
 // In-kernel whole-file overwrite through the privileged VFS door. The
 // caller guarantees content.len equals the file's current size (the
 // same-length rewrite contract), so the write never grows the file and
 // the FAT32 dir-entry resize branch is never taken.
-fn writeWholeFile(path: []const u8, content: []const u8) bool {
-    var open_result: vfs.OpenResult = .{};
-    preempt_disable();
-    const sb_opt = vfs.vfs_open(path, &open_result);
-    preempt_enable();
-    const sb = sb_opt orelse return false;
+fn writeWholeFile(path []u8, content []u8) bool {
+    var open_result vfs.OpenResult = .{}
+    preempt_disable()
+    const sb_opt = vfs.vfs_open(path, &open_result)
+    preempt_enable()
+    const sb = sb_opt orelse return false
 
-    var f: file_mod.File = .{};
-    f.private = open_result.private;
-    f.size = open_result.size;
-    f.offset = 0;
-    var off: usize = 0;
-    var ok = true;
-    while (off < content.len) {
-        preempt_disable();
-        const n = vfs.vfs_write(sb, &f, content[off..].ptr, content.len - off);
-        preempt_enable();
-        if (n <= 0) {
-            ok = false;
-            break;
+    var f file_mod.File = .{}
+    f.private = open_result.private
+    f.size = open_result.size
+    f.offset = 0
+    var off usize = 0
+    var ok bool = true
+    while off < content.len {
+        preempt_disable()
+        const n = vfs.vfs_write(sb, &f, content[off..].ptr, content.len - off)
+        preempt_enable()
+        if n <= 0 {
+            ok = false
+            break
         }
-        off += @intCast(n);
+        off += #intCast(n)
     }
-    preempt_disable();
-    vfs.vfs_close(sb, &f);
-    preempt_enable();
-    return ok;
+    preempt_disable()
+    vfs.vfs_close(sb, &f)
+    preempt_enable()
+    return ok
 }
 
 // sys_passwd — kernel-owned password change (slot 46). Rewrites `user`'s
@@ -1050,50 +1086,50 @@ fn writeWholeFile(path: []const u8, content: []const u8) bool {
 //
 // The salt source is the kernel entropy fallback (timer mix) — weak but
 // fresh per change; the RNG200 hardware source is a named carve-out.
-export fn sys_passwd(user_uva: u64, user_len: u64, old_uva: u64, old_len: u64, new_uva: u64, new_len: u64) i64 {
-    const c = current orelse return -1;
+export fn sys_passwd(user_uva u64, user_len u64, old_uva u64, old_len u64, new_uva u64, new_len u64) i64 {
+    const c = current orelse return -1
 
     // Scrub both plaintext passwords + the derived verifier on every exit
     // path (same rationale as sys_authenticate). The salt/hash hex are public
     // verifier material, not secret, so they need no scrub.
     defer {
-        @memset(&passwd_scratch.old_pass, 0);
-        @memset(&passwd_scratch.new_pass, 0);
-        @memset(&auth_scratch.derived, 0);
+        #memset(&passwd_scratch.old_pass, 0)
+        #memset(&passwd_scratch.new_pass, 0)
+        #memset(&auth_scratch.derived, 0)
     }
 
     // Copy all three strings under hard caps (sys_authenticate contract:
     // soft-fail on overflow or a wild UVA, no zombify).
-    if (user_len == 0 or user_len > passwd_scratch.user.len) return -1;
-    if (old_len > passwd_scratch.old_pass.len) return -1;
-    if (new_len == 0 or new_len > passwd_scratch.new_pass.len) return -1;
-    if (copy_from_user(&passwd_scratch.user, user_uva, user_len) < 0) return -1;
-    if (old_len > 0 and copy_from_user(&passwd_scratch.old_pass, old_uva, old_len) < 0) return -1;
-    if (copy_from_user(&passwd_scratch.new_pass, new_uva, new_len) < 0) return -1;
-    const username = passwd_scratch.user[0..user_len];
-    const old_password = passwd_scratch.old_pass[0..old_len];
-    const new_password = passwd_scratch.new_pass[0..new_len];
+    if (user_len == 0) || (user_len > passwd_scratch.user.len) { return -1 }
+    if old_len > passwd_scratch.old_pass.len { return -1 }
+    if (new_len == 0) || (new_len > passwd_scratch.new_pass.len) { return -1 }
+    if copy_from_user(&passwd_scratch.user, user_uva, user_len) < 0 { return -1 }
+    if (old_len > 0) && (copy_from_user(&passwd_scratch.old_pass, old_uva, old_len) < 0) { return -1 }
+    if copy_from_user(&passwd_scratch.new_pass, new_uva, new_len) < 0 { return -1 }
+    const username = passwd_scratch.user[0..user_len]
+    const old_password = passwd_scratch.old_pass[0..old_len]
+    const new_password = passwd_scratch.new_pass[0..new_len]
 
     // Authorization for non-root callers: own record only.
-    if (c.euid != 0) {
-        const pw_content = readWholeFile(PASSWD_PATH, &passwd_scratch.pwbuf) catch return -1;
-        const own = pwfile.lookupByUid(pw_content, c.uid) orelse return -defs.EACCES;
-        if (!std.mem.eql(u8, own.user, username)) return -defs.EACCES;
+    if c.euid != 0 {
+        const pw_content = readWholeFile(PASSWD_PATH, &passwd_scratch.pwbuf) catch return -1
+        const own = pwfile.lookupByUid(pw_content, c.uid) orelse return -defs.EACCES
+        if !std.mem.eql(u8, own.user, username) { return -defs.EACCES }
     }
 
     // The rewrite target must exist and be readable: /mnt/shadow only.
     // Its absence is the graceful no-writable-shadow case (QEMU virt).
-    const content = readWholeFile(MNT_SHADOW_PATH, &auth_scratch.fbuf) catch return -1;
+    const content = readWholeFile(MNT_SHADOW_PATH, &auth_scratch.fbuf) catch return -1
 
     // The target record must exist and parse (we need its iteration count
     // — the rewrite keeps it, which is half of the same-length contract).
-    const span = shadow.findUserLine(content, username) orelse return -1;
-    const old_entry = shadow.parseLine(content[span.start..span.end]) orelse return -1;
+    const span = shadow.findUserLine(content, username) orelse return -1
+    const old_entry = shadow.parseLine(content[span.start..span.end]) orelse return -1
 
     // Non-root callers must prove knowledge of the old password against
     // the very record being replaced.
-    if (c.euid != 0) {
-        switch (verifyAgainst(content, username, old_password)) {
+    if c.euid != 0 {
+        switch verifyAgainst(content, username, old_password) {
             .match => {},
             .mismatch, .no_user => return -defs.EACCES,
             .corrupt => return -1,
@@ -1103,28 +1139,28 @@ export fn sys_passwd(user_uva: u64, user_len: u64, old_uva: u64, old_len: u64, n
     // Mint the new verifier: fresh salt, PBKDF2 over the new password with
     // the record's existing iteration count, both hex-encoded at the fixed
     // widths the same-length contract relies on.
-    _ = hwrng.fill(&passwd_scratch.salt_raw);
-    _ = shadow.hexEncode(&passwd_scratch.salt_raw, &passwd_scratch.salt_hex) orelse return -1;
+    _ = hwrng.fill(&passwd_scratch.salt_raw)
+    _ = shadow.hexEncode(&passwd_scratch.salt_raw, &passwd_scratch.salt_hex) orelse return -1
     sha256.pbkdf2HmacSha256(
         new_password,
         &passwd_scratch.salt_raw,
         old_entry.iterations,
-        auth_scratch.derived[0..32],
-    );
-    _ = shadow.hexEncode(auth_scratch.derived[0..32], &passwd_scratch.hash_hex) orelse return -1;
+        auth_scratch.derived[0..32]
+    )
+    _ = shadow.hexEncode(auth_scratch.derived[0..32], &passwd_scratch.hash_hex) orelse return -1
 
     // Same-length in-place rewrite, then push the whole file back.
     // auth_scratch.fbuf still holds the file content; rewrite it there.
-    const mut_content = auth_scratch.fbuf[0..content.len];
-    if (!shadow.rewriteLineInPlace(
+    const mut_content = auth_scratch.fbuf[0..content.len]
+    if !shadow.rewriteLineInPlace(
         mut_content,
         username,
         &passwd_scratch.salt_hex,
-        &passwd_scratch.hash_hex,
-    )) return -1;
+        &passwd_scratch.hash_hex
+    ) { return -1 }
 
-    if (!writeWholeFile(MNT_SHADOW_PATH, mut_content)) return -1;
-    return 0;
+    if !writeWholeFile(MNT_SHADOW_PATH, mut_content) { return -1 }
+    return 0
 }
 
 /// Syscall dispatch table — referenced from entry.S (`adr x27, sys_call_table`).
@@ -1141,76 +1177,76 @@ export fn sys_passwd(user_uva: u64, user_len: u64, old_uva: u64, old_len: u64, n
 /// 23 / 24 / 27..29 were retired: those slots route to sys_retired
 /// (a clean -1) and their numbers are never reused.
 export var sys_call_table = blk: {
-    var t = [_]?*const anyopaque{null} ** defs.NR_SYSCALLS;
+    var t [defs.NR_SYSCALLS]?*anyopaque = [_]?*anyopaque{null} ** defs.NR_SYSCALLS
 
-    t[defs.SYS_FORK] = @ptrCast(&sys_fork);
-    t[defs.SYS_EXIT] = @ptrCast(&sys_exit);
-    t[defs.SYS_WAIT] = @ptrCast(&sys_wait);
-    t[defs.SYS_DUMP_FREE] = @ptrCast(&sys_dump_free);
-    t[defs.SYS_KILL] = @ptrCast(&sys_kill);
-    t[defs.SYS_EXECVE] = @ptrCast(&sys_execve);
+    t[defs.SYS_FORK] = #ptrCast(&sys_fork)
+    t[defs.SYS_EXIT] = #ptrCast(&sys_exit)
+    t[defs.SYS_WAIT] = #ptrCast(&sys_wait)
+    t[defs.SYS_DUMP_FREE] = #ptrCast(&sys_dump_free)
+    t[defs.SYS_KILL] = #ptrCast(&sys_kill)
+    t[defs.SYS_EXECVE] = #ptrCast(&sys_execve)
 
-    t[defs.SYS_OPEN_FILE] = @ptrCast(&sys_openFile);
-    t[defs.SYS_SEEK] = @ptrCast(&sys_seek);
+    t[defs.SYS_OPEN_FILE] = #ptrCast(&sys_openFile)
+    t[defs.SYS_SEEK] = #ptrCast(&sys_seek)
 
-    t[defs.SYS_BRK] = @ptrCast(&sys_brk);
-    t[defs.SYS_SBRK] = @ptrCast(&sys_sbrk);
-    t[defs.SYS_MMAP] = @ptrCast(&sys_mmap);
-    t[defs.SYS_MUNMAP] = @ptrCast(&sys_munmap);
-    t[defs.SYS_MLOCK] = @ptrCast(&sys_mlock);
-    t[defs.SYS_MUNLOCK] = @ptrCast(&sys_munlock);
+    t[defs.SYS_BRK] = #ptrCast(&sys_brk)
+    t[defs.SYS_SBRK] = #ptrCast(&sys_sbrk)
+    t[defs.SYS_MMAP] = #ptrCast(&sys_mmap)
+    t[defs.SYS_MUNMAP] = #ptrCast(&sys_munmap)
+    t[defs.SYS_MLOCK] = #ptrCast(&sys_mlock)
+    t[defs.SYS_MUNLOCK] = #ptrCast(&sys_munlock)
 
-    t[defs.SYS_PIPE] = @ptrCast(&sys_pipe);
-    t[defs.SYS_SOCKET] = @ptrCast(&sys_socket);
-    t[defs.SYS_MSGGET] = @ptrCast(&sys_msgget);
-    t[defs.SYS_SEMGET] = @ptrCast(&sys_semget);
-    t[defs.SYS_SHMGET] = @ptrCast(&sys_shmget);
+    t[defs.SYS_PIPE] = #ptrCast(&sys_pipe)
+    t[defs.SYS_SOCKET] = #ptrCast(&sys_socket)
+    t[defs.SYS_MSGGET] = #ptrCast(&sys_msgget)
+    t[defs.SYS_SEMGET] = #ptrCast(&sys_semget)
+    t[defs.SYS_SHMGET] = #ptrCast(&sys_shmget)
 
-    t[defs.SYS_SET_CONSOLE_MODE] = @ptrCast(&sys_setConsoleMode);
-    t[defs.SYS_CLOSE_CONSOLE] = @ptrCast(&sys_closeConsole);
+    t[defs.SYS_SET_CONSOLE_MODE] = #ptrCast(&sys_setConsoleMode)
+    t[defs.SYS_CLOSE_CONSOLE] = #ptrCast(&sys_closeConsole)
 
-    t[defs.SYS_CONSOLE_INJECT] = @ptrCast(&sys_console_inject);
+    t[defs.SYS_CONSOLE_INJECT] = #ptrCast(&sys_console_inject)
 
-    t[defs.SYS_READ] = @ptrCast(&sys_read);
-    t[defs.SYS_WRITE] = @ptrCast(&sys_write);
-    t[defs.SYS_CLOSE] = @ptrCast(&sys_close);
-    t[defs.SYS_DUP2] = @ptrCast(&sys_dup2);
+    t[defs.SYS_READ] = #ptrCast(&sys_read)
+    t[defs.SYS_WRITE] = #ptrCast(&sys_write)
+    t[defs.SYS_CLOSE] = #ptrCast(&sys_close)
+    t[defs.SYS_DUP2] = #ptrCast(&sys_dup2)
 
-    t[defs.SYS_CHDIR] = @ptrCast(&sys_chdir);
-    t[defs.SYS_GETCWD] = @ptrCast(&sys_getcwd);
-    t[defs.SYS_READDIR] = @ptrCast(&sys_readdir);
+    t[defs.SYS_CHDIR] = #ptrCast(&sys_chdir)
+    t[defs.SYS_GETCWD] = #ptrCast(&sys_getcwd)
+    t[defs.SYS_READDIR] = #ptrCast(&sys_readdir)
 
-    t[defs.SYS_KLOG_READ] = @ptrCast(&sys_klog_read);
+    t[defs.SYS_KLOG_READ] = #ptrCast(&sys_klog_read)
 
-    t[defs.SYS_GETUID] = @ptrCast(&sys_getuid);
-    t[defs.SYS_GETEUID] = @ptrCast(&sys_geteuid);
-    t[defs.SYS_GETGID] = @ptrCast(&sys_getgid);
-    t[defs.SYS_GETEGID] = @ptrCast(&sys_getegid);
-    t[defs.SYS_SETUID] = @ptrCast(&sys_setuid);
-    t[defs.SYS_SETGID] = @ptrCast(&sys_setgid);
+    t[defs.SYS_GETUID] = #ptrCast(&sys_getuid)
+    t[defs.SYS_GETEUID] = #ptrCast(&sys_geteuid)
+    t[defs.SYS_GETGID] = #ptrCast(&sys_getgid)
+    t[defs.SYS_GETEGID] = #ptrCast(&sys_getegid)
+    t[defs.SYS_SETUID] = #ptrCast(&sys_setuid)
+    t[defs.SYS_SETGID] = #ptrCast(&sys_setgid)
 
-    t[defs.SYS_AUTHENTICATE] = @ptrCast(&sys_authenticate);
-    t[defs.SYS_PASSWD] = @ptrCast(&sys_passwd);
-    t[defs.SYS_REBOOT] = @ptrCast(&sys_reboot);
+    t[defs.SYS_AUTHENTICATE] = #ptrCast(&sys_authenticate)
+    t[defs.SYS_PASSWD] = #ptrCast(&sys_passwd)
+    t[defs.SYS_REBOOT] = #ptrCast(&sys_reboot)
 
     // Retired: legacy per-kind console / file / pipe / exec shims
     // (write_str, exec, readFile, writeFile, closeFile, openConsole,
     // readConsole, pipe_read, pipe_write, pipe_close). Slot numbers are
     // never reused; any caller gets -1.
-    for ([_]usize{ 0, 5, 8, 9, 11, 23, 24, 27, 28, 29 }) |retired| {
-        t[retired] = @ptrCast(&sys_retired);
+    for retired in ([_]usize{ 0, 5, 8, 9, 11, 23, 24, 27, 28, 29 }) {
+        t[retired] = #ptrCast(&sys_retired)
     }
 
-    break :blk t;
-};
+    break :blk t
+}
 
 // Build-time guard: src/asm_defs_common.inc must declare
 // `#define NR_SYSCALLS 49` to match. If you bump the highest SYS_*
 // constant in lib/syscall_defs.zig, also bump the asm-side literal,
 // then update this comptime check.
 comptime {
-    if (defs.NR_SYSCALLS != 49) {
-        @compileError("NR_SYSCALLS drifted from src/asm_defs_common.inc — keep both in lockstep");
+    if defs.NR_SYSCALLS != 49 {
+        #compileError("NR_SYSCALLS drifted from src/asm_defs_common.inc — keep both in lockstep")
     }
 }
 
@@ -1218,9 +1254,10 @@ comptime {
 /// el0_svc can `blr` through the table after the user pgd has been
 /// installed in TTBR0.
 export fn sys_call_table_relocate() void {
-    var i: usize = 0;
-    while (i < defs.NR_SYSCALLS) : (i += 1) {
-        const cur: u64 = @intFromPtr(sys_call_table[i]);
-        sys_call_table[i] = @ptrFromInt(cur | LINEAR_MAP_BASE);
+    var i usize = 0
+    while i < defs.NR_SYSCALLS {
+        const cur u64 = #intFromPtr(sys_call_table[i])
+        sys_call_table[i] = #ptrFromInt(cur | LINEAR_MAP_BASE)
+        i += 1
     }
 }

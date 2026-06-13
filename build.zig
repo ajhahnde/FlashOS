@@ -750,6 +750,39 @@ pub fn build(b: *std.Build) void {
     fork_mod.addImport("execve", execve_mod);
     fork_mod.addImport("build_options", build_options_mod);
 
+    // Syscall dispatch table + handlers. Ported to Flash; flashc transpiles
+    // it via addFlashSource. Moved from a relative `@import("sys.zig")` in
+    // start.zig to a named module — the generated .zig lives in the build
+    // cache, so the path import no longer resolves. start.zig force-includes
+    // it (`_ = @import("sys")`) so the dispatch table + every export fn land
+    // in the ELF; entry.S reaches sys_call_table by symbol and kernel.zig
+    // calls sys_call_table_relocate through a C-ABI `extern fn`. The board
+    // driver bag is not imported here — sys reaches its three board entry
+    // points through C-ABI trampolines in src/kernel.zig (board stays in the
+    // kernel root module). No host test: sys.zig carries no test blocks.
+    const sys_src = addFlashSource(b, "src/sys.flash");
+    const sys_mod = b.createModule(.{
+        .root_source_file = sys_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    sys_mod.addImport("syscall_defs", syscall_defs_mod);
+    sys_mod.addImport("task_layout", task_layout_mod);
+    sys_mod.addImport("user_layout", user_layout_mod);
+    sys_mod.addImport("pipe", pipe_mod);
+    sys_mod.addImport("console", console_mod);
+    sys_mod.addImport("sched", sched_mod);
+    sys_mod.addImport("vfs", vfs_mod);
+    sys_mod.addImport("file", file_mod);
+    sys_mod.addImport("fdtable", fdtable_mod);
+    sys_mod.addImport("path", path_mod);
+    sys_mod.addImport("klog_ring", klog_ring_mod);
+    sys_mod.addImport("sha256", sha256_mod);
+    sys_mod.addImport("shadow", shadow_mod);
+    sys_mod.addImport("perm", perm_mod);
+    sys_mod.addImport("pwfile", pwfile_mod);
+    sys_mod.addImport("hwrng", hwrng_mod);
+
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/start.zig"),
@@ -821,6 +854,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("fdtable", fdtable_mod);
     kernel_mod.addImport("console", console_mod);
     kernel_mod.addImport("sched", sched_mod);
+    kernel_mod.addImport("sys", sys_mod);
     kernel_mod.addImport("execve", execve_mod);
     kernel_mod.addImport("path", path_mod);
     kernel_mod.addImport("initramfs", initramfs_mod);

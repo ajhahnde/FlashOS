@@ -19,7 +19,7 @@ comptime {
     _ = @import("sched");
     _ = @import("fork");
     _ = @import("execve");
-    _ = @import("sys.zig");
+    _ = @import("sys");
     _ = @import("page_alloc");
     _ = @import("mm_user");
     _ = @import("utilc");

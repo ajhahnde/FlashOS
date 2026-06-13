@@ -64,6 +64,22 @@ extern var current: ?*task_layout.TaskStruct;
 // Syscall table
 extern fn sys_call_table_relocate() void;
 
+// Board-driver trampolines for the Flash-sourced syscall module. src/sys.zig
+// became a named module (src/sys.flash); its generated .zig lives in the build
+// cache, so it can no longer @import the relatively-imported board bag. These
+// thin C-ABI wrappers bridge the boundary — the same role fork.zig's
+// move_to_user_elf_argv plays for execve. console_tx uses the usb pair;
+// sys_reboot calls board_power_reboot.
+export fn board_usb_enumerated() bool {
+    return board.usb.enumerated();
+}
+export fn board_usb_cdc_tx(ptr: [*]const u8, len: u64) void {
+    board.usb.cdc_tx(ptr[0..len]);
+}
+export fn board_power_reboot() noreturn {
+    board.power.reboot();
+}
+
 // Trace
 extern fn trace_init() void;
 extern fn trace_output_kernel_pts(interface: i32) void;
