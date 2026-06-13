@@ -588,6 +588,20 @@ pub fn build(b: *std.Build) void {
         .root_source_file = pwfile_src,
     });
 
+    // hwrng — kernel entropy source (timer-backed SplitMix64 fallback).
+    // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
+    // pulls hwrng_init into the ELF with `_ = @import("hwrng")` and sys.zig
+    // reaches fill()/Source through the same named module; kernel.zig calls
+    // hwrng_init via a C-ABI `extern fn`. console_ui supplies the boot Sink.
+    // The one transpile is shared with the host-test build below (src_lazy).
+    const hwrng_src = addFlashSource(b, "src/hwrng.flash");
+    const hwrng_mod = b.createModule(.{
+        .root_source_file = hwrng_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    hwrng_mod.addImport("console_ui", console_ui_mod);
+
     // FAT32 on-disk layout decode + cluster/FAT/dir helpers.
     // Pure data-shape module — no VFS / file / page
     // imports; takes the BlockDev vtable by runtime pointer so the
@@ -775,6 +789,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("sha256", sha256_mod);
     kernel_mod.addImport("shadow", shadow_mod);
     kernel_mod.addImport("perm", perm_mod);
+    kernel_mod.addImport("hwrng", hwrng_mod);
     // sys_passwd authorization: uid -> login-name lookup against
     // /etc/passwd (the same parser /bin/login and fsh's whoami import).
     kernel_mod.addImport("pwfile", pwfile_mod);
@@ -2336,7 +2351,8 @@ pub fn build(b: *std.Build) void {
     // (fill / hwrng_init) runs against host_stubs' ramping get_sys_count,
     // so the boot self-test + announce path is exercised end-to-end.
     _ = addHostTest(b, test_step, .{
-        .src = "src/hwrng.zig",
+        .src = "src/hwrng.flash",
+        .src_lazy = hwrng_src,
         .stubs = stubs_obj,
         .imports = &.{.{ .name = "console_ui", .mod = console_ui_mod }},
     });

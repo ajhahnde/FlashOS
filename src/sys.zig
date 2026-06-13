@@ -20,10 +20,12 @@ const sha256 = @import("sha256");
 const shadow = @import("shadow");
 const perm = @import("perm");
 const pwfile = @import("pwfile");
-// Kernel entropy source (salt minting for sys_passwd). Path import —
-// hwrng.zig shares the kernel root module (start.zig force-includes it
-// for the exported hwrng_init), same pattern as board.zig below.
-const hwrng = @import("hwrng.zig");
+// Kernel entropy source (salt minting for sys_passwd). Named module —
+// hwrng was promoted to a named module when it moved to Flash (the
+// generated .zig lives in the build cache, so a path import would not
+// resolve); start.zig force-includes the same module for the exported
+// hwrng_init, same pattern as sched/execve/utilc.
+const hwrng = @import("hwrng");
 // USB-C gadget console: board bag, for the console_tx mux below.
 // Path-import — sys.zig shares the kernel root module with board.zig
 // (kernel.zig imports it the same way). No cycle: board's driver modules

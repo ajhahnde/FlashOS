@@ -23,7 +23,7 @@ comptime {
     _ = @import("page_alloc");
     _ = @import("mm_user.zig");
     _ = @import("utilc");
-    _ = @import("hwrng.zig");
+    _ = @import("hwrng");
 
     _ = @import("trace/utils.zig");
     _ = @import("trace/trace_main.zig");
