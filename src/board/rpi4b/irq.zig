@@ -48,9 +48,9 @@ extern fn get_core() u32;
 extern var current: *anyopaque;
 
 const console = @import("console");
-// Board-local sibling import (same module instance board.zig exposes as
-// board.usb): the timer-tick enumeration service below polls the DWC2 core.
-const usb = @import("usb.zig");
+// Named module (the same instance board.zig exposes as board.usb): the
+// timer-tick enumeration service below polls the DWC2 core.
+const usb = @import("rpi4b_usb");
 
 // -Dtrace profiler seam. The empty stub keeps handle_irq's signature and
 // `frame` argument identical in a non-trace build (the call inlines to

@@ -877,7 +877,7 @@ pub fn build(b: *std.Build) void {
     // rpi4b board driver leaves promoted to Flash named modules (same
     // pattern as the virt set above). gpio/timer/power/uart are board.zig
     // switch prongs; rpi4b_mailbox is the VideoCore MMIO doorbell consumed
-    // by the still-Zig rpi4b emmc2/usb drivers (it can't take the name
+    // by the rpi4b emmc2/usb board drivers (it can't take the name
     // "mailbox" — that's the pure message-layout data module it imports).
     // Created here so rpi4b_uart can reach console_mod and rpi4b_mailbox
     // can reach mailbox_mod.
@@ -913,6 +913,27 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     rpi4b_uart_mod.addImport("console", console_mod);
+    const rpi4b_emmc2_src = addFlashSource(b, "src/board/rpi4b/emmc2.flash");
+    const rpi4b_emmc2_mod = b.createModule(.{
+        .root_source_file = rpi4b_emmc2_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    rpi4b_emmc2_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
+    rpi4b_emmc2_mod.addImport("block_dev", block_dev_mod);
+    rpi4b_emmc2_mod.addImport("mailbox", mailbox_mod);
+    rpi4b_emmc2_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
+    const rpi4b_usb_src = addFlashSource(b, "src/board/rpi4b/usb.flash");
+    const rpi4b_usb_mod = b.createModule(.{
+        .root_source_file = rpi4b_usb_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    rpi4b_usb_mod.addImport("usb_descriptors", usb_descriptors_mod);
+    rpi4b_usb_mod.addImport("usb_tx_ring", usb_tx_ring_mod);
+    rpi4b_usb_mod.addImport("mailbox", mailbox_mod);
+    rpi4b_usb_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
+    rpi4b_usb_mod.addImport("console", console_mod);
 
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
@@ -1023,6 +1044,8 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("rpi4b_power", rpi4b_power_mod);
     kernel_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
     kernel_mod.addImport("rpi4b_uart", rpi4b_uart_mod);
+    kernel_mod.addImport("rpi4b_emmc2", rpi4b_emmc2_mod);
+    kernel_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
     kernel_mod.addImport("utilc", utilc_mod);
     kernel_mod.addImport("sha256", sha256_mod);

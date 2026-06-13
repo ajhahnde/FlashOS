@@ -33,7 +33,7 @@ pub const irq = switch (build_options.board) {
 // (QEMU `-M virt` exposes no SDHCI peripheral; see
 // src/board/virt/emmc2.zig).
 pub const emmc2 = switch (build_options.board) {
-    .rpi4b => @import("board/rpi4b/emmc2.zig"),
+    .rpi4b => @import("rpi4b_emmc2"),
     .virt => @import("virt_emmc2"),
 };
 
@@ -41,7 +41,7 @@ pub const emmc2 = switch (build_options.board) {
 // stub on virt (QEMU emulates no DWC2 device path; see
 // src/board/virt/usb.zig).
 pub const usb = switch (build_options.board) {
-    .rpi4b => @import("board/rpi4b/usb.zig"),
+    .rpi4b => @import("rpi4b_usb"),
     .virt => @import("virt_usb"),
 };
 
