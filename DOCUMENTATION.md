@@ -119,15 +119,14 @@ lib/
   syscall_defs.flash         Shared SYS_* IDs (kernel + user side)
 
 tools/
-  hello_elf.zig + .S       Hand-rolled ELF for [TEST] exec-elf
-  stackbomb_elf.zig + .S   Recursive stack-blower for [TEST] stack-overflow
-  flibc_demo_elf.zig + .S  flibc-driven demo for [TEST] flibc
+  hello.flash              Hand-rolled ELF for [TEST] exec-elf
+  stackbomb.flash          Recursive stack-blower for [TEST] stack-overflow
+  flibc_demo.flash         flibc-driven demo for [TEST] flibc
   hello_linker.ld          Single-PT_LOAD layout (hello + stackbomb)
   flibc_demo_linker.ld     Single-PT_LOAD layout with .rodata folded in
 
 tests/
   host_stubs.zig           Shared linker stubs for 'zig build test'
-  host_stubs_pipe.zig      Pipe-test page-alloc stub
   host_stubs_sched.zig     Sched-test HW-side stubs
   host_stubs_initramfs.zig File/initramfs stubs (typed `current`)
   host_stubs_vfs.zig       VFS-test stubs

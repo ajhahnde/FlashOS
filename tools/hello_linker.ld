@@ -1,5 +1,5 @@
 /*
- * Minimal linker script for tools/hello_elf.zig — produces a single
+ * Minimal linker script for tools/hello.flash — produces a single
  * page-aligned PT_LOAD segment so the FlashOS ELF loader (which
  * rejects non-page-aligned p_vaddrs and does not coalesce overlapping
  * segments) can map it page-grain. The kernel loader copies file-
