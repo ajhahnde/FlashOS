@@ -415,11 +415,12 @@ pub fn build(b: *std.Build) void {
     // SDHCI command encoder + CSD parser.
     // Named module so the rpi4b BCM2711 EMMC2 driver
     // (src/board/rpi4b/emmc2.zig) can `@import("sdhci_cmd")`
-    // for the CMD0..ACMD41 encodings and parseCsdV2. Host tests at the
-    // bottom of this file build a separate test-only Module from the
-    // same source — pure data, no shared state.
+    // for the CMD0..ACMD41 encodings and parseCsdV2. Ported to Flash;
+    // flashc transpiles it via addFlashSource and the one transpile is
+    // shared with the host-test build below (src_lazy).
+    const sdhci_cmd_src = addFlashSource(b, "src/sdhci_cmd.flash");
     const sdhci_cmd_mod = b.createModule(.{
-        .root_source_file = b.path("src/sdhci_cmd.zig"),
+        .root_source_file = sdhci_cmd_src,
         .target = target,
         .optimize = optimize,
     });
@@ -428,20 +429,24 @@ pub fn build(b: *std.Build) void {
     // Pure data; the rpi4b board side
     // (src/board/rpi4b/mailbox.zig) wraps it with the MMIO doorbell so
     // the EMMC2 driver can read the firmware-set base clock and derive
-    // a safe SDHCI divider. Host tests build a separate test-only
-    // Module from the same source.
+    // a safe SDHCI divider. Ported to Flash; flashc transpiles it via
+    // addFlashSource and the one transpile is shared with the host-test
+    // build below (src_lazy).
+    const mailbox_src = addFlashSource(b, "src/mailbox.flash");
     const mailbox_mod = b.createModule(.{
-        .root_source_file = b.path("src/mailbox.zig"),
+        .root_source_file = mailbox_src,
         .target = target,
         .optimize = optimize,
     });
 
     // USB descriptor set + SETUP decode (DWC2 gadget). Pure data; the
     // rpi4b board side (src/board/rpi4b/usb.zig) imports it as
-    // "usb_descriptors". Host tests build a separate test-only Module
-    // from the same source.
+    // "usb_descriptors". Ported to Flash; flashc transpiles it via
+    // addFlashSource and the one transpile is shared with the host-test
+    // build below (src_lazy).
+    const usb_descriptors_src = addFlashSource(b, "src/usb_descriptors.flash");
     const usb_descriptors_mod = b.createModule(.{
-        .root_source_file = b.path("src/usb_descriptors.zig"),
+        .root_source_file = usb_descriptors_src,
         .target = target,
         .optimize = optimize,
     });
@@ -2094,18 +2099,18 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    // sdhci_cmd.zig — pure-data SDHCI command encoder + CSD parser.
+    // sdhci_cmd.flash — pure-data SDHCI command encoder + CSD parser.
     // No externs, no fixture state.
-    _ = addHostTest(b, test_step, .{ .src = "src/sdhci_cmd.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/sdhci_cmd.flash", .src_lazy = sdhci_cmd_src });
 
-    // mailbox.zig — pure-data VideoCore property-tag builder + parser.
+    // mailbox.flash — pure-data VideoCore property-tag builder + parser.
     // No externs; the MMIO doorbell lives in
     // src/board/rpi4b/mailbox.zig.
-    _ = addHostTest(b, test_step, .{ .src = "src/mailbox.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/mailbox.flash", .src_lazy = mailbox_src });
 
-    // usb_descriptors.zig — byte-exact USB descriptor set + SETUP decode
+    // usb_descriptors.flash — byte-exact USB descriptor set + SETUP decode
     // (DWC2 gadget). No externs; pure data + pure functions.
-    _ = addHostTest(b, test_step, .{ .src = "src/usb_descriptors.zig" });
+    _ = addHostTest(b, test_step, .{ .src = "src/usb_descriptors.flash", .src_lazy = usb_descriptors_src });
 
     // usb_tx_ring.flash — bulk-IN TX byte-ring (DWC2 gadget).
     // No externs; pure ring arithmetic (push/peek/advance/clear).

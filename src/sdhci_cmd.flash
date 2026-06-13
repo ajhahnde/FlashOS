@@ -23,7 +23,7 @@
 // Single-block reads/writes only; multi-block (CMD18 / CMD25) and
 // DMA are future optimisations.
 
-const std = @import("std");
+const std = #import("std")
 
 // Hardware-level response shape — the value the controller needs in
 // CMD_RSPNS_TYPE plus whether to enable the CRC check. The SD-spec
@@ -43,49 +43,49 @@ pub const CmdResp = enum {
     r1b, //  48-bit + CRC + IDX + busy  — CMD7
     r2, //   136-bit                    — CMD2 / CMD9 / CMD10
     r3, //   48-bit, no CRC, no IDX     — ACMD41 (also R4)
-};
+}
 
-pub const CmdDir = enum(u1) { write = 0, read = 1 };
+pub const CmdDir = enum(u1) { write = 0, read = 1 }
 
-pub fn encode(idx: u6, resp: CmdResp, is_data: bool, dir: CmdDir) u32 {
-    var v: u32 = 0;
+pub fn encode(idx u6, resp CmdResp, is_data bool, dir CmdDir) u32 {
+    var v u32 = 0
     // CMD_RSPNS_TYPE: 0=none, 1=136-bit, 2=48-bit, 3=48-bit+busy.
-    const rspns_type: u32 = switch (resp) {
+    const rspns_type u32 = switch resp {
         .none => 0,
         .r2 => 1,
         .r1, .r3 => 2,
         .r1b => 3,
-    };
-    v |= rspns_type << 16; //                                      CMD_RSPNS_TYPE
-    if (resp == .r1 or resp == .r1b or resp == .r2) v |= (1 << 19); // CRC check — IXCHK never set (BCM2711 quirk)
-    if (is_data) v |= (1 << 21); //                                CMD_ISDATA
-    v |= @as(u32, idx) << 24; //                                   CMD_INDEX
-    if (is_data) {
-        v |= (1 << 1); //                                          TM_BLKCNT_EN
-        v |= @as(u32, @intFromEnum(dir)) << 4; //                  TM_DAT_DIR
     }
-    return v;
+    v |= rspns_type << 16 //                                      CMD_RSPNS_TYPE
+    if resp == .r1 || resp == .r1b || resp == .r2 { v |= (1 << 19) } // CRC check — IXCHK never set (BCM2711 quirk)
+    if is_data { v |= (1 << 21) } //                                CMD_ISDATA
+    v |= #as(u32, idx) << 24 //                                   CMD_INDEX
+    if is_data {
+        v |= (1 << 1) //                                          TM_BLKCNT_EN
+        v |= #as(u32, #intFromEnum(dir)) << 4 //                  TM_DAT_DIR
+    }
+    return v
 }
 
-pub const CMD0_GO_IDLE: u32 = encode(0, .none, false, .write);
-pub const CMD2_ALL_SEND_CID: u32 = encode(2, .r2, false, .write);
-pub const CMD3_SEND_REL_ADDR: u32 = encode(3, .r1, false, .write); // R6
-pub const CMD7_SELECT_CARD: u32 = encode(7, .r1b, false, .write); // R1b
-pub const CMD8_SEND_IF_COND: u32 = encode(8, .r1, false, .write); // R7
-pub const CMD9_SEND_CSD: u32 = encode(9, .r2, false, .write);
-pub const CMD17_READ_SINGLE: u32 = encode(17, .r1, true, .read);
-pub const CMD24_WRITE_SINGLE: u32 = encode(24, .r1, true, .write);
-pub const CMD55_APP_CMD: u32 = encode(55, .r1, false, .write);
-pub const ACMD41_SD_SEND_OP_COND: u32 = encode(41, .r3, false, .write);
+pub const CMD0_GO_IDLE u32 = encode(0, .none, false, .write)
+pub const CMD2_ALL_SEND_CID u32 = encode(2, .r2, false, .write)
+pub const CMD3_SEND_REL_ADDR u32 = encode(3, .r1, false, .write) // R6
+pub const CMD7_SELECT_CARD u32 = encode(7, .r1b, false, .write) // R1b
+pub const CMD8_SEND_IF_COND u32 = encode(8, .r1, false, .write) // R7
+pub const CMD9_SEND_CSD u32 = encode(9, .r2, false, .write)
+pub const CMD17_READ_SINGLE u32 = encode(17, .r1, true, .read)
+pub const CMD24_WRITE_SINGLE u32 = encode(24, .r1, true, .write)
+pub const CMD55_APP_CMD u32 = encode(55, .r1, false, .write)
+pub const ACMD41_SD_SEND_OP_COND u32 = encode(41, .r3, false, .write)
 
 // CMD8 argument: VHS=1 (2.7-3.6 V supplied) + check pattern 0xAA. The
 // card echoes the pattern in R7; mismatch means a v1.x card or a bad
 // voltage rail.
-pub const CMD8_ARG_VHS_27_36_CHECK_AA: u32 = 0x000001AA;
+pub const CMD8_ARG_VHS_27_36_CHECK_AA u32 = 0x000001AA
 
 // ACMD41 argument: HCS (bit 30, host supports SDHC/SDXC) + OCR voltage
 // window 3.0-3.4 V (bits 20..23 set). XPC and S18R left clear.
-pub const ACMD41_ARG_HCS_AND_VOLT: u32 = 0x40FF8000;
+pub const ACMD41_ARG_HCS_AND_VOLT u32 = 0x40FF8000
 
 // CSD v2.0 capacity parser (SDHC / SDXC).
 //
@@ -104,16 +104,18 @@ pub const ACMD41_ARG_HCS_AND_VOLT: u32 = 0x40FF8000;
 // (C_SIZE + 1) * 1024 per the SD Physical Layer Simplified Spec.
 
 pub const Csd = struct {
-    capacity_blocks: u64,
-};
+    capacity_blocks u64,
+}
 
-pub fn parseCsdV2(resp: [4]u32) error{UnsupportedCsdVersion}!Csd {
-    const csd_structure = (resp[3] >> 22) & 0x3;
-    if (csd_structure != 1) return error.UnsupportedCsdVersion;
-    const c_size_lo: u32 = (resp[1] >> 16) & 0x3F;
-    const c_size_hi: u32 = (resp[2] & 0xFFFF) << 6;
-    const c_size: u32 = c_size_lo | c_size_hi;
-    return .{ .capacity_blocks = (@as(u64, c_size) + 1) * 1024 };
+const CsdError = error{UnsupportedCsdVersion}
+
+pub fn parseCsdV2(resp [4]u32) CsdError!Csd {
+    const csd_structure = (resp[3] >> 22) & 0x3
+    if csd_structure != 1 { return error.UnsupportedCsdVersion }
+    const c_size_lo u32 = (resp[1] >> 16) & 0x3F
+    const c_size_hi u32 = (resp[2] & 0xFFFF) << 6
+    const c_size u32 = c_size_lo | c_size_hi
+    return .{ .capacity_blocks = (#as(u64, c_size) + 1) * 1024 }
 }
 
 // ---- SDHCI clock divider ----
@@ -132,22 +134,22 @@ pub fn parseCsdV2(resp: [4]u32) error{UnsupportedCsdVersion}!Csd {
 // divisor even in SDHCI 3.0 10-bit divided-clock mode (Circle's
 // GetClockDivider rounds up the same way); clamped to the largest
 // power of two the 10-bit CONTROL1 field can hold.
-pub fn clockDivisor(base_hz: u32, target_hz: u32) u32 {
-    if (base_hz == 0 or target_hz == 0) return 1;
-    const denom: u32 = 2 * target_hz;
-    const min_n: u32 = (base_hz + denom - 1) / denom; // ceil(base / 2*target)
-    var n: u32 = 1;
-    while (n < min_n and n < 512) n <<= 1;
-    return n;
+pub fn clockDivisor(base_hz u32, target_hz u32) u32 {
+    if base_hz == 0 || target_hz == 0 { return 1 }
+    const denom u32 = 2 * target_hz
+    const min_n u32 = (base_hz + denom - 1) / denom // ceil(base / 2*target)
+    var n u32 = 1
+    while n < min_n && n < 512 { n <<= 1 }
+    return n
 }
 
 // Pack a 10-bit divisor into CONTROL1's split SDCLK-frequency-select
 // field: low 8 bits at [15:8], high 2 bits at [7:6] (SD Host
 // Controller 3.00 "10-bit Divided Clock Mode").
-pub fn control1ClockBits(n: u32) u32 {
-    const lo = (n & 0xFF) << 8;
-    const hi = ((n >> 8) & 0x3) << 6;
-    return lo | hi;
+pub fn control1ClockBits(n u32) u32 {
+    const lo = (n & 0xFF) << 8
+    const hi = ((n >> 8) & 0x3) << 6
+    return lo | hi
 }
 
 // ---- Host tests ----
@@ -155,105 +157,105 @@ pub fn control1ClockBits(n: u32) u32 {
 // Pure data; no externs, no fixture state. The freestanding kernel
 // build links the same source unchanged.
 
-const testing = std.testing;
+const testing = std.testing
 
 test "CMD0_GO_IDLE is all-zero (no response, no data, no flags)" {
-    try testing.expectEqual(@as(u32, 0), CMD0_GO_IDLE);
+    try testing.expectEqual(#as(u32, 0), CMD0_GO_IDLE)
 }
 
 test "CMD17 encodes idx=17, R1, data, read direction" {
-    const v = CMD17_READ_SINGLE;
-    try testing.expectEqual(@as(u32, 17), (v >> 24) & 0x3F);
-    try testing.expectEqual(@as(u32, 2), (v >> 16) & 0x3); // RESP_TYPE = r1 (48-bit)
-    try testing.expect((v & (1 << 19)) != 0); // CRC check
-    try testing.expect((v & (1 << 20)) == 0); // IXCHK never set (BCM2711 quirk)
-    try testing.expect((v & (1 << 21)) != 0); // ISDATA
-    try testing.expect((v & (1 << 1)) != 0); // BLKCNT_EN
-    try testing.expectEqual(@as(u32, 1), (v >> 4) & 1); // DIR = read
+    const v = CMD17_READ_SINGLE
+    try testing.expectEqual(#as(u32, 17), (v >> 24) & 0x3F)
+    try testing.expectEqual(#as(u32, 2), (v >> 16) & 0x3) // RESP_TYPE = r1 (48-bit)
+    try testing.expect((v & (1 << 19)) != 0) // CRC check
+    try testing.expect((v & (1 << 20)) == 0) // IXCHK never set (BCM2711 quirk)
+    try testing.expect((v & (1 << 21)) != 0) // ISDATA
+    try testing.expect((v & (1 << 1)) != 0) // BLKCNT_EN
+    try testing.expectEqual(#as(u32, 1), (v >> 4) & 1) // DIR = read
 }
 
 test "CMD24 encodes idx=24 + write direction (DIR bit clear)" {
-    const v = CMD24_WRITE_SINGLE;
-    try testing.expectEqual(@as(u32, 24), (v >> 24) & 0x3F);
-    try testing.expect((v & (1 << 19)) != 0); // CRC check
-    try testing.expect((v & (1 << 20)) == 0); // IXCHK never set (BCM2711 quirk)
-    try testing.expect((v & (1 << 21)) != 0); // ISDATA
-    try testing.expectEqual(@as(u32, 0), (v >> 4) & 1); // DIR = write
+    const v = CMD24_WRITE_SINGLE
+    try testing.expectEqual(#as(u32, 24), (v >> 24) & 0x3F)
+    try testing.expect((v & (1 << 19)) != 0) // CRC check
+    try testing.expect((v & (1 << 20)) == 0) // IXCHK never set (BCM2711 quirk)
+    try testing.expect((v & (1 << 21)) != 0) // ISDATA
+    try testing.expectEqual(#as(u32, 0), (v >> 4) & 1) // DIR = write
 }
 
 test "CMD8_SEND_IF_COND encodes R7-shape (CRC, no IXCHK), not data" {
-    const v = CMD8_SEND_IF_COND;
-    try testing.expectEqual(@as(u32, 8), (v >> 24) & 0x3F);
-    try testing.expectEqual(@as(u32, 2), (v >> 16) & 0x3); // RESP_TYPE = r1 (48-bit)
-    try testing.expect((v & (1 << 19)) != 0); // CRC check
-    try testing.expect((v & (1 << 20)) == 0); // IXCHK never set (BCM2711 quirk)
-    try testing.expect((v & (1 << 21)) == 0); // not data
+    const v = CMD8_SEND_IF_COND
+    try testing.expectEqual(#as(u32, 8), (v >> 24) & 0x3F)
+    try testing.expectEqual(#as(u32, 2), (v >> 16) & 0x3) // RESP_TYPE = r1 (48-bit)
+    try testing.expect((v & (1 << 19)) != 0) // CRC check
+    try testing.expect((v & (1 << 20)) == 0) // IXCHK never set (BCM2711 quirk)
+    try testing.expect((v & (1 << 21)) == 0) // not data
 }
 
 test "CMD7_SELECT_CARD encodes R1b (busy response, CRC, no IXCHK)" {
-    const v = CMD7_SELECT_CARD;
-    try testing.expectEqual(@as(u32, 7), (v >> 24) & 0x3F);
-    try testing.expectEqual(@as(u32, 3), (v >> 16) & 0x3); // RESP_TYPE = 48-bit+busy
-    try testing.expect((v & (1 << 19)) != 0); // CRC check
-    try testing.expect((v & (1 << 20)) == 0); // IXCHK never set (BCM2711 quirk)
+    const v = CMD7_SELECT_CARD
+    try testing.expectEqual(#as(u32, 7), (v >> 24) & 0x3F)
+    try testing.expectEqual(#as(u32, 3), (v >> 16) & 0x3) // RESP_TYPE = 48-bit+busy
+    try testing.expect((v & (1 << 19)) != 0) // CRC check
+    try testing.expect((v & (1 << 20)) == 0) // IXCHK never set (BCM2711 quirk)
 }
 
 test "CMD55_APP_CMD encodes idx=55" {
-    try testing.expectEqual(@as(u32, 55), (CMD55_APP_CMD >> 24) & 0x3F);
+    try testing.expectEqual(#as(u32, 55), (CMD55_APP_CMD >> 24) & 0x3F)
 }
 
 test "ACMD41 encodes R3 (no CRC, no IDX check)" {
-    const v = ACMD41_SD_SEND_OP_COND;
-    try testing.expectEqual(@as(u32, 41), (v >> 24) & 0x3F);
-    try testing.expectEqual(@as(u32, 2), (v >> 16) & 0x3); // RESP_TYPE = r3
-    try testing.expect((v & (1 << 19)) == 0);
-    try testing.expect((v & (1 << 20)) == 0);
+    const v = ACMD41_SD_SEND_OP_COND
+    try testing.expectEqual(#as(u32, 41), (v >> 24) & 0x3F)
+    try testing.expectEqual(#as(u32, 2), (v >> 16) & 0x3) // RESP_TYPE = r3
+    try testing.expect((v & (1 << 19)) == 0)
+    try testing.expect((v & (1 << 20)) == 0)
 }
 
 test "CMD2 encodes R2 (136-bit, CRC, no IXCHK) for CID retrieval" {
-    const v = CMD2_ALL_SEND_CID;
-    try testing.expectEqual(@as(u32, 2), (v >> 24) & 0x3F);
-    try testing.expectEqual(@as(u32, 1), (v >> 16) & 0x3); // RESP_TYPE = r2 (136-bit)
-    try testing.expect((v & (1 << 19)) != 0); // CRC check (R2 has CRC)
-    try testing.expect((v & (1 << 20)) == 0); // IXCHK never set (BCM2711 quirk)
-    try testing.expect((v & (1 << 21)) == 0); // not data
+    const v = CMD2_ALL_SEND_CID
+    try testing.expectEqual(#as(u32, 2), (v >> 24) & 0x3F)
+    try testing.expectEqual(#as(u32, 1), (v >> 16) & 0x3) // RESP_TYPE = r2 (136-bit)
+    try testing.expect((v & (1 << 19)) != 0) // CRC check (R2 has CRC)
+    try testing.expect((v & (1 << 20)) == 0) // IXCHK never set (BCM2711 quirk)
+    try testing.expect((v & (1 << 21)) == 0) // not data
 }
 
 test "parseCsdV2 decodes C_SIZE = 7647 to ~3.7 GiB" {
     // Synthetic SDHC CSD with CSD_STRUCTURE = 1 and C_SIZE = 0x1DDF.
     // c_size_lo = 0x1F (low 6 bits)  → resp[1][21:16]
     // c_size_hi = 0x77 (high 16 bits) → resp[2][15:0]
-    var resp: [4]u32 = .{ 0, 0, 0, 0 };
-    resp[3] = 1 << 22;
-    resp[1] = 0x1F << 16;
-    resp[2] = 0x77;
-    const csd = try parseCsdV2(resp);
-    try testing.expectEqual(@as(u64, (7647 + 1) * 1024), csd.capacity_blocks);
+    var resp [4]u32 = .{ 0, 0, 0, 0 }
+    resp[3] = 1 << 22
+    resp[1] = 0x1F << 16
+    resp[2] = 0x77
+    const csd = try parseCsdV2(resp)
+    try testing.expectEqual(#as(u64, (7647 + 1) * 1024), csd.capacity_blocks)
 }
 
 test "parseCsdV2 rejects CSD v1 (CSD_STRUCTURE = 0)" {
-    const resp: [4]u32 = .{ 0, 0, 0, 0 };
-    try testing.expectError(error.UnsupportedCsdVersion, parseCsdV2(resp));
+    const resp [4]u32 = .{ 0, 0, 0, 0 }
+    try testing.expectError(error.UnsupportedCsdVersion, parseCsdV2(resp))
 }
 
 test "clockDivisor rounds up to a power-of-two divisor" {
     // 100 MHz base, 400 kHz target → min 125 → next pow2 128.
-    try testing.expectEqual(@as(u32, 128), clockDivisor(100_000_000, 400_000));
+    try testing.expectEqual(#as(u32, 128), clockDivisor(100_000_000, 400_000))
     // 200 MHz base, 400 kHz target → min 250 → next pow2 256.
-    try testing.expectEqual(@as(u32, 256), clockDivisor(200_000_000, 400_000));
+    try testing.expectEqual(#as(u32, 256), clockDivisor(200_000_000, 400_000))
     // 100 MHz base, 25 MHz transfer target → min 2 → pow2 2.
-    try testing.expectEqual(@as(u32, 2), clockDivisor(100_000_000, 25_000_000));
+    try testing.expectEqual(#as(u32, 2), clockDivisor(100_000_000, 25_000_000))
 }
 
 test "clockDivisor stays a power of two inside [1, 512]" {
-    try testing.expectEqual(@as(u32, 1), clockDivisor(0, 400_000));
-    try testing.expectEqual(@as(u32, 1), clockDivisor(100_000_000, 400_000_000));
-    try testing.expectEqual(@as(u32, 512), clockDivisor(4_000_000_000, 1));
+    try testing.expectEqual(#as(u32, 1), clockDivisor(0, 400_000))
+    try testing.expectEqual(#as(u32, 1), clockDivisor(100_000_000, 400_000_000))
+    try testing.expectEqual(#as(u32, 512), clockDivisor(4_000_000_000, 1))
 }
 
 test "control1ClockBits splits the divisor into the CONTROL1 layout" {
     // N = 250 → low byte 0xFA at [15:8], high bits clear.
-    try testing.expectEqual(@as(u32, 0xFA00), control1ClockBits(250));
+    try testing.expectEqual(#as(u32, 0xFA00), control1ClockBits(250))
     // N = 0x2A8 → low 0xA8 at [15:8], high 0b10 at [7:6].
-    try testing.expectEqual(@as(u32, 0xA880), control1ClockBits(0x2A8));
+    try testing.expectEqual(#as(u32, 0xA880), control1ClockBits(0x2A8))
 }
