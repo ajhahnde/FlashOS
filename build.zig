@@ -1684,12 +1684,13 @@ pub fn build(b: *std.Build) void {
     // loaded by kernel_process directly at boot, so there is no
     // snapshot cap on its size — prepare_move_to_user_elf walks the
     // PT_LOAD page by page.
-    // init_main (PID 1) is Flash now; it imports the in-kernel test harness
-    // (kernel_tests.zig, still Zig) as a relative sibling, so the generated
-    // init_main.zig and the on-disk kernel_tests.zig are composed into one
-    // WriteFiles directory for that @import("kernel_tests.zig") to resolve.
+    // init_main (PID 1) is Flash; it imports the in-kernel test harness
+    // (kernel_tests.flash) as a relative sibling. flashc transpiles the
+    // harness at build time, and the generated init_main.zig + the transpiled
+    // kernel_tests.zig are composed into one WriteFiles directory so the
+    // relative @import("kernel_tests.zig") resolves.
     const pid1_dir = b.addWriteFiles();
-    _ = pid1_dir.addCopyFile(b.path("user_space/kernel_tests.zig"), "kernel_tests.zig");
+    _ = pid1_dir.addCopyFile(addFlashSource(b, "user_space/kernel_tests.flash"), "kernel_tests.zig");
     const pid1_mod = b.createModule(.{
         .root_source_file = pid1_dir.addCopyFile(addFlashSource(b, "user_space/init_main.flash"), "init_main.zig"),
         .target = target,
