@@ -19,7 +19,7 @@
 login: flash
 Password: *****
 
-FlashOS [v0.2.0] by ajhahnde - type 'help' for commands
+FlashOS [v{{VERSION}}] by ajhahnde - type 'help' for commands
 
 $ help
 Commands:
@@ -40,4 +40,4 @@ etc/
 sbin/
 test/
 
-$
+$ reboot

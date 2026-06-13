@@ -29,6 +29,7 @@
 import sys, time, re, os
 
 SESSION = os.path.join(os.path.dirname(__file__), "boot_demo_session.txt")
+ZON = os.path.join(os.path.dirname(__file__), "..", "build.zig.zon")
 
 BOOT_LINE = 0.16        # pause after a printed boot/handshake line
 AFTER_PROMPT = 0.30     # pause after a prompt prints, before typing starts
@@ -56,6 +57,15 @@ def colorize(line):
 TYPED = re.compile(r'^(login: |Password: |\$ )(\S.*)$')
 
 
+def zon_version():
+    # Single-source the banner version from build.zig.zon (the one truth, the
+    # same field fsh derives its homescreen version from via build_options) so
+    # the demo's `FlashOS [v…]` line never drifts from the shipped release.
+    with open(ZON, "r", encoding="utf-8") as f:
+        m = re.search(r'\.version\s*=\s*"([^"]+)"', f.read())
+    return m.group(1) if m else "?"
+
+
 def out(s):
     sys.stdout.write(s)
     sys.stdout.flush()
@@ -76,11 +86,19 @@ def type_command(prompt, text):
 
 
 def main():
+    # Clear the screen (+ scrollback) and home the cursor before the first
+    # boot byte, so the GIF opens on the boot output at the top-left — not on
+    # the launch command the VHS tape typed (hidden) to start this replay.
+    # It also gives the final `reboot` a clean loop seam: when the GIF wraps,
+    # the screen is wiped just as a real machine reset would clear it.
+    out("\x1b[2J\x1b[3J\x1b[H")
     with open(SESSION, "rb") as f:
         lines = [ln.rstrip("\r") for ln in
                  f.read().decode("utf-8", "replace").split("\n")]
     if lines and lines[-1] == "":
         lines.pop()
+    version = zon_version()
+    lines = [ln.replace("{{VERSION}}", version) for ln in lines]
 
     # The trailing line is the live prompt waiting for input — the `$ ` shell
     # prompt after the last command, or a re-spawned `login:`. Print it

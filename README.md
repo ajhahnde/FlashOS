@@ -40,7 +40,7 @@
 > The boot above is a captured serial console of FlashOS booting on real
 > Raspberry Pi 4B hardware to the `login:` prompt; the trailing `fsh`
 > session — `help` and `ls` — replays the shell's real output at a readable
-> cadence.
+> cadence, before a final `reboot` loops the demo back to the boot.
 
 ## About
 
