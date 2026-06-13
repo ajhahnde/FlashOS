@@ -326,9 +326,11 @@ pub fn build(b: *std.Build) void {
     // WaitQueue API. Named module so both kernel and
     // host-test builds reach it via `@import("wait_queue")` — the host
     // test wiring at the bottom of this file mirrors this for the
-    // pipe.zig test root.
+    // pipe.zig test root. The one flashc transpile (wait_queue_src) is
+    // shared across the kernel root and both test roots below.
+    const wait_queue_src = addFlashSource(b, "src/wait_queue.flash");
     const wait_queue_mod = b.createModule(.{
-        .root_source_file = b.path("src/wait_queue.zig"),
+        .root_source_file = wait_queue_src,
         .target = target,
         .optimize = optimize,
     });
@@ -336,9 +338,12 @@ pub fn build(b: *std.Build) void {
 
     // Anonymous-pipe module. Pulls in wait_queue for
     // the blocking read/write paths; kernel-only for now (future work
-    // generalises to a tagged ?*File once the FS lands).
+    // generalises to a tagged ?*File once the FS lands). The one flashc
+    // transpile (pipe_src) is shared across the kernel root and both
+    // test roots below.
+    const pipe_src = addFlashSource(b, "src/pipe.flash");
     const pipe_mod = b.createModule(.{
-        .root_source_file = b.path("src/pipe.zig"),
+        .root_source_file = pipe_src,
         .target = target,
         .optimize = optimize,
     });
@@ -1965,7 +1970,8 @@ pub fn build(b: *std.Build) void {
     // imports — capture the helper's returned Module so the pipe call
     // below can plug it back in as the "wait_queue" import.
     const wq_test_mod = addHostTest(b, test_step, .{
-        .src = "src/wait_queue.zig",
+        .src = "src/wait_queue.flash",
+        .src_lazy = wait_queue_src,
         .stubs = stubs_obj,
         .imports = &.{.{ .name = "task_layout", .mod = task_layout_test_mod }},
     });
@@ -1976,7 +1982,8 @@ pub fn build(b: *std.Build) void {
     // already pulled in transitively via wq_test_mod, so omitting it
     // from `stubs` here keeps the host stubs single-defined.
     _ = addHostTest(b, test_step, .{
-        .src = "src/pipe.zig",
+        .src = "src/pipe.flash",
+        .src_lazy = pipe_src,
         .extra_stubs = &.{host_alloc_obj},
         .imports = &.{
             .{ .name = "wait_queue", .mod = wq_test_mod },
@@ -2016,13 +2023,13 @@ pub fn build(b: *std.Build) void {
     // either path re-introduces same-symbol collisions against
     // sched_stubs_obj. Hand-build a stub-free chain instead.
     const wq_sched_mod = b.createModule(.{
-        .root_source_file = b.path("src/wait_queue.zig"),
+        .root_source_file = wait_queue_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
     wq_sched_mod.addImport("task_layout", task_layout_test_mod);
     const pipe_sched_mod = b.createModule(.{
-        .root_source_file = b.path("src/pipe.zig"),
+        .root_source_file = pipe_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
