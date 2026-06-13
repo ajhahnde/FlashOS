@@ -389,8 +389,11 @@ pub fn build(b: *std.Build) void {
     });
     file_mod.addImport("task_layout", task_layout_mod);
 
+    // The one flashc transpile (fdtable_src) is shared across the kernel
+    // root and both test roots below.
+    const fdtable_src = addFlashSource(b, "src/fdtable.flash");
     const fdtable_mod = b.createModule(.{
-        .root_source_file = b.path("src/fdtable.zig"),
+        .root_source_file = fdtable_src,
         .target = target,
         .optimize = optimize,
     });
@@ -603,8 +606,11 @@ pub fn build(b: *std.Build) void {
     // backing the unified console read. Same named-module wiring as wait_queue
     // / pipe so the kernel build and the host-test build share one
     // task_layout Module instance.
+    // The one flashc transpile (console_src) is shared across the kernel
+    // root and the host-test root below.
+    const console_src = addFlashSource(b, "src/console.flash");
     const console_mod = b.createModule(.{
-        .root_source_file = b.path("src/console.zig"),
+        .root_source_file = console_src,
         .target = target,
         .optimize = optimize,
     });
@@ -1996,7 +2002,8 @@ pub fn build(b: *std.Build) void {
     // shared stubs_obj alone suffices). stubs_obj arrives transitively
     // via wq_test_mod, so the helper's `stubs` field stays unset.
     _ = addHostTest(b, test_step, .{
-        .src = "src/console.zig",
+        .src = "src/console.flash",
+        .src_lazy = console_src,
         .imports = &.{
             .{ .name = "wait_queue", .mod = wq_test_mod },
             .{ .name = "task_layout", .mod = task_layout_test_mod },
@@ -2047,7 +2054,7 @@ pub fn build(b: *std.Build) void {
     file_sched_mod.addImport("task_layout", task_layout_test_mod);
 
     const fdtable_sched_mod = b.createModule(.{
-        .root_source_file = b.path("src/fdtable.zig"),
+        .root_source_file = fdtable_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
@@ -2117,7 +2124,8 @@ pub fn build(b: *std.Build) void {
     file_test_mod.addImport("task_layout", task_layout_test_mod);
 
     _ = addHostTest(b, test_step, .{
-        .src = "src/fdtable.zig",
+        .src = "src/fdtable.flash",
+        .src_lazy = fdtable_src,
         .stubs = file_stubs_obj,
         .extra_stubs = &.{host_alloc_obj},
         .imports = &.{
