@@ -419,8 +419,11 @@ pub fn build(b: *std.Build) void {
     // initramfs.zig's locate/read/seek into a VfsOps vtable — kept
     // separate from initramfs.zig so the parser stays VFS-agnostic
     // and host-testable in isolation.
+    // Transpiled from src/initramfs_backend.flash; shared with the
+    // host-test build below (src_lazy).
+    const initramfs_backend_src = addFlashSource(b, "src/initramfs_backend.flash");
     const initramfs_backend_mod = b.createModule(.{
-        .root_source_file = b.path("src/initramfs_backend.zig"),
+        .root_source_file = initramfs_backend_src,
         .target = target,
         .optimize = optimize,
     });
@@ -590,8 +593,11 @@ pub fn build(b: *std.Build) void {
     // FAT32 VFS backend. Wraps fat32.zig's
     // on-disk decode in the real VfsOps vtable; replaces the earlier
     // fat32_stub.
+    // Ported to Flash; the one flashc transpile is shared with the
+    // host-test build below (src_lazy).
+    const fat32_backend_src = addFlashSource(b, "src/fat32_backend.flash");
     const fat32_backend_mod = b.createModule(.{
-        .root_source_file = b.path("src/fat32_backend.zig"),
+        .root_source_file = fat32_backend_src,
         .target = target,
         .optimize = optimize,
     });
@@ -2228,7 +2234,8 @@ pub fn build(b: *std.Build) void {
     const overlay_test_mod = addHostTest(b, test_step, .{ .src = "src/overlay.flash", .src_lazy = overlay_src });
 
     _ = addHostTest(b, test_step, .{
-        .src = "src/fat32_backend.zig",
+        .src = "src/fat32_backend.flash",
+        .src_lazy = fat32_backend_src,
         .stubs = vfs_stubs_obj,
         .imports = &.{
             .{ .name = "block_dev", .mod = block_dev_test_mod },
@@ -2240,7 +2247,8 @@ pub fn build(b: *std.Build) void {
     });
 
     _ = addHostTest(b, test_step, .{
-        .src = "src/initramfs_backend.zig",
+        .src = "src/initramfs_backend.flash",
+        .src_lazy = initramfs_backend_src,
         .stubs = stubs_obj,
         .imports = &.{
             .{ .name = "initramfs", .mod = b.createModule(.{
