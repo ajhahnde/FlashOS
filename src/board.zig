@@ -25,8 +25,8 @@ pub const timer = switch (build_options.board) {
 };
 
 pub const irq = switch (build_options.board) {
-    .rpi4b => @import("board/rpi4b/irq.zig"),
-    .virt => @import("board/virt/irq.zig"),
+    .rpi4b => @import("rpi4b_irq"),
+    .virt => @import("virt_irq"),
 };
 
 // emmc2: BCM2711 SDHCI driver on rpi4b, memory-backed fake on virt

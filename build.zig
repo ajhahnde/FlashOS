@@ -935,6 +935,65 @@ pub fn build(b: *std.Build) void {
     rpi4b_usb_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
     rpi4b_usb_mod.addImport("console", console_mod);
 
+    // Trace-cluster named modules (kept in Zig; the profiler is opt-in and
+    // not on the boot contract). Promoted from kernel_mod-relative imports so
+    // the Flash-sourced IRQ drivers can reach the sampler by name — a named
+    // module can no longer be pulled in through a relative path once its
+    // source moves to the build cache. ksyms is force-imported by start.zig
+    // in every build (its symbol table backs the trace machinery); sampler +
+    // fp_walk are referenced only by the IRQ handlers' -Dtrace seam, so the
+    // default build never compiles them (the import sits in a dead comptime
+    // branch). Promoting all three to named modules keeps ksyms a member of
+    // exactly one module instead of landing in both kernel_mod and sampler.
+    const ksyms_mod = b.createModule(.{
+        .root_source_file = b.path("src/trace/ksyms.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const fp_walk_mod = b.createModule(.{
+        .root_source_file = b.path("src/trace/fp_walk.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const sampler_mod = b.createModule(.{
+        .root_source_file = b.path("src/trace/sampler.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sampler_mod.addImport("task_layout", task_layout_mod);
+    sampler_mod.addImport("ksyms", ksyms_mod);
+    sampler_mod.addImport("fp_walk", fp_walk_mod);
+
+    // Per-board interrupt controllers — GICv2 (GIC-400) on rpi4b, GICv3 on
+    // virt — promoted to Flash named modules. board.zig's irq prong selects
+    // the active one; the non-selected prong is dead comptime code. Both
+    // reach the -Dtrace sampler by name (trace_sampler seam in handle_irq);
+    // the default build leaves that import in a dead comptime branch, so no
+    // trace module is compiled and the kernel image is byte-identical.
+    const rpi4b_irq_src = addFlashSource(b, "src/board/rpi4b/irq.flash");
+    const rpi4b_irq_mod = b.createModule(.{
+        .root_source_file = rpi4b_irq_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    rpi4b_irq_mod.addImport("console", console_mod);
+    rpi4b_irq_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
+    rpi4b_irq_mod.addImport("build_options", build_options_mod);
+    rpi4b_irq_mod.addImport("task_layout", task_layout_mod);
+    rpi4b_irq_mod.addImport("sampler", sampler_mod);
+    const virt_irq_src = addFlashSource(b, "src/board/virt/irq.flash");
+    const virt_irq_mod = b.createModule(.{
+        .root_source_file = virt_irq_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    virt_irq_mod.addImport("virt_dtb", virt_dtb_mod);
+    virt_irq_mod.addImport("virt_uart", virt_uart_mod);
+    virt_irq_mod.addImport("console", console_mod);
+    virt_irq_mod.addImport("build_options", build_options_mod);
+    virt_irq_mod.addImport("task_layout", task_layout_mod);
+    virt_irq_mod.addImport("sampler", sampler_mod);
+
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/start.zig"),
@@ -1032,9 +1091,8 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("virt_usb", virt_usb_mod);
     kernel_mod.addImport("virt_emmc2", virt_emmc2_mod);
     // virt_dtb + virt_uart: board.zig's uart prong selects virt_uart; the
-    // still-Zig virt/irq.zig reaches both by name (its dtb.zig/uart.zig
-    // siblings moved to Flash). virt/irq.flash is written but its wiring
-    // waits on the trace-cluster named-module promotion (Phase H trace step).
+    // virt IRQ controller (virt_irq) reaches both by name (a sibling of
+    // uart/irq, not its own board.zig prong).
     kernel_mod.addImport("virt_dtb", virt_dtb_mod);
     kernel_mod.addImport("virt_uart", virt_uart_mod);
     // rpi4b board leaves: gpio/timer/power/uart are board.zig prongs;
@@ -1046,6 +1104,13 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("rpi4b_uart", rpi4b_uart_mod);
     kernel_mod.addImport("rpi4b_emmc2", rpi4b_emmc2_mod);
     kernel_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
+    // Per-board IRQ controllers (board.zig's irq prong) + the unconditional
+    // ksyms force-import (start.zig pulls its symbol table into every image).
+    // sampler/fp_walk are not added here: only the IRQ modules' -Dtrace seam
+    // references the sampler, so kernel_mod never imports them directly.
+    kernel_mod.addImport("rpi4b_irq", rpi4b_irq_mod);
+    kernel_mod.addImport("virt_irq", virt_irq_mod);
+    kernel_mod.addImport("ksyms", ksyms_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
     kernel_mod.addImport("utilc", utilc_mod);
     kernel_mod.addImport("sha256", sha256_mod);

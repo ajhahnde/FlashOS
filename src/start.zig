@@ -65,6 +65,8 @@ comptime {
 
     _ = @import("trace/utils.zig");
     _ = @import("trace/trace_main.zig");
-    _ = @import("trace/ksyms.zig");
+    // ksyms is a named module (see build.zig) so the -Dtrace sampler can
+    // reach it without ksyms.zig ending up a member of two modules.
+    _ = @import("ksyms");
     _ = @import("trace/pl011_uart.zig");
 }

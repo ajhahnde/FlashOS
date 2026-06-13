@@ -14,13 +14,13 @@
 // monotonic frame-pointer guard, so a garbage FP terminates the walk
 // rather than faulting. This is a *statistical* profiler — leaf frames and
 // hand-written-asm frames that carry no standard AAPCS64 frame record are
-// simply skipped. Compiled only under -Dtrace (see src/board/*/irq.zig).
+// simply skipped. Compiled only under -Dtrace (see src/board/*/irq.flash).
 
 const layout = @import("task_layout");
 const KeRegs = layout.KeRegs;
 const TaskStruct = layout.TaskStruct;
-const ksyms = @import("ksyms.zig");
-const fp_walk = @import("fp_walk.zig");
+const ksyms = @import("ksyms");
+const fp_walk = @import("fp_walk");
 
 const PAGE_SIZE: u64 = 1 << 12;
 // Boot console: Mini-UART on rpi4b, PL011 on virt. Both are visible under
