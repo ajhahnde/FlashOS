@@ -826,8 +826,8 @@ pub fn build(b: *std.Build) void {
     // calls sys_call_table_relocate through a C-ABI `extern fn`. The board
     // driver bag is not imported here — sys reaches its three board entry
     // points through C-ABI trampolines in src/start.zig (the kernel root
-    // module, which still imports board.zig). No host test: sys.zig carries
-    // no test blocks.
+    // module, which imports the board bag as a named module). No host test:
+    // sys.zig carries no test blocks.
     const sys_src = addFlashSource(b, "src/sys.flash");
     const sys_mod = b.createModule(.{
         .root_source_file = sys_src,
@@ -858,8 +858,8 @@ pub fn build(b: *std.Build) void {
     // it (`_ = @import("kernel")`) so kernel_main_impl + the other export fns
     // land in the ELF; boot.S/entry.S reach kernel_main by symbol. The board
     // driver bag is not imported here — kernel reaches its board entry points
-    // through C-ABI trampolines in src/start.zig (the kernel root still
-    // imports board.zig directly). No host test: kernel.zig carries no tests.
+    // through C-ABI trampolines in src/start.zig (the kernel root imports the
+    // board bag as a named module). No host test: kernel.zig carries no tests.
     const kernel_src = addFlashSource(b, "src/kernel.flash");
     const kernel_kmod = b.createModule(.{
         .root_source_file = kernel_src,
@@ -994,6 +994,37 @@ pub fn build(b: *std.Build) void {
     virt_irq_mod.addImport("task_layout", task_layout_mod);
     virt_irq_mod.addImport("sampler", sampler_mod);
 
+    // board: comptime indirection that aliases each driver slot to the active
+    // board's leaf module. Ported to Flash; flashc transpiles it via
+    // addFlashSource. Moved from a relative `@import("board.zig")` in start.zig
+    // to a named module — the generated .zig lives in the build cache, so the
+    // path import no longer resolves. start.zig force-imports it (`_ =
+    // board.uart` etc.) so each driver's `export fn` decls land in the ELF.
+    // Both boards' leaf modules are imported here; board.zig's comptime switch
+    // on build_options.board selects the active set, so the linker only keeps
+    // the chosen prong.
+    const board_src = addFlashSource(b, "src/board.flash");
+    const board_mod = b.createModule(.{
+        .root_source_file = board_src,
+        .target = target,
+        .optimize = optimize,
+    });
+    board_mod.addImport("build_options", build_options_mod);
+    board_mod.addImport("virt_uart", virt_uart_mod);
+    board_mod.addImport("rpi4b_uart", rpi4b_uart_mod);
+    board_mod.addImport("virt_gpio", virt_gpio_mod);
+    board_mod.addImport("rpi4b_gpio", rpi4b_gpio_mod);
+    board_mod.addImport("virt_timer", virt_timer_mod);
+    board_mod.addImport("rpi4b_timer", rpi4b_timer_mod);
+    board_mod.addImport("virt_irq", virt_irq_mod);
+    board_mod.addImport("rpi4b_irq", rpi4b_irq_mod);
+    board_mod.addImport("virt_emmc2", virt_emmc2_mod);
+    board_mod.addImport("rpi4b_emmc2", rpi4b_emmc2_mod);
+    board_mod.addImport("virt_usb", virt_usb_mod);
+    board_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
+    board_mod.addImport("virt_power", virt_power_mod);
+    board_mod.addImport("rpi4b_power", rpi4b_power_mod);
+
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/start.zig"),
@@ -1110,6 +1141,9 @@ pub fn build(b: *std.Build) void {
     // references the sampler, so kernel_mod never imports them directly.
     kernel_mod.addImport("rpi4b_irq", rpi4b_irq_mod);
     kernel_mod.addImport("virt_irq", virt_irq_mod);
+    // board: the comptime driver-alias bag (src/board.flash). start.zig
+    // force-imports it so each active driver's export fns reach the linker.
+    kernel_mod.addImport("board", board_mod);
     kernel_mod.addImport("ksyms", ksyms_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
     kernel_mod.addImport("utilc", utilc_mod);

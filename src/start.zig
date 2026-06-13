@@ -5,13 +5,13 @@
 // is it: every other kernel module is pulled in here via comptime
 // @import so all `export fn` decls land in the final ELF.
 
-const board = @import("board.zig");
+const board = @import("board");
 
 // Board-driver trampolines for the Flash-sourced kernel + syscall modules.
 // src/kernel.flash and src/sys.flash are named modules whose generated .zig
-// lives in the build cache, so they can no longer @import the relatively
-// imported board bag. This root module still imports board.zig directly, so
-// these thin C-ABI wrappers bridge the boundary — kernel.flash / sys.flash
+// lives in the build cache, so they can no longer reach the board bag by a
+// relative @import. This root module imports the board bag as a named module,
+// so these thin C-ABI wrappers bridge the boundary — kernel.flash / sys.flash
 // reach each board entry point through a matching `extern fn`. (Same role
 // fork.zig's move_to_user_elf_argv plays for execve.)
 export fn board_irq_init() void {

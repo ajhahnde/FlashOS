@@ -55,12 +55,12 @@ extern fn copy_from_user(kbuf [*]mut u8, uva u64, len u64) i32
 extern fn copy_to_user(uva u64, kbuf [*]u8, len u64) i32
 
 // Board driver bag, reached through C-ABI trampolines in src/kernel.zig.
-// board.zig is imported relatively into the kernel root module (drivers
-// pull their siblings via relative paths), so a leaf Flash module — whose
-// generated .zig lives in the build cache — cannot @import it. kernel.zig
-// (which is in the root and imports board) exports these thin wrappers, the
-// same boundary fork.zig bridges with move_to_user_elf_argv. The usb pair
-// backs console_tx; board_power_reboot backs sys_reboot.
+// The board bag is a named module imported by the kernel root module, so a
+// leaf Flash module — whose generated .zig lives in the build cache — cannot
+// @import it. kernel.zig (which is in the root and imports board) exports
+// these thin wrappers, the same boundary fork.zig bridges with
+// move_to_user_elf_argv. The usb pair backs console_tx; board_power_reboot
+// backs sys_reboot.
 extern fn board_usb_enumerated() bool
 extern fn board_usb_cdc_tx(ptr [*]u8, len u64) void
 extern fn board_power_reboot() noreturn

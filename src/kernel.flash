@@ -64,10 +64,10 @@ extern var current ?*mut task_layout.TaskStruct
 extern fn sys_call_table_relocate() void
 
 // Board-driver trampolines. kernel.zig became a named module (src/kernel.flash);
-// its generated .zig lives in the build cache, so it can no longer @import the
-// relatively-imported board bag. The thin C-ABI wrappers live in the build root
-// (src/start.zig), which still imports board.zig directly — the same role
-// fork.zig's move_to_user_elf_argv plays for execve. Reached here by symbol.
+// its generated .zig lives in the build cache, so it can no longer reach the
+// board bag by a relative @import. The thin C-ABI wrappers live in the build
+// root (src/start.zig), which imports the board bag as a named module — the same
+// role fork.zig's move_to_user_elf_argv plays for execve. Reached here by symbol.
 extern fn board_irq_init() void
 extern fn board_usb_init() i32
 extern fn board_usb_poll() void
