@@ -303,8 +303,9 @@ pub fn build(b: *std.Build) void {
     // src/fork.zig (prepare_move_to_user_elf) and src/mm_user.zig
     // (map_page, do_data_abort) share the constants. Same module-level
     // exposure pattern as syscall_defs_mod.
+    const user_layout_src = addFlashSource(b, "src/user_layout.flash");
     const user_layout_mod = b.createModule(.{
-        .root_source_file = b.path("src/user_layout.zig"),
+        .root_source_file = user_layout_src,
         .target = target,
         .optimize = optimize,
     });
@@ -315,8 +316,9 @@ pub fn build(b: *std.Build) void {
     // an explicit named import to keep task_layout.zig from being
     // pulled into two sibling named modules through relative paths
     // (which Zig 0.16 rejects as "file exists in two modules").
+    const task_layout_src = addFlashSource(b, "src/task_layout.flash");
     const task_layout_mod = b.createModule(.{
-        .root_source_file = b.path("src/task_layout.zig"),
+        .root_source_file = task_layout_src,
         .target = target,
         .optimize = optimize,
     });
@@ -423,8 +425,9 @@ pub fn build(b: *std.Build) void {
     // through; the board layer (src/board/<board>/emmc2.zig)
     // populates `read_fn` / `write_fn` post-init. No tests
     // (pure data + one extern struct).
+    const block_dev_src = addFlashSource(b, "src/block_dev.flash");
     const block_dev_mod = b.createModule(.{
-        .root_source_file = b.path("src/block_dev.zig"),
+        .root_source_file = block_dev_src,
         .target = target,
         .optimize = optimize,
     });
@@ -1788,13 +1791,13 @@ pub fn build(b: *std.Build) void {
     // Shared task_layout module — see kernel-build comment above for
     // why the named modules must share a single Module instance.
     const task_layout_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/task_layout.zig"),
+        .root_source_file = task_layout_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
 
     const user_layout_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/user_layout.zig"),
+        .root_source_file = user_layout_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
@@ -2168,7 +2171,7 @@ pub fn build(b: *std.Build) void {
     // (BlockDev type), uses an in-memory 64 KiB fake disk built by the
     // inline test fixture. No page-alloc or task-layout externs needed.
     const block_dev_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/block_dev.zig"),
+        .root_source_file = block_dev_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });

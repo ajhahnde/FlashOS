@@ -11,20 +11,20 @@
 // compiler's internal calling convention.
 
 pub const BlockDev = extern struct {
-    read_fn: ?*const fn (lba: u32, buf: *[512]u8) callconv(.c) i32,
-    write_fn: ?*const fn (lba: u32, buf: *const [512]u8) callconv(.c) i32,
-};
+    read_fn ?*fn(u32, *mut [512]u8) callconv(.c) i32,
+    write_fn ?*fn(u32, *[512]u8) callconv(.c) i32,
+}
 
 // Wired at boot by board.emmc2.init() — null before that point.
-pub var sd_dev: BlockDev = .{
+pub var sd_dev BlockDev = .{
     .read_fn = null,
     .write_fn = null,
-};
+}
 
-const builtin = @import("builtin");
+const builtin = #import("builtin")
 
 // See vfs.relocateOps / sys_call_table_relocate.
-const LINEAR_MAP_BASE: u64 = 0xFFFF000000000000;
+const LINEAR_MAP_BASE u64 = 0xFFFF000000000000
 
 // Re-point sd_dev's function pointers to their high-mem (TTBR1)
 // aliases. File syscalls run at EL1 with TTBR0 holding the *user*
@@ -36,11 +36,11 @@ const LINEAR_MAP_BASE: u64 = 0xFFFF000000000000;
 // first mount so every later read/write — kernel bring-up or
 // syscall context — goes through the high alias.
 pub fn relocate() void {
-    if (comptime builtin.target.os.tag != .freestanding) return;
-    if (sd_dev.read_fn) |f| {
-        sd_dev.read_fn = @ptrFromInt(@intFromPtr(f) | LINEAR_MAP_BASE);
+    if builtin.target.os.tag != .freestanding { return }
+    if sd_dev.read_fn |f| {
+        sd_dev.read_fn = #ptrFromInt(#intFromPtr(f) | LINEAR_MAP_BASE)
     }
-    if (sd_dev.write_fn) |f| {
-        sd_dev.write_fn = @ptrFromInt(@intFromPtr(f) | LINEAR_MAP_BASE);
+    if sd_dev.write_fn |f| {
+        sd_dev.write_fn = #ptrFromInt(#intFromPtr(f) | LINEAR_MAP_BASE)
     }
 }
