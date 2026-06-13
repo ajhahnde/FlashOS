@@ -707,14 +707,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Path-resolved ELF loader. Ported to Flash; flashc transpiles it via
+    // addFlashSource. The one transpile is shared between the kernel module
+    // and the execve host-test below (src_lazy). start.zig pulls execve_impl
+    // into the ELF; fork imports execve for the ArgvBlock type.
+    const execve_src = addFlashSource(b, "src/execve.flash");
     const execve_mod = b.createModule(.{
-        .root_source_file = b.path("src/execve.zig"),
+        .root_source_file = execve_src,
         .target = target,
         .optimize = optimize,
     });
     // Kernel-build imports for execveKernel (path-resolve + PT_LOAD stream).
-    // The host-test build (build.zig below) wires src/execve.zig with no
-    // imports; the comptime is_kernel guard keeps these out of host analysis.
+    // The host-test build (build.zig below) wires src/execve.flash with no
+    // kernel imports; the comptime is_kernel guard keeps these out of host
+    // analysis.
     execve_mod.addImport("task_layout", task_layout_mod);
     execve_mod.addImport("vfs", vfs_mod);
     execve_mod.addImport("user_layout", user_layout_mod);
@@ -1941,7 +1947,8 @@ pub fn build(b: *std.Build) void {
     // top-level @imports the module unconditionally; the kernel-only
     // join site sits behind the comptime is_kernel guard.
     const execve_test_mod = addHostTest(b, test_step, .{
-        .src = "src/execve.zig",
+        .src = "src/execve.flash",
+        .src_lazy = execve_src,
         .imports = &.{.{ .name = "path", .mod = path_test_mod }},
     });
 
