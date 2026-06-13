@@ -65,6 +65,32 @@ jobs:
           sudo ln -sf /usr/bin/aarch64-linux-gnu-objcopy /usr/local/bin/aarch64-elf-objcopy
           sudo ln -sf /usr/bin/aarch64-linux-gnu-nm      /usr/local/bin/aarch64-elf-nm
 
+      # FlashOS source modules are written in Flash (*.flash) and transpiled
+      # to Zig at build time by flashc. build.zig resolves the compiler at
+      # ~/Flash/zig-out/bin/flashc-stage1 by default; the pinned revision
+      # lives in flash-toolchain.lock. Flash ships no prebuilt binaries, so
+      # build the self-hosted stage1 from source at the pinned commit. The
+      # binary is cached on the lock hash, so it only rebuilds when the pin
+      # moves.
+      - name: cache flashc (pinned Flash toolchain)
+        id: flashc
+        uses: actions/cache@v4
+        with:
+          path: ~/Flash/zig-out/bin/flashc-stage1
+          key: flashc-stage1-${{ runner.os }}-${{ hashFiles('flash-toolchain.lock') }}
+
+      - name: build flashc from the pinned Flash commit
+        if: steps.flashc.outputs.cache-hit != 'true'
+        # `zig build stage1` (not the bare `zig build`, which emits only the
+        # stage0 bootstrap seed `flashc`) produces the self-hosted
+        # `flashc-stage1` that flash-toolchain.lock pins.
+        run: |
+          commit=$(grep -oE '^flash-commit[[:space:]]*=[[:space:]]*[0-9a-f]{40}' flash-toolchain.lock | grep -oE '[0-9a-f]{40}')
+          git clone https://github.com/ajhahnde/Flash.git ~/Flash
+          git -C ~/Flash checkout "$commit"
+          ( cd ~/Flash && zig build stage1 )
+          test -x ~/Flash/zig-out/bin/flashc-stage1
+
       - name: host unit tests
         run: zig build test
 
