@@ -565,8 +565,12 @@ pub fn build(b: *std.Build) void {
     // imports; takes the BlockDev vtable by runtime pointer so the
     // host tests can swap in an in-memory fake.
     // fat32_backend.zig consumes this module to wire the real VfsOps.
+    // Ported to Flash; the one flashc transpile is shared with the
+    // host-test builds below (src_lazy), including fat32_backend's test
+    // module.
+    const fat32_src = addFlashSource(b, "src/fat32.flash");
     const fat32_mod = b.createModule(.{
-        .root_source_file = b.path("src/fat32.zig"),
+        .root_source_file = fat32_src,
         .target = target,
         .optimize = optimize,
     });
@@ -2159,7 +2163,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "syscall_defs", .mod = syscall_defs_test_mod }},
     });
 
-    // fat32.zig — FAT32 on-disk layout decode.
+    // fat32.flash — FAT32 on-disk layout decode.
     // Pure data module: imports only the host-only block_dev Module
     // (BlockDev type), uses an in-memory 64 KiB fake disk built by the
     // inline test fixture. No page-alloc or task-layout externs needed.
@@ -2169,7 +2173,8 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     });
     _ = addHostTest(b, test_step, .{
-        .src = "src/fat32.zig",
+        .src = "src/fat32.flash",
+        .src_lazy = fat32_src,
         .imports = &.{.{ .name = "block_dev", .mod = block_dev_test_mod }},
     });
 
@@ -2181,7 +2186,7 @@ pub fn build(b: *std.Build) void {
     // and vfs because the kernel-side fat32_mod / vfs_mod are wired
     // for aarch64 freestanding, not host.
     const fat32_for_backend_mod = b.createModule(.{
-        .root_source_file = b.path("src/fat32.zig"),
+        .root_source_file = fat32_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
