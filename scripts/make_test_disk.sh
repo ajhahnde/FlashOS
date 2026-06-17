@@ -48,7 +48,11 @@
 #     scripts/make_test_disk.sh && shasum zig-out/test_sd.img
 set -eu
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# $0 (not ${BASH_SOURCE[0]}): build.zig invokes this via `sh …`, so the
+# shebang is bypassed and on Ubuntu CI the interpreter is dash, which has
+# no BASH_SOURCE array — ${BASH_SOURCE[0]} is a "Bad substitution" there.
+# $0 is POSIX and resolves the same under both dash and bash.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 SHADOW_SRC="${1:-}"
