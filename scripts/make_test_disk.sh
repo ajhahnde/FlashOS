@@ -23,8 +23,12 @@
 # Toolchain: mtools (mformat / mmd / mcopy), NOT mkfs.fat. dosfstools
 # is absent on the dev box; mtools needs no sudo/loopback and formats
 # straight into a file at a byte offset (img@@1M = LBA 2048). The
-# canonical mkfs.fat -F 32 -s 8 -S 512 maps byte-equivalent onto
-# mformat -F -c 8 under the available tool.
+# canonical mkfs.fat -F 32 -s 1 -S 512 maps byte-equivalent onto
+# mformat -F -c 1 under the available tool. One sector per cluster
+# (not 8): at 64 MiB only -c 1 yields ≥65525 data clusters, the FAT32
+# spec minimum that newer mtools enforces (older builds let an
+# undersized "FAT32" slide). The kernel reads SecPerClus from the BPB
+# (src/fat32.flash mount), so cluster size is not wired in anywhere.
 #
 # CREATE-IF-ABSENT (NOT idempotent-overwrite). The Variant-B roundtrip
 # needs the disk to PERSIST across two consecutive `zig build run`
@@ -107,11 +111,12 @@ printf '\x55\xAA' | dd of="$IMG" bs=1 seek=510 conv=notrunc status=none
 
 # ---- FAT32 filesystem at byte offset 1 MiB (LBA 2048) ----
 #   -F      force FAT32
-#   -c 8    8 sectors/cluster = 4 KiB (plan's mkfs.fat -s 8)
+#   -c 1    1 sector/cluster = 512 B; only this keeps ≥65525 clusters
+#           at 64 MiB so newer mtools accepts it as valid FAT32
 #   -T n    total sectors of the filesystem (= partition size)
 #   -N hex  pinned volume serial (reproducible)
 #   -v lbl  pinned volume label
-mformat -i "$IMG@@1M" -F -c 8 -T "$PART_SECTORS" -N 12345678 -v SCRATCH ::
+mformat -i "$IMG@@1M" -F -c 1 -T "$PART_SECTORS" -N 12345678 -v SCRATCH ::
 
 # ---- seed files (deterministic content + mtime) ----
 TMP_DAT="$(mktemp -t roundtr_dat.XXXXXX)"
