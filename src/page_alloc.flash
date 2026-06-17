@@ -258,8 +258,10 @@ test "mem_map_reserve_above caps the pool at the RAM end" {
     mem_map_reserve_above(ram_end)
     const in_ram_pages = (ram_end - MALLOC_START) / PAGE_SIZE
     try std.testing.expectEqual(in_ram_pages, dump_free_count())
-    // Drain to the cap; the page just below ram_end is the last legal one.
-    for _ in 0..(in_ram_pages - 1) { _ = get_free_page() }
+    // Mark every in-RAM page allocated except the last legal one, directly.
+    // Draining via get_free_page would rescan from index 0 on each call
+    // (O(n^2) over ~260k pages — see the exhaustion tests above).
+    for i in 0..(in_ram_pages - 1) { mem_map[i] = 1 }
     const last = get_free_page()
     try std.testing.expectEqual(ram_end - PAGE_SIZE, last)
     // Pool now exhausted within the RAM window — sentinel, no OOB PA.
