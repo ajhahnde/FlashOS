@@ -4796,7 +4796,7 @@
 .quad 0x000000000019b3c0
 .string "__initramfs_start"
 .space 38
-.quad 0x00000000001a31f0
+.quad 0x00000000001a3258
 .string "__initramfs_end"
 .space 40
 .quad 0x00000000001a4000
