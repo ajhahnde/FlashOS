@@ -55,10 +55,13 @@ jobs:
         # the human-driven /doc-drift pass.
         run: bash scripts/check_doc_drift.sh
 
-      - name: install qemu + aarch64 binutils
+      - name: install qemu + aarch64 binutils + mtools
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-arm binutils-aarch64-linux-gnu
+          # mtools (mformat/mcopy/minfo/mdir) builds the rpi4b FAT32 test
+          # disk in scripts/make_test_disk.sh — needed since rpi4b became
+          # the sole boot gate (virt did not seed a backing image).
+          sudo apt-get install -y qemu-system-arm binutils-aarch64-linux-gnu mtools
           # build.zig invokes `aarch64-elf-objcopy` and `aarch64-elf-nm`;
           # Ubuntu's apt ships them as `aarch64-linux-gnu-*`. Symlinks
           # bridge the prefix without touching build.zig (Pi byte-identity
