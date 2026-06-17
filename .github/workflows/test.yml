@@ -57,19 +57,65 @@ jobs:
         # the human-driven /doc-drift pass.
         run: bash scripts/check_doc_drift.sh
 
-      - name: install qemu + aarch64 binutils + mtools
+      - name: install aarch64 binutils + mtools + qemu build deps
         run: |
           sudo apt-get update
           # mtools (mformat/mcopy/minfo/mdir) builds the rpi4b FAT32 test
           # disk in scripts/make_test_disk.sh — needed since rpi4b became
           # the sole boot gate (virt did not seed a backing image).
-          sudo apt-get install -y qemu-system-arm binutils-aarch64-linux-gnu mtools
+          #
+          # No apt qemu: the `raspi4b` machine type landed in QEMU 9.0
+          # (Apr 2024); every GitHub-hosted runner's apt qemu predates it
+          # (noble 8.2, jammy 6.2), so the next steps build qemu-system-
+          # aarch64 from a pinned source release. The libs below are both
+          # its build and (via the runtime .so they pull in) its run deps,
+          # so this always-run step keeps a cache-hit qemu linkable.
+          sudo apt-get install -y binutils-aarch64-linux-gnu mtools \
+            ninja-build pkg-config python3-pip python3-venv \
+            libglib2.0-dev libpixman-1-dev flex bison
           # build.zig invokes `aarch64-elf-objcopy` and `aarch64-elf-nm`;
           # Ubuntu's apt ships them as `aarch64-linux-gnu-*`. Symlinks
           # bridge the prefix without touching build.zig (Pi byte-identity
           # is sensitive to build.zig changes).
           sudo ln -sf /usr/bin/aarch64-linux-gnu-objcopy /usr/local/bin/aarch64-elf-objcopy
           sudo ln -sf /usr/bin/aarch64-linux-gnu-nm      /usr/local/bin/aarch64-elf-nm
+
+      # The rpi4b boot smoke needs QEMU >= 9.0 for the `raspi4b` machine.
+      # Pin 11.0.1 — the version the boot contract in run_qemu_test.sh was
+      # captured against locally — so CI emulates byte-for-byte what the
+      # operator validates by hand (free-page checkpoints, scenario tally).
+      # Built once per version, cached on the version key, then instant.
+      - name: cache qemu-system-aarch64 (pinned source build)
+        id: qemu
+        uses: actions/cache@v4
+        with:
+          path: ~/qemu-prefix
+          key: qemu-aarch64-11.0.1-${{ runner.os }}
+
+      - name: build qemu-system-aarch64 from pinned source
+        if: steps.qemu.outputs.cache-hit != 'true'
+        # Single-target build (aarch64-softmmu only) keeps it to a few
+        # minutes; we drive QEMU headless (-display none), so the UI/tools
+        # frontends are disabled.
+        run: |
+          ver=11.0.1
+          curl -fsSL -o /tmp/qemu.tar.xz "https://download.qemu.org/qemu-$ver.tar.xz"
+          mkdir -p /tmp/qemu-src
+          tar -xJf /tmp/qemu.tar.xz -C /tmp/qemu-src --strip-components=1
+          cd /tmp/qemu-src
+          ./configure --prefix="$HOME/qemu-prefix" --target-list=aarch64-softmmu \
+            --disable-docs --disable-tools --disable-gtk --disable-sdl \
+            --disable-vnc --disable-curses --disable-werror
+          make -j"$(nproc)"
+          make install
+
+      - name: put pinned qemu on PATH
+        # GITHUB_PATH prepends for all later steps, so the boot smoke's
+        # bare `qemu-system-aarch64` resolves to the pinned build, not apt.
+        run: |
+          echo "$HOME/qemu-prefix/bin" >> "$GITHUB_PATH"
+          "$HOME/qemu-prefix/bin/qemu-system-aarch64" --version
+          "$HOME/qemu-prefix/bin/qemu-system-aarch64" -machine help | grep -i raspi4b
 
       # FlashOS source modules are written in Flash (*.flash) and transpiled
       # to Zig at build time by flashc. build.zig resolves the compiler at
