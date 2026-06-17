@@ -29,11 +29,13 @@ env:
 
 jobs:
   test:
-    # Pinned to 22.04 because kcov was dropped from Ubuntu 24.04 noble
-    # repositories; jammy universe still carries kcov 38-2. Coverage
-    # upload depends on this — see the `host unit tests with coverage`
-    # step below.
-    runs-on: ubuntu-22.04
+    # ubuntu-24.04 (noble) ships QEMU 8.2, whose aarch64 system emulator
+    # carries the `raspi4b` machine type the rpi4b boot smoke needs;
+    # 22.04's QEMU 6.2 predates it (`unsupported machine type`). kcov is
+    # absent from noble's repos but that is moot — the coverage step
+    # already builds kcov v43 from source (jammy's apt v38 is too old to
+    # read zig's DWARF), so nothing here depends on an apt kcov.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
