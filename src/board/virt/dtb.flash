@@ -1,7 +1,7 @@
 // Minimal Flattened Device Tree (FDT v17) parser for QEMU virt /
 // any UEFI host that hands off a DTB pointer in x0 at kernel entry.
 //
-// The DTB physical address is captured by src/boot.S `master` (via
+// The DTB physical address is captured by arch/aarch64/boot.S `master` (via
 // the per-board `save_dtb_pa` macro) into the .bss global `dtb_pa`
 // declared in src/board/virt/boot_quirks.S. After the high-half
 // linear map is up, this file reads the DTB at LINEAR_MAP_BASE +

@@ -7,7 +7,7 @@
 //
 // The property buffer lives in .bss. The kernel runs with the data
 // cache off and all RAM mapped Normal-Non-Cacheable (see MAIR_EL1 /
-// SCTLR in src/asm_defs_common.inc), so ARM writes hit RAM directly
+// SCTLR in arch/aarch64/asm_defs_common.inc), so ARM writes hit RAM directly
 // and the VideoCore sees them without any cache maintenance. The
 // buffer sits in the low <16 MiB identity-mapped window, so its
 // virtual address equals its physical address — exactly what the

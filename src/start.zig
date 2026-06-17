@@ -1,6 +1,6 @@
 // start: kernel entry root for the Zig build.
 //
-// The entry point is `_start` in src/boot.S, which calls `kernel_main`
+// The entry point is `_start` in arch/aarch64/boot.S, which calls `kernel_main`
 // (kernel.flash). Zig's executable target needs a root module; this file
 // is it: every other kernel module is pulled in here via comptime
 // @import so all `export fn` decls land in the final ELF.

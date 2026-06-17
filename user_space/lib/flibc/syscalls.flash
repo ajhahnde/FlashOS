@@ -1,6 +1,6 @@
 // Raw SVC wrappers for the FlashOS kernel ABI — the lowest layer of
 // flibc. Each fn loads the syscall ID into x8 (per the EL0→EL1 contract
-// established in src/entry.S:el0_svc), then `svc #0` to trap. Argument /
+// established in arch/aarch64/entry.S:el0_svc), then `svc #0` to trap. Argument /
 // return wiring follows AAPCS64: x0..x5 inputs, x0 return.
 //
 // Syscall IDs come from lib/syscall_defs.zig — the same constants the

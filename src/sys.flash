@@ -1169,7 +1169,7 @@ export fn sys_passwd(user_uva u64, user_len u64, old_uva u64, old_len u64, new_u
 /// propagates here automatically and any duplicate id would overwrite
 /// (and any gap would leave a null that still traps cleanly through the
 /// unreachable kernel code path). The upper dispatch bound is
-/// NR_SYSCALLS in src/asm_defs_common.inc (`b.hs` in entry.S); keep it
+/// NR_SYSCALLS in arch/aarch64/asm_defs_common.inc (`b.hs` in entry.S); keep it
 /// in lockstep with the highest user-facing id +1.
 ///
 /// The unified ABI (slots 32..35) carries all console / pipe /
@@ -1240,13 +1240,13 @@ export var sys_call_table = blk: {
     break :blk t
 }
 
-// Build-time guard: src/asm_defs_common.inc must declare
+// Build-time guard: arch/aarch64/asm_defs_common.inc must declare
 // `#define NR_SYSCALLS 49` to match. If you bump the highest SYS_*
 // constant in lib/syscall_defs.zig, also bump the asm-side literal,
 // then update this comptime check.
 comptime {
     if defs.NR_SYSCALLS != 49 {
-        #compileError("NR_SYSCALLS drifted from src/asm_defs_common.inc — keep both in lockstep")
+        #compileError("NR_SYSCALLS drifted from arch/aarch64/asm_defs_common.inc — keep both in lockstep")
     }
 }
 

@@ -204,8 +204,8 @@ pub const KeRegs = extern struct {
     pstate u64 = 0,
 }
 
-// ABI seam — the EL1 exception stub (src/entry.S) reserves exactly
-// S_FRAME_SIZE bytes (src/asm_defs_common.inc) for the saved-register
+// ABI seam — the EL1 exception stub (arch/aarch64/entry.S) reserves exactly
+// S_FRAME_SIZE bytes (arch/aarch64/asm_defs_common.inc) for the saved-register
 // frame, and fork/context-switch resolve KeRegs at
 // THREAD_SIZE - @sizeOf(KeRegs). The asm reservation and this struct MUST
 // agree byte-for-byte; a field reorder or addition here would silently
@@ -213,6 +213,6 @@ pub const KeRegs = extern struct {
 // size and fail the build the moment it drifts.
 comptime {
     if #sizeOf(KeRegs) != 272 {
-        #compileError("KeRegs size changed — update S_FRAME_SIZE in src/asm_defs_common.inc to match")
+        #compileError("KeRegs size changed — update S_FRAME_SIZE in arch/aarch64/asm_defs_common.inc to match")
     }
 }

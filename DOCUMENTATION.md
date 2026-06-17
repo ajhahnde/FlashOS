@@ -164,7 +164,7 @@ flowchart TD
    and starts the cores at EL3.
 2. `armstub/src/armstub8.S` configures secure-mode registers, enables
    the GIC, and `eret`s to EL1.
-3. `_start` (`src/boot.S`) sets the stack, clears `.bss`, builds the
+3. `_start` (`arch/aarch64/boot.S`) sets the stack, clears `.bss`, builds the
    identity and high page tables, wakes the secondary cores,
    initialises `TCR_EL1` / `MAIR_EL1` / `VBAR_EL1` / `TTBR0` / `TTBR1`
    explicitly (required for QEMU; on real hardware armstub leaves
@@ -489,7 +489,7 @@ ABI type is documented in §5.
   zero (and preemption is enabled) it calls `_schedule`.
 - **Task states.** `TASK_RUNNING`, `TASK_INTERRUPTIBLE`, `TASK_ZOMBIE`.
 - **Context switch.** `switch_to` updates `current`, programs the new
-  PGD via `set_pgd`, and calls `core_switch_to` (`src/sched.S`) to
+  PGD via `set_pgd`, and calls `core_switch_to` (`arch/aarch64/sched.S`) to
   swap callee-saved registers, FP, SP, and LR.
 - **Fork.** `copy_process` allocates a kernel page for the new task,
   copies the parent's exception-frame regs, clones the user page
@@ -640,8 +640,8 @@ PT_LOAD each payload links into carries no writable `.bss`.
 
 ## 5. Syscalls & exceptions
 
-The vector table is in `src/entry.S` and is loaded into `vbar_el1` by
-`irq_init_vectors` (`src/irq.S`). Synchronous exceptions from EL0 are
+The vector table is in `arch/aarch64/entry.S` and is loaded into `vbar_el1` by
+`irq_init_vectors` (`arch/aarch64/irq.S`). Synchronous exceptions from EL0 are
 dispatched in `handle_sync_el0_64`. SVCs go through `el0_svc` →
 indexed lookup in `sys_call_table` (`src/sys.flash`); data aborts call
 `do_data_abort`.
@@ -666,9 +666,9 @@ svc #0   trap into the kernel
 x0       return value
 ```
 
-The vector at `vbar_el1 + 0x400` (`el0_svc` in `src/entry.S`)
+The vector at `vbar_el1 + 0x400` (`el0_svc` in `arch/aarch64/entry.S`)
 indexes into `sys_call_table` (`src/sys.flash`) and `blr`s to the
-selected handler. `NR_SYSCALLS = 49` (in `src/asm_defs_common.inc`)
+selected handler. `NR_SYSCALLS = 49` (in `arch/aarch64/asm_defs_common.inc`)
 is enforced by a `b.hs` check on `x8`; out-of-range numbers fall
 through to the invalid-entry path. A comptime guard in `src/sys.flash`
 re-asserts `defs.NR_SYSCALLS == 49` so the Zig table and the asm

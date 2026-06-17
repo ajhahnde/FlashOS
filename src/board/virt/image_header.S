@@ -19,7 +19,7 @@
  * Total: 64 bytes. The header occupies its own section
  * `.text.boot.header` so the linker script can place it as the very
  * first bytes of the image, before `.text.boot` and the existing
- * `_start` / `_start_real` label pair in src/boot.S.
+ * `_start` / `_start_real` label pair in arch/aarch64/boot.S.
  */
 
 .section ".text.boot.header"

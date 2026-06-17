@@ -7,7 +7,7 @@
 // names so a renumbering becomes a single-file change with compiler
 // enforcement, instead of paired edits coordinated by comments.
 //
-// NR_SYSCALLS in src/asm_defs_common.inc must stay in lockstep with the
+// NR_SYSCALLS in arch/aarch64/asm_defs_common.inc must stay in lockstep with the
 // highest ID +1 (it caps the dispatch range via `b.hs` in entry.S).
 //
 // Pure compile-time constants: no code is emitted, no `linksection`
@@ -39,7 +39,7 @@ pub const SYS_MLOCK u64 = 16
 pub const SYS_MUNLOCK u64 = 17
 // Slot 18 = SYS_PIPE; the other end-of-pipe ABI sits past the console
 // reservation (slots 23..26) so the console can fill its slots
-// without touching the pipe IDs. NR_SYSCALLS in src/asm_defs_common.inc
+// without touching the pipe IDs. NR_SYSCALLS in arch/aarch64/asm_defs_common.inc
 // must stay one past the highest slot.
 pub const SYS_PIPE u64 = 18
 // Slots 19..22 are reserved IPC stubs (no-op handlers until v1.x).
@@ -176,7 +176,7 @@ pub const SYS_REBOOT u64 = 47
 pub const SYS_GETCWD u64 = 48
 
 // Highest slot + 1; equals the `#define NR_SYSCALLS` literal in
-// src/asm_defs_common.inc. Adding a new SYS_* constant past
+// arch/aarch64/asm_defs_common.inc. Adding a new SYS_* constant past
 // SYS_GETCWD bumps this automatically; the comptime guard in
 // src/sys.zig catches divergence from the asm-side literal at build
 // time.

@@ -1,7 +1,7 @@
 // Statistical kernel profiler — the -Dtrace sampler (Path D).
 //
 // Reached from handle_irq on both boards, BEFORE timer_tick, with the
-// saved exception frame the entry stub (src/entry.S) built at the kernel
+// saved exception frame the entry stub (arch/aarch64/entry.S) built at the kernel
 // SP. We run in IRQ context: TTBR0 may still hold the interrupted user
 // process's pgd, so we touch only globals reachable from there — `current`
 // (exactly what timer_tick dereferences in the same context) and the

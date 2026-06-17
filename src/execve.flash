@@ -312,7 +312,7 @@ fn execveKernel(path_ptr u64, argv_ptr u64) i32 {
     }
     // Success: the eret jumps to e_entry, so this "return value" is never
     // read by the (now-replaced) caller. Instead ret_from_syscall
-    // (src/entry.S) does `str x0, [sp, 0]` AFTER the loader runs, storing
+    // (arch/aarch64/entry.S) does `str x0, [sp, 0]` AFTER the loader runs, storing
     // this value into the saved-x0 slot — which becomes the new program's
     // x0. The AAPCS64 entry contract is x0 = argc, so success MUST return
     // argc: the loader's `regs.regs[0] = argc` frame write is otherwise

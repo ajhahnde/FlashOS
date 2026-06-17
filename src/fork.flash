@@ -322,7 +322,7 @@ pub fn prepare_move_to_user_elf_argv(
         const dst [*]mut u8 = #ptrFromInt(stack_kva + (PAGE_SIZE - ab.bytes.len))
         #memcpy(dst[0..ab.bytes.len], ab.bytes)
         // x1 = argv and sp = &argv[0] survive to the new program: kernel_exit
-        // restores them from this frame and ret_from_syscall (src/entry.S)
+        // restores them from this frame and ret_from_syscall (arch/aarch64/entry.S)
         // does not touch them. x0 = argc is the AAPCS64 contract, but for the
         // sole caller (execve via the SVC path) ret_from_syscall overwrites
         // the saved-x0 slot with execveKernel's return value — so execveKernel

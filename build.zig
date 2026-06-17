@@ -26,7 +26,8 @@ comptime {
 //
 // Layout:
 //   * src/start.zig                   — root, comptime-imports every kernel module
-//   * src/*.S                         — boot/entry/sched/timer/etc. assembly
+//   * arch/aarch64/*.S, *.inc         — CPU-ISA core: boot/entry/sched/timer/etc.
+//   * src/*.S                         — machine-independent asm (symbol table, trace)
 //   * src/board/<board>/*             — per-board driver bag + linker script
 //   * user_space/init_main.flash      — pid1.elf root, staged into the initramfs
 //   * src/board/<board>/linker.ld     — per-board link script (.initramfs section)
@@ -1043,7 +1044,7 @@ pub fn build(b: *std.Build) void {
         .strip = false, // keep symbols so `populate-syms` can nm the ELF
         .unwind_tables = .none,
         // NOTE: -Dtrace deliberately does NOT force -fno-omit-frame-pointer.
-        // src/boot.S uses x29 as a scratch LR stash during early boot, and the
+        // arch/aarch64/boot.S uses x29 as a scratch LR stash during early boot, and the
         // per-task kernel stack is only ~2.4 KiB; reserving x29 as a frame
         // pointer kernel-wide corrupts the boot and trips a safety panic (it
         // wild-branches under ReleaseSmall). The sampler therefore walks the
@@ -1058,13 +1059,13 @@ pub fn build(b: *std.Build) void {
     kernel.step.dependOn(hygiene_step);
 
     const asm_files = [_][]const u8{
-        "src/boot.S",
-        "src/entry.S",
-        "src/utils.S",
-        "src/mm.S",
-        "src/sched.S",
-        "src/irq.S",
-        "src/generic_timer.S",
+        "arch/aarch64/boot.S",
+        "arch/aarch64/entry.S",
+        "arch/aarch64/utils.S",
+        "arch/aarch64/mm.S",
+        "arch/aarch64/sched.S",
+        "arch/aarch64/irq.S",
+        "arch/aarch64/generic_timer.S",
         "src/symbol_area.S",
         "src/trace/hook.S",
         "src/trace/patchable_trampolines.S",
@@ -1084,9 +1085,12 @@ pub fn build(b: *std.Build) void {
     for (board_asm_files) |path| {
         kernel_mod.addAssemblyFile(b.path(b.fmt("src/board/{s}/{s}", .{ @tagName(board), path })));
     }
-    // The kernel .S files use `#include "asm_defs.inc"`. The bridge
-    // header pulls in `board_asm_defs.inc` from the active board's
-    // directory — added below so the per-board layout resolves.
+    // The kernel .S files use `#include "asm_defs.inc"`, which now lives
+    // alongside them under arch/aarch64/. That bridge header in turn pulls in
+    // `board_asm_defs.inc` from the active board's directory — both search
+    // paths are added below so the ISA + per-board layout resolves. src/ is
+    // kept on the path for any remaining top-level .S includes.
+    kernel_mod.addIncludePath(b.path("arch/aarch64"));
     kernel_mod.addIncludePath(b.path("src"));
     kernel_mod.addIncludePath(b.path(b.fmt("src/board/{s}", .{@tagName(board)})));
 
