@@ -37,7 +37,7 @@ permissions and limitations under the License.
 
 ## 2. Copyright notice
 
-**Copyright © 2026 Anton Hahn.**
+**Copyright © 2026 ajhahnde.**
 
 FlashOS is a port and substantial rewrite in Zig of the C-based
 architecture originally developed by **Wei-Lin Chang (rhythm16)**.
