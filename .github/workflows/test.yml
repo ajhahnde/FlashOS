@@ -1,8 +1,9 @@
-# Per-push CI: host unit tests + rpi4b build-only + virt QEMU boot
-# smoke. The rpi4b boot suite takes 5–8 min and is verified locally
-# before tags; the build-only step here catches link / cross-compile
-# breakage on the rpi4b path (board_asm_defs.inc, mini-uart, BCM2711
-# timer, armstub, …) for ~30 s of CI time without paying the boot cost.
+# Per-push CI: host unit tests + rpi4b QEMU boot smoke. The rpi4b boot
+# suite takes 5–8 min; it doubles as the link / cross-compile check for
+# the rpi4b path (board_asm_defs.inc, mini-uart, BCM2711 timer, armstub,
+# …). The faster virt boot smoke that used to run here is frozen as of
+# 2026-06-17 (virt board deprioritized — rpi4b + real HW are the live
+# gates); revive by restoring the -Dboard=virt test-virt step.
 #
 # Toolchain note: build.zig hardcodes the `aarch64-elf-` binutils
 # prefix (matches the macOS Homebrew naming). Ubuntu's apt ships the
@@ -156,14 +157,11 @@ jobs:
           directory: ./coverage/merged
           fail_ci_if_error: false
 
-      - name: rpi4b build (compile + link only, no boot)
-        run: zig build -Dboard=rpi4b
-
-      - name: virt QEMU boot smoke
+      - name: rpi4b QEMU boot smoke
         # -Dci-login-seed seeds flash/flash before /bin/login so the
         # unattended boot authenticates with no typist. -Dboot-selftest runs
         # the in-kernel [TEST] harness (the 28-scenario / 32-checkpoint
         # boot-as-test path run_qemu_test.sh asserts). Both default OFF so
         # hardware deploys boot clean straight to a real login: prompt; the
         # watchdog needs both ON.
-        run: zig build -Dboard=virt -Dci-login-seed=true -Dboot-selftest=true test-virt
+        run: zig build -Dboard=rpi4b -Dci-login-seed=true -Dboot-selftest=true test-rpi4b

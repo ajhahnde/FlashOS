@@ -56,6 +56,14 @@
 # The script accepts either pattern; the active board's pair must
 # match exactly. Net: 32 × {bbff2, 3be46} + 1 × {bc000, 3be54}.
 #
+# FROZEN (2026-06-17): the virt board is deprioritized — rpi4b + real
+# HW are the live gates and CI now boots rpi4b (test-rpi4b), not virt.
+# The virt values above (0x3be46 / 0x3be54 + the drift history) are a
+# frozen snapshot from the last virt validation; they are NOT re-checked
+# while virt is on ice and may have drifted unrecorded. Detection of the
+# virt pattern is kept so `-Dboard=virt test-virt` still works for the
+# eventual revive — at which point re-validate and refresh these values.
+#
 # Drift history (legitimate free-page baseline shifts, newest first):
 #   * v0.3.0 — virt 0x3be47→0x3be46 (per-scenario), 0x3be55→0x3be54 (boot
 #              baseline): the +strict-align build-target feature replaces

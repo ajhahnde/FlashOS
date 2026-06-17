@@ -473,9 +473,9 @@ build() {
 _flashos_run_usage() {
   print -- "usage: run [qemu|virt|test|watchdog|hw|auto] [zig args...]"
   print -- "  qemu                rpi4b board in QEMU (default via 'auto')"
-  print -- "  virt                qemu virt board"
+  print -- "  virt                qemu virt board (FROZEN 2026-06-17 — deprioritized; still builds)"
   print -- "  test                host unit tests   (--NAME filters by test name, e.g. run test --fat32)"
-  print -- "  watchdog [virt|rpi4b]  boot-watchdog; always seeds login + selftest (default: virt)"
+  print -- "  watchdog [virt|rpi4b]  boot-watchdog; always seeds login + selftest (default: rpi4b)"
   print -- "  hw                  attach to the Raspberry Pi over serial (pi connect; --trace = MU adapter)"
   print -- "  auto                alias for qemu"
 }
@@ -507,12 +507,13 @@ run() {
       # past the login: prompt) AND -Dboot-selftest=true (the in-kernel test
       # scenarios the contract counts). Missing either flag rides the timeout —
       # and on rpi4b that is ~12 min of TCG. Bake both in so
-      # the footgun cannot happen. Defaults to the fast/safe virt board; rpi4b
-      # is an explicit, warned opt-in.
-      local wb="${1:-virt}" step
+      # the footgun cannot happen. Defaults to rpi4b (the live board); virt
+      # is frozen as of 2026-06-17 (deprioritized) but still an explicit opt-in.
+      local wb="${1:-rpi4b}" step
       (( $# > 0 )) && shift
       case "$wb" in
-        virt)  step=test-virt ;;
+        virt)  step=test-virt
+               _flashos_warn "virt watchdog: board is FROZEN (deprioritized 2026-06-17); rpi4b + HW are the live gates" ;;
         rpi4b) step=test-rpi4b
                _flashos_warn "rpi4b watchdog: ~5-8 min of TCG (720s ceiling)" ;;
         *) _flashos_err "run watchdog: unknown board '$wb' (virt|rpi4b)"; return 1 ;;
