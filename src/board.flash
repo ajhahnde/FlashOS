@@ -53,3 +53,13 @@ pub const power = switch build_options.board {
     .rpi4b => #import("rpi4b_power"),
     .virt => #import("virt_power"),
 }
+
+// mailbox: hardware-monitoring reads (SoC temperature, ARM clock) over
+// the VideoCore property channel on rpi4b; a 0-returning stub on virt,
+// which has no mailbox. Consumed by the sys_cpu_temp / sys_cpu_freq
+// syscalls — the EMMC2/GPIO/power mailbox traffic stays on the direct
+// rpi4b_mailbox import, not this alias.
+pub const mailbox = switch build_options.board {
+    .rpi4b => #import("rpi4b_mailbox"),
+    .virt => #import("virt_mailbox"),
+}

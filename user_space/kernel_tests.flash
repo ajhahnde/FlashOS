@@ -88,6 +88,36 @@ pub fn sys_dump_free() u64 {
         : .{ .memory = true })
 }
 
+// Hardware-monitoring reads (slots 49..52), all argument-free `-> u64`.
+// Drive the hwmon-core / hwmon-mailbox scenarios.
+pub fn sys_mem_total() u64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> u64),
+        : [nr] "{x8}" (defs.SYS_MEMTOTAL),
+        : .{ .memory = true })
+}
+
+pub fn sys_uptime() u64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> u64),
+        : [nr] "{x8}" (defs.SYS_UPTIME),
+        : .{ .memory = true })
+}
+
+pub fn sys_cpu_temp() u64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> u64),
+        : [nr] "{x8}" (defs.SYS_CPU_TEMP),
+        : .{ .memory = true })
+}
+
+pub fn sys_cpu_freq() u64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> u64),
+        : [nr] "{x8}" (defs.SYS_CPU_FREQ),
+        : .{ .memory = true })
+}
+
 pub fn sys_kill(pid i32) i32 {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> i32),
@@ -395,6 +425,12 @@ const FAIL_RNG [*:0]u8 = "[FAIL] rng\n"
 // both together assert "the announce ran AND it was healthy".
 const HWRNG_MARKER []u8 = "hwrng"
 const HWRNG_FAIL_MARKER []u8 = "hwrng: self-test failed"
+const TEST_HWMON_CORE [*:0]u8 = "[TEST] hwmon-core\n"
+const PASS_HWMON_CORE [*:0]u8 = "[PASS] hwmon-core\n"
+const FAIL_HWMON_CORE [*:0]u8 = "[FAIL] hwmon-core\n"
+const TEST_HWMON_MAILBOX [*:0]u8 = "[TEST] hwmon-mailbox\n"
+const PASS_HWMON_MAILBOX [*:0]u8 = "[PASS] hwmon-mailbox\n"
+const FAIL_HWMON_MAILBOX [*:0]u8 = "[FAIL] hwmon-mailbox\n"
 const TEST_CREDS [*:0]u8 = "[TEST] creds\n"
 const PASS_CREDS [*:0]u8 = "[PASS] creds\n"
 const FAIL_CREDS [*:0]u8 = "[FAIL] creds\n"
@@ -1795,8 +1831,8 @@ fn run_readdir(baseline u64) bool {
     var found_ls bool = false
     var last i32 = 0
     var index u64 = 0
-    // Bounded walk — /bin holds six entries today; 64 is a runaway guard,
-    // not the sentinel (the sentinel is the -1 return asserted below).
+    // Bounded walk — /bin holds well under 64 entries; 64 is a runaway
+    // guard, not the sentinel (the sentinel is the -1 return asserted below).
     while (index < 64) {
         var d defs.Dirent = .{}
         last = sys_readdir(BIN_DIR, index, #intFromPtr(&d))
@@ -1933,6 +1969,60 @@ fn run_rng(baseline u64) bool {
     }
 
     sys_writeConsole(if (ok) PASS_RNG else FAIL_RNG)
+    return ok
+}
+
+// Hardware monitoring — core metrics (mem + uptime), no mailbox. Pure
+// argument-free reads, no fork: baseline-neutral by construction. The
+// behavioural assertions tie the syscalls to observable invariants rather
+// than merely "did not fault":
+//   * mem_total is the frozen allocatable pool — non-zero, and never less
+//     than the live free count (you cannot have more free pages than the
+//     pool holds). The gap (pool − free) is the pages held since boot,
+//     which must stay small; a garbage pool size would blow past the bound.
+//   * uptime is monotonic: two back-to-back reads land in the same wall-
+//     clock second, so the kernel-side assertion is non-decreasing (the
+//     strictly-increasing check needs spaced reads and lives in the Pi
+//     tool acceptance). A sane upper bound rules out a wild counter.
+fn run_hwmon_core(baseline u64) bool {
+    sys_writeConsole(TEST_HWMON_CORE)
+    var ok bool = true
+
+    const total = sys_mem_total()
+    if (total == 0) { ok = false }
+    if (total < baseline) { ok = false }
+    if (total - baseline > 1024) { ok = false }
+
+    const up1 = sys_uptime()
+    const up2 = sys_uptime()
+    if (up2 < up1) { ok = false }
+    if (up1 > 86_400) { ok = false }
+
+    if (sys_dump_free() != baseline) { ok = false }
+    sys_writeConsole(if (ok) PASS_HWMON_CORE else FAIL_HWMON_CORE)
+    return ok
+}
+
+// Hardware monitoring — mailbox metrics (temperature + CPU clock). Board-
+// uniform by design (plan §7): 0 means "unknown" — the virt stub and a
+// failed/absent mailbox both report it — otherwise the value must sit in a
+// plausible silicon range. That keeps the scenario green on rpi4b (real
+// VideoCore mailbox) and virt (0-stub) alike, so the virt revive stays
+// cheap. No fork, no user buffer: baseline-neutral, no EFAULT companion.
+fn run_hwmon_mailbox(baseline u64) bool {
+    sys_writeConsole(TEST_HWMON_MAILBOX)
+    var ok bool = true
+
+    // milli-degrees Celsius; 20..120 °C is the believable powered range.
+    const temp = sys_cpu_temp()
+    if (temp != 0 && (temp < 20_000 || temp > 120_000)) { ok = false }
+
+    // Hz; 100 MHz .. 3 GHz spans idle-throttle to turbo with margin.
+    const freq = sys_cpu_freq()
+    if (freq != 0 && (freq < 100_000_000 || freq > 3_000_000_000)) { ok = false }
+
+    if (sys_dump_free() != baseline) { ok = false }
+    sys_writeConsole(if (ok) PASS_HWMON_MAILBOX else FAIL_HWMON_MAILBOX)
     return ok
 }
 
@@ -2439,6 +2529,12 @@ const scenarios = [_]Scenario{
     // .{ .name = "fsh", .run = run_fsh }, // DISABLED — see run_fsh above
     .{ .name = "readdir", .run = run_readdir },
     .{ .name = "klog", .run = run_klog },
+    // hwmon-core / hwmon-mailbox exercise the v0.5.0 monitoring syscalls
+    // (mem_total, uptime, cpu_temp, cpu_freq). Pure argument-free reads, no
+    // fork — baseline-neutral; one sys_dump_free checkpoint each (+2 → 34).
+    // Board-uniform so they stay green on rpi4b and the virt 0-stub alike.
+    .{ .name = "hwmon-core", .run = run_hwmon_core },
+    .{ .name = "hwmon-mailbox", .run = run_hwmon_mailbox },
     // creds runs last — it asserts the uid/gid identity layer. Never
     // first (rng holds that slot by contract); a forked child drops
     // privilege and reports via a pipe, so it is reap-based and

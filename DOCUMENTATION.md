@@ -182,7 +182,7 @@ flowchart TD
    stack page, and `eret`s to the ELF entry point.
 6. `user_space/init_main.flash` is the `pid1.elf` root: `_start`
    calls `pid1_main`, which runs `run_all()` from
-   `kernel_tests.flash`. The harness runs the twenty-eight scenarios and
+   `kernel_tests.flash`. The harness runs the thirty scenarios and
    prints an `X/Y passed` tally, then hands PID 1 to `/bin/login`:
    the login gate authenticates against `/etc/shadow`,
    drops privilege per `/etc/passwd`, and execs the user's shell —
@@ -456,8 +456,8 @@ backends synthesise the listing differently:
   segment as a synthetic `DT_DIR` (`bin` under `/`). The arc list is
   lexicographically sorted, so duplicate synthetic subdirectories are
   adjacent and collapse with a single de-dup. `ls /` → `bin`, `etc`,
-  `sbin`, `test`; `ls /bin` → `cat`, `clear`, `dmesg`, `echo`, `forkbomb`, `fsh`,
-  `less`, `login`, `ls`, `meminfo`, `passwd`, `sysinfo`. The pure `directEntry`
+  `sbin`, `test`; `ls /bin` → `cat`, `clear`, `cpuinfo`, `dmesg`, `echo`, `forkbomb`,
+  `fsh`, `less`, `login`, `ls`, `meminfo`, `passwd`, `sysinfo`. The pure `directEntry`
   helper is host-tested against a comptime cpio fixture.
 - **FAT32 — root-directory 8.3 walk (Pi-only).** `readdir` reuses the
   root-walk (16 entries/sector, skipping `0x00` end / `0xE5` deleted /
@@ -668,10 +668,10 @@ x0       return value
 
 The vector at `vbar_el1 + 0x400` (`el0_svc` in `arch/aarch64/entry.S`)
 indexes into `sys_call_table` (`src/sys.flash`) and `blr`s to the
-selected handler. `NR_SYSCALLS = 49` (in `arch/aarch64/asm_defs_common.inc`)
+selected handler. `NR_SYSCALLS = 53` (in `arch/aarch64/asm_defs_common.inc`)
 is enforced by a `b.hs` check on `x8`; out-of-range numbers fall
 through to the invalid-entry path. A comptime guard in `src/sys.flash`
-re-asserts `defs.NR_SYSCALLS == 49` so the Zig table and the asm
+re-asserts `defs.NR_SYSCALLS == 53` so the Zig table and the asm
 literal stay in lockstep.
 
 Because the user PGD is installed in TTBR0 at the time of the SVC,
@@ -722,6 +722,12 @@ mapping rather than chasing into UVA space.
 |   44   | `setgid`         | `x0 = u32 gid`                                    | `i64` 0 on success, -1 (EPERM) | Mirror of `setuid` over the group ids. `/bin/login` calls it *before* `setuid` (gid first, while still root — after the uid drop it would be denied) |
 |   45   | `authenticate`   | `x0 = const u8 *user`, `x1 = u64 user_len`, `x2 = const u8 *pass`, `x3 = u64 pass_len` | `i64` 0 on a match, -1 otherwise | **Kernel-owned credential verify.** Reads the active shadow database in-kernel (the execve-style no-alloc VFS recipe — baseline-neutral): the writable FAT32 copy `/mnt/shadow` first (that is where `passwd` writes), falling back to the initramfs `/etc/shadow` seed when `/mnt` is unmounted (QEMU virt), the file is absent (fresh card), or it is corrupt — the latter announced loudly (the anti-brick rule: corruption never locks the operator out, the baked-in seed credentials still work). Finds the user's line (`user:iterations:salt_hex:hash_hex`, parsed by the host-tested `src/shadow.flash`), runs PBKDF2-HMAC-SHA256 (`src/sha256.flash`) over the password with the stored salt + iteration count, and constant-time-compares (`ctEql`) against the stored verifier. The KDF and every salt/hash byte stay inside the kernel — userland sees only pass/fail. The plaintext password crosses the user→kernel boundary exactly once into a static kernel buffer (overwritten by the next call). Credential UVAs cross via the soft `copy_from_user` (wild UVA / over-long input → -1, no zombify) |
 |   46   | `passwd`         | `x0 = const u8 *user`, `x1 = u64 user_len`, `x2 = const u8 *old`, `x3 = u64 old_len`, `x4 = const u8 *new`, `x5 = u64 new_len` | `i64` 0 on success, -13 (`-EACCES`) on an authorization failure, -1 otherwise | **Kernel-owned password change.** Rewrites `user`'s record in the writable FAT32 shadow (`/mnt/shadow`) with a fresh kernel-minted salt (`src/hwrng.flash`) and a PBKDF2 re-hash of the new password. Authorization: root (euid 0) may reset any record without the old password (the forgotten-password recovery path); everyone else only the record whose name maps to their own uid (`/etc/passwd` lookup via the host-tested `src/pwfile.flash`) and only with the correct old password. The rewrite is splice-safe by construction: the iteration count is kept and salt/hash are fixed-width hex, so the new line is byte-identical in length and the whole-file in-place write never changes the file size (no FAT32 dir-entry resize). Returns -1 when no writable shadow exists (QEMU virt / fresh card — the initramfs seed is immutable), the user has no record, or the rewrite would change the record length. `/bin/passwd` is the interactive consumer |
+|   47   | `reboot`         | (none)                                            | does not return | **Machine reset.** Resets the board through the per-board path (PSCI `SYSTEM_RESET` on QEMU virt, the BCM2711 watchdog full-reset on rpi4b, behind the `board.power` facade) and never returns. EL0 cannot issue the privileged SMC / power-manager MMIO itself, which is why it is a syscall. No privilege gate yet — any logged-in session may reboot |
+|   48   | `getcwd`         | `x0 = u8 *buf`, `x1 = u64 len`              | `i64` path length excluding the NUL, -1 on wild UVA / `len` too small | **Working-directory readback** — the readback half of the slot-36 `chdir` store. Copies the task's NUL-terminated `cwd` (`TaskStruct.cwd`) into the user buffer; `cwd` is a plain TaskStruct field, so this allocates nothing. `buf` crosses via the soft `copy_to_user`; a wild UVA or a `len` too small to hold the path plus its terminator returns -1, no zombify. `pwd` is the sole consumer |
+|   49   | `mem_total`      | (none)                                            | `u64` allocatable pool size in pages | **Hardware monitoring.** Returns the frozen post-reserve allocatable pool size (the board's boot free-page baseline). Constant after boot — unlike `dump_free` it does not move as pages are handed out — so a tool derives "used" as this minus `dump_free` and total bytes as pages << 12. Board-independent (`page_alloc`) |
+|   50   | `uptime`         | (none)                                            | `u64` seconds since boot | **Hardware monitoring.** Seconds since boot from the architectural counter, dividing `CNTPCT_EL0` by the runtime `CNTFRQ_EL0` (not the fixed tick period, which can differ from the counter rate). Monotonic. Board-independent |
+|   51   | `cpu_temp`       | (none)                                            | `u64` milli-degrees Celsius, `0` = unknown | **Hardware monitoring.** SoC temperature over the VideoCore mailbox (`TAG_GET_TEMPERATURE`). Reads `0` = unknown on a board without the firmware (QEMU virt) or on a mailbox timeout. The kernel runs the transaction under `preempt_disable` to serialise the shared property buffer against a task switch |
+|   52   | `cpu_freq`       | (none)                                            | `u64` Hz, `0` = unknown | **Hardware monitoring.** ARM core clock over the VideoCore mailbox (the firmware-reported rate, which scales with DVFS). Reads `0` = unknown on a board without the firmware (virt) or on a mailbox timeout. Same `preempt_disable` serialisation as `cpu_temp` |
 
 `sys_console_inject` is a documented debug syscall, not part of the
 forward-stable ABI surface. It is retained because the in-kernel test
@@ -1105,11 +1111,11 @@ initramfs/file pair get dedicated per-target stub objects
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`) to
 avoid double-defining symbols that the module under test already
-exports. The current suite totals **419 host tests** across 39
+exports. The current suite totals **415 host tests** across 39
 modules — see the coverage matrix below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.flash`).
-PID 1 enters `run_all()`, which exercises twenty-eight scenarios on real
+PID 1 enters `run_all()`, which exercises thirty scenarios on real
 kernel state:
 
 - `fork-stress` — 3 × 5 fork/reap rounds with per-round and final
@@ -1291,7 +1297,7 @@ Each scenario emits `[TEST] name` … `[PASS] name` (or `[FAIL]`), and
 `run_all` prints a final `X/Y passed` tally. The harness runs
 identically under QEMU (`zig build -Dboard=virt run-virt` /
 `-Dboard=rpi4b run`) and on real hardware (`./build.sh` → SD-flash →
-`picapture`); a green run lands `28/28 passed` with 32 baseline
+`picapture`); a green run lands `30/30 passed` with 34 baseline
 checkpoints (`0xbbff2` rpi4b / `0x3be46` virt) and 0 `ERROR CAUGHT`
 on both boards, then hands off to
 `/bin/login` → `/bin/fsh`. With the login lifecycle fsh's homescreen
@@ -1312,7 +1318,7 @@ byte-comparing. Emits `[TEST] emmc2-block` … `[PASS] emmc2-block`
 or `[FAIL] emmc2-block (write|read|mismatch)`. On QEMU it
 exercises the virt fake (`src/board/virt/emmc2.flash`); on Pi 4 it
 exercises the real BCM2711 EMMC2 driver (verified on a 64 GB SDXC).
-The EL0 28/28 tally is unaffected — both
+The EL0 30/30 tally is unaffected — both
 buffers live on the kernel stack and the scenario runs in kernel
 context.
 
@@ -1349,14 +1355,14 @@ leak-free:
   keeps a deep-syscall stack overflow out of the credential fields (see
   "Security model" in §5).
 
-A full QEMU or Pi run prints 32 `free_pages:` lines: 1 kernel boot
+A full QEMU or Pi run prints 34 `free_pages:` lines: 1 kernel boot
 baseline + 1 user-space baseline + 1 checkpoint per fork-stress round
 (3 rounds) + 1 fork-stress final + 1 each for rng / oom-graceful / kill /
 exec-elf / execve / brk / stack-overflow / wild-pointer / exec-fault /
 undef-instr / efault-syscall / flibc / pipe / console-echo / fd-redirect /
 initramfs-open / vfs-dispatch / trace / fs-roundtrip / readdir / klog /
-creds / authenticate / perm / login / passwd —
-i.e. 32 × `0xbbff2` (the user-space baseline plus 31 scenario checkpoints) +
+hwmon-core / hwmon-mailbox / creds / authenticate / perm / login / passwd —
+i.e. 34 × `0xbbff2` (the user-space baseline plus 33 scenario checkpoints) +
 1 × `0xbc000`.
 
 ```text
@@ -1419,7 +1425,7 @@ end-to-end on QEMU + Pi 4.
 
 | Module                          | Host tests | Kernel-harness scenarios                                                                            | Reason if host-untested                                                                                                                                                                                                                      |
 | ------------------------------- | ---------: | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/page_alloc.flash`          |         12 | every (free-page baseline)                                                                          | —                                                                                                                                                                                                                                           |
+| `src/page_alloc.flash`          |         14 | every (free-page baseline)                                                                          | —                                                                                                                                                                                                                                           |
 | `src/elf.flash`                 |         16 | `exec-elf`, `stack-overflow`, `flibc`                                                         | —                                                                                                                                                                                                                                           |
 | `src/wait_queue.flash`          |          4 | `pipe`, `console-echo`, `fd-redirect`                                                       | —                                                                                                                                                                                                                                           |
 | `src/pipe.flash`                |          5 | `pipe`, `fd-redirect`                                                                   | —                                                                                                                                                                                                                                           |
@@ -1430,7 +1436,7 @@ end-to-end on QEMU + Pi 4.
 | `src/file.zig`                |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `fd-redirect`   | fd-table helpers live in `src/fdtable.flash`; the `alloc`/`ref`/`unref` lifetime tests remain here                                                                                                                       |
 | `src/vfs.zig`                 |         13 | `vfs-dispatch`, `fs-roundtrip`, `initramfs-open`, `exec-elf`, `stack-overflow`, `flibc`, `readdir` | —                                                                                                                                                                                                                                           |
 | `src/sdhci_cmd.flash`           |         13 | `emmc2-block` (CMD17/CMD24 encoding, CSD v2 parse, clock divisor)                                 | —                                                                                                                                                                                                                                           |
-| `src/mailbox.flash`             |         14 | `emmc2-block` (clock-rate query for SDHCI divider; SD VDD power-on and 3.3 V I/O rail at init); USB-C console (`usb_init`'s USB-HCD power-on)    | —                                                                                                                                                                                                                                           |
+| `src/mailbox.flash`             |         19 | `emmc2-block` (clock-rate query for SDHCI divider; SD VDD power-on and 3.3 V I/O rail at init); USB-C console (`usb_init`'s USB-HCD power-on)    | —                                                                                                                                                                                                                                           |
 | `src/board/virt/dtb.flash`      |          4 | (virt boot hand-off)                                                                                | —                                                                                                                                                                                                                                           |
 | `src/fat32.flash`               |         27 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
 | `src/initramfs_backend.flash`   |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
@@ -1455,7 +1461,7 @@ end-to-end on QEMU + Pi 4.
 | `user_space/lib/flibc/completion.flash` | 12 | (PID-1 hand-off)                                                                                  | pure tab-completion core (`parse` command-vs-path, `commonPrefixLen`, `classify` for the double-TAB decision); the `readdir`-driven candidate gathering + double-TAB listing live in `readline`'s completing driver; runtime path = the interactive fsh shell after the harness                                                                                  |
 | `user_space/lib/flibc/keys.flash`     |    7 | — (full-screen tools)                                                                             | pure VT100 input `Decoder` (`ESC[` arrows / ctrl / tab → `Key`); the SVC `readKey` driver is gated like `readline`; runtime path = `/bin/less` (the full-screen pager) over the serial console                                                                                                                  |
 | `user_space/lib/flibc/pager.flash`    |   10 | — (full-screen tools)                                                                             | pure scroll / line-index core (`Pager`: line indexing, `line` slicing, scroll clamping); no SVC — the render + key loop live in `/bin/less`; runtime path = `/bin/less` over the serial console |
-| `lib/console_ui/screen.flash`         |    6 | — (full-screen tools)                                                                             | pure ANSI screen renderers (alt-screen lifecycle, cursor, `Panel` box, `kv` rows); `Sink`-routed, allocator-free; the first consumers are `/bin/sysinfo` (`kv`), `/bin/less` (alt-screen + `Panel`), and `/bin/clear` (`clear`)                                                                                                                                         |
+| `lib/console_ui/screen.flash`         |    6 | — (full-screen tools)                                                                             | pure ANSI screen renderers (alt-screen lifecycle, cursor, `Panel` box, `kv` rows); `Sink`-routed, allocator-free; the first consumers are `/bin/sysinfo` and `/bin/cpuinfo` (`kv`), `/bin/less` (alt-screen + `Panel`), and `/bin/clear` (`clear`)                                                                                                                                         |
 | `user_space/fsh/tokenize.flash`       |   11 | (PID-1 hand-off)                                                                                  | pure whitespace split + single-pipe decomposition; the shell driver (`fsh.flash`) is integration-only via the PID-1 → fsh hand-off (the `type 'help' for commands` boot success marker)                                                                                                                     |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | shared bump-allocator helper consumed by other test roots; carries no inline tests of its own                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | runtime code patching; no ICache sync host-side                                                                                                                                                                                              |
@@ -1468,13 +1474,13 @@ end-to-end on QEMU + Pi 4.
 | `src/usb_tx_ring.flash`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.flash` stays hardware-verified                                                                                    |
 | `src/board/rpi4b/usb.flash`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.flash`, the TX ring in `src/usb_tx_ring.flash` |
 
-Totals: **419 host tests** (`zig build test`) + **28 in-kernel
-EL0 scenarios** + **1 pre-PID-1 EL1 scenario** (`emmc2-block`,
-`run-virt` / `run`). The table's 39 per-module inline counts sum to
-**403**; the `zig build test` total (419) is exactly 16 higher
-because the `fork.flash` test root re-runs `src/elf.flash`'s 16 tests
-through its direct file import — elf's tests run once under their own
-row and once inside `fork.flash`'s step. 403 + 16 = 419.
+Totals: **415 host tests** (`zig build test`, counted from the build
+graph by `scripts/test_tally.sh`) + **30 in-kernel EL0 scenarios** +
+**1 pre-PID-1 EL1 scenario** (`emmc2-block`, `run-virt` / `run`). The
+per-module column above is an approximate breakdown — the authoritative
+total is whatever `zig build test` prints; `fork.flash`'s test root also
+re-runs `src/elf.flash`'s tests through a direct file import, so a few
+modules' tests execute a second time inside `fork.flash`'s step.
 
 ### Output markers
 
@@ -1489,7 +1495,7 @@ row and once inside `fork.flash`'s step. 403 + 16 = 419.
 | `kill ok`, `exec-elf ok` | Per-scenario progress prints                                        |
 
 Greens require: `X == Y`, all `[PASS]` no `[FAIL]`, 0 `ERROR CAUGHT`,
-32 per-scenario checkpoints + 1 boot baseline, and fsh's homescreen
+34 per-scenario checkpoints + 1 boot baseline, and fsh's homescreen
 marker (`type 'help' for commands`) emitted 3× per boot.
 
 ## 9. Build artefacts

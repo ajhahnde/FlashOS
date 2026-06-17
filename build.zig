@@ -569,6 +569,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const virt_mailbox_src = addFlashSource(b, "src/board/virt/mailbox.flash");
+    const virt_mailbox_mod = b.createModule(.{
+        .root_source_file = virt_mailbox_src,
+        .target = target,
+        .optimize = optimize,
+    });
     const virt_usb_src = addFlashSource(b, "src/board/virt/usb.flash");
     const virt_usb_mod = b.createModule(.{
         .root_source_file = virt_usb_src,
@@ -1035,6 +1041,8 @@ pub fn build(b: *std.Build) void {
     board_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
     board_mod.addImport("virt_power", virt_power_mod);
     board_mod.addImport("rpi4b_power", rpi4b_power_mod);
+    board_mod.addImport("virt_mailbox", virt_mailbox_mod);
+    board_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
 
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
@@ -1591,6 +1599,68 @@ pub fn build(b: *std.Build) void {
     sysinfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     sysinfo.entry = .disabled;
 
+    // ---- cpuinfo.elf — one-shot CPU monitor coreutil ----
+    // Prints the SoC temperature and ARM clock (sys_cpu_temp / sys_cpu_freq
+    // over the VideoCore mailbox) as aligned kv rows, then exits — the
+    // focused sibling of sysinfo's broader summary. Imports flibc + console_ui
+    // only (no pwfile / build_options). Same recipe as ls / sysinfo (flibc
+    // _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
+    // coreutil_linker.ld). Staged at /bin/cpuinfo; kept out of the CI
+    // FSH_SCRIPT like sysinfo (live readings would break the baseline count).
+    // Source is Flash (tools/cpuinfo.flash) — flashc transpiles it to Zig at
+    // build time via addFlashSource.
+    const cpuinfo_mod = b.createModule(.{
+        .root_source_file = addFlashSource(b, "tools/cpuinfo.flash"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    cpuinfo_mod.addImport("flibc", flibc_mod);
+    cpuinfo_mod.addImport("flibc_start", flibc_start_mod);
+    cpuinfo_mod.addImport("flibc_mem", flibc_mem_mod);
+    cpuinfo_mod.addImport("console_ui", console_ui_mod);
+    const cpuinfo = b.addExecutable(.{
+        .name = "cpuinfo.elf",
+        .root_module = cpuinfo_mod,
+    });
+    cpuinfo.pie = false;
+    cpuinfo.bundle_compiler_rt = false;
+    cpuinfo.link_z_max_page_size = 0x80;
+    cpuinfo.link_z_common_page_size = 0x80;
+    cpuinfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    cpuinfo.entry = .disabled;
+
+    // ---- uptime.elf — one-shot uptime monitor coreutil ----
+    // Prints the humanised seconds-since-boot (sys_uptime, the architectural
+    // counter) as one kv row, then exits — the focused sibling of sysinfo's
+    // uptime row, the way cpuinfo focuses temperature + clock. Imports flibc +
+    // console_ui only (no pwfile / build_options). Same recipe as cpuinfo /
+    // sysinfo (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip,
+    // shared coreutil_linker.ld). Staged at /bin/uptime; kept out of the CI
+    // FSH_SCRIPT like sysinfo (a live reading would break the baseline count).
+    // Source is Flash (tools/uptime.flash) — flashc transpiles it to Zig at
+    // build time via addFlashSource.
+    const uptime_mod = b.createModule(.{
+        .root_source_file = addFlashSource(b, "tools/uptime.flash"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    uptime_mod.addImport("flibc", flibc_mod);
+    uptime_mod.addImport("flibc_start", flibc_start_mod);
+    uptime_mod.addImport("flibc_mem", flibc_mem_mod);
+    uptime_mod.addImport("console_ui", console_ui_mod);
+    const uptime = b.addExecutable(.{
+        .name = "uptime.elf",
+        .root_module = uptime_mod,
+    });
+    uptime.pie = false;
+    uptime.bundle_compiler_rt = false;
+    uptime.link_z_max_page_size = 0x80;
+    uptime.link_z_common_page_size = 0x80;
+    uptime.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    uptime.entry = .disabled;
+
     // ---- less.elf — full-screen text pager ----
     // First interactive consumer of the navigation scaffold: takes over the
     // console with console_ui.screen (alt-screen + panelTop title bar), reads
@@ -1818,6 +1888,7 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(argv_echo.getEmittedBin(), "test/argv_echo.elf");
     _ = cpio_stage.addCopyFile(cat.getEmittedBin(), "bin/cat");
     _ = cpio_stage.addCopyFile(clear.getEmittedBin(), "bin/clear");
+    _ = cpio_stage.addCopyFile(cpuinfo.getEmittedBin(), "bin/cpuinfo");
     _ = cpio_stage.addCopyFile(dmesg.getEmittedBin(), "bin/dmesg");
     _ = cpio_stage.addCopyFile(echo.getEmittedBin(), "bin/echo");
     _ = cpio_stage.addCopyFile(forkbomb.getEmittedBin(), "bin/forkbomb");
@@ -1826,6 +1897,7 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(ls.getEmittedBin(), "bin/ls");
     _ = cpio_stage.addCopyFile(meminfo.getEmittedBin(), "bin/meminfo");
     _ = cpio_stage.addCopyFile(sysinfo.getEmittedBin(), "bin/sysinfo");
+    _ = cpio_stage.addCopyFile(uptime.getEmittedBin(), "bin/uptime");
     _ = cpio_stage.addCopyFile(b.path("user_space/fsh/fshrc"), "etc/fshrc");
     _ = cpio_stage.addCopyFile(login.getEmittedBin(), "bin/login");
     _ = cpio_stage.addCopyFile(passwd_bin.getEmittedBin(), "bin/passwd");
@@ -1854,6 +1926,7 @@ pub fn build(b: *std.Build) void {
     const initramfs_arcs = [_]struct { arc: []const u8, mode: u32 }{
         .{ .arc = "bin/cat", .mode = 0o100755 },
         .{ .arc = "bin/clear", .mode = 0o100755 },
+        .{ .arc = "bin/cpuinfo", .mode = 0o100755 },
         .{ .arc = "bin/dmesg", .mode = 0o100755 },
         .{ .arc = "bin/echo", .mode = 0o100755 },
         .{ .arc = "bin/forkbomb", .mode = 0o100755 },
@@ -1864,6 +1937,7 @@ pub fn build(b: *std.Build) void {
         .{ .arc = "bin/meminfo", .mode = 0o100755 },
         .{ .arc = "bin/passwd", .mode = 0o100755 },
         .{ .arc = "bin/sysinfo", .mode = 0o100755 },
+        .{ .arc = "bin/uptime", .mode = 0o100755 },
         .{ .arc = "etc/fshrc", .mode = 0o100644 },
         .{ .arc = "etc/passwd", .mode = 0o100644 },
         .{ .arc = "etc/shadow", .mode = 0o100600 },

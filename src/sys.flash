@@ -64,6 +64,17 @@ extern fn copy_to_user(uva u64, kbuf [*]u8, len u64) i32
 extern fn board_usb_enumerated() bool
 extern fn board_usb_cdc_tx(ptr [*]u8, len u64) void
 extern fn board_power_reboot() noreturn
+// Mailbox-backed hardware monitors, reached through the same start.zig
+// trampolines (board.mailbox is rpi4b-real, virt-stubbed to 0). Both
+// return 0 = unknown on a board without the firmware.
+extern fn board_mailbox_temperature() u32
+extern fn board_mailbox_cpu_clock() u32
+
+// Allocatable pool size (SYS_MEMTOTAL) and seconds-since-boot
+// (SYS_UPTIME). Cross-module kernel reads, exported by page_alloc /
+// generic_timer.
+extern fn mem_total_count() u64
+extern fn uptime_seconds() u64
 
 const builtin = #import("builtin")
 
@@ -139,6 +150,35 @@ export fn sys_kill(pid i32) i32 {
 }
 export fn sys_dump_free() u64 {
     return dump_free_count()
+}
+
+// SYS_MEMTOTAL — allocatable pool size in pages, frozen at boot. A tool
+// derives "used" as this minus SYS_DUMP_FREE; "total bytes" as pages << 12.
+export fn sys_mem_total() u64 {
+    return mem_total_count()
+}
+
+// SYS_UPTIME — seconds since boot, from the architectural counter.
+export fn sys_uptime() u64 {
+    return uptime_seconds()
+}
+
+// SYS_CPU_TEMP — SoC temperature in milli-degrees Celsius (0 = unknown).
+// SYS_CPU_FREQ — ARM clock in Hz (0 = unknown). Both run a mailbox
+// transaction over the shared prop_buf; preempt_disable serialises that
+// single-core-shared static against a task switch landing mid-transaction.
+export fn sys_cpu_temp() u64 {
+    preempt_disable()
+    const milli u64 = board_mailbox_temperature()
+    preempt_enable()
+    return milli
+}
+
+export fn sys_cpu_freq() u64 {
+    preempt_disable()
+    const hz u64 = board_mailbox_cpu_clock()
+    preempt_enable()
+    return hz
 }
 
 // SYS CALL FILE SYSTEM
@@ -1229,6 +1269,11 @@ export var sys_call_table = blk: {
     t[defs.SYS_PASSWD] = #ptrCast(&sys_passwd)
     t[defs.SYS_REBOOT] = #ptrCast(&sys_reboot)
 
+    t[defs.SYS_MEMTOTAL] = #ptrCast(&sys_mem_total)
+    t[defs.SYS_UPTIME] = #ptrCast(&sys_uptime)
+    t[defs.SYS_CPU_TEMP] = #ptrCast(&sys_cpu_temp)
+    t[defs.SYS_CPU_FREQ] = #ptrCast(&sys_cpu_freq)
+
     // Retired: legacy per-kind console / file / pipe / exec shims
     // (write_str, exec, readFile, writeFile, closeFile, openConsole,
     // readConsole, pipe_read, pipe_write, pipe_close). Slot numbers are
@@ -1241,11 +1286,11 @@ export var sys_call_table = blk: {
 }
 
 // Build-time guard: arch/aarch64/asm_defs_common.inc must declare
-// `#define NR_SYSCALLS 49` to match. If you bump the highest SYS_*
-// constant in lib/syscall_defs.zig, also bump the asm-side literal,
+// `#define NR_SYSCALLS 53` to match. If you bump the highest SYS_*
+// constant in lib/syscall_defs.flash, also bump the asm-side literal,
 // then update this comptime check.
 comptime {
-    if defs.NR_SYSCALLS != 49 {
+    if defs.NR_SYSCALLS != 53 {
         #compileError("NR_SYSCALLS drifted from arch/aarch64/asm_defs_common.inc — keep both in lockstep")
     }
 }

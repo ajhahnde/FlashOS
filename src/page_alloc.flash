@@ -25,12 +25,21 @@ fn kva_to_pa(kva u64) u64 {
 // code can reset state by calling it again.
 var mem_map [MALLOC_PAGES]u8 = undefined
 
+// Allocatable pool size in pages, frozen once boot-time reservation is
+// done — total pool minus the pages reserve_below/above carve out for the
+// kernel image and the out-of-RAM tail. Unlike the live free count, this
+// does NOT move as pages are handed out, so SYS_MEMTOTAL can derive
+// "used = total - free". Seeded to the whole pool by mem_map_init and
+// decremented only on a fresh 0->1 reservation (see the reserve fns).
+var pool_total u64 = MALLOC_PAGES
+
 // Zero the memory bitmap. Called eagerly from kernel_main on core 0
 // before any allocator user runs.
 export fn mem_map_init() void {
     for i in 0..MALLOC_PAGES {
         mem_map[i] = 0
     }
+    pool_total = MALLOC_PAGES
 }
 
 // Mark every page whose PA is below `end_pa` as allocated. Boot-only
@@ -50,6 +59,7 @@ export fn mem_map_reserve_below(end_pa u64) void {
     while i < MALLOC_PAGES {
         const pa u64 = MALLOC_START + #as(u64, #intCast(i)) * PAGE_SIZE
         if pa >= end_pa { break }
+        if mem_map[i] == 0 { pool_total -= 1 }
         mem_map[i] = 1
         i += 1
     }
@@ -65,7 +75,10 @@ export fn mem_map_reserve_above(start_pa u64) void {
     var i usize = 0
     while i < MALLOC_PAGES {
         const pa u64 = MALLOC_START + #as(u64, #intCast(i)) * PAGE_SIZE
-        if pa >= start_pa { mem_map[i] = 1 }
+        if pa >= start_pa {
+            if mem_map[i] == 0 { pool_total -= 1 }
+            mem_map[i] = 1
+        }
         i += 1
     }
 }
@@ -133,6 +146,14 @@ export fn dump_free_count() u64 {
     main_output_u64(MU, free_count)
     main_output(MU, "\n")
     return free_count
+}
+
+// Allocatable pool size in pages, backing SYS_MEMTOTAL. Constant after
+// boot reservation (see `pool_total`) — a tool computes used pages as
+// this minus the live `dump_free_count`. Silent: unlike dump_free_count
+// it is a userland metric, not a leak-test sync point.
+export fn mem_total_count() u64 {
+    return pool_total
 }
 
 // External C function declarations
@@ -266,4 +287,32 @@ test "mem_map_reserve_above caps the pool at the RAM end" {
     try std.testing.expectEqual(ram_end - PAGE_SIZE, last)
     // Pool now exhausted within the RAM window — sentinel, no OOB PA.
     try std.testing.expectEqual(#as(u64, 0), get_free_page())
+}
+
+test "mem_total_count is the post-reserve pool size and ignores allocations" {
+    reset_for_test()
+    // Whole pool before any reservation.
+    try std.testing.expectEqual(MALLOC_PAGES, mem_total_count())
+    // Reserve a 5-page kernel prefix (virt-style): the total drops by 5.
+    mem_map_reserve_below(MALLOC_START + 5 * PAGE_SIZE)
+    try std.testing.expectEqual(MALLOC_PAGES - 5, mem_total_count())
+    // Handing out pages must NOT move the total — only the free count does.
+    _ = get_free_page()
+    _ = get_free_page()
+    try std.testing.expectEqual(MALLOC_PAGES - 5, mem_total_count())
+}
+
+test "mem_total_count counts overlapping reservations once" {
+    reset_for_test()
+    // reserve_above then reserve_below over an overlapping range must not
+    // double-decrement: a page already reserved stays a single subtraction.
+    const ram_end u64 = 0x80000000
+    mem_map_reserve_above(ram_end)
+    const above = MALLOC_PAGES - (ram_end - MALLOC_START) / PAGE_SIZE
+    try std.testing.expectEqual(MALLOC_PAGES - above, mem_total_count())
+    // A below-reservation that runs past the cap re-touches reserved pages;
+    // only the fresh prefix below the cap should subtract.
+    mem_map_reserve_below(ram_end + 10 * PAGE_SIZE)
+    const below = (ram_end - MALLOC_START) / PAGE_SIZE
+    try std.testing.expectEqual(MALLOC_PAGES - above - below, mem_total_count())
 }

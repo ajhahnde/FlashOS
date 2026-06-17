@@ -9,7 +9,7 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.4.0-f59e0b?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.5.0-f59e0b?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/zig-0.16.0-lightgrey?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
@@ -38,8 +38,8 @@
 
 > The boot above is a captured serial console of FlashOS booting on real
 > Raspberry Pi 4B hardware to the `login:` prompt; the trailing `fsh`
-> session — `help` and `ls` — replays the shell's real output at a readable
-> cadence, before a final `reboot` loops the demo back to the boot.
+> session — `help`, `ls`, and `sysinfo` — replays the shell's real output at
+> a readable cadence, before a final `reboot` loops the demo back to the boot.
 
 ## About
 
@@ -111,7 +111,8 @@ harness and a host-side unit test suite.
   `execvp` (`/bin/<name>` resolution) for externals — plus `/bin/echo`,
   `/bin/cat`, `/bin/ls` (the stateless `sys_readdir` consumer),
   `/bin/meminfo`, `/bin/forkbomb` (a capped leak probe),
-  `/bin/sysinfo` (a key/value system summary), `/bin/less` (a
+  `/bin/sysinfo` (a key/value system summary), `/bin/cpuinfo` (CPU
+  temperature + clock), `/bin/uptime` (time since boot), `/bin/less` (a
   full-screen pager), `/bin/clear` (a screen wipe), and `/bin/passwd`. Reads
   `/etc/fshrc` at startup; `sys_chdir` gives each
   task a working directory. No userland allocator yet — every buffer is
@@ -146,8 +147,8 @@ harness and a host-side unit test suite.
   and consumed by the function-entry tracer (runtime intact, but
   currently inert — Zig has no `-fpatchable-function-entry=2`
   equivalent yet).
-- **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 28
-  scenarios) plus a host-side `zig build test` suite (419 host
+- **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 30
+  scenarios) plus a host-side `zig build test` suite (415 host
   tests across 39 modules).
 
 ## Quick start
@@ -224,7 +225,7 @@ serial-console setup.
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
-| `zig build test`                     | Host-side unit tests (419 tests, 39 modules)                   |
+| `zig build test`                     | Host-side unit tests (415 tests, 39 modules)                   |
 | `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                        |
 
 The default optimisation mode is `ReleaseSmall`. Override with

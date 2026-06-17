@@ -160,10 +160,11 @@
  * 32..35, SYS_CHDIR at 36 and SYS_READDIR at 37.
  * SYS_KLOG_READ at 38, then the process-credential ABI
  * SYS_GETUID..SYS_SETGID at 39..44, SYS_AUTHENTICATE at 45,
- * SYS_PASSWD at 46, SYS_REBOOT at 47, and SYS_GETCWD at 48, so the
- * cap is now 49.
- * See lib/syscall_defs.zig. */
-#define NR_SYSCALLS  49
+ * SYS_PASSWD at 46, SYS_REBOOT at 47, and SYS_GETCWD at 48. The
+ * hardware-monitoring ABI then appends SYS_MEMTOTAL/UPTIME/CPU_TEMP/
+ * CPU_FREQ at 49..52, so the cap is now 53.
+ * See lib/syscall_defs.flash. */
+#define NR_SYSCALLS  53
 
 /* ---- sched ---- */
 #define CORE_CONTEXT_OFFSET 0

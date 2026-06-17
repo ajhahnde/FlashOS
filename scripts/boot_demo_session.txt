@@ -40,4 +40,14 @@ etc/
 sbin/
 test/
 
+$ sysinfo
+FlashOS system
+version {{VERSION}}
+user    flash
+free    770013 pages
+mem     140 KiB / 3008 MiB
+uptime  0m 3s
+temp    37 C
+freq    600 MHz
+
 $ reboot

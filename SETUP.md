@@ -132,7 +132,7 @@ directly on the controlling terminal. `run-virt` uses
 `-M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic`, with the
 PL011 routed onto host stdio.
 
-A green run on either board lands `28/28 passed`, 32 per-scenario
+A green run on either board lands `30/30 passed`, 34 per-scenario
 free-page checkpoints (`0xbbff2` on rpi4b, `0x3be46` on virt) plus the
 matching boot baseline (`0xbc000` / `0x3be54`), and 0 `ERROR CAUGHT`.
 The boot then hands off to `/bin/login` → `/bin/fsh`; with the login
@@ -345,7 +345,7 @@ zig build test
 Runs the host-side unit tests against pure-logic kernel modules.
 Each module that has tests is its own test root, linked against
 `tests/host_stubs.zig` (stubs for assembly-only externs). The
-current suite covers 39 modules (419 host tests); it
+current suite covers 39 modules (415 host tests); it
 finishes in well under a second and is the fastest signal that
 core kernel logic still holds.
 

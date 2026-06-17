@@ -9,7 +9,7 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.4.0-f59e0b?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.5.0-f59e0b?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/zig-0.16.0-lightgrey?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
@@ -38,13 +38,14 @@
 
 > Der Boot oben ist eine echte Serial-Console-Aufnahme von FlashOS
 > beim Booten auf echter Raspberry-Pi-4B-Hardware bis zum
-> `login:`-Prompt; die anschließende `fsh`-Session — `help` und `ls`
-> — spielt die echte Ausgabe der Shell in einer lesbaren Kadenz ab.
+> `login:`-Prompt; die anschließende `fsh`-Session — `help`, `ls` und
+> `sysinfo` — spielt die echte Ausgabe der Shell in einer lesbaren Kadenz ab,
+> bevor ein abschließendes `reboot` die Demo zurück zum Boot schleift.
 
 ## About
 
 FlashOS ist ein Bare-Metal-AArch64-Kernel, der auf Raspberry-Pi-4B-
-Hardware und unter QEMU bootet. Der Kernel ist in
+Hardware und unter QEMU bootet. Der Kernel-Core ist in
 [Flash](https://github.com/ajhahnde/Flash) geschrieben — einer
 Systemsprache, die zu Zig transpiliert — mit dem Boot-Pfad, den
 Exception-Vektoren und dem Context Switch in AArch64-Assembly. Der
@@ -116,8 +117,10 @@ Stress-Zyklen hinweg, geprüft durch ein kernelinternes
   `/bin/echo`, `/bin/cat`, `/bin/ls` (der zustandslose
   `sys_readdir`-Konsument), `/bin/meminfo`, `/bin/forkbomb` (eine
   gedeckelte Leak-Probe), `/bin/sysinfo` (eine Key/Value-System-
-  Zusammenfassung), `/bin/less` (ein Full-Screen-Pager), `/bin/clear`
-  (eine Bildschirmlöschung) und `/bin/passwd`. Liest beim Start
+  Zusammenfassung), `/bin/cpuinfo` (CPU-Temperatur + Takt),
+  `/bin/uptime` (Zeit seit Boot), `/bin/less` (ein Full-Screen-Pager),
+  `/bin/clear` (eine
+  Bildschirmlöschung) und `/bin/passwd`. Liest beim Start
   `/etc/fshrc`; `sys_chdir` gibt jedem Task ein Arbeitsverzeichnis.
   Noch kein Userland-Allocator — jeder Puffer ist fest dimensioniert,
   stack/static.
@@ -155,8 +158,8 @@ Stress-Zyklen hinweg, geprüft durch ein kernelinternes
   `populate-syms`-Schritt und konsumiert vom Function-Entry-Tracer
   (Laufzeit intakt, aber derzeit inert — Zig hat noch kein Äquivalent
   zu `-fpatchable-function-entry=2`).
-- **Kernelinternes Test-Harness** (`[TEST]/[PASS]/[FAIL]` + Bilanz, 28
-  Szenarien) plus eine host-seitige `zig build test`-Suite (419
+- **Kernelinternes Test-Harness** (`[TEST]/[PASS]/[FAIL]` + Bilanz, 30
+  Szenarien) plus eine host-seitige `zig build test`-Suite (415
   Host-Tests über 39 Module).
 
 ## Schnellstart
@@ -234,7 +237,7 @@ und das Setup der seriellen Konsole.
 | `zig build -Dboard=virt test-virt`   | virt booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht    |
 | `zig build -Dboard=rpi4b test-rpi4b` | raspi4b booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht |
 | `zig build -Dboard=virt iso`         | Eine GRUB-EFI-Rescue-ISO bauen (nur virt)                            |
-| `zig build test`                     | Host-seitige Unit-Tests (419 tests, 39 modules)                      |
+| `zig build test`                     | Host-seitige Unit-Tests (415 tests, 39 modules)                      |
 | `zig build clean`                    | `.zig-cache/` und `zig-out/` entfernen                                |
 
 Der Standard-Optimierungsmodus ist `ReleaseSmall`. Mit
@@ -268,18 +271,47 @@ Ein tieferer Durchgang durch jedes Subsystem findet sich in der
 `v[MAJOR].[MINOR].[PATCH]`. Pro-Tag-Notizen finden sich auf der
 [Releases-Seite](https://github.com/ajhahnde/FlashOS/releases).
 
+## KI-Unterstützung
+
+Die Prosa-Docs in diesem Repo (README, DOCUMENTATION, CHANGELOG, PORT)
+sind LLM-entworfen unter meiner Durchsicht. Ehrlich gehalten werden sie
+durch den Build, nicht durch Vertrauen: das OS wird verifiziert, indem
+man es bootet, nicht indem man es beschreibt.
+
+- Bootet von derselben Kernel-ABI in eine Login-Shell auf QEMU `virt`
+  und Raspberry Pi 4B
+- `-Dboot-selftest=true` führt das kernelinterne `[TEST]`-Harness als
+  PID 1 vor dem Login-Prompt aus — Prozess-, Dateisystem-, Memory-Fault-
+  und Geräte-Szenarien, jeweils von Free-Page-Checkpoints eingeklammert,
+  um Leaks sichtbar zu machen
+- Der Kernel ist in Flash geschrieben und über den Schwester-Compiler
+  `flashc` zu Zig transpiliert — gepinnt in `flash-toolchain.lock`
+
+Wenn ein Doc behauptet, ein Subsystem funktioniere, dann ist es der
+Boot-Pfad, der es ausübt.
+
+Die Docs werden außerdem durch eine automatisierte Drift-Prüfung aktuell
+gehalten, die die darin zitierten Contract-Werte — Version,
+Boot-Contract-Zahlen, ABI-Konstanten — mit dem Live-Tree synchron hält,
+sodass eine veraltete Kopie erkannt statt ausgeliefert wird.
+
+Der Source-Code (`src/*.flash`, die Zig-Treiber, die AArch64-Assembly)
+ist von mir verfasst.
+
 ## Lizenz
 
 Apache License, Version 2.0. Siehe [Lizenz](../../LICENSE.md).
 
 ## Siehe auch
 
-- [eeco](https://github.com/ajhahnde/eeco) — self-maintaining workflow ecosystem.
-- [the-way-out](https://github.com/ajhahnde/the-way-out) — top-down pixel-art escape-room shooter.
-- [Flash](https://github.com/ajhahnde/Flash) — eine Systemsprache und Zig-Transpiler.
+- **[Flash](https://github.com/ajhahnde/Flash)** — eine Systemsprache und Zig-Transpiler.
+- **[eeco](https://github.com/ajhahnde/eeco)** — selbstwartendes Workflow-Ökosystem.
+- **[the-way-out](https://github.com/ajhahnde/the-way-out)** — Top-down-Pixel-Art-Escape-Room-Shooter.
+- **[Theria](https://github.com/ajhahnde/Theria)** — 2.5D-MOBA, gebaut in Godot 4.
+
 
 ---
 
 [Als Nächstes: Dokumentation →](DOCUMENTATION.md)
 
-<!-- sync-ref: README.md @ e06f2f0724a207b7327749e3bf218e1cac18a774 | synced 2026-06-13 -->
+<!-- sync-ref: README.md @ b0d131a75b94b2c21e0d10fed9424bde38e664a2 | synced 2026-06-17 -->

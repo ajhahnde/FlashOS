@@ -5,11 +5,11 @@
 // print-and-exit coreutil that lays the available system
 // facts out as aligned key/value rows. It shows only what the kernel can answer
 // today — the FlashOS version (build_options, single-sourced from build.zig.zon),
-// the logged-in user (getuid -> /etc/passwd via the shared pwfile parser), and
-// the free-page count (sys_dump_free). The live metrics the goal's
-// hardware-monitoring milestone adds — CPU temperature / clock, uptime — slot in
-// as extra kv rows once the mailbox / timer syscalls land; sysinfo never
-// fabricates them.
+// the logged-in user (getuid -> /etc/passwd via the shared pwfile parser), the
+// free-page count (sys_dump_free), and the hardware-monitoring metrics: memory
+// use and uptime (board-independent), plus CPU temperature and clock from the
+// VideoCore mailbox. temp / freq read 0 = unknown on a board without the
+// mailbox (virt) and render "n/a" — sysinfo never fabricates a reading.
 //
 // Print-and-exit, so it needs neither the alt-screen buffer nor readKey (those
 // serve the future live /bin/mon). Like meminfo it is kept out of the CI
@@ -44,6 +44,15 @@ export fn main(_ usize, _ argv) noreturn {
     // free: the live kernel free-page count, formatted into a stack buffer.
     var num_buf [32]u8 = undefined
     console_ui.screen.kv(sink, "free", freePages(&num_buf))
+
+    // hardware-monitoring rows. One scratch buffer reused across the four: kv
+    // consumes each value before the next formatter overwrites it. temp / freq
+    // print "n/a" when the syscall returns 0 (unknown).
+    var fmt_buf [48]u8 = undefined
+    console_ui.screen.kv(sink, "mem", memUsage(&fmt_buf))
+    console_ui.screen.kv(sink, "uptime", uptimeStr(&fmt_buf))
+    console_ui.screen.kv(sink, "temp", tempStr(&fmt_buf))
+    console_ui.screen.kv(sink, "freq", freqStr(&fmt_buf))
 
     flibc.exit()
 }
@@ -83,6 +92,97 @@ fn currentUser(buf []mut u8) []u8 {
 fn freePages(buf []mut u8) []u8 {
     var i usize = u64dec(buf, flibc.sys.dump_free())
     suffix := " pages"
+    for c in suffix {
+        buf[i] = c
+        i += 1
+    }
+    return buf[0..i]
+}
+
+// "<used> KiB / <total> MiB": the pages currently in use (mem_total -
+// free) against the frozen allocatable pool. Used is rendered in KiB
+// (<<2 — 4 KiB pages), not MiB: an idle system's live footprint is tens
+// of pages, and a >>8 MiB conversion floors that to a meaningless 0.
+// Total stays in MiB (the pool is GiB-scale). The two reads are separate
+// syscalls, so a concurrent allocation could skew "used" by a page —
+// harmless for a one-shot summary.
+fn memUsage(buf []mut u8) []u8 {
+    total_pages := flibc.sys.mem_total()
+    free_pages := flibc.sys.dump_free()
+    var used_pages u64 = 0
+    if total_pages > free_pages {
+        used_pages = total_pages - free_pages
+    }
+    var i usize = u64dec(buf, used_pages << 2)
+    i += appendStr(buf[i..], " KiB / ")
+    i += u64dec(buf[i..], total_pages >> 8)
+    i += appendStr(buf[i..], " MiB")
+    return buf[0..i]
+}
+
+// Copy `s` into the front of `out`, returning the byte count.
+fn appendStr(out []mut u8, s []u8) usize {
+    var i usize = 0
+    for c in s {
+        out[i] = c
+        i += 1
+    }
+    return i
+}
+
+// Seconds since boot, humanised: "<h>h <m>m <s>s", collapsing to "<s>s"
+// under a minute. uptime() is monotonic across reads.
+fn uptimeStr(buf []mut u8) []u8 {
+    secs := flibc.sys.uptime()
+    h := secs / 3600
+    m := (secs % 3600) / 60
+    s := secs % 60
+    var i usize = 0
+    if h > 0 {
+        i += u64dec(buf[i..], h)
+        buf[i] = 'h'
+        i += 1
+        buf[i] = ' '
+        i += 1
+    }
+    if h > 0 || m > 0 {
+        i += u64dec(buf[i..], m)
+        buf[i] = 'm'
+        i += 1
+        buf[i] = ' '
+        i += 1
+    }
+    i += u64dec(buf[i..], s)
+    buf[i] = 's'
+    i += 1
+    return buf[0..i]
+}
+
+// SoC temperature in whole degrees Celsius, or "n/a" when unknown (0 —
+// virt's stub, or a mailbox timeout on real hardware). cpu_temp() is
+// milli-degrees. ASCII "C" keeps every byte single-width on any console.
+fn tempStr(buf []mut u8) []u8 {
+    milli := flibc.sys.cpu_temp()
+    if milli == 0 {
+        return "n/a"
+    }
+    var i usize = u64dec(buf, milli / 1000)
+    suffix := " C"
+    for c in suffix {
+        buf[i] = c
+        i += 1
+    }
+    return buf[0..i]
+}
+
+// ARM core clock in MHz, or "n/a" when unknown (0). cpu_freq() is Hz.
+fn freqStr(buf []mut u8) []u8 {
+    hz := flibc.sys.cpu_freq()
+    if hz == 0 {
+        return "n/a"
+    }
+    var i usize = u64dec(buf, hz / 1_000_000)
+    suffix := " MHz"
     for c in suffix {
         buf[i] = c
         i += 1

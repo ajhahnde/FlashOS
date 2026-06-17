@@ -45,6 +45,14 @@ export fn board_power_reboot() noreturn {
     board.power.reboot();
 }
 
+export fn board_mailbox_temperature() u32 {
+    return board.mailbox.getTemperature();
+}
+
+export fn board_mailbox_cpu_clock() u32 {
+    return board.mailbox.getCpuClock();
+}
+
 comptime {
     _ = @import("kernel");
     _ = board.uart;

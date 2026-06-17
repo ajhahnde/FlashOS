@@ -32,9 +32,11 @@ pub const CHANNEL_PROP u32 = 8
 pub const TAG_GET_CLOCK_RATE u32 = 0x0003_0002
 pub const TAG_SET_GPIO_STATE u32 = 0x0003_8041
 pub const TAG_SET_POWER_STATE u32 = 0x0002_8001
+pub const TAG_GET_TEMPERATURE u32 = 0x0003_0006
 
 // VideoCore clock ids.
 pub const CLOCK_ID_EMMC2 u32 = 12
+pub const CLOCK_ID_ARM u32 = 3
 
 // VideoCore power-state device ids. Standard RPi mailbox table:
 // 0 = SD card, 1 = UART0, 2 = UART1, 3 = USB HCD.
@@ -109,6 +111,19 @@ pub fn buildSetPowerState(buf *mut Msg, device_id u32, state u32) void {
     buf[7] = 0 // end tag
 }
 
+// Fill `buf` with a get-temperature request. `temp_id` selects the
+// sensor; the BCM2711 exposes a single SoC sensor at id 0.
+pub fn buildGetTemperature(buf *mut Msg, temp_id u32) void {
+    buf[0] = #intCast(buf.len * #sizeOf(u32)) // 32
+    buf[1] = CODE_REQUEST
+    buf[2] = TAG_GET_TEMPERATURE
+    buf[3] = 8 // value buffer: temp id + temperature
+    buf[4] = CODE_REQUEST
+    buf[5] = temp_id
+    buf[6] = 0
+    buf[7] = 0 // end tag
+}
+
 // Check the overall response code the VideoCore stamps into word [1].
 pub fn checkResponse(buf *Msg) MailboxError!void {
     if buf[1] != CODE_RESPONSE_OK { return error.MailboxError }
@@ -120,6 +135,20 @@ pub fn checkResponse(buf *Msg) MailboxError!void {
 pub fn parseClockRate(buf *Msg, clock_id u32) MailboxError!u32 {
     try checkResponse(buf)
     if buf[5] != clock_id { return error.MailboxError }
+    if buf[6] == 0 { return error.MailboxError }
+    return buf[6]
+}
+
+// Parse a completed get-temperature response. Returns the temperature
+// in milli-degrees Celsius. Fails if the VideoCore did not stamp the
+// success code, echoed a different sensor id than requested, or reported
+// a zero reading (structurally implausible for a powered SoC — treated
+// as a malformed response, the same posture parseClockRate takes on a
+// zero rate). The board side maps that failure to its "0 = unknown"
+// degradation.
+pub fn parseTemperature(buf *Msg, temp_id u32) MailboxError!u32 {
+    try checkResponse(buf)
+    if buf[5] != temp_id { return error.MailboxError }
     if buf[6] == 0 { return error.MailboxError }
     return buf[6]
 }
@@ -268,4 +297,49 @@ test "parsePowerState rejects device-id mismatch" {
     buf[5] = 7 // VC echoed a different device
     buf[6] = POWER_STATE_ON
     try testing.expectError(error.MailboxError, parsePowerState(&buf, DEVICE_ID_SD_CARD, true))
+}
+
+test "buildGetTemperature lays out an 8-word get-temperature request" {
+    var buf Msg = undefined
+    buildGetTemperature(&buf, 0)
+    try testing.expectEqual(#as(u32, 32), buf[0])
+    try testing.expectEqual(#as(u32, 0), buf[1])
+    try testing.expectEqual(TAG_GET_TEMPERATURE, buf[2])
+    try testing.expectEqual(#as(u32, 8), buf[3])
+    try testing.expectEqual(#as(u32, 0), buf[4])
+    try testing.expectEqual(#as(u32, 0), buf[5])
+    try testing.expectEqual(#as(u32, 0), buf[6])
+    try testing.expectEqual(#as(u32, 0), buf[7])
+}
+
+test "parseTemperature returns the milli-degrees on a well-formed response" {
+    var buf Msg = undefined
+    buildGetTemperature(&buf, 0)
+    buf[1] = 0x8000_0000 // VC: overall OK
+    buf[4] = 0x8000_0008 // VC: tag OK + 8 bytes returned
+    buf[6] = 47_233 // 47.233 °C
+    try testing.expectEqual(#as(u32, 47_233), try parseTemperature(&buf, 0))
+}
+
+test "parseTemperature rejects a missing success code" {
+    var buf Msg = undefined
+    buildGetTemperature(&buf, 0)
+    buf[6] = 47_233
+    try testing.expectError(error.MailboxError, parseTemperature(&buf, 0))
+}
+
+test "parseTemperature rejects a sensor-id mismatch" {
+    var buf Msg = undefined
+    buildGetTemperature(&buf, 0)
+    buf[1] = 0x8000_0000
+    buf[5] = 1 // VC echoed a different sensor
+    buf[6] = 47_233
+    try testing.expectError(error.MailboxError, parseTemperature(&buf, 0))
+}
+
+test "parseTemperature rejects a zero reading" {
+    var buf Msg = undefined
+    buildGetTemperature(&buf, 0)
+    buf[1] = 0x8000_0000 // VC: overall OK, but temperature word left 0
+    try testing.expectError(error.MailboxError, parseTemperature(&buf, 0))
 }

@@ -29,8 +29,41 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-06-17
+
+### Added
+
+- **Hardware-monitoring syscalls and `/bin/cpuinfo`.** Four new
+  argument-free syscalls expose live system metrics to user space:
+  `mem_total` (slot 49, the allocatable pool size in pages), `uptime`
+  (50, seconds since boot from the architectural counter), `cpu_temp`
+  (51, SoC temperature in milli-degrees Celsius) and `cpu_freq` (52, the
+  ARM core clock in Hz). Temperature and clock are read over the VideoCore
+  mailbox (a new `TAG_GET_TEMPERATURE` property tag) and return `0` =
+  unknown on a board without the firmware (QEMU virt) or on a mailbox
+  timeout, which the tools render as `n/a` — never a fabricated value. Two
+  new coreutils join the existing `/bin/meminfo`: `/bin/cpuinfo` prints the
+  temperature and clock, and `/bin/uptime` prints the time since boot as
+  `Nm Ns`. `/bin/sysinfo` gains `mem` (used/total, the used figure in KiB
+  so a small footprint no longer floors to `0 MiB`), `uptime`, `temp` and
+  `freq` rows. Two in-kernel `[TEST]` scenarios (`hwmon-core`,
+  `hwmon-mailbox`) cover the new syscalls, moving the boot contract to 30
+  EL0 scenarios and 34 per-scenario checkpoints.
+
 ### Fixed
 
+- **VideoCore mailbox reads no longer match a stale reply.** The doorbell
+  word the kernel posts to the property channel is identical on every call
+  (a fixed property-buffer address OR-ed with a fixed channel), so the
+  completion check could not tell a fresh reply from the leftover of the
+  previous transaction. Two back-to-back reads — as `cpuinfo` and
+  `sysinfo` issue for temperature then clock — let the second read consume
+  the first read's stale FIFO entry and parse the property buffer before
+  VideoCore had refreshed it, surfacing as the clock flapping between its
+  real value and `n/a`. `transact()` now drains the read FIFO before
+  posting and brackets the doorbell exchange with a `dsb sy` barrier, so
+  each read observes only its own reply; verified on real hardware with
+  three consecutive `cpuinfo` runs holding a stable `600 MHz`.
 - **`/bin/login` now refuses to run as a non-root command.** Invoked from
   an already-privilege-dropped shell, `login` would still authenticate the
   entered credentials — the kernel verifier does not gate on the caller's
@@ -274,7 +307,8 @@ highlights are below.
 - **Kernel symbol table** generated from the linked ELF by a two-pass
   build step, so panics and the profiler can print real names.
 
-[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/ajhahnde/FlashOS/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/ajhahnde/FlashOS/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/ajhahnde/FlashOS/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/ajhahnde/FlashOS/compare/v0.1.0...v0.2.0

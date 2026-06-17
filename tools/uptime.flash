@@ -1,0 +1,84 @@
+// uptime — one-shot uptime monitor for /bin/uptime.
+//
+// Prints the seconds-since-boot, humanised, as a single key/value row, then
+// exits — the focused sibling of sysinfo's broader summary, the same way
+// cpuinfo focuses temperature + clock. The value comes from the architectural
+// counter (sys_uptime), board-independent, so it reads the same under QEMU and
+// on hardware.
+//
+// Print-and-exit, so it needs neither the alt-screen buffer nor readKey. Same
+// coreutil recipe as cpuinfo / sysinfo (flibc _start shim, flibc_mem, single
+// R+X PT_LOAD, stack buffers only). Kept out of the CI FSH_SCRIPT like sysinfo:
+// the reading is non-deterministic and does not belong in the baseline-
+// checkpoint trace. Source is Flash — flashc transpiles it to Zig at build
+// time via addFlashSource.
+
+use flibc
+use console_ui
+
+link "flibc_start"
+link "flibc_mem"
+
+fn sink(bytes []u8) void {
+    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
+}
+
+export fn main(_ usize, _ argv) noreturn {
+    console_ui.banner(sink, "FlashOS uptime")
+
+    var buf [32]u8 = undefined
+    console_ui.screen.kv(sink, "uptime", uptimeStr(&buf))
+
+    flibc.exit()
+}
+
+// Seconds since boot, humanised: "<h>h <m>m <s>s", collapsing to "<s>s"
+// under a minute. uptime() is monotonic across reads.
+fn uptimeStr(buf []mut u8) []u8 {
+    secs := flibc.sys.uptime()
+    h := secs / 3600
+    m := (secs % 3600) / 60
+    s := secs % 60
+    var i usize = 0
+    if h > 0 {
+        i += u64dec(buf[i..], h)
+        buf[i] = 'h'
+        i += 1
+        buf[i] = ' '
+        i += 1
+    }
+    if h > 0 || m > 0 {
+        i += u64dec(buf[i..], m)
+        buf[i] = 'm'
+        i += 1
+        buf[i] = ' '
+        i += 1
+    }
+    i += u64dec(buf[i..], s)
+    buf[i] = 's'
+    i += 1
+    return buf[0..i]
+}
+
+// Write `v` as decimal ASCII into `out` (>= 20 bytes for the u64 max),
+// returning the byte count.
+fn u64dec(out []mut u8, v u64) usize {
+    if v == 0 {
+        out[0] = '0'
+        return 1
+    }
+    var tmp [20]u8 = undefined
+    var n usize = 0
+    var x u64 = v
+    while x != 0 {
+        tmp[n] = '0' + #as(u8, #intCast(x % 10))
+        n += 1
+        x /= 10
+    }
+    var i usize = 0
+    while i < n {
+        out[i] = tmp[n - 1 - i]
+        i += 1
+    }
+    return n
+}

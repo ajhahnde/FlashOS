@@ -24,8 +24,8 @@
 # for the seeded kernel.
 #
 # Expected success picture:
-#   * 28 EL0 scenarios, all `[PASS]` (no `[FAIL]`)
-#   * 32 × per-scenario checkpoint at the board's PID-1 baseline
+#   * 30 EL0 scenarios, all `[PASS]` (no `[FAIL]`)
+#   * 34 × per-scenario checkpoint at the board's PID-1 baseline
 #   *  1 × initial boot-baseline checkpoint (baseline + 0xe = 14 pages,
 #         the PID-1 fork delta over the PID-0 boot snapshot)
 #   *  1 × healthy kernel-entropy announce (`Initialized hwrng ...`), 0 ×
@@ -51,20 +51,39 @@
 #              the 64 MiB `.sdscratch` buffer; reserve_above caps the
 #              pool at virt's 1 GiB RAM end (0x80000000), well below
 #              MALLOC_END's RPi-derived 0xFC000000. Boot baseline =
-#              0x3be54, per-scenario checkpoint = 0x3be46.
+#              0x3be53, per-scenario checkpoint = 0x3be45.
 #
 # The script accepts either pattern; the active board's pair must
-# match exactly. Net: 32 × {bbff2, 3be46} + 1 × {bc000, 3be54}.
+# match exactly. Net: 34 × {bbff2, 3be45} + 1 × {bc000, 3be53}.
 #
 # FROZEN (2026-06-17): the virt board is deprioritized — rpi4b + real
 # HW are the live gates and CI now boots rpi4b (test-rpi4b), not virt.
-# The virt values above (0x3be46 / 0x3be54 + the drift history) are a
-# frozen snapshot from the last virt validation; they are NOT re-checked
-# while virt is on ice and may have drifted unrecorded. Detection of the
-# virt pattern is kept so `-Dboard=virt test-virt` still works for the
+# The virt values above (0x3be45 / 0x3be53 + the drift history) were
+# refreshed at the v0.5.0 /bin/uptime change (see drift history) and are
+# otherwise NOT re-checked while virt is on ice. Detection of the virt
+# pattern is kept so `-Dboard=virt test-virt` still works for the
 # eventual revive — at which point re-validate and refresh these values.
 #
 # Drift history (legitimate free-page baseline shifts, newest first):
+#   * v0.5.0 — virt 0x3be46→0x3be45 (per-scenario), 0x3be54→0x3be53 (boot
+#              baseline): the /bin/uptime coreutil added one ELF to the
+#              initramfs, growing the kernel image past a page boundary so
+#              virt's reserve_below covers one more page. This recapture also
+#              folds in the hwmon image growth deferred below (virt was left at
+#              0x3be46/0x3be54 then; the measured current pair is now the truth
+#              of record). rpi4b unaffected (reserve calls are no-ops — kernel
+#              sits below MALLOC_START, so a larger image does not move the
+#              count, and the value stays 0xbbff2 / 0xbc000).
+#   * v0.5.0 — TALLY bump, not a hex shift: hardware-monitoring adds the
+#              [TEST] hwmon-core + hwmon-mailbox scenarios (mem_total /
+#              uptime / cpu_temp / cpu_freq), so EL0 scenarios go 28→30 and
+#              per-scenario checkpoints 32→34 (one sys_dump_free each). The
+#              free-page HEX is unchanged on rpi4b (0xbbff2 / 0xbc000 — the
+#              boot pool is identical; reserve_below/_above stay no-ops, so a
+#              larger kernel image does not move the count) and the watchdog
+#              guard now wants 34. virt's hex drifted ~1 page from the larger
+#              image; left un-recaptured then, folded into the /bin/uptime
+#              recapture above.
 #   * v0.3.0 — virt 0x3be47→0x3be46 (per-scenario), 0x3be55→0x3be54 (boot
 #              baseline): the +strict-align build-target feature replaces
 #              unaligned NEON stores with aligned codegen, growing the kernel
@@ -154,11 +173,11 @@ errors=$(grep -cF "ERROR CAUGHT" "$LOG" || true)
 fails=$(grep -cF "[FAIL]" "$LOG" || true)
 
 # Board-specific baseline pair (see header). rpi4b: bbff2 / bc000;
-# virt: 3be46 / 3be54. Pick the board whose checkpoint pattern is
+# virt: 3be45 / 3be53. Pick the board whose checkpoint pattern is
 # present, then require its exact pair (32 checkpoints + 1 boot
 # baseline). Detecting by content keeps this script board-arg-free.
 rpi_chk=$(grep -cF "free_pages: 00000000000bbff2" "$LOG" || true)
-virt_chk=$(grep -cF "free_pages: 000000000003be46" "$LOG" || true)
+virt_chk=$(grep -cF "free_pages: 000000000003be45" "$LOG" || true)
 
 if [ "$rpi_chk" -gt 0 ]; then
     ok_chk=$rpi_chk
@@ -166,10 +185,10 @@ if [ "$rpi_chk" -gt 0 ]; then
     chk_label="0xbbff2"; base_label="0xbc000"
 elif [ "$virt_chk" -gt 0 ]; then
     ok_chk=$virt_chk
-    ok_base=$(grep -cF "free_pages: 000000000003be54" "$LOG" || true)
-    chk_label="0x3be46"; base_label="0x3be54"
+    ok_base=$(grep -cF "free_pages: 000000000003be53" "$LOG" || true)
+    chk_label="0x3be45"; base_label="0x3be53"
 else
-    echo "FAIL (no known checkpoint pattern): neither 0xbbff2 (rpi4b) nor 0x3be46 (virt) found" >&2
+    echo "FAIL (no known checkpoint pattern): neither 0xbbff2 (rpi4b) nor 0x3be45 (virt) found" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi
@@ -188,9 +207,9 @@ hwrng_bad=$(grep -cF "hwrng: self-test failed" "$LOG" || true)
 # path regressed; more means a scenario leaked an extra session.
 fsh_ok=$(grep -cF "type 'help' for commands" "$LOG" || true)
 
-if [ "$errors" -ne 0 ] || [ "$fails" -ne 0 ] || [ "$ok_chk" -ne 32 ] || [ "$ok_base" -ne 1 ] \
+if [ "$errors" -ne 0 ] || [ "$fails" -ne 0 ] || [ "$ok_chk" -ne 34 ] || [ "$ok_base" -ne 1 ] \
     || [ "$hwrng_ok" -ne 1 ] || [ "$hwrng_bad" -ne 0 ] || [ "$fsh_ok" -ne 3 ]; then
-    echo "FAIL (guard): ERROR_CAUGHT=$errors [FAIL]=$fails ${chk_label}=$ok_chk (want 32) ${base_label}=$ok_base (want 1) hwrng_ok=$hwrng_ok (want 1) hwrng_bad=$hwrng_bad (want 0) fsh_ok=$fsh_ok (want 3)" >&2
+    echo "FAIL (guard): ERROR_CAUGHT=$errors [FAIL]=$fails ${chk_label}=$ok_chk (want 34) ${base_label}=$ok_base (want 1) hwrng_ok=$hwrng_ok (want 1) hwrng_bad=$hwrng_bad (want 0) fsh_ok=$fsh_ok (want 3)" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

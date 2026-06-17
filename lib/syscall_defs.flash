@@ -175,12 +175,26 @@ pub const SYS_REBOOT u64 = 47
 // consumer. Appended past SYS_REBOOT — see the NR_SYSCALLS note below.
 pub const SYS_GETCWD u64 = 48
 
+// Hardware-monitoring ABI. Slots 49..52 — four argument-free `() -> u64`
+// reads that back the cpuinfo/sysinfo tools. SYS_MEMTOTAL (49) returns
+// the post-reserve allocatable pool size in pages (the boot free-page
+// baseline; a tool subtracts SYS_DUMP_FREE for "used"). SYS_UPTIME (50)
+// returns seconds since boot from the architectural counter. SYS_CPU_TEMP
+// (51) returns the SoC temperature in milli-degrees Celsius and SYS_CPU_FREQ
+// (52) the ARM clock in Hz, both over the VideoCore mailbox; each reports
+// 0 = unknown on a board without the firmware (virt), which the tools render
+// as `n/a`. Appended past SYS_GETCWD — see the NR_SYSCALLS note below.
+pub const SYS_MEMTOTAL u64 = 49
+pub const SYS_UPTIME u64 = 50
+pub const SYS_CPU_TEMP u64 = 51
+pub const SYS_CPU_FREQ u64 = 52
+
 // Highest slot + 1; equals the `#define NR_SYSCALLS` literal in
 // arch/aarch64/asm_defs_common.inc. Adding a new SYS_* constant past
-// SYS_GETCWD bumps this automatically; the comptime guard in
-// src/sys.zig catches divergence from the asm-side literal at build
+// the current top bumps this automatically; the comptime guard in
+// src/sys.flash catches divergence from the asm-side literal at build
 // time.
-pub const NR_SYSCALLS usize = SYS_GETCWD + 1
+pub const NR_SYSCALLS usize = SYS_CPU_FREQ + 1
 
 // Kernel-log ring capacity in bytes. Shared here because both
 // the kernel ring (src/klog_ring.zig sizes `KlogRing` to it) and userland

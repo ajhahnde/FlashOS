@@ -11,8 +11,20 @@ const SYS_FREQ u32 = 54_000_000
 extern fn setup_CNTP_CTL() void
 extern fn set_CNTP_CVAL(cval u64) void
 extern fn get_sys_count() u64
+extern fn get_sys_freq() u64
 
 var next_deadline u64 = 0
+
+// Seconds since boot, for SYS_UPTIME. Divides the architectural counter
+// by its runtime frequency (CNTFRQ_EL0) — deliberately NOT the SYS_FREQ
+// tick constant, which is only the re-arm period and can differ from the
+// counter rate on another board. A zero CNTFRQ would be a firmware bug;
+// guard the divide so a misconfigured board reports 0 instead of faulting.
+export fn uptime_seconds() u64 {
+    const freq = get_sys_freq()
+    if freq == 0 { return 0 }
+    return get_sys_count() / freq
+}
 
 export fn generic_timer_init() void {
     setup_CNTP_CTL()

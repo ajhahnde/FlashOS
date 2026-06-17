@@ -1,0 +1,92 @@
+// cpuinfo — one-shot CPU monitor for /bin/cpuinfo.
+//
+// Prints the SoC temperature and ARM core clock as aligned key/value rows,
+// then exits. Both come from the VideoCore mailbox (sys_cpu_temp /
+// sys_cpu_freq) and read 0 = unknown on a board without it (virt), rendered
+// "n/a" — cpuinfo never fabricates a reading. CPU load is intentionally
+// absent: a busy/idle percentage needs idle-task accounting the scheduler
+// does not keep yet, so it waits for that layer rather than being faked.
+//
+// Print-and-exit, so it needs neither the alt-screen buffer nor readKey.
+// Same coreutil recipe as ls / sysinfo (flibc _start shim, flibc_mem, single
+// R+X PT_LOAD, stack buffers only). Kept out of the CI FSH_SCRIPT like
+// sysinfo: the readings are non-deterministic and do not belong in the
+// baseline-checkpoint trace. Source is Flash — flashc transpiles it to Zig
+// at build time via addFlashSource.
+
+use flibc
+use console_ui
+
+link "flibc_start"
+link "flibc_mem"
+
+fn sink(bytes []u8) void {
+    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
+}
+
+export fn main(_ usize, _ argv) noreturn {
+    console_ui.banner(sink, "FlashOS cpu")
+
+    // One scratch buffer reused across both rows: kv consumes each value
+    // before the next formatter overwrites it.
+    var buf [32]u8 = undefined
+    console_ui.screen.kv(sink, "temp", tempStr(&buf))
+    console_ui.screen.kv(sink, "freq", freqStr(&buf))
+
+    flibc.exit()
+}
+
+// SoC temperature in whole degrees Celsius, or "n/a" when unknown (0 —
+// virt's stub, or a mailbox timeout on real hardware). cpu_temp() is
+// milli-degrees. ASCII "C" keeps every byte single-width on any console.
+fn tempStr(buf []mut u8) []u8 {
+    milli := flibc.sys.cpu_temp()
+    if milli == 0 {
+        return "n/a"
+    }
+    var i usize = u64dec(buf, milli / 1000)
+    suffix := " C"
+    for c in suffix {
+        buf[i] = c
+        i += 1
+    }
+    return buf[0..i]
+}
+
+// ARM core clock in MHz, or "n/a" when unknown (0). cpu_freq() is Hz.
+fn freqStr(buf []mut u8) []u8 {
+    hz := flibc.sys.cpu_freq()
+    if hz == 0 {
+        return "n/a"
+    }
+    var i usize = u64dec(buf, hz / 1_000_000)
+    suffix := " MHz"
+    for c in suffix {
+        buf[i] = c
+        i += 1
+    }
+    return buf[0..i]
+}
+
+// Write `v` as decimal ASCII into `out` (>= 20 bytes for the u64 max),
+// returning the byte count.
+fn u64dec(out []mut u8, v u64) usize {
+    if v == 0 {
+        out[0] = '0'
+        return 1
+    }
+    var tmp [20]u8 = undefined
+    var n usize = 0
+    var x u64 = v
+    while x != 0 {
+        tmp[n] = '0' + #as(u8, #intCast(x % 10))
+        n += 1
+        x /= 10
+    }
+    var i usize = 0
+    while i < n {
+        out[i] = tmp[n - 1 - i]
+        i += 1
+    }
+    return n
+}

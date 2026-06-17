@@ -33,6 +33,19 @@ inline fn regs() *mut volatile MboxRegs {
     return #ptrFromInt(MBOX_BASE)
 }
 
+// Full system data barrier. Orders the ARM's plain writes/reads of the
+// `prop_buf` (Normal-Non-Cacheable RAM) against the volatile doorbell
+// register traffic, so the request words are published before the
+// doorbell rings and the response words are read only after the
+// completion doorbell is observed. The "memory" clobber also stops the
+// compiler reordering the buffer accesses across the barrier.
+inline fn dsb() void {
+    asm volatile ("dsb sy"
+        :
+        :
+        : .{ .memory = true })
+}
+
 const STATUS_FULL u32 = 0x8000_0000
 const STATUS_EMPTY u32 = 0x4000_0000
 
@@ -52,6 +65,28 @@ fn transact() bool {
     const r = regs()
     // .bss in the id-mapped low window → VA == PA, fits in u32.
     const msg u32 = mailbox.doorbell(#intCast(#intFromPtr(&prop_buf)), mailbox.CHANNEL_PROP)
+
+    // Drain any stale response a prior transaction left in the read
+    // FIFO. The doorbell word is identical for every property call
+    // (fixed buffer address + fixed channel), so a leftover entry would
+    // satisfy the `r.read == msg` match below and be taken for THIS
+    // call's response — returning before the VideoCore has refreshed
+    // `prop_buf`, so the parse reads a stale/half-written buffer and the
+    // call degrades to "unknown". This is the back-to-back race: the
+    // first property read per command drains clean and succeeds, the
+    // second matches the first's leftover. Flush first so the match can
+    // only catch the fresh reply.
+    var drain u32 = 0
+    while ((r.status & STATUS_EMPTY) == 0) {
+        _ = r.read
+        if (drain >= SPIN) {
+            break
+        }
+        drain += 1
+    }
+
+    // Publish the request words before ringing the doorbell.
+    dsb()
 
     var spin u32 = 0
     while ((r.status & STATUS_FULL) != 0) {
@@ -74,6 +109,8 @@ fn transact() bool {
         }
         spin += 1
     }
+    // Order the buffer reads after observing the completion doorbell.
+    dsb()
     return true
 }
 
@@ -86,6 +123,22 @@ pub fn getClockRate(clock_id u32) u32 {
         return 0
     }
     return mailbox.parseClockRate(&prop_buf, clock_id) catch 0
+}
+
+// Read the SoC temperature in milli-degrees Celsius. Returns 0 on any
+// failure (mailbox wedged, bad response) — callers treat 0 as "unknown".
+pub fn getTemperature() u32 {
+    mailbox.buildGetTemperature(&prop_buf, 0)
+    if (!transact()) {
+        return 0
+    }
+    return mailbox.parseTemperature(&prop_buf, 0) catch 0
+}
+
+// Read the ARM (CPU) core clock in Hz — the firmware-reported rate, not
+// a fixed constant (it scales with DVFS). Returns 0 on any failure.
+pub fn getCpuClock() u32 {
+    return getClockRate(mailbox.CLOCK_ID_ARM)
 }
 
 // Set a firmware-managed GPIO (e.g. the Pi 4 expander lines). Returns

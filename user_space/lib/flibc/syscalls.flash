@@ -54,6 +54,38 @@ pub fn dump_free() u64 {
         : .{ .memory = true })
 }
 
+// Hardware monitors (slots 49..52), all argument-free `-> u64`. mem_total
+// is the frozen allocatable pool size in pages; uptime is seconds since
+// boot; cpu_temp is milli-degrees Celsius and cpu_freq is Hz, each 0 when
+// the board exposes no firmware to ask (virt) — callers render that `n/a`.
+pub fn mem_total() u64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> u64),
+        : [nr] "{x8}" (defs.SYS_MEMTOTAL),
+        : .{ .memory = true })
+}
+
+pub fn uptime() u64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> u64),
+        : [nr] "{x8}" (defs.SYS_UPTIME),
+        : .{ .memory = true })
+}
+
+pub fn cpu_temp() u64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> u64),
+        : [nr] "{x8}" (defs.SYS_CPU_TEMP),
+        : .{ .memory = true })
+}
+
+pub fn cpu_freq() u64 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> u64),
+        : [nr] "{x8}" (defs.SYS_CPU_FREQ),
+        : .{ .memory = true })
+}
+
 /// exec_path(path, argv) — path-resolved ELF exec on slot 31. `path` is
 /// a NUL-terminated UVA; `argv` points at a NULL-terminated array of
 /// `[*:0]u8`. The kernel (src/execve.zig:execveKernel) streams PT_LOAD

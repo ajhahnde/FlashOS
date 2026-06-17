@@ -134,7 +134,7 @@ direkt im steuernden Terminal erscheinen. `run-virt` verwendet
 `-M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic`, mit der auf das
 Host-stdio geleiteten PL011.
 
-Ein grüner Lauf auf beiden Boards landet bei `28/28 passed`, 32
+Ein grüner Lauf auf beiden Boards landet bei `30/30 passed`, 34
 Free-Page-Checkpoints pro Szenario (`0xbbff2` auf rpi4b, `0x3be46` auf virt)
 plus der passenden Boot-Baseline (`0xbc000` / `0x3be54`) und 0 `ERROR CAUGHT`.
 Der Boot übergibt dann an `/bin/login` → `/bin/fsh`; mit dem
@@ -353,7 +353,7 @@ zig build test
 Führt die host-seitigen Unit-Tests gegen Pure-Logic-kernel-Module aus.
 Jedes Modul mit Tests bildet seinen eigenen Test-Root, gelinkt gegen
 `tests/host_stubs.zig` (Stubs für reine Assembly-Externs). Die aktuelle
-Suite deckt 39 Module ab (419 Host-Tests); sie ist weit unter einer Sekunde
+Suite deckt 39 Module ab (415 Host-Tests); sie ist weit unter einer Sekunde
 fertig und ist das schnellste Signal dafür, dass die Kernlogik des kernel
 weiterhin hält.
 
@@ -361,4 +361,4 @@ weiterhin hält.
 
 [← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Port →](../../PORT.md)
 
-<!-- sync-ref: SETUP.md @ e06f2f0724a207b7327749e3bf218e1cac18a774 | synced 2026-06-13 -->
+<!-- sync-ref: SETUP.md @ b0d131a75b94b2c21e0d10fed9424bde38e664a2 | synced 2026-06-17 -->
