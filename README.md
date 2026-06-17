@@ -58,12 +58,12 @@ harness and a host-side unit test suite.
 
 ## Specifications
 
-|                  |                                                                                       |
-| :--------------- | :------------------------------------------------------------------------------------ |
-| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                      |
-| **Architecture** | AArch64 (ARMv8-A)                                                                     |
-| **Languages**    | Flash (transpiled to Zig) + AArch64 assembly                                          |
-| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils                                |
+|                        |                                                                                             |
+| :--------------------- | :------------------------------------------------------------------------------------------ |
+| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                            |
+| **Architecture** | AArch64 (ARMv8-A)                                                                           |
+| **Languages**    | Flash (transpiled to Zig) + AArch64 assembly                                                |
+| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils                                  |
 | **Targets**      | RPi 4B hardware,`qemu-system-aarch64 -M raspi4b`, _and_ `qemu-system-aarch64 -M virt` |
 
 ## Features
@@ -212,21 +212,21 @@ serial-console setup.
 
 ## Build steps
 
-| Step                                 | What it does                                                    |
-| :----------------------------------- | :-------------------------------------------------------------- |
-| `zig build` (or `-Dboard=rpi4b`)     | Default — Pi:`kernel8.img` + `armstub8.bin`                     |
-| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                            |
-| `zig build kernel`                   | Kernel image only                                               |
-| `zig build armstub` (rpi4b only)     | Armstub only                                                    |
-| `zig build populate-syms`            | Regenerate `src/symbol_area.S` from the linked ELF              |
-| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to `$SD_BOOT`                     |
-| `zig build -Dboard=rpi4b run`        | Boot under `qemu-system-aarch64 -M raspi4b`                     |
-| `zig build -Dboard=virt run-virt`    | Boot under `qemu-system-aarch64 -M virt`                        |
-| `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt     |
-| `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt  |
-| `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                         |
-| `zig build test`                     | Host-side unit tests (419 tests, 39 modules)                    |
-| `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                             |
+| Step                                   | What it does                                                   |
+| :------------------------------------- | :------------------------------------------------------------- |
+| `zig build` (or `-Dboard=rpi4b`)   | Default — Pi:`kernel8.img` + `armstub8.bin`               |
+| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                         |
+| `zig build kernel`                   | Kernel image only                                              |
+| `zig build armstub` (rpi4b only)     | Armstub only                                                   |
+| `zig build populate-syms`            | Regenerate `src/symbol_area.S` from the linked ELF           |
+| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to `$SD_BOOT`                  |
+| `zig build -Dboard=rpi4b run`        | Boot under `qemu-system-aarch64 -M raspi4b`                  |
+| `zig build -Dboard=virt run-virt`    | Boot under `qemu-system-aarch64 -M virt`                     |
+| `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
+| `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
+| `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
+| `zig build test`                     | Host-side unit tests (419 tests, 39 modules)                   |
+| `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                        |
 
 The default optimisation mode is `ReleaseSmall`. Override with
 `-Doptimize=ReleaseSafe` (or `Debug`, `ReleaseFast`).
@@ -258,6 +258,31 @@ A deeper walk-through of each subsystem is in
 
 `v[MAJOR].[MINOR].[PATCH]`. Per-tag notes live on the
 [releases page](https://github.com/ajhahnde/FlashOS/releases).
+
+## AI assistance
+
+The prose docs in this repo (README, DOCUMENTATION, CHANGELOG, MIGRATION,
+PORT) are LLM-drafted under my review. They're kept honest by the build,
+not by trust: the OS is verified by booting it, not by describing it.
+
+- Boots to a login shell on QEMU `virt` and Raspberry Pi 4B from the
+  same kernel ABI
+- `-Dboot-selftest=true` runs the in-kernel `[TEST]` harness at PID 1
+  before the login prompt — process, filesystem, memory-fault, and
+  device scenarios, each bracketed by free-page checkpoints to surface
+  leaks
+- The kernel is written in Flash and transpiled to Zig via the sibling
+  `flashc` compiler — pinned in `flash-toolchain.lock`
+
+If a doc claims a subsystem works, the boot path is what exercises it.
+
+The docs are also kept current by an automated drift check that keeps
+the contract values quoted across them — version, boot-contract numbers,
+ABI constants — in sync with the live tree, so a stale copy is caught
+rather than shipped.
+
+Source code (`src/*.flash`, the Zig drivers, the AArch64 assembly) is
+authored by me.
 
 ## License
 
