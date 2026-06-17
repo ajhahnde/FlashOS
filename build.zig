@@ -68,6 +68,14 @@ var host_tests_use_llvm = false;
 // non-null, only tests whose name contains this substring run (zig test filter).
 var host_test_filter: ?[]const u8 = null;
 
+// Source files of every host test addHostTest wires, in registration order.
+// The `test` step's final tally (scripts/test_tally.sh) counts the `test "…"`
+// blocks across exactly these files, so the printed pass count is derived from
+// the build graph itself and can never drift from the suite. Fixed cap — there
+// are ~60 host tests; bump if the suite ever outgrows it.
+var host_test_srcs: [256][]const u8 = undefined;
+var host_test_n: usize = 0;
+
 fn addHostTest(b: *std.Build, step: *std.Build.Step, cfg: HostTest) *std.Build.Module {
     const m = b.createModule(.{
         .root_source_file = if (cfg.src_lazy) |lp| lp else b.path(cfg.src),
@@ -83,6 +91,8 @@ fn addHostTest(b: *std.Build, step: *std.Build.Step, cfg: HostTest) *std.Build.M
         .filters = if (host_test_filter) |f| &.{f} else &.{},
     });
     step.dependOn(&b.addRunArtifact(t).step);
+    host_test_srcs[host_test_n] = cfg.src;
+    host_test_n += 1;
     return m;
 }
 
@@ -2723,4 +2733,24 @@ pub fn build(b: *std.Build) void {
         .stubs = stubs_obj,
         .imports = &.{.{ .name = "console_ui", .mod = console_ui_mod }},
     });
+
+    // Final pass banner. Zig's build runner is silent on a fully-green test
+    // step (counts only surface with `--summary all`), so wire a last system
+    // command that depends on every test run added above — it executes only
+    // after they all pass — and prints one green "<N> tests passed" line. The
+    // file list it counts is host_test_srcs, populated by addHostTest, so the
+    // number tracks the build graph and never drifts. A filtered run prints a
+    // count-free banner instead (only a subset ran).
+    {
+        const argv = b.allocator.alloc([]const u8, 3 + host_test_n) catch @panic("OOM");
+        argv[0] = "sh";
+        argv[1] = "scripts/test_tally.sh";
+        argv[2] = host_test_filter orelse "";
+        for (host_test_srcs[0..host_test_n], 0..) |src, i| argv[3 + i] = src;
+        const tally = b.addSystemCommand(argv);
+        // Depend on the hygiene checks + every test run already attached to
+        // test_step, so the banner is the last thing printed.
+        for (test_step.dependencies.items) |dep| tally.step.dependOn(dep);
+        test_step.dependOn(&tally.step);
+    }
 }
