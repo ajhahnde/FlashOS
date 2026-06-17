@@ -12,7 +12,6 @@
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="MIGRATION.md"><b>Migration</b></a> ·
     <b>Port</b> ·
     <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
@@ -30,12 +29,11 @@ then compiles as before. The port preserved behaviour, not just source:
 the boot contract's per-board free-page checkpoints held unchanged from
 the first ported module to the last.
 
-> **Relationship to [Migration](MIGRATION.md).** `MIGRATION.md` records
-> the earlier C → Zig translation and is frozen provenance — it is not
-> touched by this port. This page is its Zig → Flash sequel. The two are
-> independent lineage records: C → Zig changed the language of the whole
-> tree; Zig → Flash changes the language of the *OS-image* code while the
-> boot assembly, the host build tooling, and a small, documented set of
+> **Lineage.** FlashOS began as a C bare-metal kernel by Wei-Lin Chang
+> (rhythm16; see [License](LICENSE.md)), was rewritten in pure Zig +
+> AArch64 assembly, and now carries its OS-image code in Flash. This page
+> covers the Zig → Flash step: the *OS-image* modules moved to Flash while
+> the boot assembly, the host build tooling, and a small, documented set of
 > modules stay Zig (see [§4](#4-what-stays-zig)).
 
 ## Contents
@@ -172,4 +170,4 @@ Flash lowered to the same machine the project shipped before.
 
 ---
 
-[← Prev: Migration](MIGRATION.md) · [Next: Versioning →](VERSIONING.md)
+[← Prev: Setup](SETUP.md) · [Next: Versioning →](VERSIONING.md)

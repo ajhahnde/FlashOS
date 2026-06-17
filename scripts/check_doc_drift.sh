@@ -9,7 +9,7 @@
 # gate a push.
 #
 # Scope: the active public English docs only. README.md, DOCUMENTATION.md,
-# SETUP.md. CHANGELOG.md and MIGRATION.md are FROZEN provenance — a path named
+# SETUP.md. CHANGELOG.md is FROZEN provenance — a path named
 # there (e.g. a since-deleted script) is honored lineage, not drift, and is
 # never scanned here.
 #

@@ -12,7 +12,6 @@
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="MIGRATION.md"><b>Migration</b></a> ·
     <a href="PORT.md"><b>Port</b></a> ·
     <b>Versioning</b> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
@@ -36,7 +35,7 @@ Companion documents:
 
 - [`DOCUMENTATION.md`](DOCUMENTATION.md) — the architectural overview,
   including the modules whose behaviour is named below.
-- [`MIGRATION.md`](MIGRATION.md) — the frozen record of the one-time C-to-Zig port.
+- [`PORT.md`](PORT.md) — the lineage record of the Zig-to-Flash port.
 - [`CHANGELOG.md`](CHANGELOG.md) — the per-release human-readable log.
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and

@@ -18,7 +18,6 @@
 <p>
     <a href="DOCUMENTATION.md"><b>Dokumentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="../../MIGRATION.md"><b>Migration</b></a> ·
     <a href="../../PORT.md"><b>Port</b></a> ·
     <a href="../../VERSIONING.md"><b>Versionierung</b></a> ·
     <a href="../../CHANGELOG.md"><b>Changelog</b></a> ·

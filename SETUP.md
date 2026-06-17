@@ -12,7 +12,6 @@
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <b>Setup</b> ·
-    <a href="MIGRATION.md"><b>Migration</b></a> ·
     <a href="PORT.md"><b>Port</b></a> ·
     <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
@@ -352,4 +351,4 @@ core kernel logic still holds.
 
 ---
 
-[← Prev: Documentation](DOCUMENTATION.md) · [Next: Migration →](MIGRATION.md)
+[← Prev: Documentation](DOCUMENTATION.md) · [Next: Port →](PORT.md)

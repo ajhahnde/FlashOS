@@ -18,7 +18,6 @@
 <p>
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="MIGRATION.md"><b>Migration</b></a> ·
     <a href="PORT.md"><b>Port</b></a> ·
     <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
@@ -261,8 +260,8 @@ A deeper walk-through of each subsystem is in
 
 ## AI assistance
 
-The prose docs in this repo (README, DOCUMENTATION, CHANGELOG, MIGRATION,
-PORT) are LLM-drafted under my review. They're kept honest by the build,
+The prose docs in this repo (README, DOCUMENTATION, CHANGELOG, PORT)
+are LLM-drafted under my review. They're kept honest by the build,
 not by trust: the OS is verified by booting it, not by describing it.
 
 - Boots to a login shell on QEMU `virt` and Raspberry Pi 4B from the
@@ -290,9 +289,11 @@ Apache License, Version 2.0. See [License](LICENSE.md).
 
 ## See also
 
-- [eeco](https://github.com/ajhahnde/eeco) — self-maintaining workflow ecosystem.
-- [the-way-out](https://github.com/ajhahnde/the-way-out) — top-down pixel-art escape-room shooter.
-- [Flash](https://github.com/ajhahnde/Flash) — a systems language and Zig transpiler.
+- **[Flash](https://github.com/ajhahnde/Flash)** — a systems language and Zig transpiler.
+- **[eeco](https://github.com/ajhahnde/eeco)** — self-maintaining workflow ecosystem.
+- **[the-way-out](https://github.com/ajhahnde/the-way-out)** — top-down pixel-art escape-room shooter.
+- **[Theria](https://github.com/ajhahnde/Theria)** — 2.5D MOBA built in Godot 4.
+
 
 ---
 

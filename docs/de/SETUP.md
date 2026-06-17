@@ -12,7 +12,6 @@
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Dokumentation</b></a> ·
     <b>Setup</b> ·
-    <a href="../../MIGRATION.md"><b>Migration</b></a> ·
     <a href="../../PORT.md"><b>Port</b></a> ·
     <a href="../../VERSIONING.md"><b>Versionierung</b></a> ·
     <a href="../../CHANGELOG.md"><b>Changelog</b></a> ·
@@ -360,6 +359,6 @@ weiterhin hält.
 
 ---
 
-[← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Migration →](../../MIGRATION.md)
+[← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Port →](../../PORT.md)
 
 <!-- sync-ref: SETUP.md @ e06f2f0724a207b7327749e3bf218e1cac18a774 | synced 2026-06-13 -->
