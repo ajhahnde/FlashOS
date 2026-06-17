@@ -127,6 +127,21 @@ export fn main(argc usize, argv argv) noreturn {
     var pw_buf [512]u8 = undefined
     var shell_buf [64]u8 = undefined
 
+    // login mints a session by dropping privilege from root, and setuid is
+    // one-way — so a login that is not already root can only ever re-grant the
+    // euid it inherited. Run as a normal command from a privilege-dropped shell
+    // it would still authenticate (the kernel verifier does not gate on the
+    // caller's uid) and only then fail the drop with a misleading "cannot drop
+    // privilege". Refuse up front: minting sessions is the PID-1 supervisor's
+    // job, reached as root via initramfs exec. The proper user-switch is
+    // `logout` back to that supervisor, then log in as the other account.
+    // (Matches Unix, where login is getty/PID-1-only with no user entry point;
+    // FlashOS has no setuid-root bit to make a user-invoked login safe.)
+    if flibc.sys.geteuid() != 0 {
+        emit("login: must be root\n")
+        flibc.exit()
+    }
+
     // Optional session limit (argv[1], decimal). 0 = loop forever.
     var max_sessions u32 = 0
     if argc >= 2 {

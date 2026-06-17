@@ -29,6 +29,18 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **`/bin/login` now refuses to run as a non-root command.** Invoked from
+  an already-privilege-dropped shell, `login` would still authenticate the
+  entered credentials — the kernel verifier does not gate on the caller's
+  uid — and only then fail the privilege drop with a misleading `login:
+  cannot drop privilege`, a confusing half-success that could never grant a
+  higher uid since `setuid` is one-way. `login` now checks `geteuid()` at
+  entry and exits with `login: must be root`, leaving session minting to the
+  PID-1 supervisor. Switch users by logging out back to that supervisor,
+  then logging in as the other account.
+
 ## [v0.4.0] - 2026-06-13
 
 ### Changed
