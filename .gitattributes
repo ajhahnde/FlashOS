@@ -1,3 +1,5 @@
 # Force .inc files to be recognized as Assembly to prevent misidentification as C++
 *.inc linguist-language=Assembly
-*.flash linguist-language=Zig
+# .flash transpiles to Zig and shares its syntax, so reuse Zig highlighting,
+# but keep .flash out of the repo language bar since it is not actually Zig.
+*.flash linguist-language=Zig linguist-detectable=false
