@@ -29,6 +29,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-06-18
+
 ### Added
 
 - **FAT32 file create / unlink / rename and the `cp` / `mv` / `rm`
@@ -340,7 +342,8 @@ highlights are below.
 - **Kernel symbol table** generated from the linked ELF by a two-pass
   build step, so panics and the profiler can print real names.
 
-[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.6.0...HEAD
+[v0.6.0]: https://github.com/ajhahnde/FlashOS/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/ajhahnde/FlashOS/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/ajhahnde/FlashOS/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/ajhahnde/FlashOS/compare/v0.2.0...v0.3.0

@@ -40,6 +40,21 @@ etc/
 sbin/
 test/
 
+$ cp /mnt/roundtr.dat /mnt/backup.fl
+
+$ mv /mnt/backup.fl /mnt/notes.fl
+
+$ ls /mnt/
+roundtr.dat
+empty.txt
+notes.fl
+shadow
+
+$ grep flash /etc/passwd
+flash:1000:1000:/home/flash:/bin/fsh
+
+$ rm /mnt/notes.fl
+
 $ sysinfo
 FlashOS system
 version {{VERSION}}
