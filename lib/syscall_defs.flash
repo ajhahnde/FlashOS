@@ -189,12 +189,19 @@ pub const SYS_UPTIME u64 = 50
 pub const SYS_CPU_TEMP u64 = 51
 pub const SYS_CPU_FREQ u64 = 52
 
+// FAT32 metadata ABI: SYS_CREATE (53) makes a new empty file and returns a
+// writable fd (creat); SYS_UNLINK (54) removes a file; SYS_RENAME (55)
+// renames it within the same directory. Files only, /mnt only.
+pub const SYS_CREATE u64 = 53
+pub const SYS_UNLINK u64 = 54
+pub const SYS_RENAME u64 = 55
+
 // Highest slot + 1; equals the `#define NR_SYSCALLS` literal in
 // arch/aarch64/asm_defs_common.inc. Adding a new SYS_* constant past
 // the current top bumps this automatically; the comptime guard in
 // src/sys.flash catches divergence from the asm-side literal at build
 // time.
-pub const NR_SYSCALLS usize = SYS_CPU_FREQ + 1
+pub const NR_SYSCALLS usize = SYS_RENAME + 1
 
 // Kernel-log ring capacity in bytes. Shared here because both
 // the kernel ring (src/klog_ring.zig sizes `KlogRing` to it) and userland

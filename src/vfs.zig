@@ -114,12 +114,44 @@ pub const VfsOps = extern struct {
     // yet — readdir support lands per backend) is
     // safely non-enumerable rather than a null call.
     readdir: *const fn (sb: *SuperBlock, path_ptr: [*]const u8, path_len: usize, index: u64, out: *Dirent) callconv(.c) c_int = defaultReaddir,
+    // create: make a new empty entry at `path` (already mount-prefix-
+    // stripped) and fill `out` as open does, but for a *writable* handle —
+    // dirent_lba/off point at the fresh entry so a following write grows it.
+    // Returns 0 on success, -1 on exists / bad-name / no-space / EROFS. Path
+    // crosses as ptr+len for the same callconv(.c) reason as open. Defaults to
+    // the EROFS stub so a read-only backend (initramfs) is non-destructive
+    // until it wires a real impl. Appended after readdir so the extern-struct
+    // VfsOps ABI of the existing slots stays byte-identical.
+    create: *const fn (sb: *SuperBlock, path_ptr: [*]const u8, path_len: usize, out: *OpenResult) callconv(.c) c_int = defaultCreate,
+    // unlink: remove the entry at `path` (tombstone its directory entry and
+    // free its cluster chain). Returns 0 on success, -1 on missing / EROFS.
+    unlink: *const fn (sb: *SuperBlock, path_ptr: [*]const u8, path_len: usize) callconv(.c) c_int = defaultUnlink,
+    // rename: rename `old` to `new` within the *same* directory (an in-place
+    // 8.3 name rewrite, no data move). Returns 0 on success, -1 on missing /
+    // bad-name / target-exists / EROFS. The vfs_rename wrapper rejects a
+    // cross-superblock rename before dispatch, so a backend only ever sees
+    // same-mount pairs.
+    rename: *const fn (sb: *SuperBlock, old_ptr: [*]const u8, old_len: usize, new_ptr: [*]const u8, new_len: usize) callconv(.c) c_int = defaultRename,
 };
 
 // Empty-directory readdir: returns the end sentinel (-1) at every
 // index. The default for the VfsOps.readdir field above; backends
 // override it with a real walk.
 fn defaultReaddir(_: *SuperBlock, _: [*]const u8, _: usize, _: u64, _: *Dirent) callconv(.c) c_int {
+    return -1;
+}
+
+// EROFS defaults for the write-side vtable slots: a backend that has not
+// wired create/unlink/rename (initramfs, or any future read-only mount)
+// fails the mutation closed (-1) rather than dispatching through a null
+// pointer. Same safe-direction posture as defaultReaddir.
+fn defaultCreate(_: *SuperBlock, _: [*]const u8, _: usize, _: *OpenResult) callconv(.c) c_int {
+    return -1;
+}
+fn defaultUnlink(_: *SuperBlock, _: [*]const u8, _: usize) callconv(.c) c_int {
+    return -1;
+}
+fn defaultRename(_: *SuperBlock, _: [*]const u8, _: usize, _: [*]const u8, _: usize) callconv(.c) c_int {
     return -1;
 }
 
@@ -169,6 +201,9 @@ pub fn relocateOps(ops: *VfsOps) void {
     ops.close = @ptrFromInt(@intFromPtr(ops.close) | LINEAR_MAP_BASE);
     ops.write = @ptrFromInt(@intFromPtr(ops.write) | LINEAR_MAP_BASE);
     ops.readdir = @ptrFromInt(@intFromPtr(ops.readdir) | LINEAR_MAP_BASE);
+    ops.create = @ptrFromInt(@intFromPtr(ops.create) | LINEAR_MAP_BASE);
+    ops.unlink = @ptrFromInt(@intFromPtr(ops.unlink) | LINEAR_MAP_BASE);
+    ops.rename = @ptrFromInt(@intFromPtr(ops.rename) | LINEAR_MAP_BASE);
 }
 
 // Wire a superblock into the root (initramfs) slot. Called from the
@@ -236,6 +271,40 @@ pub fn vfs_readdir(path: []const u8, index: u64, out: *Dirent) c_int {
     const r = resolve(path) orelse return -1;
     const ops = r.sb.ops orelse return -1;
     return ops.readdir(r.sb, r.sub_path.ptr, r.sub_path.len, index, out);
+}
+
+// Resolve + dispatch to the backend's create. Mirrors vfs_open: on hit
+// returns the SB (the caller stashes it in File.sb for later read/write/
+// close dispatch) and fills `out` for the new writable handle. Returns
+// null on an unmounted slot, a missing vtable, or a backend failure
+// (exists / bad-name / no-space / EROFS).
+pub fn vfs_create(path: []const u8, out: *OpenResult) ?*SuperBlock {
+    const r = resolve(path) orelse return null;
+    const ops = r.sb.ops orelse return null;
+    if (ops.create(r.sb, r.sub_path.ptr, r.sub_path.len, out) < 0) return null;
+    return r.sb;
+}
+
+// Resolve + dispatch to the backend's unlink. Returns 0 on success, -1 on
+// an unmounted slot, a missing vtable, or a backend failure.
+pub fn vfs_unlink(path: []const u8) c_int {
+    const r = resolve(path) orelse return -1;
+    const ops = r.sb.ops orelse return -1;
+    return ops.unlink(r.sb, r.sub_path.ptr, r.sub_path.len);
+}
+
+// Resolve both paths and dispatch to the backend's rename. A cross-
+// superblock rename is rejected here, before dispatch: an in-place 8.3
+// name rewrite cannot move bytes between mounts, so a true cross-mount
+// move is the caller's copy+unlink job (mv's fallback), not the kernel's.
+// Returns 0 on success, -1 on an unmounted slot, a missing vtable, a
+// cross-mount pair, or a backend failure.
+pub fn vfs_rename(old: []const u8, new: []const u8) c_int {
+    const ro = resolve(old) orelse return -1;
+    const rn = resolve(new) orelse return -1;
+    if (ro.sb != rn.sb) return -1;
+    const ops = ro.sb.ops orelse return -1;
+    return ops.rename(ro.sb, ro.sub_path.ptr, ro.sub_path.len, rn.sub_path.ptr, rn.sub_path.len);
 }
 
 // ---- Host tests ----
@@ -342,7 +411,49 @@ fn fakeReaddir(_: *SuperBlock, path_ptr: [*]const u8, path_len: usize, index: u6
     return -1;
 }
 
+// fakeCreate: echo a fresh writable payload for "/new", miss otherwise —
+// proves vfs_create threads OpenResult (including the dirent location) back.
+fn fakeCreate(_: *SuperBlock, path_ptr: [*]const u8, path_len: usize, out: *OpenResult) callconv(.c) c_int {
+    const path = path_ptr[0..path_len];
+    if (std.mem.eql(u8, path, "/new")) {
+        out.private = 0;
+        out.size = 0;
+        out.mode = 0o100644;
+        out.uid = 3;
+        out.gid = 4;
+        out.dirent_lba = 6;
+        out.dirent_off = 64;
+        return 0;
+    }
+    return -1;
+}
+// fakeUnlink: succeeds for "/gone", misses otherwise.
+fn fakeUnlink(_: *SuperBlock, path_ptr: [*]const u8, path_len: usize) callconv(.c) c_int {
+    const path = path_ptr[0..path_len];
+    return if (std.mem.eql(u8, path, "/gone")) 0 else -1;
+}
+// fakeRename: succeeds for old "/a" -> new "/b", misses otherwise.
+fn fakeRename(_: *SuperBlock, old_ptr: [*]const u8, old_len: usize, new_ptr: [*]const u8, new_len: usize) callconv(.c) c_int {
+    const old = old_ptr[0..old_len];
+    const new = new_ptr[0..new_len];
+    return if (std.mem.eql(u8, old, "/a") and std.mem.eql(u8, new, "/b")) 0 else -1;
+}
+
 const fake_ops: VfsOps = .{
+    .open = fakeOpen,
+    .read = fakeRead,
+    .seek = fakeSeek,
+    .close = fakeClose,
+    .write = fakeWrite,
+    .readdir = fakeReaddir,
+    .create = fakeCreate,
+    .unlink = fakeUnlink,
+    .rename = fakeRename,
+};
+
+// A vtable that leaves the write-side slots at their EROFS defaults — proves
+// a backend that wires only the read path stays non-destructive.
+const readonly_ops: VfsOps = .{
     .open = fakeOpen,
     .read = fakeRead,
     .seek = fakeSeek,
@@ -430,4 +541,71 @@ test "vfs_readdir returns -1 when the resolved SB has no vtable" {
     mount_table[0] = &fake_initramfs_sb;
     var d: Dirent = .{};
     try testing.expectEqual(@as(c_int, -1), vfs_readdir("/anything", 0, &d));
+}
+
+test "vfs_create dispatches through the vtable and threads OpenResult back" {
+    resetMounts();
+    fake_initramfs_sb.ops = &fake_ops;
+    mount_table[0] = &fake_initramfs_sb;
+
+    var out: OpenResult = .{};
+    const sb = vfs_create("/new", &out) orelse return error.NotCreated;
+    try testing.expectEqual(@as(*SuperBlock, &fake_initramfs_sb), sb);
+    try testing.expectEqual(@as(u32, 0o100644), out.mode);
+    try testing.expectEqual(@as(u32, 3), out.uid);
+    try testing.expectEqual(@as(u32, 4), out.gid);
+    // The dirent location threads through so a following write can grow it.
+    try testing.expectEqual(@as(u32, 6), out.dirent_lba);
+    try testing.expectEqual(@as(u32, 64), out.dirent_off);
+
+    // A backend failure routes to the same SB but resolves to null.
+    var out_miss: OpenResult = .{};
+    try testing.expectEqual(@as(?*SuperBlock, null), vfs_create("/miss", &out_miss));
+}
+
+test "vfs_create returns null when the resolved SB has no vtable" {
+    resetMounts();
+    fake_initramfs_sb.ops = null;
+    mount_table[0] = &fake_initramfs_sb;
+    var out: OpenResult = .{};
+    try testing.expectEqual(@as(?*SuperBlock, null), vfs_create("/new", &out));
+}
+
+test "vfs_unlink dispatches through the vtable" {
+    resetMounts();
+    fake_initramfs_sb.ops = &fake_ops;
+    mount_table[0] = &fake_initramfs_sb;
+    try testing.expectEqual(@as(c_int, 0), vfs_unlink("/gone"));
+    try testing.expectEqual(@as(c_int, -1), vfs_unlink("/still-here"));
+}
+
+test "vfs_rename dispatches a same-mount pair" {
+    resetMounts();
+    fake_initramfs_sb.ops = &fake_ops;
+    mount_table[0] = &fake_initramfs_sb;
+    try testing.expectEqual(@as(c_int, 0), vfs_rename("/a", "/b"));
+    try testing.expectEqual(@as(c_int, -1), vfs_rename("/a", "/c"));
+}
+
+test "vfs_rename rejects a cross-superblock pair before dispatch" {
+    resetMounts();
+    fake_initramfs_sb.ops = &fake_ops;
+    fake_fat32_sb.ops = &fake_ops;
+    mount_table[0] = &fake_initramfs_sb;
+    mount_table[1] = &fake_fat32_sb;
+    // old resolves to slot 0 (initramfs), new to slot 1 (FAT32) — a true move
+    // across mounts, which an in-place rename cannot do: must fail closed.
+    try testing.expectEqual(@as(c_int, -1), vfs_rename("/a", "/mnt/b"));
+}
+
+test "write-side vtable slots default to EROFS (-1)" {
+    resetMounts();
+    fake_initramfs_sb.ops = &readonly_ops;
+    mount_table[0] = &fake_initramfs_sb;
+    var out: OpenResult = .{};
+    // A backend that wires only the read path leaves create/unlink/rename at
+    // their EROFS defaults — every mutation fails closed.
+    try testing.expectEqual(@as(?*SuperBlock, null), vfs_create("/new", &out));
+    try testing.expectEqual(@as(c_int, -1), vfs_unlink("/gone"));
+    try testing.expectEqual(@as(c_int, -1), vfs_rename("/a", "/b"));
 }

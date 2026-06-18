@@ -288,6 +288,108 @@ export fn sys_openFile(path_ptr u64) i32 {
     return fd
 }
 
+// Shared copy-path-from-user + cwd-resolve — the off-stack form
+// sys_create / sys_unlink / sys_rename use (the same logic sys_openFile
+// inlines). Copies the NUL-terminated user path into `raw_buf`, then
+// resolves it against the caller's cwd into `join_buf`: an absolute path
+// passes straight through, a relative one is `.`/`..`-collapsed by the
+// host-tested joinResolve. Returns the resolved slice, or null on a copy
+// fault or an over-long resolved path. Caller holds preempt_disable (the
+// buffers are shared statics). Every buffer here is off-stack, keeping
+// these handlers' frames well clear of the TaskStruct credential tail.
+fn copyResolvePath(c *mut TaskStruct, path_ptr u64, raw_buf *mut [1024]u8, join_buf *mut [layout.CWD_SIZE]u8) ?[]u8 {
+    var i usize = 0
+    while i < 1023 {
+        var b u8 = 0
+        if copy_from_user(#ptrCast(&b), path_ptr + i, 1) < 0 { return null }
+        raw_buf[i] = b
+        if b == 0 { break }
+        i += 1
+    }
+    raw_buf[i] = 0
+    const raw_path = std.mem.span(#as([*:0]u8, #ptrCast(raw_buf)))
+    if raw_path.len > 0 && raw_path[0] == '/' { return raw_path }
+    const cwd_slice = std.mem.sliceTo(#as([*:0]u8, #ptrCast(&c.cwd)), 0)
+    return path_mod.joinResolve(cwd_slice, raw_path, join_buf)
+}
+
+// Second path scratch for sys_rename — its two paths must be resolved and
+// live simultaneously, so the new-path copy/join cannot reuse the old-path
+// buffers (open_path_buf / open_join_buf). Off-stack for the same stack-tail reason.
+var rename_new_buf [1024]u8 = undefined
+var rename_new_join [layout.CWD_SIZE]u8 = undefined
+
+// sys_create — creat(): make a new empty file and return a writable fd. The
+// deepest-stack twin of sys_openFile (shared off-stack path scratch):
+// resolve the path, dispatch vfs_create, then install a File the same way.
+// The new file is caller-owned (uid/gid = the caller's effective ids); the
+// backend supplies the 0644 mode baseline. /mnt is the only writable mount,
+// so a create elsewhere (initramfs) fails closed via its EROFS vtable stub.
+export fn sys_create(path_ptr u64) i32 {
+    const c = current orelse return -1
+
+    preempt_disable()
+    defer preempt_enable()
+
+    const resolved = copyResolvePath(c, path_ptr, &open_path_buf, &open_join_buf) orelse return -1
+
+    var open_result vfs.OpenResult = .{}
+    const sb = vfs.vfs_create(resolved, &open_result)
+    if sb == null { return -1 }
+
+    const f = file_mod.alloc() orelse return -1
+    f.refs = 1
+    f.private = open_result.private
+    f.size = open_result.size
+    f.offset = 0
+    f.sb = sb
+    // Caller-owned: stamp the creating user's effective ids over the
+    // backend's root baseline so the per-write check in sys_write lets the
+    // owner write the file it just made. Persistence is a known ceiling —
+    // a reboot reverts to the overlay default (see fat32_backend create).
+    f.mode = open_result.mode
+    f.uid = c.euid
+    f.gid = c.egid
+    f.dirent_lba = open_result.dirent_lba
+    f.dirent_off = open_result.dirent_off
+
+    const fd = fdtable.install(c, .file, f)
+    if fd < 0 {
+        file_mod.unref(f)
+        return -1
+    }
+    return fd
+}
+
+// sys_unlink — remove the file at `path`. Resolve + dispatch; the backend
+// tombstones the entry and frees its chain. Returns 0 on success, -1 on a
+// missing file, a read-only mount, or a fault.
+export fn sys_unlink(path_ptr u64) i32 {
+    const c = current orelse return -1
+
+    preempt_disable()
+    defer preempt_enable()
+
+    const resolved = copyResolvePath(c, path_ptr, &open_path_buf, &open_join_buf) orelse return -1
+    return #intCast(vfs.vfs_unlink(resolved))
+}
+
+// sys_rename — rename `old` to `new` within the same directory. Both paths
+// are copied + resolved into separate off-stack buffers (both must be live
+// for the dispatch) and handed to vfs_rename, which rejects a cross-mount
+// pair before the backend sees it. Returns 0 on success, -1 on a missing
+// source, a cross-directory/-mount move, a bad name, or a fault.
+export fn sys_rename(old_ptr u64, new_ptr u64) i32 {
+    const c = current orelse return -1
+
+    preempt_disable()
+    defer preempt_enable()
+
+    const old_resolved = copyResolvePath(c, old_ptr, &open_path_buf, &open_join_buf) orelse return -1
+    const new_resolved = copyResolvePath(c, new_ptr, &rename_new_buf, &rename_new_join) orelse return -1
+    return #intCast(vfs.vfs_rename(old_resolved, new_resolved))
+}
+
 // Post-lookup body for file reads. The VFS vtable walks
 // chunks of <=512 bytes and copies them to the caller's UVA. Returns
 // total bytes copied, -1 on copy_to_user fault with no progress so
@@ -1274,6 +1376,10 @@ export var sys_call_table = blk: {
     t[defs.SYS_CPU_TEMP] = #ptrCast(&sys_cpu_temp)
     t[defs.SYS_CPU_FREQ] = #ptrCast(&sys_cpu_freq)
 
+    t[defs.SYS_CREATE] = #ptrCast(&sys_create)
+    t[defs.SYS_UNLINK] = #ptrCast(&sys_unlink)
+    t[defs.SYS_RENAME] = #ptrCast(&sys_rename)
+
     // Retired: legacy per-kind console / file / pipe / exec shims
     // (write_str, exec, readFile, writeFile, closeFile, openConsole,
     // readConsole, pipe_read, pipe_write, pipe_close). Slot numbers are
@@ -1286,11 +1392,11 @@ export var sys_call_table = blk: {
 }
 
 // Build-time guard: arch/aarch64/asm_defs_common.inc must declare
-// `#define NR_SYSCALLS 53` to match. If you bump the highest SYS_*
+// `#define NR_SYSCALLS 56` to match. If you bump the highest SYS_*
 // constant in lib/syscall_defs.flash, also bump the asm-side literal,
 // then update this comptime check.
 comptime {
-    if defs.NR_SYSCALLS != 53 {
+    if defs.NR_SYSCALLS != 56 {
         #compileError("NR_SYSCALLS drifted from arch/aarch64/asm_defs_common.inc — keep both in lockstep")
     }
 }

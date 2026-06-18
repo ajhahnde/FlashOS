@@ -1,0 +1,64 @@
+// cp — copy SRC to DST for /bin/cp.
+//
+//   cp SRC DST
+//
+// Opens SRC read-only, creates DST (a fresh writable file via SYS_CREATE),
+// and streams SRC's bytes into it in 512-byte chunks. DST must not already
+// exist (create fails closed on a name collision — no clobber); SRC and DST
+// are files, and DST's name must fit 8.3 (the create syscall rejects a longer
+// one). Errors print a diagnostic to fd 2 and exit.
+//
+// The first consumer of SYS_CREATE: it is what exercises the create -> write
+// -> persist path end to end (the acceptance loop copies a file, reboots, and
+// reads it back). Same coreutil recipe as cat: flibc _start shim, flibc_mem,
+// stack buffer only.
+
+use flibc
+
+link "flibc_start"
+link "flibc_mem"
+
+const BUF_LEN usize = 512
+
+fn diag(msg []u8) {
+    _ = flibc.sys.write_fd(2, msg.ptr, msg.len)
+}
+
+export fn main(argc usize, argv argv) noreturn {
+    if argc < 3 {
+        diag("usage: cp SRC DST\n")
+        flibc.exit()
+    }
+    const src = argv[1] orelse flibc.exit()
+    const dst = argv[2] orelse flibc.exit()
+
+    const sfd = flibc.sys.open(src)
+    if sfd < 0 {
+        diag("cp: cannot open source\n")
+        flibc.exit()
+    }
+    const dfd = flibc.sys.create(dst)
+    if dfd < 0 {
+        diag("cp: cannot create destination\n")
+        _ = flibc.sys.close(sfd)
+        flibc.exit()
+    }
+
+    var buf [BUF_LEN]u8 = undefined
+    while true {
+        n := flibc.sys.read(sfd, &buf, buf.len)
+        if n <= 0 {
+            break
+        }
+        // FAT32 write() pushes the whole chunk in one call; a short write is
+        // therefore an error (ENOSPC / fault), not a partial that needs a
+        // retry loop.
+        if flibc.sys.write_fd(dfd, &buf, #intCast(n)) != n {
+            diag("cp: write error\n")
+            break
+        }
+    }
+    _ = flibc.sys.close(sfd)
+    _ = flibc.sys.close(dfd)
+    flibc.exit()
+}

@@ -394,25 +394,40 @@ SDHCI single-block PIO pattern).
 The `/mnt` slot is backed by the real
 `src/fat32_backend.flash` (it replaced `fat32_stub.zig`): `fat32.flash`
 decodes the BPB / FAT / root-dir on `init()`, and the backend's
-`open` / `read` / `seek` / `close` / `write` walk and mutate the
-cluster chain over `block_dev.sd_dev`. **On-disk layout** matches
+`open` / `read` / `seek` / `close` / `write` / `create` / `unlink` /
+`rename` walk and mutate the cluster chain over `block_dev.sd_dev`.
+`create` / `unlink` / `rename` are the file-metadata operations
+(syscalls 53–55): create finds-or-extends a free 8.3 directory slot and
+stamps an empty entry, unlink tombstones the entry (`0xE5`) and frees
+its chain, rename rewrites the 8.3 name in place. Files only and (for
+rename) same-directory only; sub-directory creation and cross-directory
+move are future scope. On-device source files use the 3-char `.fl`
+extension rather than `.flash` (`.flash` is 5 chars and does not fit an
+8.3 short name, which `fat32.encode8_3` rejects); there is no LFN. **On-disk layout** matches
 `scripts/format_sd.sh`: a single MBR primary partition, type `0x0c`
 (FAT32-LBA), starting at **LBA 2048**, labelled `BOOT`, spanning the
 disk. The Pi-HW acceptance run seeds two files into the FAT32 root
 before `picapture`: `ROUNDTR.DAT` (4 KiB of zero) and `ROUNDTR.MAG`
 (1 byte of zero) — 8.3 short names (`fat32.encode8_3` rejects a
-basename longer than 8). `[TEST] fs-roundtrip` uses `ROUNDTR.MAG` as the boot-to-boot witness.
+basename longer than 8). `[TEST] fs-roundtrip` uses `ROUNDTR.MAG` as the
+boot-to-boot witness, and (on a mounted boot) folds in a CRUD leg that
+creates, writes, reads back, renames, and unlinks a scratch file
+(`CRUD.FL` → `CRUD2.FL`) within the one boot — exercising the
+create/unlink/rename ABI end to end while leaving the disk unchanged, so
+the scenario tally is unmoved (an uncounted `[DBG] fs-crud OK …` line
+marks the leg in a Pi capture).
 
 **No QEMU gate exercises the real SD / FAT32 write path.** QEMU
 `-M raspi4b` does not model the BCM2711 EMMC2/Arasan SDHCI well
 enough to pass CMD8 (SEND_IF_COND), so `board.emmc2.init()` returns
 -1 and `fat32_backend.init()` never runs; `virt` has no SD device by
 design. On **both** QEMU boards `[TEST] fs-roundtrip` takes the
-mount-detected SKIP path (`[PASS] fs-roundtrip (skip)`, tally still
-18/18). The real Variant-B roundtrip (`[PASS] fs-roundtrip-write`
-on boot 1, `[PASS] fs-roundtrip` after a power-cycle on boot 2) and
-all of `fat32_backend.writeBack` / `sys_write` are validated on
-**real Pi-4 hardware only**;
+mount-detected SKIP path (`[PASS] fs-roundtrip (skip)`, the EL0 tally
+still 30/34) and the CRUD leg above never runs. The real Variant-B
+roundtrip (`[PASS] fs-roundtrip-write` on boot 1, `[PASS] fs-roundtrip`
+after a power-cycle on boot 2), the CRUD leg, and all of
+`fat32_backend.writeBack` / `create` / `unlink` / `rename` / `sys_write`
+are validated on **real Pi-4 hardware only**;
 `zig build test` covers `src/fat32.flash`'s decode units but not
 `fat32_backend.flash`. Dispatch is a
 single `startsWith("/mnt/")` branch; the trailing slash is
@@ -560,8 +575,9 @@ pub const FdSlot = extern struct {        // 16 B; 8 slots = 128 B
 
 The syscall surface is assembled into an interactive shell,
 `fsh`, staged in the initramfs at `/bin/fsh`, plus the `/bin/echo` and
-`/bin/cat` coreutils, plus `/bin/ls`, `/bin/meminfo`, and
-`/bin/forkbomb`. fsh and the coreutils link against **flibc**
+`/bin/cat` coreutils, plus `/bin/ls`, `/bin/meminfo`,
+`/bin/forkbomb`, `/bin/grep` (literal line search), and the FAT32
+file-management trio `/bin/cp` / `/bin/mv` / `/bin/rm`. fsh and the coreutils link against **flibc**
 (`user_space/lib/flibc/`), the userland mini-libc: SVC wrappers, a
 comptime-format `printf`, the `_start` argc/argv shim, and — for payloads
 that trip LLVM's `memcpy` / `strlen` idiom lowering — a freestanding
@@ -728,6 +744,9 @@ mapping rather than chasing into UVA space.
 |   50   | `uptime`         | (none)                                            | `u64` seconds since boot | **Hardware monitoring.** Seconds since boot from the architectural counter, dividing `CNTPCT_EL0` by the runtime `CNTFRQ_EL0` (not the fixed tick period, which can differ from the counter rate). Monotonic. Board-independent |
 |   51   | `cpu_temp`       | (none)                                            | `u64` milli-degrees Celsius, `0` = unknown | **Hardware monitoring.** SoC temperature over the VideoCore mailbox (`TAG_GET_TEMPERATURE`). Reads `0` = unknown on a board without the firmware (QEMU virt) or on a mailbox timeout. The kernel runs the transaction under `preempt_disable` to serialise the shared property buffer against a task switch |
 |   52   | `cpu_freq`       | (none)                                            | `u64` Hz, `0` = unknown | **Hardware monitoring.** ARM core clock over the VideoCore mailbox (the firmware-reported rate, which scales with DVFS). Reads `0` = unknown on a board without the firmware (virt) or on a mailbox timeout. Same `preempt_disable` serialisation as `cpu_temp` |
+|   53   | `create`         | `x0 = const u8 *path` (NUL-terminated)            | `i32` writable fd (≥ 0), -1 on error | **File create (`creat`).** Makes a new empty file at `path` and returns a writable fd — the create-then-write half the `open` ABI lacks (slot 7 has no `O_CREAT`). `path` is `cwd`-joined like `open`, then `vfs.resolve`d; only the FAT32 `/mnt` mount is writable (initramfs returns -1, EROFS). Fails -1 on a name that does not fit 8.3, an existing name (no clobber), a full or unmounted volume, or no free fd. The new file is **caller-owned** (uid/gid = the caller's effective ids, mode 0644); created-file permission metadata does not persist across reboot (it falls back to the `/mnt` overlay default). Same off-stack path scratch as `open` so the deep `joinResolve` frame never reaches the TaskStruct credential tail. Pi-only (FAT32 does not mount under QEMU). `/bin/cp` is the consumer |
+|   54   | `unlink`         | `x0 = const u8 *path` (NUL-terminated)            | `i32` 0 on success, -1 on error | **File remove.** Tombstones the file's 8.3 directory entry (`0xE5`) and frees its FAT cluster chain (crediting FSInfo). Files only — a directory returns -1 (no `rmdir` this release). `path` resolves like `open`; a missing file, a read-only mount, or a fault returns -1. Pi-only. `/bin/rm` is the consumer |
+|   55   | `rename`         | `x0 = const u8 *old`, `x1 = const u8 *new` (both NUL-terminated) | `i32` 0 on success, -1 on error | **File rename (same directory).** Rewrites `old`'s 8.3 name to `new`'s in place — no data move — preserving cluster, size and attributes. Same-directory only: the VFS rejects a cross-mount pair, and the backend rejects a different parent directory, before any rewrite (a cross-directory move is `/bin/mv`'s copy+unlink fallback). Fails -1 on a missing source, a `new` name that does not fit 8.3, an existing target (no clobber), or a fault. Both paths use separate off-stack scratch (they must be live together). Pi-only. `/bin/mv` is the consumer |
 
 `sys_console_inject` is a documented debug syscall, not part of the
 forward-stable ABI surface. It is retained because the in-kernel test
@@ -1111,7 +1130,7 @@ initramfs/file pair get dedicated per-target stub objects
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`) to
 avoid double-defining symbols that the module under test already
-exports. The current suite totals **415 host tests** across 39
+exports. The current suite totals **445 host tests** across 40
 modules — see the coverage matrix below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.flash`).
@@ -1434,13 +1453,13 @@ end-to-end on QEMU + Pi 4.
 | `src/sched.flash`               |         13 | every fork/kill/wait scenario                                                                       | —                                                                                                                                                                                                                                           |
 | `src/initramfs.flash`           |         13 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
 | `src/file.zig`                |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `fd-redirect`   | fd-table helpers live in `src/fdtable.flash`; the `alloc`/`ref`/`unref` lifetime tests remain here                                                                                                                       |
-| `src/vfs.zig`                 |         13 | `vfs-dispatch`, `fs-roundtrip`, `initramfs-open`, `exec-elf`, `stack-overflow`, `flibc`, `readdir` | —                                                                                                                                                                                                                                           |
+| `src/vfs.zig`                 |         19 | `vfs-dispatch`, `fs-roundtrip`, `initramfs-open`, `exec-elf`, `stack-overflow`, `flibc`, `readdir` | the create/unlink/rename wrapper + EROFS-default tests are host-only (cross-superblock rename rejection, default-stub fail-closed)                                                                                                                                                                                                                                           |
 | `src/sdhci_cmd.flash`           |         13 | `emmc2-block` (CMD17/CMD24 encoding, CSD v2 parse, clock divisor)                                 | —                                                                                                                                                                                                                                           |
 | `src/mailbox.flash`             |         19 | `emmc2-block` (clock-rate query for SDHCI divider; SD VDD power-on and 3.3 V I/O rail at init); USB-C console (`usb_init`'s USB-HCD power-on)    | —                                                                                                                                                                                                                                           |
 | `src/board/virt/dtb.flash`      |          4 | (virt boot hand-off)                                                                                | —                                                                                                                                                                                                                                           |
-| `src/fat32.flash`               |         27 | `fs-roundtrip`, `vfs-dispatch`                                                                  | —                                                                                                                                                                                                                                           |
+| `src/fat32.flash`               |         37 | `fs-roundtrip`, `vfs-dispatch`                                                                  | the create/unlink/rename primitives (find/extend a free dir slot, write/delete an entry, free a chain, FSInfo credit) are host-tested here, including the directory-extend and free-count round-trip cases                                                                                                                                                                                                                                           |
 | `src/initramfs_backend.flash`   |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`         | —                                                                                                                                                                                                                                           |
-| `src/fat32_backend.flash`       |         11 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | thin VfsOps wrapper over `src/fat32.flash`; the real SD read/write path runs on Pi-4 hardware only (QEMU `raspi4b` EMMC2 dies at CMD8, `virt` has no SD), so the on-disk decode logic is covered by `src/fat32.flash` host tests instead. The splice contract (sub-sector + whole-file same-length writes) and the permission-overlay parse/apply are host-tested here; FAT32 `readdir` is exercised by `[TEST] readdir` on the Pi-only leg (`/mnt/*` returns -1 cleanly under QEMU; FAT32 host tests cover the `decode8_3` helper) |
+| `src/fat32_backend.flash`       |         17 | `vfs-dispatch`, `fs-roundtrip`, `passwd`                                                                  | thin VfsOps wrapper over `src/fat32.flash`; the real SD read/write path runs on Pi-4 hardware only (QEMU `raspi4b` EMMC2 dies at CMD8, `virt` has no SD), so the on-disk decode logic is covered by `src/fat32.flash` host tests instead. The splice contract (sub-sector + whole-file same-length writes) and the permission-overlay parse/apply are host-tested here; FAT32 `readdir` is exercised by `[TEST] readdir` on the Pi-only leg (`/mnt/*` returns -1 cleanly under QEMU; FAT32 host tests cover the `decode8_3` helper) |
 | `src/block_dev.flash`           |          0 | `emmc2-block`                                                                                     | pure vtable indirection; logic ≈ fn-pointer forwarding                                                                                                                                                                                      |
 | `src/sys.flash`                 |          0 | every syscall scenario                                                                              | extern-heavy dispatch; logic ≈ argument forwarding                                                                                                                                                                                          |
 | `src/fork.flash`                |          5 | `fork-stress`, `oom-graceful`, `exec-elf`, `brk`                                                    | —                                                                                                                                                                                                                                           |
@@ -1463,6 +1482,7 @@ end-to-end on QEMU + Pi 4.
 | `user_space/lib/flibc/pager.flash`    |   10 | — (full-screen tools)                                                                             | pure scroll / line-index core (`Pager`: line indexing, `line` slicing, scroll clamping); no SVC — the render + key loop live in `/bin/less`; runtime path = `/bin/less` over the serial console |
 | `lib/console_ui/screen.flash`         |    6 | — (full-screen tools)                                                                             | pure ANSI screen renderers (alt-screen lifecycle, cursor, `Panel` box, `kv` rows); `Sink`-routed, allocator-free; the first consumers are `/bin/sysinfo` and `/bin/cpuinfo` (`kv`), `/bin/less` (alt-screen + `Panel`), and `/bin/clear` (`clear`)                                                                                                                                         |
 | `user_space/fsh/tokenize.flash`       |   11 | (PID-1 hand-off)                                                                                  | pure whitespace split + single-pipe decomposition; the shell driver (`fsh.flash`) is integration-only via the PID-1 → fsh hand-off (the `type 'help' for commands` boot success marker)                                                                                                                     |
+| `tools/grep_match.flash`              |    8 | — (coreutil)                                                                                      | pure windowed substring matcher with optional ASCII case-fold for `/bin/grep`; the open/read/line-assembly driver lives in `tools/grep.flash`                                                                                                                                                            |
 | `tests/host_alloc.zig`         |          0 | —                                                                                                   | shared bump-allocator helper consumed by other test roots; carries no inline tests of its own                                                                                                                                                                                                        |
 | `src/trace/*`                 |          0 | `trace`                                                                                           | runtime code patching; no ICache sync host-side                                                                                                                                                                                              |
 | `src/trace/fp_walk.zig`       |          6 | — (pure host)                                                                                       | AAPCS64 frame-record decoder for the `-Dtrace` sampler; the FP-walk bounds / wrap / alignment / monotonic guards are host-verified (the live sampler only fires on real-Pi async timer ticks)                                                  |
@@ -1474,7 +1494,7 @@ end-to-end on QEMU + Pi 4.
 | `src/usb_tx_ring.flash`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.flash` stays hardware-verified                                                                                    |
 | `src/board/rpi4b/usb.flash`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.flash`, the TX ring in `src/usb_tx_ring.flash` |
 
-Totals: **415 host tests** (`zig build test`, counted from the build
+Totals: **445 host tests** (`zig build test`, counted from the build
 graph by `scripts/test_tally.sh`) + **30 in-kernel EL0 scenarios** +
 **1 pre-PID-1 EL1 scenario** (`emmc2-block`, `run-virt` / `run`). The
 per-module column above is an approximate breakdown — the authoritative

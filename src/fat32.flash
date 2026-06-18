@@ -7,10 +7,13 @@
 //   * FAT table read/write (cluster -> next cluster, allocate fresh)
 //   * Directory entry decode (8.3 only, no VFAT/LFN)
 //   * Cluster allocate (linear scan, mark EOC, update FSInfo hints)
-//   * FSInfo update (free_count decrement + next_free hint advance)
+//   * FSInfo update (free_count decrement/increment + next_free hint)
+//   * Directory-entry create (find/extend a free slot, stamp 8.3),
+//     delete (0xE5 tombstone), and cluster-chain free — the metadata
+//     primitives the create / unlink / rename VFS ops are built on
 //
 // Out of scope: LFN, attributes-as-permissions, sub-second
-// timestamps, file deletion (sys_unlink is future work).
+// timestamps, sub-directory creation (mkdir is future work).
 //
 // Block I/O is the caller's responsibility — every helper takes a
 // `*Mount` (or `*mut Mount` for write paths) holding the
@@ -431,6 +434,169 @@ pub fn updateDirEntryFirstCluster(m *mut Mount, found FoundEntry, cluster u32) F
     std.mem.writeInt(u16, sector_buf[found.byte_offset + 0x1A ..][0..2], #truncate(cluster), .little)
     const write_fn = m.dev.write_fn orelse return error.BlockWriteFailed
     if write_fn(found.lba, sector_buf) != 0 { return error.BlockWriteFailed }
+}
+
+// ---- Directory-entry mutation: create / delete / chain-free -----------------
+//
+// The three metadata operations sys_create / sys_unlink / sys_rename are built
+// on, layered over the read-side lookup helpers and the cluster allocator
+// above. Each is a self-contained sector RMW on dir_sector_scratch or the
+// FSInfo sector — same static-buffer posture as updateDirEntry* (every VFS
+// dispatch runs under preempt_disable, so at most one is in flight).
+
+pub const DirSlot = struct {
+    lba u32,
+    byte_offset u16,
+}
+
+// findFreeDirSlot's failure set folds in allocCluster's NoSpace (a full volume
+// that cannot be extended) on top of the plain block-I/O errors.
+pub const DirSlotError = error{ NoSpace, BlockReadFailed, BlockWriteFailed, InvalidCluster }
+
+// Locate a reusable directory slot in `dir_cluster`'s chain: the first entry
+// whose first byte is 0x00 (never-used) or 0xE5 (deleted). When every slot in
+// the chain is live, the chain is extended by one fresh, zero-filled cluster
+// and that cluster's first slot is returned — so a create into a full directory
+// grows the directory rather than failing. The bounded hop count is the same
+// corrupted-FAT cycle guard lookupInDir uses (ReleaseSmall traps are off,
+// so the walk must self-terminate).
+pub fn findFreeDirSlot(m *mut Mount, dir_cluster u32) DirSlotError!DirSlot {
+    var cluster u32 = dir_cluster
+    var last_cluster u32 = 0
+    const sector_buf = &dir_sector_scratch
+    var hops u32 = 0
+    while cluster >= 2 && cluster < FAT_EOC_MIN {
+        const start_lba = clusterLba(m, cluster) catch { return error.InvalidCluster }
+        var i u32 = 0
+        while i < m.sectors_per_cluster {
+            const lba = start_lba + i
+            const read_fn = m.dev.read_fn orelse return error.BlockReadFailed
+            if read_fn(lba, sector_buf) != 0 { return error.BlockReadFailed }
+            var j u16 = 0
+            while j < 16 {
+                const byte_off u16 = j * 32
+                const first_byte = sector_buf[byte_off]
+                if first_byte == 0x00 || first_byte == 0xE5 {
+                    return .{ .lba = lba, .byte_offset = byte_off }
+                }
+                j += 1
+            }
+            i += 1
+        }
+        last_cluster = cluster
+        cluster = try readFatEntry(m, cluster)
+        hops += 1
+        if hops > m.total_clusters { return error.NoSpace }
+    }
+    // Chain exhausted with no free slot — grow the directory by one cluster.
+    return extendDirChain(m, last_cluster)
+}
+
+// Append a fresh cluster to a directory chain whose tail is `last_cluster`,
+// zero it (so every slot reads 0x00 = end-of-directory), link the old tail to
+// it, and return its first slot. allocCluster already stamped the new cluster
+// EOC, so the grown chain terminates correctly.
+fn extendDirChain(m *mut Mount, last_cluster u32) DirSlotError!DirSlot {
+    if last_cluster < 2 { return error.NoSpace } // never walked a real tail
+    const new_cluster = try allocCluster(m)
+    try writeFatEntry(m, last_cluster, new_cluster)
+    try fsInfoOnAlloc(m, new_cluster)
+    try zeroCluster(m, new_cluster)
+    const lba = clusterLba(m, new_cluster) catch { return error.InvalidCluster }
+    return .{ .lba = lba, .byte_offset = 0 }
+}
+
+// Zero every sector of `cluster` via the directory scratch buffer. Called on a
+// freshly allocated directory cluster so its slots read as end-of-directory.
+fn zeroCluster(m *mut Mount, cluster u32) DirSlotError!void {
+    const start_lba = clusterLba(m, cluster) catch { return error.InvalidCluster }
+    const sector_buf = &dir_sector_scratch
+    #memset(sector_buf, 0)
+    const write_fn = m.dev.write_fn orelse return error.BlockWriteFailed
+    var i u32 = 0
+    while i < m.sectors_per_cluster {
+        if write_fn(start_lba + i, sector_buf) != 0 { return error.BlockWriteFailed }
+        i += 1
+    }
+}
+
+// Stamp a fresh 8.3 directory entry into the slot at (lba, byte_offset). The
+// 32-byte slot is cleared first — it may be a recycled 0xE5 entry carrying
+// stale cluster/size fields — then the live fields are written. Timestamps and
+// dates stay zero (no RTC). The same primitive rewrites an existing entry's
+// name in place (the sys_rename path), preserving its cluster + size by passing
+// them back in.
+pub fn writeDirEntry(m *mut Mount, lba u32, byte_offset u16, name8_3 [11]u8, attr u8, first_cluster u32, size u32) FatError!void {
+    const sector_buf = &dir_sector_scratch
+    const read_fn = m.dev.read_fn orelse return error.BlockReadFailed
+    if read_fn(lba, sector_buf) != 0 { return error.BlockReadFailed }
+    const base usize = byte_offset
+    var z usize = 0
+    while z < 32 {
+        sector_buf[base + z] = 0
+        z += 1
+    }
+    #memcpy(sector_buf[base..][0..11], &name8_3)
+    sector_buf[base + 0x0B] = attr
+    std.mem.writeInt(u16, sector_buf[base + 0x14 ..][0..2], #truncate(first_cluster >> 16), .little)
+    std.mem.writeInt(u16, sector_buf[base + 0x1A ..][0..2], #truncate(first_cluster), .little)
+    std.mem.writeInt(u32, sector_buf[base + 0x1C ..][0..4], size, .little)
+    const write_fn = m.dev.write_fn orelse return error.BlockWriteFailed
+    if write_fn(lba, sector_buf) != 0 { return error.BlockWriteFailed }
+}
+
+// Tombstone a directory entry by setting its first name byte to 0xE5. The
+// cluster chain is freed separately (freeChain) — this only detaches the name
+// so lookups skip it and findFreeDirSlot can reuse the slot.
+pub fn markDeleted(m *mut Mount, lba u32, byte_offset u16) FatError!void {
+    const sector_buf = &dir_sector_scratch
+    const read_fn = m.dev.read_fn orelse return error.BlockReadFailed
+    if read_fn(lba, sector_buf) != 0 { return error.BlockReadFailed }
+    sector_buf[byte_offset] = 0xE5
+    const write_fn = m.dev.write_fn orelse return error.BlockWriteFailed
+    if write_fn(lba, sector_buf) != 0 { return error.BlockWriteFailed }
+}
+
+// Free a whole cluster chain starting at `first_cluster`, returning every link
+// to FAT_FREE and crediting FSInfo. `first_cluster < 2` (an empty file's
+// first_cluster == 0, or a reserved value) is a no-op. The next link is read
+// before the current is freed; freeing as it walks also means a corrupted
+// back-edge cannot spin forever (a revisited link reads FAT_FREE and stops),
+// and the hop bound is the same total_clusters cycle guard as a belt-and-
+// suspenders backstop.
+pub fn freeChain(m *mut Mount, first_cluster u32) FatError!void {
+    var cluster u32 = first_cluster
+    var hops u32 = 0
+    while cluster >= 2 && cluster < FAT_EOC_MIN {
+        const next = try readFatEntry(m, cluster)
+        try writeFatEntry(m, cluster, FAT_FREE)
+        try fsInfoOnFree(m, cluster)
+        cluster = next
+        hops += 1
+        if hops > m.total_clusters { return error.InvalidCluster }
+    }
+}
+
+// FSInfo credit on free — the counterpart to fsInfoOnAlloc. Increments
+// free_count and lowers the next-free hint to the just-freed cluster (a hint,
+// not authority — allocCluster linear-scans regardless), keeping free_count
+// honest across create + unlink cycles. A corrupted FSInfo (bad
+// signatures) is left untouched, exactly as fsInfoOnAlloc does.
+pub fn fsInfoOnFree(m *mut Mount, freed_cluster u32) FatError!void {
+    const sector = &fat_sector_scratch
+    const read_fn = m.dev.read_fn orelse return error.BlockReadFailed
+    if read_fn(m.fsinfo_lba, sector) != 0 { return error.BlockReadFailed }
+    const lead = std.mem.readInt(u32, sector[0x000..0x004], .little)
+    const struc = std.mem.readInt(u32, sector[0x1E4..0x1E8], .little)
+    if lead != FSINFO_LEAD_SIG || struc != FSINFO_STRUC_SIG {
+        return
+    }
+    var free_count = std.mem.readInt(u32, sector[0x1E8..0x1EC], .little)
+    if free_count != 0xFFFFFFFF { free_count += 1 }
+    std.mem.writeInt(u32, sector[0x1E8..0x1EC], free_count, .little)
+    std.mem.writeInt(u32, sector[0x1EC..0x1F0], freed_cluster, .little)
+    const write_fn = m.dev.write_fn orelse return error.BlockWriteFailed
+    if write_fn(m.fsinfo_lba, sector) != 0 { return error.BlockWriteFailed }
 }
 
 pub fn encode8_3(name []u8) ?[11]u8 {
@@ -892,4 +1058,149 @@ test "lookupPath tolerates redundant slashes" {
     // resolution (defensive — vfs.resolve normally pre-collapses).
     const found = try lookupPath(&m, "/subdir//deep.txt")
     try testing.expectEqual(#as(u32, 6), firstCluster(found.entry))
+}
+
+// ---- create / unlink / rename primitives ----
+
+// Read the FSInfo free_count directly, the same way fsInfoOnAlloc/Free do.
+fn readFreeCount(m *Mount) u32 {
+    var sec [512]u8 align(4) = undefined
+    _ = fake_dev.read_fn.?(m.fsinfo_lba, &sec)
+    return std.mem.readInt(u32, sec[0x1E8..0x1EC], .little)
+}
+
+// Fill all 16 slots of the root cluster (LBA 6) with live, non-matching
+// entries so no 0x00/0xE5 slot remains — forces findFreeDirSlot to extend.
+fn fillRootCluster() void {
+    const root_sector = host_disk[6 * 512 .. 7 * 512]
+    var j usize = 0
+    while j < 16 {
+        const off = j * 32
+        #memcpy(root_sector[off .. off + 11], "FULL    BIN")
+        root_sector[off + 0x0B] = ATTR_ARCHIVE
+        j += 1
+    }
+}
+
+test "findFreeDirSlot reuses a 0xE5 deleted slot" {
+    setupFixture()
+    var m = try mount(&fake_dev, 0)
+    // The fixture's root slot 1 (offset 32) is the 0xE5 deleted entry; it must
+    // be handed back before the trailing 0x00 slots so deletes free up space.
+    const slot = try findFreeDirSlot(&m, m.bpb.root_clus)
+    try testing.expectEqual(#as(u32, 6), slot.lba) // root cluster 2 -> LBA 6
+    try testing.expectEqual(#as(u16, 32), slot.byte_offset)
+}
+
+test "findFreeDirSlot returns the first end-of-dir slot when none are deleted" {
+    setupFixture()
+    seedSubtree()
+    var m = try mount(&fake_dev, 0)
+    // SUBDIR (cluster 4, LBA 8) holds DEEP.TXT @0 and SUB2 @32; slot 2 (offset
+    // 64) is the first 0x00 end-of-dir slot.
+    const slot = try findFreeDirSlot(&m, 4)
+    try testing.expectEqual(#as(u32, 8), slot.lba)
+    try testing.expectEqual(#as(u16, 64), slot.byte_offset)
+}
+
+test "findFreeDirSlot extends a full directory cluster" {
+    setupFixture()
+    fillRootCluster()
+    var m = try mount(&fake_dev, 0)
+    const free_before = readFreeCount(&m)
+    // Root cluster (2) is full and EOC-terminated, so the slot must come from a
+    // freshly allocated cluster 4 (clusters 2,3 already used) at LBA 8, slot 0.
+    const slot = try findFreeDirSlot(&m, m.bpb.root_clus)
+    try testing.expectEqual(#as(u32, 8), slot.lba)
+    try testing.expectEqual(#as(u16, 0), slot.byte_offset)
+    // The directory chain grew: root(2) -> 4 -> EOC.
+    try testing.expectEqual(#as(u32, 4), try readFatEntry(&m, 2))
+    try testing.expectEqual(FAT_EOC, try readFatEntry(&m, 4))
+    // And the allocation was credited to FSInfo.
+    try testing.expectEqual(free_before - 1, readFreeCount(&m))
+}
+
+test "findFreeDirSlot terminates on a self-looping directory chain" {
+    setupFixture()
+    fillRootCluster()
+    // Forge a 1-cluster cycle on the root: entry 2 (fat byte offset 8) -> 2,
+    // patched in both FAT copies (LBA 2 = byte 1024, LBA 4 = byte 3072).
+    std.mem.writeInt(u32, host_disk[1024 + 8 ..][0..4], 2, .little)
+    std.mem.writeInt(u32, host_disk[3072 + 8 ..][0..4], 2, .little)
+    var m = try mount(&fake_dev, 0)
+    // A hang here would be a cycle-guard regression: the full, self-looping
+    // chain exhausts the hop budget and reports NoSpace rather than spinning.
+    try testing.expectError(error.NoSpace, findFreeDirSlot(&m, m.bpb.root_clus))
+}
+
+test "writeDirEntry stamps a findable new entry" {
+    setupFixture()
+    var m = try mount(&fake_dev, 0)
+    const name = encode8_3("new.fl") orelse return error.EncodeFail
+    const slot = try findFreeDirSlot(&m, m.bpb.root_clus)
+    try writeDirEntry(&m, slot.lba, slot.byte_offset, name, ATTR_ARCHIVE, 0, 0)
+    const found = try lookupInRoot(&m, name)
+    try testing.expectEqual(slot.byte_offset, found.byte_offset)
+    try testing.expectEqual(#as(u32, 0), found.entry.file_size)
+    try testing.expectEqual(#as(u32, 0), firstCluster(found.entry))
+}
+
+test "writeDirEntry rewrites a name in place, preserving cluster and size" {
+    setupFixture()
+    var m = try mount(&fake_dev, 0)
+    // The rename primitive: rewrite HELLO.TXT's slot with a new 8.3 name while
+    // keeping its first cluster (3) and size (11).
+    const old = encode8_3("hello.txt") orelse return error.EncodeFail
+    const found = try lookupInRoot(&m, old)
+    const new = encode8_3("renamed.fl") orelse return error.EncodeFail
+    try writeDirEntry(&m, found.lba, found.byte_offset, new, found.entry.attr, firstCluster(found.entry), found.entry.file_size)
+    const re = try lookupInRoot(&m, new)
+    try testing.expectEqual(#as(u32, 11), re.entry.file_size)
+    try testing.expectEqual(#as(u32, 3), firstCluster(re.entry))
+    // The old name is gone (same slot, overwritten).
+    try testing.expectError(error.NotFound, lookupInRoot(&m, old))
+}
+
+test "markDeleted + freeChain unlinks a file and credits FSInfo" {
+    setupFixture()
+    var m = try mount(&fake_dev, 0)
+    const name = encode8_3("hello.txt") orelse return error.EncodeFail
+    const found = try lookupInRoot(&m, name)
+    const fc = firstCluster(found.entry) // 3
+    const free_before = readFreeCount(&m)
+    try markDeleted(&m, found.lba, found.byte_offset)
+    try freeChain(&m, fc)
+    try testing.expectError(error.NotFound, lookupInRoot(&m, name))
+    try testing.expectEqual(FAT_FREE, try readFatEntry(&m, fc))
+    try testing.expectEqual(free_before + 1, readFreeCount(&m))
+}
+
+test "freeChain on an empty file (cluster 0) is a no-op" {
+    setupFixture()
+    var m = try mount(&fake_dev, 0)
+    const free_before = readFreeCount(&m)
+    try freeChain(&m, 0)
+    try testing.expectEqual(free_before, readFreeCount(&m))
+}
+
+test "free_count round-trips through alloc then free" {
+    setupFixture()
+    var m = try mount(&fake_dev, 0)
+    const free0 = readFreeCount(&m)
+    const c = try allocCluster(&m)
+    try fsInfoOnAlloc(&m, c)
+    try testing.expectEqual(free0 - 1, readFreeCount(&m))
+    try freeChain(&m, c)
+    try testing.expectEqual(free0, readFreeCount(&m))
+}
+
+test "freeChain frees every link of a multi-cluster chain" {
+    setupFixture()
+    var m = try mount(&fake_dev, 0)
+    const c1 = try allocCluster(&m) // 4
+    const c2 = try allocCluster(&m) // 5
+    try writeFatEntry(&m, c1, c2) // link 4 -> 5 (5 stays EOC from allocCluster)
+    try freeChain(&m, c1)
+    try testing.expectEqual(FAT_FREE, try readFatEntry(&m, c1))
+    try testing.expectEqual(FAT_FREE, try readFatEntry(&m, c2))
 }

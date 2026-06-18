@@ -110,6 +110,8 @@ harness and a host-side unit test suite.
   privilege prompt, and `fork` +
   `execvp` (`/bin/<name>` resolution) for externals — plus `/bin/echo`,
   `/bin/cat`, `/bin/ls` (the stateless `sys_readdir` consumer),
+  `/bin/grep` (literal line search), `/bin/cp` / `/bin/mv` / `/bin/rm`
+  (FAT32 file management over the create/unlink/rename syscalls),
   `/bin/meminfo`, `/bin/forkbomb` (a capped leak probe),
   `/bin/sysinfo` (a key/value system summary), `/bin/cpuinfo` (CPU
   temperature + clock), `/bin/uptime` (time since boot), `/bin/less` (a
@@ -148,8 +150,8 @@ harness and a host-side unit test suite.
   currently inert — Zig has no `-fpatchable-function-entry=2`
   equivalent yet).
 - **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 30
-  scenarios) plus a host-side `zig build test` suite (415 host
-  tests across 39 modules).
+  scenarios) plus a host-side `zig build test` suite (445 host
+  tests across 40 modules).
 
 ## Quick start
 
@@ -225,7 +227,7 @@ serial-console setup.
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
-| `zig build test`                     | Host-side unit tests (415 tests, 39 modules)                   |
+| `zig build test`                     | Host-side unit tests (445 tests, 40 modules)                   |
 | `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                        |
 
 The default optimisation mode is `ReleaseSmall`. Override with

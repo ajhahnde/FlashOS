@@ -162,9 +162,10 @@
  * SYS_GETUID..SYS_SETGID at 39..44, SYS_AUTHENTICATE at 45,
  * SYS_PASSWD at 46, SYS_REBOOT at 47, and SYS_GETCWD at 48. The
  * hardware-monitoring ABI then appends SYS_MEMTOTAL/UPTIME/CPU_TEMP/
- * CPU_FREQ at 49..52, so the cap is now 53.
+ * CPU_FREQ at 49..52, and the FAT32 metadata ABI SYS_CREATE/UNLINK/
+ * RENAME at 53..55, so the cap is now 56.
  * See lib/syscall_defs.flash. */
-#define NR_SYSCALLS  53
+#define NR_SYSCALLS  56
 
 /* ---- sched ---- */
 #define CORE_CONTEXT_OFFSET 0

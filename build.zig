@@ -1456,6 +1456,112 @@ pub fn build(b: *std.Build) void {
     cat.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     cat.entry = .disabled;
 
+    // ---- grep.elf — line-pattern search coreutil ----
+    // grep [-i] PATTERN [FILE...]: streams each input (a FILE, or fd 0 with
+    // none) line by line and writes the lines containing PATTERN to fd 1. The
+    // matcher is the pure tools/grep_match.flash (host-tested below); this ELF
+    // is only the driver (flag/argv parsing, open/read, line assembly). Same
+    // recipe as cat (flibc _start shim, flibc_mem, pie=false, ReleaseSmall,
+    // strip, shared coreutil_linker.ld). Staged at /bin/grep; kept out of the
+    // CI FSH_SCRIPT so the free-page baseline stays deterministic.
+    const grep_match_gen = addFlashSource(b, "tools/grep_match.flash");
+    const grep_match_mod = b.createModule(.{
+        .root_source_file = grep_match_gen,
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const grep_mod = b.createModule(.{
+        .root_source_file = addFlashSource(b, "tools/grep.flash"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    grep_mod.addImport("flibc", flibc_mod);
+    grep_mod.addImport("flibc_start", flibc_start_mod);
+    grep_mod.addImport("flibc_mem", flibc_mem_mod);
+    // EACCES-aware diagnostic: grep names the permission denial, like cat.
+    grep_mod.addImport("syscall_defs", syscall_defs_mod);
+    // Pure, host-tested substring matcher.
+    grep_mod.addImport("grep_match", grep_match_mod);
+    const grep = b.addExecutable(.{
+        .name = "grep.elf",
+        .root_module = grep_mod,
+    });
+    grep.pie = false;
+    grep.bundle_compiler_rt = false;
+    grep.link_z_max_page_size = 0x80;
+    grep.link_z_common_page_size = 0x80;
+    grep.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    grep.entry = .disabled;
+
+    // ---- cp.elf / mv.elf / rm.elf — file-management coreutils ----
+    // The consumers of the FAT32 write ABI: cp creates + copies (SYS_CREATE),
+    // rm removes (SYS_UNLINK), mv renames same-dir (SYS_RENAME) with a
+    // cp+unlink fallback for cross-dir. Same recipe as cat (flibc _start shim,
+    // flibc_mem, pie=false, ReleaseSmall, strip, shared coreutil_linker.ld).
+    // Staged at /bin/{cp,mv,rm}; kept out of the CI FSH_SCRIPT (they mutate the
+    // FAT32 card, which only exists on real hardware) so the free-page baseline
+    // stays deterministic.
+    const cp_mod = b.createModule(.{
+        .root_source_file = addFlashSource(b, "tools/cp.flash"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    cp_mod.addImport("flibc", flibc_mod);
+    cp_mod.addImport("flibc_start", flibc_start_mod);
+    cp_mod.addImport("flibc_mem", flibc_mem_mod);
+    const cp = b.addExecutable(.{
+        .name = "cp.elf",
+        .root_module = cp_mod,
+    });
+    cp.pie = false;
+    cp.bundle_compiler_rt = false;
+    cp.link_z_max_page_size = 0x80;
+    cp.link_z_common_page_size = 0x80;
+    cp.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    cp.entry = .disabled;
+
+    const mv_mod = b.createModule(.{
+        .root_source_file = addFlashSource(b, "tools/mv.flash"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    mv_mod.addImport("flibc", flibc_mod);
+    mv_mod.addImport("flibc_start", flibc_start_mod);
+    mv_mod.addImport("flibc_mem", flibc_mem_mod);
+    const mv = b.addExecutable(.{
+        .name = "mv.elf",
+        .root_module = mv_mod,
+    });
+    mv.pie = false;
+    mv.bundle_compiler_rt = false;
+    mv.link_z_max_page_size = 0x80;
+    mv.link_z_common_page_size = 0x80;
+    mv.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    mv.entry = .disabled;
+
+    const rm_mod = b.createModule(.{
+        .root_source_file = addFlashSource(b, "tools/rm.flash"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    rm_mod.addImport("flibc", flibc_mod);
+    rm_mod.addImport("flibc_start", flibc_start_mod);
+    rm_mod.addImport("flibc_mem", flibc_mem_mod);
+    const rm = b.addExecutable(.{
+        .name = "rm.elf",
+        .root_module = rm_mod,
+    });
+    rm.pie = false;
+    rm.bundle_compiler_rt = false;
+    rm.link_z_max_page_size = 0x80;
+    rm.link_z_common_page_size = 0x80;
+    rm.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    rm.entry = .disabled;
+
     // ---- ls.elf — directory-listing coreutil ----
     // The first consumer of sys_readdir (slot 37): loops readdir(path, i)
     // 0.. and writes each basename (a trailing '/' for DT_DIR) to fd 1.
@@ -1888,14 +1994,18 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(argv_echo.getEmittedBin(), "test/argv_echo.elf");
     _ = cpio_stage.addCopyFile(cat.getEmittedBin(), "bin/cat");
     _ = cpio_stage.addCopyFile(clear.getEmittedBin(), "bin/clear");
+    _ = cpio_stage.addCopyFile(cp.getEmittedBin(), "bin/cp");
     _ = cpio_stage.addCopyFile(cpuinfo.getEmittedBin(), "bin/cpuinfo");
     _ = cpio_stage.addCopyFile(dmesg.getEmittedBin(), "bin/dmesg");
     _ = cpio_stage.addCopyFile(echo.getEmittedBin(), "bin/echo");
     _ = cpio_stage.addCopyFile(forkbomb.getEmittedBin(), "bin/forkbomb");
     _ = cpio_stage.addCopyFile(fsh.getEmittedBin(), "bin/fsh");
+    _ = cpio_stage.addCopyFile(grep.getEmittedBin(), "bin/grep");
     _ = cpio_stage.addCopyFile(less.getEmittedBin(), "bin/less");
     _ = cpio_stage.addCopyFile(ls.getEmittedBin(), "bin/ls");
     _ = cpio_stage.addCopyFile(meminfo.getEmittedBin(), "bin/meminfo");
+    _ = cpio_stage.addCopyFile(mv.getEmittedBin(), "bin/mv");
+    _ = cpio_stage.addCopyFile(rm.getEmittedBin(), "bin/rm");
     _ = cpio_stage.addCopyFile(sysinfo.getEmittedBin(), "bin/sysinfo");
     _ = cpio_stage.addCopyFile(uptime.getEmittedBin(), "bin/uptime");
     _ = cpio_stage.addCopyFile(b.path("user_space/fsh/fshrc"), "etc/fshrc");
@@ -1926,16 +2036,20 @@ pub fn build(b: *std.Build) void {
     const initramfs_arcs = [_]struct { arc: []const u8, mode: u32 }{
         .{ .arc = "bin/cat", .mode = 0o100755 },
         .{ .arc = "bin/clear", .mode = 0o100755 },
+        .{ .arc = "bin/cp", .mode = 0o100755 },
         .{ .arc = "bin/cpuinfo", .mode = 0o100755 },
         .{ .arc = "bin/dmesg", .mode = 0o100755 },
         .{ .arc = "bin/echo", .mode = 0o100755 },
         .{ .arc = "bin/forkbomb", .mode = 0o100755 },
         .{ .arc = "bin/fsh", .mode = 0o100755 },
+        .{ .arc = "bin/grep", .mode = 0o100755 },
         .{ .arc = "bin/less", .mode = 0o100755 },
         .{ .arc = "bin/login", .mode = 0o100755 },
         .{ .arc = "bin/ls", .mode = 0o100755 },
         .{ .arc = "bin/meminfo", .mode = 0o100755 },
+        .{ .arc = "bin/mv", .mode = 0o100755 },
         .{ .arc = "bin/passwd", .mode = 0o100755 },
+        .{ .arc = "bin/rm", .mode = 0o100755 },
         .{ .arc = "bin/sysinfo", .mode = 0o100755 },
         .{ .arc = "bin/uptime", .mode = 0o100755 },
         .{ .arc = "etc/fshrc", .mode = 0o100644 },
@@ -2380,6 +2494,12 @@ pub fn build(b: *std.Build) void {
     // from a line + scratch buffer; no externs, no stubs, no SVC. Compiles
     // the flashc-generated module (tokenize.flash is the source of truth).
     _ = addHostTest(b, test_step, .{ .src = "user_space/fsh/tokenize.flash", .src_lazy = tokenize_gen });
+
+    // grep match core — pure windowed substring matcher with ASCII case-fold.
+    // No externs, no stubs, no SVC; the open/read/line-assembly driver sits in
+    // tools/grep.flash. Compiles the flashc-generated module (the .flash is the
+    // source of truth).
+    _ = addHostTest(b, test_step, .{ .src = "tools/grep_match.flash", .src_lazy = grep_match_gen });
 
     // flibc keys.zig — VT100 input Decoder host coverage (arrows / ctrl / tab).
     // Pure `Decoder.feed`; the SVC readKey driver sits behind the same

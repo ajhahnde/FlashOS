@@ -261,6 +261,46 @@ pub fn open(path [*:0]u8) i32 {
         : .{ .memory = true })
 }
 
+/// create(path) — creat(): make a new empty file at `path` and return a
+/// writable fd (slot 53, SYS_CREATE). `path` is a NUL-terminated UVA;
+/// relative paths join against the task's `cwd` at the boundary, like
+/// `open`. Returns the new fd (>= 0), or -1 on a >8.3 name, an existing
+/// file, a full or read-only volume, or no free fd. The new file is
+/// caller-owned. /mnt only — a create elsewhere is EROFS.
+pub fn create(path [*:0]u8) i32 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i32),
+        : [nr] "{x8}" (defs.SYS_CREATE),
+          [path] "{x0}" (path),
+        : .{ .memory = true })
+}
+
+/// unlink(path) — remove the file at `path` (slot 54, SYS_UNLINK). Same
+/// path-resolution rules as `open`. Returns 0 on success, -1 on a missing
+/// file, a directory, a read-only volume, or a fault.
+pub fn unlink(path [*:0]u8) i32 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i32),
+        : [nr] "{x8}" (defs.SYS_UNLINK),
+          [path] "{x0}" (path),
+        : .{ .memory = true })
+}
+
+/// rename(old, new) — rename `old` to `new` within the same directory
+/// (slot 55, SYS_RENAME). Both are NUL-terminated UVAs, resolved against
+/// `cwd` like `open`. Returns 0 on success, -1 on a missing source, a
+/// cross-directory or cross-mount move, a >8.3 new name, an existing
+/// target, or a fault. Cross-directory moves are the caller's copy+unlink
+/// job (see /bin/mv).
+pub fn rename(old [*:0]u8, new [*:0]u8) i32 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i32),
+        : [nr] "{x8}" (defs.SYS_RENAME),
+          [old] "{x0}" (old),
+          [new] "{x1}" (new),
+        : .{ .memory = true })
+}
+
 /// readdir(path, index, out) — fill `out` with the `index`-th entry of
 /// the directory at `path` (slot 37, SYS_READDIR). `path` is a NUL-
 /// terminated UVA; relative paths join against the task's `cwd` at the

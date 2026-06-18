@@ -1,0 +1,77 @@
+// mv — move/rename OLD to NEW for /bin/mv.
+//
+//   mv OLD NEW
+//
+// First tries the kernel's same-directory rename (SYS_RENAME), an in-place
+// 8.3 name rewrite with no data move — the fast path for `mv A.FL B.FL`. The
+// kernel rejects a cross-directory rename (it cannot move bytes between
+// directories), so on failure mv falls back to copy-then-unlink: create NEW,
+// stream OLD into it, remove OLD. NEW must not already exist and its name
+// must fit 8.3 (the rename / create syscalls reject otherwise).
+//
+// Same coreutil recipe as cp (which owns the same copy loop); the fallback is
+// inlined rather than exec'ing /bin/cp to keep mv a single self-contained
+// program. flibc _start shim, flibc_mem, stack buffer only.
+
+use flibc
+
+link "flibc_start"
+link "flibc_mem"
+
+const BUF_LEN usize = 512
+
+fn diag(msg []u8) {
+    _ = flibc.sys.write_fd(2, msg.ptr, msg.len)
+}
+
+// Copy src -> dst (dst created fresh). Returns true on a clean copy.
+fn copyFile(src cstr, dst cstr) bool {
+    const sfd = flibc.sys.open(src)
+    if sfd < 0 {
+        return false
+    }
+    const dfd = flibc.sys.create(dst)
+    if dfd < 0 {
+        _ = flibc.sys.close(sfd)
+        return false
+    }
+    var buf [BUF_LEN]u8 = undefined
+    var ok bool = true
+    while true {
+        n := flibc.sys.read(sfd, &buf, buf.len)
+        if n <= 0 {
+            break
+        }
+        if flibc.sys.write_fd(dfd, &buf, #intCast(n)) != n {
+            ok = false
+            break
+        }
+    }
+    _ = flibc.sys.close(sfd)
+    _ = flibc.sys.close(dfd)
+    return ok
+}
+
+export fn main(argc usize, argv argv) noreturn {
+    if argc < 3 {
+        diag("usage: mv OLD NEW\n")
+        flibc.exit()
+    }
+    const old = argv[1] orelse flibc.exit()
+    const new = argv[2] orelse flibc.exit()
+
+    // Fast path: same-directory in-place rename.
+    if flibc.sys.rename(old, new) == 0 {
+        flibc.exit()
+    }
+
+    // Fallback: cross-directory move via copy + unlink.
+    if !copyFile(old, new) {
+        diag("mv: cannot move\n")
+        flibc.exit()
+    }
+    if flibc.sys.unlink(old) < 0 {
+        diag("mv: moved but could not remove source\n")
+    }
+    flibc.exit()
+}

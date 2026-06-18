@@ -65,6 +65,16 @@
 # eventual revive — at which point re-validate and refresh these values.
 #
 # Drift history (legitimate free-page baseline shifts, newest first):
+#   * v0.6.0 — NO hex shift, NO tally bump. The FAT32 create/unlink/rename
+#              ABI is folded into the existing [TEST] fs-roundtrip (a CRUD
+#              leg: create→write→readback→rename→unlink, Pi-only, self-
+#              cleaning) rather than added as a new scenario, so EL0 scenarios
+#              stay 30 and per-scenario checkpoints stay 34 — the leg adds no
+#              sys_dump_free. The grep/cp/mv/rm coreutils grow the initramfs,
+#              but rpi4b's reserve calls are no-ops (kernel below MALLOC_START)
+#              so 0xbbff2 / 0xbc000 hold; the CRUD leg emits an uncounted
+#              `[DBG] fs-crud OK …` marker on a mounted (Pi) boot. virt left on
+#              ice (not recaptured — see flashos-virt-deprioritized).
 #   * v0.5.0 — virt 0x3be46→0x3be45 (per-scenario), 0x3be54→0x3be53 (boot
 #              baseline): the /bin/uptime coreutil added one ELF to the
 #              initramfs, growing the kernel image past a page boundary so
@@ -103,7 +113,10 @@
 # Tally-matcher note: the harness counts a green fs-roundtrip as one PASS
 # whichever of `[PASS] fs-roundtrip-write …` / `[PASS] fs-roundtrip` /
 # `[PASS] fs-roundtrip (skip)` it emits; [TEST] passwd has the same
-# `[PASS] passwd` / `[PASS] passwd (skip)` split. (`main_output_u64`
+# `[PASS] passwd` / `[PASS] passwd (skip)` split. The v0.6.0 CRUD leg folded
+# into fs-roundtrip adds no new [PASS] label — on a mounted (Pi) boot it
+# emits an uncounted `[DBG] fs-crud OK …` line and the scenario still closes
+# on its existing fs-roundtrip-write / fs-roundtrip PASS. (`main_output_u64`
 # prints u64 as 16-digit zero-padded hex.)
 set -euo pipefail
 

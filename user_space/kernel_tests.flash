@@ -170,6 +170,34 @@ pub fn sys_openFile(path [*:0]u8) i32 {
         : .{ .memory = true })
 }
 
+// FAT32 metadata ABI (slots 53..55) — the create/unlink/rename leg of the
+// fs-roundtrip scenario drives these. create returns a writable fd;
+// unlink/rename return 0 on success, -1 otherwise.
+pub fn sys_create(path [*:0]u8) i32 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i32),
+        : [nr] "{x8}" (defs.SYS_CREATE),
+          [path] "{x0}" (path),
+        : .{ .memory = true })
+}
+
+pub fn sys_unlink(path [*:0]u8) i32 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i32),
+        : [nr] "{x8}" (defs.SYS_UNLINK),
+          [path] "{x0}" (path),
+        : .{ .memory = true })
+}
+
+pub fn sys_rename(old [*:0]u8, new [*:0]u8) i32 {
+    return asm volatile ("svc #0"
+        : [ret] "={x0}" (-> i32),
+        : [nr] "{x8}" (defs.SYS_RENAME),
+          [old] "{x0}" (old),
+          [new] "{x1}" (new),
+        : .{ .memory = true })
+}
+
 // Directory-enumeration ABI (Slot 37) — stateless
 // index walk: x0/x1/x2 = path / index / out-Dirent UVA. Returns 0 with
 // the dirent filled on a hit, -1 at end-of-directory / bad path / wild
@@ -482,6 +510,15 @@ const MAG_INBOOT_BAD [*:0]u8 = "[DBG] mag-inboot=00 (1-byte writeBack REGRESSION
 // roundtrip.mag (9-char base) would make every open return -1.
 const ROUNDTRIP_DAT_PATH [*:0]u8 = "/mnt/roundtr.dat"
 const ROUNDTRIP_MAG_PATH [*:0]u8 = "/mnt/roundtr.mag"
+
+// CRUD lifecycle leg of fs-roundtrip: a file created, written, read back,
+// renamed, and unlinked within one boot, leaving the disk as it found it.
+// 8.3-safe basenames (<=8 chars). The [DBG] marker is not counted by
+// run_qemu_test.sh's [PASS]/[FAIL]/checkpoint greps, so it adds Pi-capture
+// evidence without moving the tally.
+const CRUD_PATH_A [*:0]u8 = "/mnt/crud.fl"
+const CRUD_PATH_B [*:0]u8 = "/mnt/crud2.fl"
+const CRUD_OK [*:0]u8 = "[DBG] fs-crud OK (create/write/rename/unlink)\n"
 
 // [TEST] fs-empty-write — drives fat32_backend.write's step-0 (give a
 // first_cluster == 0 file its first data cluster). Seeded as a 0-byte
@@ -1521,6 +1558,86 @@ fn fill_pattern(p *mut [4096]u8) void {
     }
 }
 
+// CRUD lifecycle leg — exercise the create / unlink / rename ABI within one
+// boot and leave the disk exactly as found, so it is re-runnable and
+// free-page-neutral (every fd is closed, the file created is then removed).
+// Reached only on a mounted /mnt (the caller proved that by reading the magic
+// byte), so it is Pi-only like the rest of fs-roundtrip and never runs under
+// QEMU. Returns false on the first failed step; the caller turns that into a
+// FAIL_FS_ROUNDTRIP. Folded into the existing scenario on purpose — no new
+// [TEST]/[PASS] line, so the boot-contract tally is unchanged.
+fn run_crud_lifecycle() bool {
+    // Clear any leftovers from a previously aborted run (best-effort).
+    _ = sys_unlink(CRUD_PATH_A)
+    _ = sys_unlink(CRUD_PATH_B)
+
+    // create A and write a known 16-byte pattern.
+    const fd_c = sys_create(CRUD_PATH_A)
+    if (fd_c < 0) {
+        return false
+    }
+    var pat [16]u8 = undefined
+    var i u32 = 0
+    while (i < 16) {
+        pat[i] = 0x5A +% #as(u8, #intCast(i))
+        i += 1
+    }
+    const w = sys_write(fd_c, #intFromPtr(&pat), 16)
+    const cc = sys_close(fd_c)
+    if (w != 16 || cc != 0) {
+        _ = sys_unlink(CRUD_PATH_A)
+        return false
+    }
+
+    // read A back and verify the bytes.
+    const fd_r = sys_openFile(CRUD_PATH_A)
+    if (fd_r < 0) {
+        _ = sys_unlink(CRUD_PATH_A)
+        return false
+    }
+    var got [16]u8 = .{0} ** 16
+    const r = sys_read(fd_r, #intFromPtr(&got), 16)
+    _ = sys_close(fd_r)
+    if (r != 16) {
+        _ = sys_unlink(CRUD_PATH_A)
+        return false
+    }
+    i = 0
+    while (i < 16) {
+        if (got[i] != 0x5A +% #as(u8, #intCast(i))) {
+            _ = sys_unlink(CRUD_PATH_A)
+            return false
+        }
+        i += 1
+    }
+
+    // rename A -> B: A must vanish, B must open.
+    if (sys_rename(CRUD_PATH_A, CRUD_PATH_B) != 0) {
+        _ = sys_unlink(CRUD_PATH_A)
+        return false
+    }
+    if (sys_openFile(CRUD_PATH_A) >= 0) {
+        _ = sys_unlink(CRUD_PATH_B)
+        return false
+    }
+    const fd_b = sys_openFile(CRUD_PATH_B)
+    if (fd_b < 0) {
+        return false
+    }
+    _ = sys_close(fd_b)
+
+    // unlink B: it must be gone afterward.
+    if (sys_unlink(CRUD_PATH_B) != 0) {
+        return false
+    }
+    if (sys_openFile(CRUD_PATH_B) >= 0) {
+        return false
+    }
+
+    sys_writeConsole(CRUD_OK)
+    return true
+}
+
 fn run_fs_roundtrip(baseline u64) bool {
     sys_writeConsole(TEST_FS_ROUNDTRIP)
 
@@ -1543,6 +1660,16 @@ fn run_fs_roundtrip(baseline u64) bool {
         return false
     }
     if (sys_close(fd_mag) != 0) {
+        sys_writeConsole(FAIL_FS_ROUNDTRIP)
+        return false
+    }
+
+    // CRUD lifecycle leg (Pi-only — the magic read above proved /mnt is
+    // mounted). Folded in here so the create/unlink/rename ABI is exercised
+    // on every mounted boot without adding a [TEST]/[PASS] line; it is
+    // self-cleaning, so the per-branch free-page checkpoint below still
+    // lands on the baseline.
+    if (!run_crud_lifecycle()) {
         sys_writeConsole(FAIL_FS_ROUNDTRIP)
         return false
     }

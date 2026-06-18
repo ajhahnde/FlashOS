@@ -29,6 +29,39 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **FAT32 file create / unlink / rename and the `cp` / `mv` / `rm`
+  coreutils.** Three new syscalls complete the FAT32 write path:
+  `create` (slot 53) makes a new empty file and returns a writable fd —
+  the create-then-write half the flag-less `open` ABI lacked — `unlink`
+  (54) tombstones a file's directory entry and frees its cluster chain,
+  and `rename` (55) rewrites an 8.3 name in place within the same
+  directory. They are built on five new pure `fat32` primitives
+  (`findFreeDirSlot`, which extends a full directory by a cluster;
+  `writeDirEntry`; `markDeleted`; `freeChain`; `fsInfoOnFree`) and three
+  appended VFS vtable slots with EROFS defaults, so the read-only
+  initramfs and any future mount stay non-destructive. Three new
+  `/bin` coreutils consume them: `cp` (open + create + copy), `rm`
+  (unlink each argument), and `mv` (same-directory `rename`, with a
+  copy+unlink fallback across directories). Files only — `mkdir` /
+  `rmdir`, sub-directory writes, and cross-directory rename are deferred.
+  Created files are caller-owned (the permission metadata is a
+  per-session value that does not persist across reboot). On-device
+  source files use the 8.3-safe `.fl` extension (`.flash` does not fit an
+  8.3 short name); there is no LFN.
+- **`/bin/grep`.** A literal-pattern line search — `grep [-i] PATTERN
+  [FILE...]`, reading stdin when given no file — over a pure, host-tested
+  substring matcher with optional ASCII case folding. No regex, no
+  new syscall.
+- **`[TEST] fs-roundtrip` now exercises the full create/unlink/rename
+  lifecycle.** On a mounted (real-Pi) boot the scenario folds in a CRUD
+  leg — create, write, read back, rename, unlink, verify-gone — that
+  leaves the disk unchanged, so it adds no new scenario and the boot
+  contract stays at 30 EL0 scenarios / 34 checkpoints. FAT32 remains
+  Pi-only (QEMU's EMMC2 does not pass CMD8), so the logic is covered by
+  host tests and the lifecycle is validated on real Pi-4 hardware.
+
 ## [v0.5.0] - 2026-06-17
 
 ### Added

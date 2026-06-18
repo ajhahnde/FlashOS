@@ -1,0 +1,155 @@
+// grep — print the lines of its input that contain a literal pattern, for
+// /bin/grep.
+//
+//   grep [-i] PATTERN [FILE...]
+//
+// With no FILE it reads fd 0 (the `cat foo | grep bar` pipe case); with one or
+// more FILEs it opens each and searches it in turn. Matching lines go to fd 1,
+// each followed by a newline. `-i` folds ASCII case on both sides. The pattern
+// is a literal substring — no regex (the product vision's first cut). An empty
+// pattern matches every line (`grep '' FILE`), the GNU convention.
+//
+// The matcher itself is the pure, host-tested grep_match.lineContains; this
+// file is only the driver: flag/argv parsing, open/read, and streaming line
+// assembly. Streaming (rather than slurp-the-whole-file like /bin/less) is what
+// lets the same code path serve an unseekable pipe and a regular file alike.
+//
+// Deliberate scope limits (hobby-coreutil grade, documented not hidden):
+//   * No filename prefix on matches, even with multiple FILEs — bare matching
+//     lines only (GNU grep prefixes "file:" once >1 file). The shell's use is
+//     single-file / pipe, which this matches exactly.
+//   * A line longer than LINE_MAX bytes is matched and printed truncated to its
+//     first LINE_MAX bytes; the overrun is scanned for the newline but dropped.
+//     Serial-console lines sit far below the cap.
+//   * Exit status is not distinguished (match vs no-match vs error); fsh has no
+//     `$?` yet. Errors still go to fd 2 so they are visible.
+//
+// Same coreutil recipe as cat / ls: flibc _start shim, flibc_mem, stack buffers
+// only (rule 1 — no heap, no .bss). Kept out of the CI FSH_SCRIPT so the boot
+// free-page baseline stays deterministic.
+
+use flibc
+use syscall_defs as defs
+use grep_match
+
+link "flibc_start"
+link "flibc_mem"
+
+// Read granularity from the source fd. One syscall per CHUNK bytes.
+const CHUNK usize = 512
+// Longest line we buffer for matching/printing. A longer line is scanned for
+// its newline but only its first LINE_MAX bytes are tested and emitted.
+const LINE_MAX usize = 1024
+// Pattern copy bound. PATTERN comes in as a cstr argv slot; we copy it into a
+// sized slice so the matcher takes a plain []u8 and the length is bounded.
+const PAT_MAX usize = 256
+
+fn diag(msg []u8) {
+    _ = flibc.sys.write_fd(2, msg.ptr, msg.len)
+}
+
+// Emit `ln` to fd 1 (plus the newline stripped during scanning) when it matches.
+fn emitMatch(ln []u8, pat []u8, ignore_case bool) {
+    if grep_match.lineContains(ln, pat, ignore_case) {
+        _ = flibc.sys.write_fd(1, ln.ptr, ln.len)
+        const nl []u8 = "\n"
+        _ = flibc.sys.write_fd(1, nl.ptr, nl.len)
+    }
+}
+
+// Read `fd` to EOF, splitting on '\n' and testing each line. The newline is not
+// stored; a final line with no trailing newline is still tested at EOF.
+fn grepStream(fd i32, pat []u8, ignore_case bool) {
+    var chunk [CHUNK]u8 = undefined
+    var line [LINE_MAX]u8 = undefined
+    var line_len usize = 0
+    while true {
+        n := flibc.sys.read(fd, &chunk, chunk.len)
+        if n <= 0 {
+            break
+        }
+        var i usize = 0
+        const got usize = #intCast(n)
+        while i < got {
+            const c = chunk[i]
+            i += 1
+            if c == '\n' {
+                emitMatch(line[0..line_len], pat, ignore_case)
+                line_len = 0
+            } else if line_len < LINE_MAX {
+                line[line_len] = c
+                line_len += 1
+            }
+            // else: line past LINE_MAX — drop the byte, keep scanning for '\n'.
+        }
+    }
+    if line_len > 0 {
+        emitMatch(line[0..line_len], pat, ignore_case)
+    }
+}
+
+export fn main(argc usize, argv argv) noreturn {
+    var ai usize = 1
+    var ignore_case bool = false
+
+    // Leading flags: only -i (case-insensitive), bundled chars allowed (-i is
+    // the lone option, so this is forward room). Parsing stops at the first
+    // non-flag arg, at a bare "-", or at end of argv.
+    while ai < argc {
+        const arg = argv[ai] orelse break
+        if arg[0] != '-' || arg[1] == 0 {
+            break
+        }
+        var fi usize = 1
+        while arg[fi] != 0 {
+            if arg[fi] == 'i' {
+                ignore_case = true
+            } else {
+                diag("grep: unknown option\n")
+                flibc.exit()
+            }
+            fi += 1
+        }
+        ai += 1
+    }
+
+    // PATTERN is required. (Flash `orelse` takes a single expression, not a
+    // block — so guard the missing-arg case first, then unwrap.)
+    if ai >= argc {
+        diag("usage: grep [-i] PATTERN [FILE...]\n")
+        flibc.exit()
+    }
+    const pat_arg = argv[ai] orelse flibc.exit()
+    ai += 1
+
+    // Copy PATTERN into a sized slice (cstr -> []u8, bounded by PAT_MAX).
+    var pat_buf [PAT_MAX]u8 = undefined
+    var pat_len usize = 0
+    while pat_arg[pat_len] != 0 && pat_len < PAT_MAX {
+        pat_buf[pat_len] = pat_arg[pat_len]
+        pat_len += 1
+    }
+    const pat = pat_buf[0..pat_len]
+
+    if ai >= argc {
+        // No FILE — search stdin (the pipe case).
+        grepStream(0, pat, ignore_case)
+    } else {
+        while ai < argc {
+            const path = argv[ai] orelse break
+            ai += 1
+            const fd = flibc.sys.open(path)
+            if fd < 0 {
+                var msg []u8 = "grep: cannot open\n"
+                if fd == -defs.EACCES {
+                    msg = "grep: Permission denied\n"
+                }
+                diag(msg)
+                continue
+            }
+            grepStream(fd, pat, ignore_case)
+            _ = flibc.sys.close(fd)
+        }
+    }
+    flibc.exit()
+}

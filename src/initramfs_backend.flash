@@ -30,6 +30,9 @@ var ops_vtable vfs.VfsOps = .{
     .close = close,
     .write = writeEROFS,
     .readdir = readdir,
+    .create = createEROFS,
+    .unlink = unlinkEROFS,
+    .rename = renameEROFS,
 }
 
 // Maximum directory-query path the synthesised-prefix walk handles. The
@@ -107,6 +110,19 @@ fn close(_ *mut vfs.SuperBlock, _ *mut File) callconv(.c) void {
 // Initramfs is read-only by design (it's the CPIO image baked into
 // the kernel). Every write returns -1 — caller treats as EROFS.
 fn writeEROFS(_ *mut vfs.SuperBlock, _ *mut File, _ [*]u8, _ u64) callconv(.c) i64 {
+    return -1
+}
+
+// create / unlink / rename are likewise EROFS on the read-only root. Wired
+// explicitly (not left to the VfsOps defaults) so the read-only contract is
+// visible at this backend, not inferred from an absent field.
+fn createEROFS(_ *mut vfs.SuperBlock, _ [*]u8, _ usize, _ *mut vfs.OpenResult) callconv(.c) c_int {
+    return -1
+}
+fn unlinkEROFS(_ *mut vfs.SuperBlock, _ [*]u8, _ usize) callconv(.c) c_int {
+    return -1
+}
+fn renameEROFS(_ *mut vfs.SuperBlock, _ [*]u8, _ usize, _ [*]u8, _ usize) callconv(.c) c_int {
     return -1
 }
 
