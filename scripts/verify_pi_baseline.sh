@@ -8,6 +8,12 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# The OS-image modules transpile through flashc (the Flash compiler), so a
+# bare `zig build` cannot find it. Resolve it the same way build.zig's
+# -Dflashc default does: $FLASHC if set, else the pinned stage1 binary in the
+# Flash checkout ($FLASH_DIR, default ~/Flash).
+FLASHC="${FLASHC:-${FLASH_DIR:-$HOME/Flash}/zig-out/bin/flashc-stage1}"
+
 BASELINE="scripts/pi_baseline.sha256"
 if [ ! -f "$BASELINE" ]; then
     echo "missing $BASELINE" >&2
@@ -26,8 +32,8 @@ restore_stash() {
 }
 trap restore_stash EXIT
 
-zig build clean >/dev/null
-zig build -Dboard=rpi4b >/dev/null
+zig build clean -Dflashc="$FLASHC" >/dev/null
+zig build -Dboard=rpi4b -Dflashc="$FLASHC" >/dev/null
 
 ACTUAL=$(mktemp -t flashos_pi_check.XXXXXX)
 trap 'rm -f "$ACTUAL"; restore_stash' EXIT
