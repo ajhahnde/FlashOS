@@ -22,6 +22,9 @@ const has_driver = builtin.cpu.arch == .aarch64 && builtin.target.os.tag == .fre
 
 /// A decoded key. `.char` carries its byte in Event.ch; `.none` means the byte
 /// was consumed mid-escape-sequence (feed more); `.eof` means the stream closed.
+/// The navigation set (delete / home / end / page_up / page_down) and the editor
+/// command chords (ctrl_o / ctrl_w / ctrl_x) land here for /bin/edit; a pager or
+/// readline that does not use them lets them fall through its switch default.
 pub const Key = enum {
     up,
     down,
@@ -29,10 +32,18 @@ pub const Key = enum {
     right,
     enter,
     backspace,
+    delete,
     tab,
     escape,
+    home,
+    end,
+    page_up,
+    page_down,
     ctrl_c,
     ctrl_d,
+    ctrl_o,
+    ctrl_w,
+    ctrl_x,
     char,
     none,
     eof,
@@ -50,6 +61,7 @@ pub const Event = struct {
 /// within one call.
 pub const Decoder = struct {
     state State = .ground,
+    param u16 = 0, // accumulates the CSI numeric parameter (ESC[<n>~)
 
     const State = enum { ground, esc, csi }
 
@@ -72,6 +84,9 @@ pub const Decoder = struct {
             0x08, 0x7f => .{ .key = .backspace },
             0x03 => .{ .key = .ctrl_c },
             0x04 => .{ .key = .ctrl_d },
+            0x0f => .{ .key = .ctrl_o },
+            0x17 => .{ .key = .ctrl_w },
+            0x18 => .{ .key = .ctrl_x },
             0x20...0x7e => .{ .key = .char, .ch = b },
             else => .{ .key = .none },
         }
@@ -80,6 +95,7 @@ pub const Decoder = struct {
     fn atEsc(self *mut Decoder, b u8) Event {
         if b == '[' {
             self.state = .csi
+            self.param = 0
             return .{ .key = .none }
         }
         if b == 0x1b {
@@ -93,9 +109,16 @@ pub const Decoder = struct {
     }
 
     fn atCsi(self *mut Decoder, b u8) Event {
-        // Parameter bytes (digits / ';') belong to the sequence — keep reading
-        // so ESC[5~ (PgUp etc.) is absorbed cleanly rather than leaking bytes.
-        if (b >= '0' && b <= '9') || b == ';' {
+        // Digits accumulate the parameter so ESC[3~ (Delete), ESC[5~ (PgUp) etc.
+        // are distinguished rather than collapsed. A ';' starts a sub-parameter
+        // (e.g. ESC[1;5C modified arrows); reset so the final group wins — the
+        // arrow/tilde keys ignore modifiers here.
+        if b >= '0' && b <= '9' {
+            self.param = self.param * 10 + #as(u16, b - '0')
+            return .{ .key = .none }
+        }
+        if b == ';' {
+            self.param = 0
             return .{ .key = .none }
         }
         self.state = .ground
@@ -104,6 +127,16 @@ pub const Decoder = struct {
             'B' => .{ .key = .down },
             'C' => .{ .key = .right },
             'D' => .{ .key = .left },
+            'H' => .{ .key = .home }, // ESC[H — Home (no parameter form)
+            'F' => .{ .key = .end }, // ESC[F — End
+            '~' => switch self.param {
+                1, 7 => .{ .key = .home }, // ESC[1~ / ESC[7~
+                3 => .{ .key = .delete }, // ESC[3~
+                4, 8 => .{ .key = .end }, // ESC[4~ / ESC[8~
+                5 => .{ .key = .page_up }, // ESC[5~
+                6 => .{ .key = .page_down }, // ESC[6~
+                else => .{ .key = .none },
+            },
             else => .{ .key = .none },
         }
     }
@@ -182,16 +215,45 @@ test "arrow sequences decode through ESC [ A..D" {
     try testing.expectEqual(Key.left, decodeOne("\x1b[D").key)
 }
 
-test "parametrized CSI (ESC[5~) is absorbed, not leaked as keys" {
+test "parametrized CSI (ESC[5~) decodes on the terminator, not before" {
     var d = Decoder{}
     try testing.expectEqual(Key.none, d.feed(0x1b).key)
     try testing.expectEqual(Key.none, d.feed('[').key)
-    try testing.expectEqual(Key.none, d.feed('5').key)
-    try testing.expectEqual(Key.none, d.feed('~').key)
+    try testing.expectEqual(Key.none, d.feed('5').key) // parameter byte buffered
+    try testing.expectEqual(Key.page_up, d.feed('~').key) // terminator yields the key
 }
 
 test "bare ESC then a letter yields escape" {
     var d = Decoder{}
     try testing.expectEqual(Key.none, d.feed(0x1b).key)
     try testing.expectEqual(Key.escape, d.feed('x').key)
+}
+
+test "editor command chords decode at ground" {
+    try testing.expectEqual(Key.ctrl_o, decodeOne(&.{0x0f}).key)
+    try testing.expectEqual(Key.ctrl_w, decodeOne(&.{0x17}).key)
+    try testing.expectEqual(Key.ctrl_x, decodeOne(&.{0x18}).key)
+}
+
+test "tilde navigation sequences decode by parameter" {
+    try testing.expectEqual(Key.home, decodeOne("\x1b[1~").key)
+    try testing.expectEqual(Key.delete, decodeOne("\x1b[3~").key)
+    try testing.expectEqual(Key.end, decodeOne("\x1b[4~").key)
+    try testing.expectEqual(Key.page_up, decodeOne("\x1b[5~").key)
+    try testing.expectEqual(Key.page_down, decodeOne("\x1b[6~").key)
+    try testing.expectEqual(Key.home, decodeOne("\x1b[7~").key)
+    try testing.expectEqual(Key.end, decodeOne("\x1b[8~").key)
+}
+
+test "letter Home and End decode (ESC[H / ESC[F)" {
+    try testing.expectEqual(Key.home, decodeOne("\x1b[H").key)
+    try testing.expectEqual(Key.end, decodeOne("\x1b[F").key)
+}
+
+test "modified arrow (ESC[1;5C) still decodes to a plain arrow" {
+    try testing.expectEqual(Key.right, decodeOne("\x1b[1;5C").key)
+}
+
+test "an unknown tilde parameter is absorbed, not leaked" {
+    try testing.expectEqual(Key.none, decodeOne("\x1b[99~").key)
 }

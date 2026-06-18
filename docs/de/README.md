@@ -9,7 +9,7 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.6.0-f59e0b?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.7.0-f59e0b?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/zig-0.16.0-lightgrey?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
@@ -115,15 +115,18 @@ Stress-Zyklen hinweg, geprüft durch ein kernelinternes
   `reboot`), ein Unix-artiger `#`/`$`-Privileg-Prompt und `fork` +
   `execvp` (`/bin/<name>`-Auflösung) für externe Programme — dazu
   `/bin/echo`, `/bin/cat`, `/bin/ls` (der zustandslose
-  `sys_readdir`-Konsument), `/bin/meminfo`, `/bin/forkbomb` (eine
+  `sys_readdir`-Konsument), `/bin/grep` (literale Zeilensuche),
+  `/bin/cp` / `/bin/mv` / `/bin/rm` (FAT32-Dateiverwaltung über die
+  create/unlink/rename-Syscalls), `/bin/meminfo`, `/bin/forkbomb` (eine
   gedeckelte Leak-Probe), `/bin/sysinfo` (eine Key/Value-System-
   Zusammenfassung), `/bin/cpuinfo` (CPU-Temperatur + Takt),
   `/bin/uptime` (Zeit seit Boot), `/bin/less` (ein Full-Screen-Pager),
-  `/bin/clear` (eine
+  `/bin/edit` (ein Full-Screen-Texteditor), `/bin/clear` (eine
   Bildschirmlöschung) und `/bin/passwd`. Liest beim Start
-  `/etc/fshrc`; `sys_chdir` gibt jedem Task ein Arbeitsverzeichnis.
-  Noch kein Userland-Allocator — jeder Puffer ist fest dimensioniert,
-  stack/static.
+  `/etc/fshrc`; `sys_chdir` gibt jedem Task ein Arbeitsverzeichnis. Die
+  coreutils nutzen fest dimensionierte stack/static-Puffer; der
+  Userland-Heap (`brk`/`sbrk` hinter flibcs Bump-`malloc`) hat seinen
+  ersten Konsumenten im wachsbaren Puffer von `/bin/edit`.
 - **Prozess-Identität, Login & Berechtigungen.** Jeder Task
   trägt reale + effektive uid/gid (über `fork` vererbt, über `execve`
   bewahrt) hinter einer ABI der `getuid`/`setuid`-Familie, und jede
@@ -159,8 +162,8 @@ Stress-Zyklen hinweg, geprüft durch ein kernelinternes
   (Laufzeit intakt, aber derzeit inert — Zig hat noch kein Äquivalent
   zu `-fpatchable-function-entry=2`).
 - **Kernelinternes Test-Harness** (`[TEST]/[PASS]/[FAIL]` + Bilanz, 30
-  Szenarien) plus eine host-seitige `zig build test`-Suite (415
-  Host-Tests über 39 Module).
+  Szenarien) plus eine host-seitige `zig build test`-Suite (468
+  Host-Tests über 41 Module).
 
 ## Schnellstart
 
@@ -237,7 +240,7 @@ und das Setup der seriellen Konsole.
 | `zig build -Dboard=virt test-virt`   | virt booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht    |
 | `zig build -Dboard=rpi4b test-rpi4b` | raspi4b booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht |
 | `zig build -Dboard=virt iso`         | Eine GRUB-EFI-Rescue-ISO bauen (nur virt)                            |
-| `zig build test`                     | Host-seitige Unit-Tests (415 tests, 39 modules)                      |
+| `zig build test`                     | Host-seitige Unit-Tests (468 tests, 41 modules)                      |
 | `zig build clean`                    | `.zig-cache/` und `zig-out/` entfernen                                |
 
 Der Standard-Optimierungsmodus ist `ReleaseSmall`. Mit
@@ -314,4 +317,4 @@ Apache License, Version 2.0. Siehe [Lizenz](../../LICENSE.md).
 
 [Als Nächstes: Dokumentation →](DOCUMENTATION.md)
 
-<!-- sync-ref: README.md @ b0d131a75b94b2c21e0d10fed9424bde38e664a2 | synced 2026-06-17 -->
+<!-- sync-ref: README.md @ 0a9d568ee52436afe4be497a523c67c369df150e | synced 2026-06-18 -->

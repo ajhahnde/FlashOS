@@ -1,0 +1,559 @@
+// edit — the full-screen text editor for /bin/edit.
+//
+// The second interactive consumer of the navigation scaffold (after /bin/less)
+// and the first writer: where less proved read-only paging over the pure
+// pager core, edit proves mutation over the pure gap-buffer core. It slurps a
+// file into a heap-backed gap buffer, takes over the console with
+// screen.enter(), turns keys from flibc.readKey()'s VT100 decoder into edits
+// and motions through flibc.gapbuf, and writes the buffer back on ctrl-O. It is
+// the first real consumer of the heap (brk/sbrk + flibc malloc); the kernel
+// already provides everything, so this slot is pure userland.
+//
+// Architecture: the editing logic lives in three pure, host-tested cores —
+// gapbuf.GapBuf (storage), gapbuf.LineIndex (lines + cursor motions),
+// gapbuf.Viewport (scroll) — and grep_match.find (search). This file is the
+// driver: argv, slurp, the screen dance, the render loop, and the save path.
+// The interactive loop cannot run under QEMU (no PL011-RX stdin), so the cores'
+// host tests are the correctness proof and the Pi is the only live witness.
+//
+// Cursor invariant: the gap buffer's gap_start always equals the logical cursor
+// offset `cur`. Navigation moves the gap to the new cursor; an insert/delete
+// acts at the gap and then re-reads cur from the buffer. So byteAt() during
+// render and linearize() at save both see the text in logical order regardless.
+//
+// Save = unlink + create + write (not in-place): the FAT32 backend's write only
+// *grows* file_size — it has no truncate — so overwriting a file that got
+// shorter would leave a stale tail at the wrong size. Recreating the file gives
+// the correct fresh size every time, at the cost of a small unlink<->write crash
+// window (single-user hobby OS; atomic temp+rename is future work).
+//
+// Current limits (deferred): one logical line == one screen row
+// (horizontal scroll, no soft-wrap); no undo; tabs render as a single space and
+// other non-printables as '?' (display only — save preserves the raw bytes);
+// fixed 24x80 geometry; line index capped at MAX_LINES. Kept out of the CI
+// FSH_SCRIPT — interactive, so the boot baseline stays deterministic.
+
+use flibc
+use console_ui
+use gapbuf
+use grep_match
+
+link "flibc_start"
+link "flibc_mem"
+
+// Assumed serial-terminal geometry (no window-size ioctl exists). Row 1 is the
+// header, row ROWS the status/prompt line, the rest content.
+const ROWS usize = 24
+const HEADER usize = 1
+const STATUS usize = 1
+const CONTENT usize = ROWS - HEADER - STATUS // visible content rows (22)
+const COLS usize = 80
+
+const MAX_LINES usize = 4096 // line-index slots (on the stack)
+const SLURP usize = 4096 // file read chunk
+const INITIAL_CAP usize = 64 * 1024 // first gap-buffer block (no fstat to size it)
+const MAX_CAP usize = 4 * 1024 * 1024 // refuse to grow past this — clean stop, no OOM zombie
+
+fn sink(bytes []u8) void {
+    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
+}
+
+// Editor state. The gap buffer's storage is on the heap (malloc, grown on a
+// full gap); the line index slots are caller-owned on main's stack.
+const Ed = struct {
+    gb gapbuf.GapBuf,
+    li gapbuf.LineIndex,
+    vp gapbuf.Viewport,
+    cur usize, // logical cursor offset (== gb.gap_start, by invariant)
+    cap usize, // current storage capacity in bytes
+    dirty bool,
+    is_new bool, // file did not exist at open — skip the unlink on save
+    path [*:0]u8,
+}
+
+export fn main(argc usize, argv argv) noreturn {
+    if argc < 2 || argv[1] == null {
+        sink("usage: edit <file>\n")
+        flibc.exit()
+    }
+    path := argv[1].?
+
+    // Allocate the initial gap-buffer block on the heap (the first heap user).
+    const cap usize = INITIAL_CAP
+    const store_ptr = flibc.malloc(cap)
+    if store_ptr == null {
+        sink("edit: out of memory\n")
+        flibc.exit()
+    }
+    const store = store_ptr.?[0..cap]
+
+    var slots [MAX_LINES]u32 = undefined
+    var ed Ed = .{
+        .gb = gapbuf.GapBuf.init(store),
+        .li = .{ .lines = slots[0..], .n = 0, .total = 0 },
+        .vp = .{ .rows = CONTENT, .cols = COLS },
+        .cur = 0,
+        .cap = cap,
+        .dirty = false,
+        .is_new = false,
+        .path = path,
+    }
+
+    // Slurp the file into the buffer (the fd is not held past the read). A
+    // non-existent file opens as an empty [New File] buffer.
+    slurp(&ed)
+
+    // Cursor home at the top; index the lines.
+    ed.cur = 0
+    ed.gb.moveGap(0)
+    ed.li.rebuild(ed.gb)
+
+    // Take over the console: raw mode (echo off) + alternate screen, and show
+    // the cursor (screen.enter hides it — a pager wants that, an editor does not).
+    _ = flibc.sys.set_console_mode(0)
+    console_ui.screen.enter(sink)
+    sink("\x1b[?25h")
+    render(&ed)
+
+    loop(&ed)
+
+    // Every exit path restores the shell view. Mode stays 0 (the shell's own
+    // baseline; fsh re-asserts it after wait() as a backstop), matching less.
+    console_ui.screen.leave(sink)
+    flibc.exit()
+}
+
+// The key loop. Returns when the user exits (ctrl-X, or ctrl-C/EOF).
+fn loop(ed *mut Ed) void {
+    while true {
+        ev := flibc.readKey()
+        switch ev.key {
+            .eof, .ctrl_c => return,
+            .ctrl_x => {
+                if exitConfirmed(ed) {
+                    return
+                }
+            },
+            .ctrl_o => {
+                _ = save(ed)
+            },
+            .ctrl_w => search(ed),
+            .up => moveTo(ed, ed.li.moveUp(ed.cur)),
+            .down => moveTo(ed, ed.li.moveDown(ed.cur)),
+            .left => moveTo(ed, gapbuf.moveLeft(ed.cur)),
+            .right => moveTo(ed, gapbuf.moveRight(ed.cur, ed.gb.len())),
+            .home => moveTo(ed, ed.li.home(ed.cur)),
+            .end => moveTo(ed, ed.li.end(ed.cur)),
+            .page_up => pageMove(ed, true),
+            .page_down => pageMove(ed, false),
+            .enter => {
+                _ = insertByte(ed, '\n')
+            },
+            .backspace => deleteBack(ed),
+            .delete => deleteFwd(ed),
+            .char => {
+                _ = insertByte(ed, ev.ch)
+            },
+            else => {}, // tab / escape / none — ignored for now
+        }
+        render(ed)
+    }
+}
+
+// ---- mutation (keeps the gap_start == cur invariant, re-indexes lines) ------
+
+// Grow the storage by doubling, preserving content + cursor. False if the cap
+// is hit or the heap rejects the allocation (a clean stop, not a crash).
+fn grow(ed *mut Ed) bool {
+    const newcap = ed.cap * 2
+    if newcap > MAX_CAP {
+        return false
+    }
+    if flibc.malloc(newcap) |raw| {
+        ed.gb.growInto(raw[0..newcap])
+        ed.cap = newcap
+        return true
+    }
+    return false
+}
+
+fn insertByte(ed *mut Ed, b u8) bool {
+    if ed.gb.gapLen() == 0 {
+        if !grow(ed) {
+            return false
+        }
+    }
+    _ = ed.gb.insert(b)
+    ed.cur = ed.gb.cursor()
+    ed.dirty = true
+    ed.li.rebuild(ed.gb)
+    return true
+}
+
+fn deleteBack(ed *mut Ed) void {
+    if ed.gb.deleteBack() {
+        ed.cur = ed.gb.cursor()
+        ed.dirty = true
+        ed.li.rebuild(ed.gb)
+    }
+}
+
+fn deleteFwd(ed *mut Ed) void {
+    if ed.gb.deleteFwd() {
+        // cursor (gap_start) unchanged by a forward delete
+        ed.dirty = true
+        ed.li.rebuild(ed.gb)
+    }
+}
+
+// ---- navigation ------------------------------------------------------------
+
+fn moveTo(ed *mut Ed, to usize) void {
+    ed.cur = to
+    ed.gb.moveGap(to)
+}
+
+// Page up/down by a content window of lines, one moveUp/moveDown step at a time
+// so the column-clamp logic stays in the line index.
+fn pageMove(ed *mut Ed, up bool) void {
+    var i usize = 0
+    var pos = ed.cur
+    while i < CONTENT {
+        pos = if (up) ed.li.moveUp(pos) else ed.li.moveDown(pos)
+        i += 1
+    }
+    moveTo(ed, pos)
+}
+
+// ---- save (unlink + create + write — shrink correctness) -------------------
+
+// Write the buffer back to its path. Returns false on any failure (reported on
+// the status line by the caller's next render). Empty buffers create an empty
+// file. The old file is unlinked first so the recreated file always carries the
+// correct, possibly smaller, size.
+fn save(ed *mut Ed) bool {
+    const total = ed.gb.len()
+
+    if !ed.is_new {
+        _ = flibc.sys.unlink(ed.path)
+    }
+    const fd = flibc.sys.create(ed.path)
+    if fd < 0 {
+        return false
+    }
+
+    var ok bool = true
+    if total > 0 {
+        // Linearize into a fresh heap block (page-aligned, so the copy is
+        // alignment-safe) and stream it to the file. The block is abandoned
+        // (free() is a no-op) — saves are infrequent and reaped on exit.
+        if flibc.malloc(total) |raw| {
+            const buf = raw[0..total]
+            _ = ed.gb.linearize(buf)
+            var off usize = 0
+            while off < total {
+                const w = flibc.sys.write_fd(fd, buf[off..].ptr, total - off)
+                if w <= 0 {
+                    ok = false
+                    break
+                }
+                off += #intCast(w)
+            }
+        } else {
+            ok = false
+        }
+    }
+
+    _ = flibc.sys.close(fd)
+    if ok {
+        ed.is_new = false
+        ed.dirty = false
+    }
+    return ok
+}
+
+// ctrl-X: confirm a save if the buffer is dirty. Returns true when the editor
+// should exit (saved, or discarded), false to keep editing (cancelled).
+fn exitConfirmed(ed *mut Ed) bool {
+    if !ed.dirty {
+        return true
+    }
+    const c = confirm(" save modified buffer?  y = save   n = discard   esc = cancel")
+    if c == 'y' {
+        return save(ed)
+    }
+    if c == 'n' {
+        return true
+    }
+    return false
+}
+
+// ---- search (ctrl-W — reuses grep_match.find over a linearized snapshot) ----
+
+fn search(ed *mut Ed) void {
+    var pbuf [COLS]u8 = undefined
+    if promptLine(" search: ", pbuf[0..]) |plen| {
+        if plen == 0 {
+            return
+        }
+        const total = ed.gb.len()
+        if total == 0 {
+            return
+        }
+        if flibc.malloc(total) |raw| {
+            const snap = raw[0..total]
+            _ = ed.gb.linearize(snap)
+            const needle = pbuf[0..plen]
+            // Search forward from just past the cursor; wrap to the top if the
+            // tail has no hit, so a repeated ctrl-W cycles through all matches.
+            var hit = grep_match.find(snap, needle, ed.cur + 1)
+            if hit == null {
+                hit = grep_match.find(snap, needle, 0)
+            }
+            if hit |at| {
+                moveTo(ed, at)
+            }
+        }
+    }
+}
+
+// ---- prompts (status-line input) -------------------------------------------
+
+// Edit a short string on the status row. Returns its length, or null if the
+// user cancelled (escape / ctrl-C). Used for the search pattern.
+fn promptLine(label []u8, buf []mut u8) ?usize {
+    var len usize = 0
+    while true {
+        console_ui.screen.moveTo(sink, #intCast(ROWS), 1)
+        sink("\x1b[2K") // erase the status line
+        sink(label)
+        sink(buf[0..len])
+        const ev = flibc.readKey()
+        switch ev.key {
+            .enter => return len,
+            .escape, .ctrl_c => return null,
+            .backspace => {
+                if len > 0 {
+                    len -= 1
+                }
+            },
+            .char => {
+                if len < buf.len {
+                    buf[len] = ev.ch
+                    len += 1
+                }
+            },
+            else => {},
+        }
+    }
+}
+
+// Draw a one-line prompt and read a single decision key. Returns 'y', 'n', or 0
+// (cancel: escape / ctrl-C / anything else).
+fn confirm(msg []u8) u8 {
+    console_ui.screen.moveTo(sink, #intCast(ROWS), 1)
+    sink("\x1b[2K")
+    sink(msg)
+    const ev = flibc.readKey()
+    if ev.key == .char {
+        if ev.ch == 'y' || ev.ch == 'Y' {
+            return 'y'
+        }
+        if ev.ch == 'n' || ev.ch == 'N' {
+            return 'n'
+        }
+    }
+    return 0
+}
+
+// ---- rendering -------------------------------------------------------------
+
+// Repaint the whole screen and park the visible cursor at the edit position.
+// scrollTo runs first so the content rows and the cursor share one viewport.
+fn render(ed *mut Ed) void {
+    const rc = ed.li.locate(ed.cur)
+    ed.vp.scrollTo(rc.row, rc.col)
+
+    console_ui.screen.clear(sink)
+    renderHeader(ed)
+    renderContent(ed)
+    renderStatus(ed, rc)
+
+    const trow u16 = #intCast(HEADER + ed.vp.screenRow(rc.row) + 1)
+    const tcol u16 = #intCast(ed.vp.screenCol(rc.col) + 1)
+    console_ui.screen.moveTo(sink, trow, tcol)
+}
+
+// Row 1: program, filename, and a modified / new-file marker, padded to COLS.
+fn renderHeader(ed *Ed) void {
+    var hb [COLS]u8 = undefined
+    const dst [*]mut volatile u8 = hb[0..].ptr
+    var i usize = 0
+    i = put(dst, i, "edit: ")
+    i = putc(dst, i, baseName(ed.path))
+    if ed.is_new {
+        i = put(dst, i, "  [New File]")
+    } else if ed.dirty {
+        i = put(dst, i, "  *")
+    }
+    while i < COLS {
+        dst[i] = ' '
+        i += 1
+    }
+    sink(hb[0..COLS])
+    sink("\n")
+}
+
+// Rows 2..ROWS-1: the visible content window, each logical line clipped to the
+// horizontal viewport and to COLS, non-printables substituted. '~' past EOF.
+fn renderContent(ed *Ed) void {
+    var rb [COLS]u8 = undefined
+    var row usize = 0
+    while row < CONTENT {
+        const idx = ed.vp.top + row
+        if idx < ed.li.n {
+            sink(rb[0..buildRow(ed, idx, rb[0..])])
+        } else {
+            sink("~")
+        }
+        sink("\n")
+        row += 1
+    }
+}
+
+// Fill `buf` with line `idx`, starting at the viewport's left column, clipped to
+// COLS, each byte mapped to one display cell. Returns the count written.
+fn buildRow(ed *Ed, idx usize, buf []mut u8) usize {
+    const dst [*]mut volatile u8 = buf.ptr
+    const start = ed.li.lineStart(idx)
+    const llen = ed.li.lineLen(idx)
+    var w usize = 0
+    var c = ed.vp.left
+    while c < llen && w < COLS {
+        dst[w] = displayByte(ed.gb.byteAt(start + c))
+        w += 1
+        c += 1
+    }
+    return w
+}
+
+// Row ROWS: cursor position and the key legend. No trailing newline (the
+// alt-screen must not scroll). Cleared by the next frame's screen.clear.
+fn renderStatus(ed *Ed, rc gapbuf.RowCol) void {
+    sink(" ")
+    emitDec(rc.row + 1)
+    sink(":")
+    emitDec(rc.col + 1)
+    if ed.dirty {
+        sink(" [modified]")
+    }
+    sink("   ^O write  ^W find  ^X exit")
+}
+
+// '\t' -> single space, other non-printables -> '?', printables verbatim. Keeps
+// every byte to one display cell so a column is a byte offset.
+fn displayByte(b u8) u8 {
+    if b == '\t' {
+        return ' '
+    }
+    if b >= 0x20 && b < 0x7f {
+        return b
+    }
+    return '?'
+}
+
+// ---- small helpers (mirror less.flash) -------------------------------------
+
+// Copy a static string through the volatile dst (strict-align safe), returning
+// the new write offset.
+fn put(dst [*]mut volatile u8, at usize, s []u8) usize {
+    var i = at
+    for ch in s {
+        if i >= COLS {
+            break
+        }
+        dst[i] = ch
+        i += 1
+    }
+    return i
+}
+
+// Like put, but for a runtime slice (the file's base name).
+fn putc(dst [*]mut volatile u8, at usize, s []u8) usize {
+    return put(dst, at, s)
+}
+
+// Last path component as a slice into the argv string (no copy).
+fn baseName(path cstr) []u8 {
+    var len usize = 0
+    while path[len] != 0 {
+        len += 1
+    }
+    var start usize = 0
+    var i usize = 0
+    while i < len {
+        if path[i] == '/' {
+            start = i + 1
+        }
+        i += 1
+    }
+    return path[start..len]
+}
+
+fn emitDec(v u64) void {
+    var buf [20]u8 = undefined
+    sink(buf[0..u64dec(buf[0..], v)])
+}
+
+fn u64dec(out []mut u8, v u64) usize {
+    if v == 0 {
+        out[0] = '0'
+        return 1
+    }
+    var tmp [20]u8 = undefined
+    var n usize = 0
+    var x u64 = v
+    while x != 0 {
+        tmp[n] = '0' + #as(u8, #intCast(x % 10))
+        n += 1
+        x /= 10
+    }
+    var i usize = 0
+    while i < n {
+        out[i] = tmp[n - 1 - i]
+        i += 1
+    }
+    return n
+}
+
+// ---- file slurp ------------------------------------------------------------
+
+// Read the whole file into the gap buffer, growing on demand. fd is opened,
+// drained, and closed here — never held across the edit loop. A file that
+// cannot be opened leaves an empty buffer flagged [New File].
+fn slurp(ed *mut Ed) void {
+    const fd = flibc.sys.open(ed.path)
+    if fd < 0 {
+        ed.is_new = true
+        return
+    }
+    var tmp [SLURP]u8 = undefined
+    while true {
+        const r = flibc.sys.read(fd, tmp[0..].ptr, SLURP)
+        if r <= 0 {
+            break
+        }
+        const got usize = #intCast(r)
+        var fed usize = 0
+        while fed < got {
+            fed += ed.gb.insertSlice(tmp[fed..got])
+            if fed < got {
+                // Gap exhausted mid-chunk — grow and keep feeding.
+                if !grow(ed) {
+                    break // MAX_CAP hit: load what fit, the rest is dropped
+                }
+            }
+        }
+    }
+    _ = flibc.sys.close(fd)
+}

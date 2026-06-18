@@ -9,7 +9,7 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.6.0-f59e0b?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.7.0-f59e0b?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/zig-0.16.0-lightgrey?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
@@ -115,10 +115,12 @@ harness and a host-side unit test suite.
   `/bin/meminfo`, `/bin/forkbomb` (a capped leak probe),
   `/bin/sysinfo` (a key/value system summary), `/bin/cpuinfo` (CPU
   temperature + clock), `/bin/uptime` (time since boot), `/bin/less` (a
-  full-screen pager), `/bin/clear` (a screen wipe), and `/bin/passwd`. Reads
+  full-screen pager), `/bin/edit` (a full-screen text editor), `/bin/clear`
+  (a screen wipe), and `/bin/passwd`. Reads
   `/etc/fshrc` at startup; `sys_chdir` gives each
-  task a working directory. No userland allocator yet — every buffer is
-  fixed-size stack/static.
+  task a working directory. The coreutils use fixed-size stack/static
+  buffers; the userland heap (`brk`/`sbrk` behind flibc's bump `malloc`)
+  has its first consumer in `/bin/edit`'s growable buffer.
 - **Process identity, login & permissions.** Every task carries
   real + effective uid/gid (inherited across `fork`, preserved across
   `execve`) behind a `getuid`/`setuid`-family ABI, and every file carries
@@ -150,8 +152,8 @@ harness and a host-side unit test suite.
   currently inert — Zig has no `-fpatchable-function-entry=2`
   equivalent yet).
 - **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 30
-  scenarios) plus a host-side `zig build test` suite (445 host
-  tests across 40 modules).
+  scenarios) plus a host-side `zig build test` suite (468 host
+  tests across 41 modules).
 
 ## Quick start
 
@@ -227,7 +229,7 @@ serial-console setup.
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
-| `zig build test`                     | Host-side unit tests (445 tests, 40 modules)                   |
+| `zig build test`                     | Host-side unit tests (468 tests, 41 modules)                   |
 | `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                        |
 
 The default optimisation mode is `ReleaseSmall`. Override with

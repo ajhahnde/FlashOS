@@ -29,6 +29,31 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-06-18
+
+### Added
+
+- **`/bin/edit` — a full-screen text editor.** `edit <file>` slurps a file
+  into a heap-backed gap buffer, takes over the console with the alternate
+  screen + raw mode, and edits it in place: arrows / Home / End / PgUp / PgDn
+  navigate, printable keys insert, Backspace / Delete remove, Enter splits the
+  line, `ctrl-O` writes, `ctrl-W` searches forward from the cursor, and
+  `ctrl-X` exits (prompting to save a modified buffer). It is the **first real
+  consumer of the userland heap** — the `brk` / `sbrk` syscalls behind flibc's
+  bump `malloc`, which already existed — so it adds **no new syscall**
+  (`NR_SYSCALLS` holds) and **no kernel change**; it is pure userland. Save is
+  **unlink + create + write** rather than in-place, because the FAT32 backend's
+  `write` only grows `file_size` (there is no truncate): recreating the file
+  yields the correct, possibly smaller, size every time. The editing logic is
+  three new pure, host-tested flibc cores — `gapbuf.GapBuf` (storage),
+  `gapbuf.LineIndex` (lines + cursor motions), `gapbuf.Viewport` (scroll) —
+  plus a reused `grep_match.find` for search; the `keys` VT100 decoder gained
+  Delete / Home / End / PgUp / PgDn and the `ctrl-O/W/X` chords. Like
+  `/bin/less` it is interactive, so its edit loop is validated on real Pi
+  hardware and kept out of the CI boot script. Limits (deferred): one
+  logical line per screen row (horizontal scroll, no soft-wrap), no undo, tabs
+  shown as a single space, fixed 24×80 geometry.
+
 ## [v0.6.0] - 2026-06-18
 
 ### Added
@@ -342,7 +367,8 @@ highlights are below.
 - **Kernel symbol table** generated from the linked ELF by a two-pass
   build step, so panics and the profiler can print real names.
 
-[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.7.0...HEAD
+[v0.7.0]: https://github.com/ajhahnde/FlashOS/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/ajhahnde/FlashOS/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/ajhahnde/FlashOS/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/ajhahnde/FlashOS/compare/v0.3.0...v0.4.0

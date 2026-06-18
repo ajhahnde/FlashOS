@@ -1800,6 +1800,48 @@ pub fn build(b: *std.Build) void {
     less.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     less.entry = .disabled;
 
+    // ---- edit.elf — full-screen text editor ----
+    // Second interactive consumer of the navigation scaffold and the first
+    // writer: slurps a file into a heap-backed gap buffer (the first real heap
+    // user — brk/sbrk + flibc malloc), edits it via the pure flibc.gapbuf cores,
+    // and writes it back on ctrl-O (unlink + create + write — FAT32 has no
+    // truncate). Reuses grep_match.find for ctrl-W search. Imports flibc +
+    // console_ui (like less) plus the two pure cores. Same recipe as less
+    // (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
+    // coreutil_linker.ld). Staged at /bin/edit; kept out of the CI FSH_SCRIPT
+    // (interactive — no QEMU stdin — so the free-page baseline stays
+    // deterministic). gapbuf is a standalone module like grep_match, not part of
+    // the flibc aggregate, so it adds no footprint to existing boot binaries.
+    // Source is Flash (tools/edit.flash) — flashc transpiles it at build time.
+    const gapbuf_gen = addFlashSource(b, "user_space/lib/flibc/gapbuf.flash");
+    const gapbuf_mod = b.createModule(.{
+        .root_source_file = gapbuf_gen,
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const edit_mod = b.createModule(.{
+        .root_source_file = addFlashSource(b, "tools/edit.flash"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+    });
+    edit_mod.addImport("flibc", flibc_mod);
+    edit_mod.addImport("flibc_start", flibc_start_mod);
+    edit_mod.addImport("flibc_mem", flibc_mem_mod);
+    edit_mod.addImport("console_ui", console_ui_mod);
+    edit_mod.addImport("gapbuf", gapbuf_mod);
+    edit_mod.addImport("grep_match", grep_match_mod);
+    const edit = b.addExecutable(.{
+        .name = "edit.elf",
+        .root_module = edit_mod,
+    });
+    edit.pie = false;
+    edit.bundle_compiler_rt = false;
+    edit.link_z_max_page_size = 0x80;
+    edit.link_z_common_page_size = 0x80;
+    edit.setLinkerScript(b.path("tools/coreutil_linker.ld"));
+    edit.entry = .disabled;
+
     // ---- clear.elf — terminal-clear coreutil ----
     // Smallest console_ui consumer: emits the shared screen-clear sequence
     // (console_ui.screen.clear) and exits, so the escape bytes stay
@@ -1998,6 +2040,7 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(cpuinfo.getEmittedBin(), "bin/cpuinfo");
     _ = cpio_stage.addCopyFile(dmesg.getEmittedBin(), "bin/dmesg");
     _ = cpio_stage.addCopyFile(echo.getEmittedBin(), "bin/echo");
+    _ = cpio_stage.addCopyFile(edit.getEmittedBin(), "bin/edit");
     _ = cpio_stage.addCopyFile(forkbomb.getEmittedBin(), "bin/forkbomb");
     _ = cpio_stage.addCopyFile(fsh.getEmittedBin(), "bin/fsh");
     _ = cpio_stage.addCopyFile(grep.getEmittedBin(), "bin/grep");
@@ -2040,6 +2083,7 @@ pub fn build(b: *std.Build) void {
         .{ .arc = "bin/cpuinfo", .mode = 0o100755 },
         .{ .arc = "bin/dmesg", .mode = 0o100755 },
         .{ .arc = "bin/echo", .mode = 0o100755 },
+        .{ .arc = "bin/edit", .mode = 0o100755 },
         .{ .arc = "bin/forkbomb", .mode = 0o100755 },
         .{ .arc = "bin/fsh", .mode = 0o100755 },
         .{ .arc = "bin/grep", .mode = 0o100755 },
@@ -2520,6 +2564,16 @@ pub fn build(b: *std.Build) void {
     // indexing, line slicing, scroll clamping). The screen.enter + readKey
     // driver lives in tools/less_elf.zig. No stubs, no imports.
     _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/pager.flash", .src_lazy = flibc_srcs.get("pager").? });
+
+    // flibc gapbuf.zig — pure editing core host coverage (gap insert/delete/
+    // moveGap/grow, segment line index, cursor motions, viewport scroll). The
+    // interactive loop the editor builds on it lives in tools/edit.flash and is
+    // Pi-only (no QEMU stdin), so these host tests are the correctness proof. A
+    // standalone module like grep_match — not part of the flibc aggregate, so it
+    // adds no footprint to existing boot binaries. The generated source is shared
+    // with edit.elf's module (gapbuf_gen, declared at the edit wiring above). No
+    // stubs, no imports.
+    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/gapbuf.flash", .src_lazy = gapbuf_gen });
 
     // virt DTB parser — pure big-endian FDT decode + bounds guards.
     // The handoff entry (`fromHandoff`) reads the `dtb_pa` extern and the

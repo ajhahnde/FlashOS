@@ -1,0 +1,568 @@
+// flibc gap-buffer core — the pure editing state machine /bin/edit drives.
+//
+// The fourth navigation seam, sitting beside keys.flash (input), screen.flash
+// (output) and pager.flash (read-only scrolling): the mutable-text logic an
+// editor needs. Three pure pieces, each host-tested in isolation so the
+// interactive loop — which QEMU cannot exercise (no PL011-RX stdin), leaving
+// the Pi as the only live witness — rests on a correctness proof that runs
+// under `zig build test`:
+//
+//   * GapBuf    — a growable byte buffer with a movable gap at the cursor, so
+//                 insert / delete at the cursor are O(1) and allocation-free.
+//   * LineIndex — line-start offsets recomputed on change, plus the cursor
+//                 motions (left/right/up/down/home/end) that are the
+//                 off-by-one-prone half of an editor.
+//   * Viewport  — top/left scroll state with cursor-follow clamping, including
+//                 horizontal scroll (one logical line == one screen row; no
+//                 soft-wrap in this version).
+//
+// Pure by construction, like its siblings: no SVC, no module state, no flibc
+// dependency. The two allocating concerns live with the caller (tools/edit.flash):
+// the storage array and the grow are caller-owned, so GapBuf never names malloc
+// and the host build allocates plain stack arrays. The grow strategy (double on
+// a full gap) suits flibc's bump allocator whose free() is a no-op — only the
+// rare doublings leak, and they are reaped on process exit.
+//
+// Column model: each byte renders to exactly one display cell (the renderer
+// substitutes a placeholder for non-printables, including TAB), so a column is
+// a byte offset within its line. Real tab-stop expansion is deferred — it would
+// make column<->offset mapping non-trivial and is future work.
+//
+// Zero footprint until referenced: analysed only when /bin/edit names it, so
+// staging the file leaves every current boot binary byte-identical.
+
+// ---- gap buffer ------------------------------------------------------------
+
+/// A growable text buffer with a gap at the cursor. The gap is the half-open
+/// physical range [gap_start, gap_end); logical text is everything else, in
+/// order. The logical cursor sits at gap_start (the left segment is
+/// [0, gap_start)), so a left/right cursor move is a moveGap and an insert is a
+/// single store into the gap. Storage is caller-owned (rule 1 — no allocator);
+/// when the gap empties, the caller hands a larger array to growInto().
+pub const GapBuf = struct {
+    buf []mut u8, // caller-owned backing store
+    gap_start usize, // first byte of the gap (== logical cursor)
+    gap_end usize, // one past the last gap byte
+
+    /// An empty buffer whose gap spans the whole of `storage`.
+    pub fn init(storage []mut u8) GapBuf {
+        return .{ .buf = storage, .gap_start = 0, .gap_end = storage.len }
+    }
+
+    /// Bytes of free gap remaining — the number of inserts before a grow.
+    pub fn gapLen(self GapBuf) usize {
+        return self.gap_end - self.gap_start
+    }
+
+    /// Logical text length (storage minus the gap).
+    pub fn len(self GapBuf) usize {
+        return self.buf.len - self.gapLen()
+    }
+
+    /// Current cursor position, as a logical offset.
+    pub fn cursor(self GapBuf) usize {
+        return self.gap_start
+    }
+
+    /// The i-th logical byte. The caller guarantees i < len(); bytes at or past
+    /// the cursor live after the gap, so they are read past gap_end.
+    pub fn byteAt(self GapBuf, i usize) u8 {
+        if i < self.gap_start {
+            return self.buf[i]
+        }
+        return self.buf[i + self.gapLen()]
+    }
+
+    /// Move the cursor to logical offset `to` (0..=len()) by shifting the bytes
+    /// that cross the gap. Moving left slides [to, gap_start) to just before
+    /// gap_end; moving right slides [gap_end, ...) down into gap_start. O(distance).
+    pub fn moveGap(self *mut GapBuf, to usize) void {
+        if to < self.gap_start {
+            const count = self.gap_start - to
+            var k usize = 0
+            while k < count {
+                self.buf[self.gap_end - 1 - k] = self.buf[self.gap_start - 1 - k]
+                k += 1
+            }
+            self.gap_end -= count
+            self.gap_start = to
+        } else if to > self.gap_start {
+            const count = to - self.gap_start
+            var k usize = 0
+            while k < count {
+                self.buf[self.gap_start + k] = self.buf[self.gap_end + k]
+                k += 1
+            }
+            self.gap_start += count
+            self.gap_end += count
+        }
+    }
+
+    /// Insert one byte at the cursor. Returns false (and inserts nothing) when
+    /// the gap is full — the caller grows and retries.
+    pub fn insert(self *mut GapBuf, b u8) bool {
+        if self.gap_start >= self.gap_end {
+            return false
+        }
+        self.buf[self.gap_start] = b
+        self.gap_start += 1
+        return true
+    }
+
+    /// Insert as many of `s` as the gap holds, returning the count inserted.
+    pub fn insertSlice(self *mut GapBuf, s []u8) usize {
+        var i usize = 0
+        while i < s.len {
+            if !self.insert(s[i]) {
+                break
+            }
+            i += 1
+        }
+        return i
+    }
+
+    /// Delete the byte before the cursor (Backspace). Returns false at offset 0.
+    pub fn deleteBack(self *mut GapBuf) bool {
+        if self.gap_start == 0 {
+            return false
+        }
+        self.gap_start -= 1
+        return true
+    }
+
+    /// Delete the byte at the cursor (Delete). Returns false at end of buffer.
+    pub fn deleteFwd(self *mut GapBuf) bool {
+        if self.gap_end >= self.buf.len {
+            return false
+        }
+        self.gap_end += 1
+        return true
+    }
+
+    /// Copy the logical text (both segments, in order) into `out`, returning the
+    /// byte count. `out` must hold len() bytes — the save path sizes it so. The
+    /// gap is skipped, so the result is exactly the file content.
+    pub fn linearize(self GapBuf, out []mut u8) usize {
+        var w usize = 0
+        var k usize = 0
+        while k < self.gap_start {
+            out[w] = self.buf[k]
+            w += 1
+            k += 1
+        }
+        k = self.gap_end
+        while k < self.buf.len {
+            out[w] = self.buf[k]
+            w += 1
+            k += 1
+        }
+        return w
+    }
+
+    /// Rebind to a larger caller-owned `bigger` store, preserving content and
+    /// cursor: the left segment keeps its offsets, the right segment moves to the
+    /// tail, and the gap widens by the size difference. `bigger.len` must be at
+    /// least the current content length. The old store is abandoned (flibc free()
+    /// is a no-op; reaped on exit).
+    pub fn growInto(self *mut GapBuf, bigger []mut u8) void {
+        const rlen = self.buf.len - self.gap_end
+        var k usize = 0
+        while k < self.gap_start {
+            bigger[k] = self.buf[k]
+            k += 1
+        }
+        k = 0
+        while k < rlen {
+            bigger[bigger.len - rlen + k] = self.buf[self.gap_end + k]
+            k += 1
+        }
+        self.buf = bigger
+        self.gap_end = bigger.len - rlen
+        // gap_start (the cursor) is unchanged.
+    }
+}
+
+// ---- line index ------------------------------------------------------------
+
+/// (row, col) cursor coordinate — a logical line and a byte column within it.
+pub const RowCol = struct {
+    row usize,
+    col usize,
+}
+
+/// Line-start offsets over a GapBuf, plus the cursor motions. The segment model:
+/// a buffer with k newlines has k+1 lines, so a trailing '\n' yields a final
+/// empty line the cursor can navigate onto and type into — the editor view,
+/// distinct from pager.flash which swallows a trailing newline for a read-only
+/// page. An empty buffer is one empty line. `lines` is caller-owned (rule 1);
+/// recompute via rebuild() after every edit (cheap for the small files this editor targets).
+pub const LineIndex = struct {
+    lines []mut u32, // caller-owned; lines[0..n] are line-start byte offsets
+    n usize, // number of lines (>= 1 once rebuilt over a non-empty slots array)
+    total usize, // logical buffer length at the last rebuild
+
+    /// Build an index over `gb` into `slots`.
+    pub fn init(slots []mut u32, gb GapBuf) LineIndex {
+        var li = LineIndex{ .lines = slots, .n = 0, .total = 0 }
+        li.rebuild(gb)
+        return li
+    }
+
+    /// Recompute line starts from the current buffer. Line 0 starts at 0; every
+    /// byte after a '\n' starts the next line. Capped at slots.len lines so a
+    /// pathological all-newline buffer cannot overrun the caller's array.
+    pub fn rebuild(self *mut LineIndex, gb GapBuf) void {
+        self.total = gb.len()
+        if self.lines.len == 0 {
+            self.n = 0
+            return
+        }
+        self.lines[0] = 0
+        var n usize = 1
+        var i usize = 0
+        while i < self.total {
+            if gb.byteAt(i) == '\n' {
+                if n >= self.lines.len {
+                    break
+                }
+                self.lines[n] = #intCast(i + 1)
+                n += 1
+            }
+            i += 1
+        }
+        self.n = n
+    }
+
+    /// Start offset of line `i` (caller ensures i < n).
+    pub fn lineStart(self LineIndex, i usize) usize {
+        return self.lines[i]
+    }
+
+    /// Byte length of line `i`, excluding its terminating '\n'. The last line
+    /// runs to EOF; an earlier line ends just before the next line's start.
+    pub fn lineLen(self LineIndex, i usize) usize {
+        const start = self.lines[i]
+        const stop = if (i + 1 < self.n) self.lines[i + 1] - 1 else self.total
+        return stop - start
+    }
+
+    /// The line containing logical `offset`: the last line whose start is <=
+    /// offset. An offset at a line's terminating '\n' belongs to that line.
+    pub fn rowOf(self LineIndex, offset usize) usize {
+        var row usize = 0
+        var i usize = 0
+        while i < self.n {
+            if self.lines[i] <= offset {
+                row = i
+            } else {
+                break
+            }
+            i += 1
+        }
+        return row
+    }
+
+    /// Logical offset of (row, col), clamping row into range and col to the
+    /// line's length — so a short line below a long one lands the cursor at its
+    /// end rather than past it.
+    pub fn offsetOf(self LineIndex, row usize, col usize) usize {
+        var r = row
+        if r >= self.n {
+            r = if (self.n > 0) self.n - 1 else 0
+        }
+        const start = self.lines[r]
+        const maxc = self.lineLen(r)
+        const c = if (col < maxc) col else maxc
+        return start + c
+    }
+
+    /// Cursor coordinate for a logical offset.
+    pub fn locate(self LineIndex, offset usize) RowCol {
+        const r = self.rowOf(offset)
+        return .{ .row = r, .col = offset - self.lines[r] }
+    }
+
+    /// Cursor up one line, preserving the byte column (clamped to the shorter
+    /// line). No-op on the first line.
+    pub fn moveUp(self LineIndex, offset usize) usize {
+        const r = self.rowOf(offset)
+        if r == 0 {
+            return offset
+        }
+        const col = offset - self.lines[r]
+        return self.offsetOf(r - 1, col)
+    }
+
+    /// Cursor down one line, preserving the byte column. No-op on the last line.
+    pub fn moveDown(self LineIndex, offset usize) usize {
+        const r = self.rowOf(offset)
+        if r + 1 >= self.n {
+            return offset
+        }
+        const col = offset - self.lines[r]
+        return self.offsetOf(r + 1, col)
+    }
+
+    /// Start of the current line.
+    pub fn home(self LineIndex, offset usize) usize {
+        return self.lines[self.rowOf(offset)]
+    }
+
+    /// End of the current line (its '\n', or EOF for the last line).
+    pub fn end(self LineIndex, offset usize) usize {
+        const r = self.rowOf(offset)
+        return self.lines[r] + self.lineLen(r)
+    }
+}
+
+/// Cursor left one byte, clamped at the start of the buffer. Independent of the
+/// line index — a left move never changes line membership math beyond the offset.
+pub fn moveLeft(offset usize) usize {
+    return if (offset > 0) offset - 1 else 0
+}
+
+/// Cursor right one byte, clamped at end of buffer.
+pub fn moveRight(offset usize, total usize) usize {
+    return if (offset < total) offset + 1 else total
+}
+
+// ---- viewport --------------------------------------------------------------
+
+/// Scroll state for the content area: `top` is the first visible line, `left`
+/// the first visible column (horizontal scroll). `rows`/`cols` are the content
+/// window the renderer paints. scrollTo() nudges top/left the minimum needed to
+/// keep the cursor in view — the only scrolling the editor does.
+pub const Viewport = struct {
+    top usize = 0,
+    left usize = 0,
+    rows usize,
+    cols usize,
+
+    /// Bring (row, col) into the window with minimal movement: pull the top/left
+    /// edge to the cursor when it falls off the near side, push it so the cursor
+    /// sits on the far row/col when it falls off the far side.
+    pub fn scrollTo(self *mut Viewport, row usize, col usize) void {
+        if row < self.top {
+            self.top = row
+        } else if row >= self.top + self.rows {
+            self.top = row - self.rows + 1
+        }
+        if col < self.left {
+            self.left = col
+        } else if col >= self.left + self.cols {
+            self.left = col - self.cols + 1
+        }
+    }
+
+    /// True when `row` is inside the vertical window.
+    pub fn visibleRow(self Viewport, row usize) bool {
+        return row >= self.top && row < self.top + self.rows
+    }
+
+    /// Screen row for a logical line (caller ensures visibleRow). 0-based.
+    pub fn screenRow(self Viewport, row usize) usize {
+        return row - self.top
+    }
+
+    /// Screen column for a byte column (caller ensures it is within left..left+cols). 0-based.
+    pub fn screenCol(self Viewport, col usize) usize {
+        return col - self.left
+    }
+}
+
+// ---- host tests ------------------------------------------------------------
+
+const std = #import("std")
+const testing = std.testing
+
+// Fill a gap buffer over `store` with `text`, returning it ready to drive.
+fn seed(store []mut u8, text []u8) GapBuf {
+    var gb = GapBuf.init(store)
+    _ = gb.insertSlice(text)
+    return gb
+}
+
+// Read the whole logical buffer back into `out`, returning the slice.
+fn dump(gb GapBuf, out []mut u8) []u8 {
+    const n = gb.linearize(out)
+    return out[0..n]
+}
+
+test "insert builds content and tracks the cursor" {
+    var store [16]u8 = undefined
+    var gb = GapBuf.init(&store)
+    _ = gb.insertSlice("abc")
+    try testing.expectEqual(#as(usize, 3), gb.len())
+    try testing.expectEqual(#as(usize, 3), gb.cursor())
+    try testing.expectEqual(#as(u8, 'a'), gb.byteAt(0))
+    try testing.expectEqual(#as(u8, 'c'), gb.byteAt(2))
+    var out [16]u8 = undefined
+    try testing.expectEqualStrings("abc", dump(gb, &out))
+}
+
+test "moveGap then insert splices mid-buffer" {
+    var store [16]u8 = undefined
+    var gb = seed(&store, "ac")
+    gb.moveGap(1) // cursor between a and c
+    try testing.expect(gb.insert('b'))
+    var out [16]u8 = undefined
+    try testing.expectEqualStrings("abc", dump(gb, &out))
+    try testing.expectEqual(#as(usize, 2), gb.cursor()) // after the 'b'
+    // byteAt still reads logical order across the gap.
+    try testing.expectEqual(#as(u8, 'c'), gb.byteAt(2))
+}
+
+test "deleteBack and deleteFwd at the cursor" {
+    var store [16]u8 = undefined
+    var gb = seed(&store, "abcd")
+    gb.moveGap(2) // between b and c
+    try testing.expect(gb.deleteBack()) // removes b
+    var out [16]u8 = undefined
+    try testing.expectEqualStrings("acd", dump(gb, &out))
+    try testing.expect(gb.deleteFwd()) // removes c
+    try testing.expectEqualStrings("ad", dump(gb, &out))
+}
+
+test "delete clamps at the ends" {
+    var store [8]u8 = undefined
+    var gb = seed(&store, "x")
+    gb.moveGap(0)
+    try testing.expect(!gb.deleteBack()) // nothing before offset 0
+    gb.moveGap(1)
+    try testing.expect(!gb.deleteFwd()) // nothing after the end
+}
+
+test "insert reports a full gap" {
+    var store [3]u8 = undefined
+    var gb = GapBuf.init(&store)
+    try testing.expect(gb.insert('a'))
+    try testing.expect(gb.insert('b'))
+    try testing.expect(gb.insert('c'))
+    try testing.expect(!gb.insert('d')) // gap exhausted
+    try testing.expectEqual(#as(usize, 0), gb.gapLen())
+}
+
+test "growInto preserves content and cursor, then accepts more" {
+    var small [4]u8 = undefined
+    var gb = seed(&small, "abcd") // gap now empty
+    gb.moveGap(2) // cursor between b and c
+    var big [16]u8 = undefined
+    gb.growInto(&big)
+    try testing.expectEqual(#as(usize, 4), gb.len())
+    try testing.expectEqual(#as(usize, 2), gb.cursor())
+    try testing.expect(gb.insert('Z')) // room again
+    var out [16]u8 = undefined
+    try testing.expectEqualStrings("abZcd", dump(gb, &out))
+}
+
+test "lineIndex counts segments: trailing newline yields a final empty line" {
+    var store [16]u8 = undefined
+    var slots [8]u32 = undefined
+    // empty buffer -> one empty line.
+    const gb0 = GapBuf.init(&store)
+    const li0 = LineIndex.init(&slots, gb0)
+    try testing.expectEqual(#as(usize, 1), li0.n)
+    try testing.expectEqual(#as(usize, 0), li0.lineLen(0))
+
+    const gb1 = seed(&store, "a\nb")
+    const li1 = LineIndex.init(&slots, gb1)
+    try testing.expectEqual(#as(usize, 2), li1.n)
+
+    var store2 [16]u8 = undefined
+    const gb2 = seed(&store2, "a\nb\n")
+    const li2 = LineIndex.init(&slots, gb2)
+    try testing.expectEqual(#as(usize, 3), li2.n) // trailing empty line
+    try testing.expectEqual(#as(usize, 0), li2.lineLen(2))
+}
+
+test "lineLen and lineStart over a multi-line buffer" {
+    var store [32]u8 = undefined
+    var slots [8]u32 = undefined
+    const gb = seed(&store, "ab\ncde\nf")
+    const li = LineIndex.init(&slots, gb)
+    try testing.expectEqual(#as(usize, 3), li.n)
+    try testing.expectEqual(#as(usize, 0), li.lineStart(0))
+    try testing.expectEqual(#as(usize, 2), li.lineLen(0)) // "ab"
+    try testing.expectEqual(#as(usize, 3), li.lineStart(1))
+    try testing.expectEqual(#as(usize, 3), li.lineLen(1)) // "cde"
+    try testing.expectEqual(#as(usize, 7), li.lineStart(2))
+    try testing.expectEqual(#as(usize, 1), li.lineLen(2)) // "f"
+}
+
+test "rowOf and locate map offsets to coordinates" {
+    var store [32]u8 = undefined
+    var slots [8]u32 = undefined
+    const gb = seed(&store, "ab\ncde")
+    const li = LineIndex.init(&slots, gb)
+    try testing.expectEqual(#as(usize, 0), li.rowOf(0))
+    try testing.expectEqual(#as(usize, 0), li.rowOf(2)) // the '\n' belongs to line 0
+    try testing.expectEqual(#as(usize, 1), li.rowOf(3))
+    const rc = li.locate(5) // 'e' on line 1
+    try testing.expectEqual(#as(usize, 1), rc.row)
+    try testing.expectEqual(#as(usize, 2), rc.col)
+}
+
+test "moveUp and moveDown preserve the column, clamped to the shorter line" {
+    var store [32]u8 = undefined
+    var slots [8]u32 = undefined
+    const gb = seed(&store, "long\na\nlonger")
+    const li = LineIndex.init(&slots, gb)
+    // cursor at col 3 of line 0 ("long")
+    const start = li.offsetOf(0, 3)
+    // down lands on line 1 ("a", len 1) clamped to col 1
+    const d = li.moveDown(start)
+    const drc = li.locate(d)
+    try testing.expectEqual(#as(usize, 1), drc.row)
+    try testing.expectEqual(#as(usize, 1), drc.col) // clamped
+    // down again to line 2 keeps the clamped col 1 (column memory is out of scope here)
+    const d2 = li.moveDown(d)
+    const d2rc = li.locate(d2)
+    try testing.expectEqual(#as(usize, 2), d2rc.row)
+    try testing.expectEqual(#as(usize, 1), d2rc.col)
+}
+
+test "moveUp on the first line and moveDown on the last are no-ops" {
+    var store [32]u8 = undefined
+    var slots [8]u32 = undefined
+    const gb = seed(&store, "a\nb")
+    const li = LineIndex.init(&slots, gb)
+    try testing.expectEqual(#as(usize, 0), li.moveUp(0))
+    const last = li.offsetOf(1, 0)
+    try testing.expectEqual(last, li.moveDown(last))
+}
+
+test "home and end snap to the line bounds" {
+    var store [32]u8 = undefined
+    var slots [8]u32 = undefined
+    const gb = seed(&store, "abc\ndef")
+    const li = LineIndex.init(&slots, gb)
+    const mid = li.offsetOf(1, 1) // on "def"
+    try testing.expectEqual(#as(usize, 4), li.home(mid)) // start of "def"
+    try testing.expectEqual(#as(usize, 7), li.end(mid)) // EOF after "def"
+}
+
+test "moveLeft and moveRight clamp at the buffer ends" {
+    try testing.expectEqual(#as(usize, 0), moveLeft(0))
+    try testing.expectEqual(#as(usize, 4), moveLeft(5))
+    try testing.expectEqual(#as(usize, 10), moveRight(9, 10))
+    try testing.expectEqual(#as(usize, 10), moveRight(10, 10)) // already at end
+}
+
+test "viewport scrolls vertically to follow the cursor" {
+    var vp = Viewport{ .rows = 3, .cols = 80 }
+    vp.scrollTo(5, 0) // cursor past the window -> top so row 5 is the last row
+    try testing.expectEqual(#as(usize, 3), vp.top) // 5 - 3 + 1
+    try testing.expect(vp.visibleRow(5))
+    try testing.expectEqual(#as(usize, 2), vp.screenRow(5))
+    vp.scrollTo(1, 0) // cursor above the window -> top pulls up to it
+    try testing.expectEqual(#as(usize, 1), vp.top)
+}
+
+test "viewport scrolls horizontally for long lines" {
+    var vp = Viewport{ .rows = 24, .cols = 10 }
+    vp.scrollTo(0, 15) // col past the window
+    try testing.expectEqual(#as(usize, 6), vp.left) // 15 - 10 + 1
+    try testing.expectEqual(#as(usize, 9), vp.screenCol(15))
+    vp.scrollTo(0, 2) // col before the window
+    try testing.expectEqual(#as(usize, 2), vp.left)
+}

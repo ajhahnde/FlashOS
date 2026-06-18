@@ -61,6 +61,26 @@ fn lower(c u8) u8 {
     return if (c >= 'A' && c <= 'Z') c + 32 else c
 }
 
+/// First offset >= `from` at which `needle` occurs in `hay`, or null if there is
+/// none. The offset-returning sibling of lineContains, for /bin/edit's ctrl-W
+/// search-from-cursor (grep itself stays on the bool form). Case-sensitive —
+/// this search does not fold case. An empty `needle` returns null so a blank search
+/// is an inert no-op rather than a match that never advances the cursor. Same
+/// windowed scan as lineContains; O((hay.len - from) * needle.len).
+pub fn find(hay []u8, needle []u8, from usize) ?usize {
+    if needle.len == 0 || from >= hay.len {
+        return null
+    }
+    var i usize = from
+    while i + needle.len <= hay.len {
+        if windowEq(hay[i .. i + needle.len], needle, false) {
+            return i
+        }
+        i += 1
+    }
+    return null
+}
+
 // ---- host tests ------------------------------------------------------------
 
 const std = #import("std")
@@ -108,4 +128,22 @@ test "match at the very start and very end" {
     try testing.expect(lineContains("abcdef", "ab", false))
     try testing.expect(lineContains("abcdef", "ef", false))
     try testing.expect(lineContains("abcdef", "abcdef", false))
+}
+
+test "find returns the first offset at or after from" {
+    try testing.expectEqual(#as(?usize, 0), find("abcabc", "abc", 0))
+    try testing.expectEqual(#as(?usize, 3), find("abcabc", "abc", 1)) // skip the first hit
+    try testing.expectEqual(#as(?usize, 2), find("xxneedle", "needle", 0))
+}
+
+test "find reports no match" {
+    try testing.expectEqual(#as(?usize, null), find("abc", "xyz", 0))
+    try testing.expectEqual(#as(?usize, null), find("abc", "abcd", 0)) // needle longer than hay
+    try testing.expectEqual(#as(?usize, null), find("abcabc", "abc", 4)) // no hit past offset 4
+}
+
+test "find with from past the end or an empty needle yields null" {
+    try testing.expectEqual(#as(?usize, null), find("abc", "a", 3))
+    try testing.expectEqual(#as(?usize, null), find("abc", "a", 99))
+    try testing.expectEqual(#as(?usize, null), find("abc", "", 0)) // blank search is inert
 }

@@ -576,14 +576,37 @@ pub const FdSlot = extern struct {        // 16 B; 8 slots = 128 B
 The syscall surface is assembled into an interactive shell,
 `fsh`, staged in the initramfs at `/bin/fsh`, plus the `/bin/echo` and
 `/bin/cat` coreutils, plus `/bin/ls`, `/bin/meminfo`,
-`/bin/forkbomb`, `/bin/grep` (literal line search), and the FAT32
-file-management trio `/bin/cp` / `/bin/mv` / `/bin/rm`. fsh and the coreutils link against **flibc**
+`/bin/forkbomb`, `/bin/grep` (literal line search), the FAT32
+file-management trio `/bin/cp` / `/bin/mv` / `/bin/rm`, the full-screen
+`/bin/less` pager, and the `/bin/edit` text editor. fsh and the coreutils link against **flibc**
 (`user_space/lib/flibc/`), the userland mini-libc: SVC wrappers, a
 comptime-format `printf`, the `_start` argc/argv shim, and — for payloads
 that trip LLVM's `memcpy` / `strlen` idiom lowering — a freestanding
-`mem.flash` provider. Every buffer is fixed-size stack/static; there is no
-userland allocator this release (heap is future work), so the single R+X
-PT_LOAD each payload links into carries no writable `.bss`.
+`mem.flash` provider. The coreutils use fixed-size stack/static buffers, so
+the single R+X PT_LOAD each links into carries no writable `.bss`; the
+userland heap (`brk` / `sbrk` behind flibc's bump `malloc`) goes unused by
+them. Its first consumer is `/bin/edit` (below).
+
+**`/bin/edit` — full-screen text editor.** The second interactive consumer of
+the navigation scaffold (after `/bin/less`) and the first writer: `edit <file>`
+slurps a file into a heap-backed **gap buffer**, takes over the console with the
+alternate screen + raw mode, and edits it in place. It is the first real
+consumer of the userland heap — the gap-buffer storage is `malloc`'d and doubled
+on demand (flibc's `free` is a no-op, so a grow abandons the old block, reaped on
+exit). The editing logic lives in three pure, host-tested cores in flibc —
+`gapbuf.GapBuf` (storage), `gapbuf.LineIndex` (lines + cursor motions), and
+`gapbuf.Viewport` (scroll) — plus `grep_match.find` for search; this keeps the
+correctness proof on the host, since the interactive loop cannot run under QEMU
+(no PL011 serial input). **Keymap:** arrows / Home / End / PgUp / PgDn move,
+printable keys insert, Backspace / Delete remove, Enter splits the line,
+`ctrl-O` writes, `ctrl-W` searches forward from the cursor, and `ctrl-X` exits
+(prompting to save a modified buffer). Save is **unlink + create + write**, not
+in-place: the FAT32 backend's `write` only grows `file_size` (there is no
+truncate), so recreating the file gives the correct, possibly smaller, size
+every time. Limits: one logical line per screen row (horizontal scroll, no
+soft-wrap), no undo, tabs shown as a single space, fixed 24×80 geometry. Like
+`/bin/less` it is interactive, so it is kept out of the CI boot script and its
+edit loop is validated on real Pi hardware.
 
 - **REPL.** `fsh` reads `/etc/fshrc` once at startup (`open` → `read` →
   `close`; comment and blank lines skipped, every other line dispatched),
@@ -1130,7 +1153,7 @@ initramfs/file pair get dedicated per-target stub objects
 (`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
 `tests/host_stubs_vfs.zig`) to
 avoid double-defining symbols that the module under test already
-exports. The current suite totals **445 host tests** across 40
+exports. The current suite totals **468 host tests** across 41
 modules — see the coverage matrix below for the per-module split.
 
 **In-kernel runtime harness** (`user_space/kernel_tests.flash`).
@@ -1494,7 +1517,7 @@ end-to-end on QEMU + Pi 4.
 | `src/usb_tx_ring.flash`         |          7 | — (USB-C console, Pi-HW only)                                                                     | pure bulk-IN TX ring arithmetic (monotone u64 head/tail, peek-then-advance); the MMIO/FIFO consumer in `src/board/rpi4b/usb.flash` stays hardware-verified                                                                                    |
 | `src/board/rpi4b/usb.flash`     |          0 | — (USB-C console, Pi-HW only)                                                                     | DWC2 MMIO; QEMU `raspi4b` does not emulate the device-mode data path, so enumeration, the connection manager, and the bulk console loop (incl. replug re-enumeration) are verified on real Pi-4 hardware; the descriptor set + SETUP decode it consumes are host-tested in `src/usb_descriptors.flash`, the TX ring in `src/usb_tx_ring.flash` |
 
-Totals: **445 host tests** (`zig build test`, counted from the build
+Totals: **468 host tests** (`zig build test`, counted from the build
 graph by `scripts/test_tally.sh`) + **30 in-kernel EL0 scenarios** +
 **1 pre-PID-1 EL1 scenario** (`emmc2-block`, `run-virt` / `run`). The
 per-module column above is an approximate breakdown — the authoritative

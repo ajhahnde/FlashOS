@@ -353,7 +353,7 @@ zig build test
 Führt die host-seitigen Unit-Tests gegen Pure-Logic-kernel-Module aus.
 Jedes Modul mit Tests bildet seinen eigenen Test-Root, gelinkt gegen
 `tests/host_stubs.zig` (Stubs für reine Assembly-Externs). Die aktuelle
-Suite deckt 39 Module ab (415 Host-Tests); sie ist weit unter einer Sekunde
+Suite deckt 41 Module ab (468 Host-Tests); sie ist weit unter einer Sekunde
 fertig und ist das schnellste Signal dafür, dass die Kernlogik des kernel
 weiterhin hält.
 
@@ -361,4 +361,4 @@ weiterhin hält.
 
 [← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Port →](../../PORT.md)
 
-<!-- sync-ref: SETUP.md @ b0d131a75b94b2c21e0d10fed9424bde38e664a2 | synced 2026-06-17 -->
+<!-- sync-ref: SETUP.md @ 0a9d568ee52436afe4be497a523c67c369df150e | synced 2026-06-18 -->

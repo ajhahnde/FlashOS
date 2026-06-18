@@ -474,8 +474,10 @@ const driver = if (has_driver) struct {
                         return .eof
                     }
                 }, // mid-line ^D ignored
-                // .none while mid-sequence, a bare ESC, or the never-fed .eof:
-                .escape, .none, .eof => {},
+                // Everything readline does not bind: a bare ESC, mid-sequence
+                // .none, the never-fed .eof, and the editor-only navigation /
+                // command keys (delete / home / end / page_*/ ctrl_o/w/x).
+                else => {},
             }
         }
     }
