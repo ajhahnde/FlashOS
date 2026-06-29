@@ -8,6 +8,6 @@
 # The build resolves the binary via -Dflashc=<path>; the default
 # expects a Flash checkout at ~/Flash built with `zig build stage1`.
 
-flash-version = 0.6.1
-flash-commit  = c5a3c5aa6fac81292567d92ff31258777b7befe0
+flash-version = 1.0.0
+flash-commit  = 11c22fde8cf95bffdfbfebd13c4c9025667f05c0
 flashc-binary = zig-out/bin/flashc-stage1
