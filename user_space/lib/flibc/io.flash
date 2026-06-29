@@ -33,6 +33,25 @@ pub fn errSink(bytes []u8) void {
     _ = sys.write_fd(2, bytes.ptr, bytes.len)
 }
 
+/// The input half of the std-vs-OS io seam — the read counterpart of
+/// consoleSink. Its shape is core.io.Input (a context-free `*fn(u32) ?u8`), so
+/// a core.tui run loop or a core.io.Reader pulls one console byte through it:
+/// it blocks on the one read syscall against fd 0 and yields that byte, or null
+/// at end-of-input. FlashOS's read(0) has no timeout — it blocks until a byte
+/// arrives — so `timeout_ms` is accepted for the seam's signature and ignored;
+/// a tui loop bound to it therefore never sees a `.tick` (fine for a pager /
+/// editor that has nothing to animate). This is the single place userland turns
+/// a console read into a read_fd call.
+pub fn consoleInput(timeout_ms u32) ?u8 {
+    _ = timeout_ms
+    var b u8 = 0
+    const n = sys.read(0, #ptrCast(&b), 1)
+    if n <= 0 {
+        return null
+    }
+    return b
+}
+
 /// puts — write a null-terminated string followed by a newline. Mirrors
 /// the C library shape (line-buffered, sentinel-terminated input).
 pub fn puts(s [*:0]u8) void {

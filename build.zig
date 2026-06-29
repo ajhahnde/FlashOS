@@ -1827,15 +1827,15 @@ pub fn build(b: *std.Build) void {
     uptime.entry = .disabled;
 
     // ---- less.elf — full-screen text pager ----
-    // First interactive consumer of the navigation scaffold: takes over the
-    // console with console_ui.screen (alt-screen + panelTop title bar), reads
-    // keys through flibc.readKey's VT100 decoder, and scrolls a single named
-    // file with the pure flibc.Pager core. A proof of the full-screen loop the
-    // way sysinfo proved the print-and-exit kv() renderer. Imports flibc +
-    // console_ui only (no pwfile / build_options). Same recipe as ls / sysinfo
-    // (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
-    // coreutil_linker.ld). Staged at /bin/less; kept out of the CI FSH_SCRIPT
-    // like sysinfo (interactive; the free-page baseline must stay deterministic).
+    // First interactive consumer of the std TUI run loop: takes over the console
+    // through core.tui.run (the TEA loop — alt-screen, key decode, double-
+    // buffered diff) and scrolls a single named file with the pure flibc.Pager
+    // core, which stays the model's domain state (std tui has no paging of its
+    // own). A proof of the interactive loop the way echo proved the std io seam.
+    // Imports flibc + core (no pwfile / build_options / console_ui). Same recipe
+    // as ls / echo (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip,
+    // shared coreutil_linker.ld). Staged at /bin/less; kept out of the CI
+    // FSH_SCRIPT (interactive; the free-page baseline must stay deterministic).
     // Source is Flash (tools/less.flash) — flashc transpiles it to Zig at build
     // time via addFlashSource.
     const less_mod = b.createModule(.{
@@ -1847,7 +1847,7 @@ pub fn build(b: *std.Build) void {
     less_mod.addImport("flibc", flibc_mod);
     less_mod.addImport("flibc_start", flibc_start_mod);
     less_mod.addImport("flibc_mem", flibc_mem_mod);
-    less_mod.addImport("console_ui", console_ui_mod);
+    less_mod.addImport("core", core_mod);
     const less = b.addExecutable(.{
         .name = "less.elf",
         .root_module = less_mod,

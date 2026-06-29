@@ -1,63 +1,85 @@
 // less — the full-screen text pager for /bin/less.
 //
-// The first consumer of the navigation scaffold's full-screen half: where
-// sysinfo proved console_ui.screen's kv() renderer print-and-exit, less proves
-// the interactive loop — it takes over the console with screen.enter(), reads
-// keys through flibc.readKey()'s VT100 decoder, scrolls with the pure
-// flibc.Pager core, and restores the shell view with screen.leave() on every
-// exit path. Output is screen.panelTop for the title bar plus raw content rows;
-// input is the arrow / page / quit keys a pager needs.
+// The first consumer of the std TUI run loop: where the one-shot tools proved
+// the std io seam (a Writer draining through a Sink), less proves the
+// interactive half — the whole frame now goes through `core.tui.run`, the TEA
+// (The Elm Architecture) loop. less hands `run` an initial model, a pure
+// `update` (a model and an event yield the next model) and a pure `view` (a
+// model paints into a back buffer), and the two injected IO seams; `run` enters
+// the alternate screen, reads keys through its own `keys.Decoder`, double-
+// buffers each `view` and emits only the minimal ANSI diff, then restores the
+// shell view on quit. The scroll logic stays the pure `flibc.Pager` core — std
+// `tui` is render + loop + input, it has no paging of its own, so the Pager is
+// the model's domain state.
 //
-// Scope is a proof, like sysinfo: it pages a single named file, slurps up to
-// BUF_MAX bytes onto its own stack (rule 1 — no heap, no .bss), indexes the
-// first MAX_LINES lines, and assumes a 24x80 serial terminal (no window-size
-// ioctl exists yet). A file larger than the slurp shows a "(more)" marker.
-// Reading a pipe is out of scope: fd 0 is the key source, so `cmd | less` would
-// have nowhere to read keys from (a /dev/tty concern for later).
+// Input is the raw byte seam: `flibc.consoleInput` blocks on read(0) and yields
+// one byte; `run`'s decoder folds the multi-byte ESC-[ arrow bursts into whole
+// key events. read(0) has no timeout, so a `.tick` never fires (nothing here
+// animates). Output is `flibc.consoleSink` over fd 1. The keys less acts on —
+// the arrows, Enter, Escape/Ctrl-C/Ctrl-D, and the `q j k space f b g G` chords
+// — are all in std's `keys.Key`, so no local key extension is needed (that is
+// the editor's concern).
 //
-// Same coreutil recipe as ls / sysinfo: flibc _start shim, flibc_mem, single
+// Scope is a proof, like the original pager: it pages a single named file,
+// slurps up to BUF_MAX bytes onto its own stack (rule 1 — no heap, no .bss),
+// indexes the first MAX_LINES lines, and assumes a 24x80 serial terminal (no
+// window-size ioctl exists yet). A file larger than the slurp shows a "(more)"
+// marker. Reading a pipe is out of scope: fd 0 is the key source, so `cmd |
+// less` would have nowhere to read keys from (a /dev/tty concern for later).
+//
+// The double-buffered cell grid (front + back, w*h cells each) is the one cost
+// the TEA model adds over the old streaming renderer; both grids plus the file
+// slurp and the line index live on the stack, comfortably inside the 64 KiB
+// user-stack budget. The strict-align `str q` class the streaming renderer
+// dodged by hand (an `align(16)` Pager slot, a volatile title write) is closed
+// at codegen now — the build target carries +strict-align — so the model and
+// its by-value Pager need no per-site alignment dodge.
+//
+// Same coreutil recipe as the others: flibc _start shim, flibc_mem, single
 // R+X PT_LOAD, stack buffers only. Kept out of the CI FSH_SCRIPT — it is
 // interactive and the free-page baseline must stay deterministic.
-//
-// Alignment note: under SCTLR_EL1.A strict-align, a generic build target would
-// vectorize byte copies and materialize >16-byte by-value struct returns with a
-// 16-byte `str q`, which faults on an only-8-aligned slot. So the Pager (a
-// >16-byte value) is returned into an `align(16)` slot, and the one string
-// concat (the title) writes through a volatile pointer so it is never widened.
-// Everything else emits source slices straight to the sink — no copies.
 
 use flibc
-use console_ui
+use core
 
 link "flibc_start"
 link "flibc_mem"
 
-// Assumed serial-terminal geometry. One header row (panelTop), one status row,
-// the rest content. No window-size query exists, so these are fixed.
+// Assumed serial-terminal geometry. One header row (the title bar), one status
+// row, the rest content. No window-size query exists, so these are fixed. Held
+// as usize for the slurp / line-index math; cast to u16 at the tui boundary.
 const ROWS usize = 24
 const STATUS usize = 1
 const HEADER usize = 1
-const PAGE usize = ROWS - HEADER - STATUS // visible content rows
+const PAGE usize = ROWS - HEADER - STATUS // visible content rows / Pager page height
 const COLS usize = 80 // clip width — keep each rendered row to one line
+const CELLS usize = ROWS * COLS // cell-buffer length (front and back each)
 
 const BUF_MAX usize = 16384 // file slurp cap (on this frame)
 const MAX_LINES usize = 2048 // line-index slots
-const TITLE_MAX usize = COLS // "less: <name>" scratch
+const STATUS_MAX usize = 96 // status-line scratch ("first-last/n …" + legend)
 
-fn sink(bytes []u8) void {
-    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
+// The pager model: the pure scroll state, the title's filename (a slice into
+// argv — stable for the program's life), the truncation marker, and the `quit`
+// flag the run loop reads to end after a final frame. `view` reads it; `update`
+// folds each key event into the next one.
+const Model = struct {
+    pg flibc.Pager,
+    name []u8,
+    truncated bool,
+    quit bool,
 }
 
 export fn main(argc usize, argv argv) noreturn {
     if argc < 2 || argv[1] == null {
-        sink("usage: less <file>\n")
+        flibc.consoleSink("usage: less <file>\n")
         flibc.exit()
     }
     path := argv[1].?
 
     fd := flibc.sys.open(path)
     if fd < 0 {
-        sink("less: cannot open file\n")
+        flibc.consoleSink("less: cannot open file\n")
         flibc.exit()
     }
 
@@ -75,94 +97,141 @@ export fn main(argc usize, argv argv) noreturn {
     _ = flibc.sys.close(fd)
     truncated := (n == buf.len)
 
-    // Title bar text, built once (the only string copy — volatile dest so the
-    // strict-align target cannot vectorize it into a faulting `str q`).
-    var title_buf [TITLE_MAX]u8 = undefined
-    title := buildTitle(&title_buf, baseName(path))
-
-    // Pager value is >16 bytes; land the by-value return on a 16-aligned slot so
-    // its sret store is not a misaligned `str q`.
     var slots [MAX_LINES]u32 = undefined
-    var pg flibc.Pager align(16) = flibc.Pager.init(buf[0..n], &slots, PAGE)
+    pg := flibc.Pager.init(buf[0..n], &slots, PAGE)
+
+    // The double buffer the TEA loop diffs over: front is what is on screen,
+    // back is where `view` paints; `run` swaps them each turn.
+    var front [CELLS]core.tui.Cell = undefined
+    var back [CELLS]core.tui.Cell = undefined
 
     // Take over the console: echo off (mode 0) so typed keys do not leak onto
-    // the alt-screen, then the alternate buffer + hidden cursor.
+    // the alt-screen. `run` itself enters the alternate buffer + hides the
+    // cursor and restores both on return.
     _ = flibc.sys.set_console_mode(0)
-    console_ui.screen.enter(sink)
-    render(&pg, title, truncated)
 
-    while true {
-        ev := flibc.readKey()
-        var quit bool = false
-        switch ev.key {
-            .eof, .escape, .ctrl_c, .ctrl_d => { quit = true },
-            .up => pg.up(1),
-            .down, .enter => pg.down(1),
-            .char => switch ev.ch {
-                'q' => { quit = true },
-                'j' => pg.down(1),
-                'k' => pg.up(1),
-                ' ', 'f' => pg.pageDown(),
-                'b' => pg.pageUp(),
-                'g' => pg.toTop(),
-                'G' => pg.toBottom(),
-                else => {},
-            },
-            else => {}, // left/right/tab/backspace/none — ignored
-        }
-        if quit {
-            break
-        }
-        render(&pg, title, truncated)
+    const cfg core.tui.Config(Model) = .{
+        .init = .{ .pg = pg, .name = baseName(path), .truncated = truncated, .quit = false },
+        .update = update,
+        .view = view,
+        .tick_ms = 0, // read(0) blocks; a tick never arrives, so the interval is moot
+        .w = #intCast(COLS),
+        .h = #intCast(ROWS),
+        .sink = flibc.consoleSink,
+        .input = flibc.consoleInput,
+        .front = front[0..],
+        .back = back[0..],
     }
+    _ = core.tui.run(Model, cfg)
 
-    // Every exit path restores the shell view. The console is left in mode 0
-    // (echo off) — the shell's own baseline, where readline does its own echo —
-    // so there is deliberately no mode restore here (mode 1 would double-echo
-    // the next prompt); fsh also re-asserts mode 0 after wait() as a backstop.
-    console_ui.screen.leave(sink)
+    // The console is left in mode 0 (echo off) — the shell's own baseline, where
+    // readline does its own echo — so there is deliberately no mode restore here
+    // (mode 1 would double-echo the next prompt); fsh also re-asserts mode 0
+    // after wait() as a backstop.
     flibc.exit()
 }
 
-// Repaint the whole screen: title bar, PAGE content rows (clipped to COLS, '~'
-// past EOF), then the status row. Full clear + repaint each frame keeps the
-// renderer trivial — fine for a serial console.
-fn render(pg *flibc.Pager, title []u8, truncated bool) void {
-    console_ui.screen.clear(sink) // home + erase
-    console_ui.screen.panelTop(sink, .{ .title = title, .width = COLS })
+// Fold one event into the next model. Pure: it copies the model, mutates the
+// copy's scroll state through the Pager ops (each clamps), and returns it. The
+// quit keys set `quit`, which `run` reads to end the loop after one more frame.
+// A `.tick` cannot arrive (the blocking input never times out) but is handled
+// for the union's sake. The keys here are exactly std's `keys.Key`; the editor's
+// home/end/page/ctrl chords are absent because a pager does not bind them.
+fn update(m Model, ev core.tui.Event) Model {
+    var next Model = m
+    switch ev {
+        .key => |k| {
+            switch k.key {
+                .escape, .ctrl_c, .ctrl_d => { next.quit = true },
+                .up => next.pg.up(1),
+                .down, .enter => next.pg.down(1),
+                .char => switch k.ch {
+                    'q' => { next.quit = true },
+                    'j' => next.pg.down(1),
+                    'k' => next.pg.up(1),
+                    ' ', 'f' => next.pg.pageDown(),
+                    'b' => next.pg.pageUp(),
+                    'g' => next.pg.toTop(),
+                    'G' => next.pg.toBottom(),
+                    else => {},
+                },
+                else => {}, // left/right/tab/backspace/none — ignored
+            }
+        },
+        .tick => {},
+    }
+    return next
+}
 
+// Paint the whole frame into the back buffer: a plain title bar, PAGE content
+// rows ('~' past EOF), then a full-width reverse-video status bar. The buffer
+// arrives blanked each turn, so a row's untouched tail is already spaces — only
+// the painted cells are written, and `run`'s diff repaints only what changed.
+fn view(m Model, buf *mut core.tui.Buffer) void {
+    // Title bar — plain, the "+- less: <name> -----+" panel look.
+    var trow [COLS]u8 = undefined
+    buf.text(0, 0, trow[0..titleRow(&trow, m.name)], .{})
+
+    // Content rows. The blank cells already fill each row's tail and any short
+    // line, so the diff erases a line that shrank between frames.
     var row usize = 0
-    while row < pg.rows {
-        idx := pg.top + row
-        if idx < pg.n {
-            l := pg.line(idx)
-            sink(if (l.len <= COLS) l else l[0..COLS])
+    while row < m.pg.rows {
+        const y u16 = #intCast(HEADER + row)
+        idx := m.pg.top + row
+        if idx < m.pg.n {
+            l := m.pg.line(idx)
+            buf.text(0, y, if (l.len <= COLS) l else l[0..COLS], .{})
         } else {
-            sink("~")
+            buf.text(0, y, "~", .{})
         }
-        sink("\n")
         row += 1
     }
 
-    statusLine(pg, truncated)
+    // Status bar — the whole row in reverse video so the bar spans full width.
+    var srow [STATUS_MAX]u8 = undefined
+    sn := statusRow(&srow, &m.pg, m.truncated)
+    buf.text(0, #intCast(ROWS - 1), srow[0..sn], .{ .attrs = core.tui.attr_reverse })
 }
 
-// Position + key legend on the final row. No trailing newline so the alt-screen
-// does not scroll. The filename already rides the title bar.
-fn statusLine(pg *flibc.Pager, truncated bool) void {
-    shown := if (pg.n > pg.top) #min(pg.rows, pg.n - pg.top) else 0
-    const first u64 = if (pg.n == 0) 0 else pg.top + 1
-    const last u64 = pg.top + shown
-    sink(" ")
-    emitDec(first)
-    sink("-")
-    emitDec(last)
-    sink("/")
-    emitDec(pg.n)
-    if truncated {
-        sink(" (more)")
+// Build the title row "+- less: <name> " + '-' fill + "+", padded to COLS into
+// `out`, and return COLS. Every put is saturating, so a pathological long name
+// clips rather than overrunning the row.
+fn titleRow(out []mut u8, name []u8) usize {
+    var n usize = 0
+    n += putStr(out, n, "+- less: ")
+    n += putStr(out, n, name)
+    n += putByte(out, n, ' ')
+    while n < COLS - 1 {
+        out[n] = '-'
+        n += 1
     }
-    sink("   q=quit  space=page  b=back  g/G=ends")
+    out[COLS - 1] = '+'
+    return COLS
+}
+
+// Build the status text " first-last/n [(more)]   <legend>" into `out`, padded
+// with spaces to STATUS_MAX so the reverse-video bar is uniform, and return the
+// padded length. Saturating puts keep it inside `out`.
+fn statusRow(out []mut u8, pg *flibc.Pager, truncated bool) usize {
+    var n usize = 0
+    shown := if (pg.n > pg.top) #min(pg.rows, pg.n - pg.top) else #as(usize, 0)
+    first := if (pg.n == 0) #as(u64, 0) else #as(u64, pg.top + 1)
+    last := #as(u64, pg.top + shown)
+    n += putByte(out, n, ' ')
+    n += putDec(out, n, first)
+    n += putByte(out, n, '-')
+    n += putDec(out, n, last)
+    n += putByte(out, n, '/')
+    n += putDec(out, n, #as(u64, pg.n))
+    if truncated {
+        n += putStr(out, n, " (more)")
+    }
+    n += putStr(out, n, "   q=quit  space=page  b=back  g/G=ends")
+    while n < out.len {
+        out[n] = ' '
+        n += 1
+    }
+    return n
 }
 
 // Last path component, as a slice into the argv string (no copy). "/a/b" -> "b",
@@ -183,50 +252,45 @@ fn baseName(path cstr) []u8 {
     return path[start..len]
 }
 
-// "less: <name>" into `buf`, clipped to its length. The destination is volatile
-// so the strict-align target never widens the byte stores into a `str q`.
-fn buildTitle(buf []mut u8, name []u8) []u8 {
-    const dst [*]mut volatile u8 = buf.ptr
-    var i usize = 0
-    prefix := "less: "
-    for c in prefix {
-        dst[i] = c
-        i += 1
-    }
-    for c in name {
-        if i >= buf.len {
-            break
-        }
-        dst[i] = c
-        i += 1
-    }
-    return buf[0..i]
-}
+// ---- saturating byte builders (write into `out`, never past its end) --------
 
-// Emit `v` as decimal ASCII (mirrors sysinfo's u64dec — a proven small reversal
-// that the strict-align target does not vectorize).
-fn emitDec(v u64) void {
-    var buf [20]u8 = undefined
-    sink(buf[0..u64dec(&buf, v)])
-}
-
-fn u64dec(out []mut u8, v u64) usize {
-    if v == 0 {
-        out[0] = '0'
+fn putByte(out []mut u8, pos usize, c u8) usize {
+    if pos < out.len {
+        out[pos] = c
         return 1
     }
+    return 0
+}
+
+fn putStr(out []mut u8, pos usize, s []u8) usize {
+    var w usize = 0
+    while w < s.len && pos + w < out.len {
+        out[pos + w] = s[w]
+        w += 1
+    }
+    return w
+}
+
+// `v` as decimal ASCII at `out[pos..]`, returning the count written. The digits
+// fall out least-significant first into `tmp`, then copy in reading order.
+fn putDec(out []mut u8, pos usize, v u64) usize {
     var tmp [20]u8 = undefined
-    var n usize = 0
-    var x u64 = v
-    while x != 0 {
-        tmp[n] = '0' + #as(u8, #intCast(x % 10))
-        n += 1
-        x /= 10
+    var d usize = 0
+    if v == 0 {
+        tmp[0] = '0'
+        d = 1
+    } else {
+        var x u64 = v
+        while x != 0 {
+            tmp[d] = '0' + #as(u8, #intCast(x % 10))
+            d += 1
+            x /= 10
+        }
     }
-    var i usize = 0
-    while i < n {
-        out[i] = tmp[n - 1 - i]
-        i += 1
+    var w usize = 0
+    while w < d && pos + w < out.len {
+        out[pos + w] = tmp[d - 1 - w]
+        w += 1
     }
-    return n
+    return w
 }
