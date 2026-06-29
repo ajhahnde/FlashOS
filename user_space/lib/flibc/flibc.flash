@@ -35,6 +35,11 @@ pub use "execvp" as execvp_mod
 pub const printf = io.printf
 pub const puts = io.puts
 
+// The io seam adapters (core.io.Sink-shaped), so a tool binds a core.io.Writer
+// to fd 1 / fd 2 without reaching into the io leaf or re-deriving the syscall.
+pub const consoleSink = io.consoleSink
+pub const errSink = io.errSink
+
 pub const malloc = heap.malloc
 pub const free = heap.free
 

@@ -19,6 +19,20 @@ use "syscalls" as sys
 
 const BUF_LEN usize = 256
 
+/// The OS side of the std-vs-OS io seam. `consoleSink` hands a finished byte
+/// slice to fd 1 (stdout) through the one write syscall; `errSink` does the
+/// same for fd 2 (stderr). Their shape is core.io.Sink — a context-free
+/// `*fn([]u8) void` — so a core.io.Writer drains straight into them, and
+/// flibc's own puts/printf drain here too. This is the single place userland
+/// turns bytes into a write_fd call; every console write routes through it.
+pub fn consoleSink(bytes []u8) void {
+    _ = sys.write_fd(1, bytes.ptr, bytes.len)
+}
+
+pub fn errSink(bytes []u8) void {
+    _ = sys.write_fd(2, bytes.ptr, bytes.len)
+}
+
 /// puts — write a null-terminated string followed by a newline. Mirrors
 /// the C library shape (line-buffered, sentinel-terminated input).
 pub fn puts(s [*:0]u8) void {
@@ -28,7 +42,7 @@ pub fn puts(s [*:0]u8) void {
     // append the newline, then flush `pos` bytes in one syscall.
     buf_put_zstr(&buf, &pos, s)
     buf_put_byte(&buf, &pos, '\n')
-    _ = sys.write_fd(1, &buf, pos)
+    consoleSink(buf[0..pos])
 }
 
 /// printf(fmt, .{args...}) — format and emit. The format string is
@@ -66,7 +80,7 @@ pub fn printf(comptime fmt []u8, args anytype) void {
     }
 
     const len = if (pos < BUF_LEN) pos else BUF_LEN - 1
-    _ = sys.write_fd(1, &buf, len)
+    consoleSink(buf[0..len])
 }
 
 // Dispatch a single arg-consuming spec. Inline so each call site is

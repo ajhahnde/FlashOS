@@ -2,10 +2,11 @@
 //
 // Writes its arguments space-separated, followed by a newline; argv[0] (the
 // program name) is skipped. No flags. Output is batched through a
-// core.io.Writer and drained to fd 1 by consoleSink — the FlashOS side of the
-// std-vs-OS io seam: std decides which bytes to emit, the OS write syscall puts
-// them on the wire. The syscall stays in flibc, the one place userland touches
-// a descriptor, so `echo hi | cat` still redirects echo's fd 1 onto the pipe.
+// core.io.Writer and drained to fd 1 by flibc.consoleSink — the FlashOS side of
+// the std-vs-OS io seam: std decides which bytes to emit, the OS write syscall
+// puts them on the wire. The syscall stays in flibc, the one place userland
+// touches a descriptor, so `echo hi | cat` still redirects echo's fd 1 onto the
+// pipe.
 //
 // flibc_mem is imported because the C-string length scan can lower to a
 // libcall.
@@ -15,13 +16,6 @@ use flibc
 
 link "flibc_start"
 link "flibc_mem"
-
-// The OS half of the io seam: hand the bytes the Writer drains to fd 1 via the
-// FlashOS write syscall. A bare function so it matches core.io.Sink, which is a
-// context-free function pointer.
-fn consoleSink(bytes []u8) void {
-    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
-}
 
 // Length of a nul-terminated argument, so it can be written as a slice.
 fn cstrLen(s cstr) usize {
@@ -34,7 +28,7 @@ fn cstrLen(s cstr) usize {
 
 export fn main(argc usize, argv argv) noreturn {
     var buf [256]u8 = undefined
-    var w core.io.Writer = .init(consoleSink, buf[0..])
+    var w core.io.Writer = .init(flibc.consoleSink, buf[0..])
     var i usize = 1
     while i < argc {
         s := argv[i] orelse break
