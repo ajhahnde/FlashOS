@@ -19,15 +19,11 @@ use console_ui
 link "flibc_start"
 link "flibc_mem"
 
-fn sink(bytes []u8) void {
-    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
-}
-
 export fn main(_ usize, _ argv) noreturn {
-    console_ui.banner(sink, "FlashOS uptime")
+    console_ui.banner(flibc.consoleSink, "FlashOS uptime")
 
     var buf [32]u8 = undefined
-    console_ui.screen.kv(sink, "uptime", uptimeStr(&buf))
+    console_ui.screen.kv(flibc.consoleSink, "uptime", uptimeStr(&buf))
 
     flibc.exit()
 }

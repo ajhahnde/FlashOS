@@ -20,18 +20,14 @@ use console_ui
 link "flibc_start"
 link "flibc_mem"
 
-fn sink(bytes []u8) void {
-    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
-}
-
 export fn main(_ usize, _ argv) noreturn {
-    console_ui.banner(sink, "FlashOS cpu")
+    console_ui.banner(flibc.consoleSink, "FlashOS cpu")
 
     // One scratch buffer reused across both rows: kv consumes each value
     // before the next formatter overwrites it.
     var buf [32]u8 = undefined
-    console_ui.screen.kv(sink, "temp", tempStr(&buf))
-    console_ui.screen.kv(sink, "freq", freqStr(&buf))
+    console_ui.screen.kv(flibc.consoleSink, "temp", tempStr(&buf))
+    console_ui.screen.kv(flibc.consoleSink, "freq", freqStr(&buf))
 
     flibc.exit()
 }

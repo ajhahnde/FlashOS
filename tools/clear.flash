@@ -12,11 +12,7 @@ use console_ui
 link "flibc_start"
 link "flibc_mem"
 
-fn sink(bytes []u8) {
-    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
-}
-
 export fn main(_ usize, _ argv) noreturn {
-    console_ui.screen.clear(sink)
+    console_ui.screen.clear(flibc.consoleSink)
     flibc.exit()
 }
