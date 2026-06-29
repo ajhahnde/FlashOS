@@ -1,42 +1,50 @@
-// echo — write arguments to fd 1 for /bin/echo.
+// echo — write arguments to fd 1 through the std io seam.
 //
 // Writes its arguments space-separated, followed by a newline; argv[0] (the
-// program name) is skipped. No flags. Output goes through the unified
-// write_fd(1, …) so that, when a shell runs `echo hi | cat`, echo's fd 1 can be
-// redirected onto the pipe.
+// program name) is skipped. No flags. Output is batched through a
+// core.io.Writer and drained to fd 1 by consoleSink — the FlashOS side of the
+// std-vs-OS io seam: std decides which bytes to emit, the OS write syscall puts
+// them on the wire. The syscall stays in flibc, the one place userland touches
+// a descriptor, so `echo hi | cat` still redirects echo's fd 1 onto the pipe.
 //
-// Exercises a `while` loop with `orelse break`, an `if` guard, and a
-// nul-terminated C-string helper (`emitz`) that scans for the terminator with a
-// second `while`. flibc_mem is imported because the length scan can lower to a
+// flibc_mem is imported because the C-string length scan can lower to a
 // libcall.
 
+use core
 use flibc
 
 link "flibc_start"
 link "flibc_mem"
 
-fn emit(s []u8) {
-    _ = flibc.sys.write_fd(1, s.ptr, s.len)
+// The OS half of the io seam: hand the bytes the Writer drains to fd 1 via the
+// FlashOS write syscall. A bare function so it matches core.io.Sink, which is a
+// context-free function pointer.
+fn consoleSink(bytes []u8) void {
+    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
 }
 
-fn emitz(s cstr) {
+// Length of a nul-terminated argument, so it can be written as a slice.
+fn cstrLen(s cstr) usize {
     var n usize = 0
     while s[n] != 0 {
         n += 1
     }
-    _ = flibc.sys.write_fd(1, s, n)
+    return n
 }
 
 export fn main(argc usize, argv argv) noreturn {
+    var buf [256]u8 = undefined
+    var w core.io.Writer = .init(consoleSink, buf[0..])
     var i usize = 1
     while i < argc {
         s := argv[i] orelse break
-        emitz(s)
+        w.writeAll(s[0..cstrLen(s)])
         if i + 1 < argc {
-            emit(" ")
+            w.writeAll(" ")
         }
         i += 1
     }
-    emit("\n")
+    w.writeAll("\n")
+    w.flush()
     flibc.exit()
 }

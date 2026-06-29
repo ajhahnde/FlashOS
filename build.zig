@@ -117,6 +117,21 @@ fn addFlashSource(b: *std.Build, src: []const u8) std.Build.LazyPath {
     return out;
 }
 
+// Same transpile step as addFlashSource, but for a .flash file outside the
+// build root — the Flash std/ sources live in the pinned Flash checkout
+// (-Dflash-std), not in this tree, so they are referenced by absolute path
+// rather than b.path. `stem` names the generated .zig (the caller composes the
+// sibling set into one directory; see the `core` module below).
+fn addFlashSourceAbs(b: *std.Build, abs_path: []const u8, stem: []const u8) std.Build.LazyPath {
+    const run = b.addSystemCommand(&.{flashc_path});
+    run.setName(b.fmt("flashc {s}", .{abs_path}));
+    run.addFileArg(.{ .cwd_relative = abs_path });
+    run.addArg("-o");
+    const out = run.addOutputFileArg(b.fmt("{s}.zig", .{stem}));
+    run.has_side_effects = true;
+    return out;
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
@@ -265,6 +280,20 @@ pub fn build(b: *std.Build) void {
         break :blk b.pathJoin(&.{ home, "Flash", "zig-out", "bin", "flashc-stage1" });
     };
 
+    // Path to the Flash std/ directory whose modules compose the `core` import
+    // (std/io, std/tui, std/keys, …). The sources belong to the pinned Flash
+    // revision in flash-toolchain.lock — they are referenced from that checkout
+    // rather than vendored, so the pin stays the single source of truth. Same
+    // default location as -Dflashc: the ~/Flash checkout.
+    const flash_std_dir = b.option(
+        []const u8,
+        "flash-std",
+        "Path to the Flash std/ directory composing the `core` import (default: ~/Flash/std)",
+    ) orelse blk: {
+        const home = b.graph.environ_map.get("HOME") orelse break :blk "std";
+        break :blk b.pathJoin(&.{ home, "Flash", "std" });
+    };
+
     // ---- hygiene checks (trailing space, hard tabs, lowercase hex) ----
     const hygiene_step = b.step("check-hygiene", "Fail on whitespace or hex-literal regressions");
 
@@ -317,6 +346,33 @@ pub fn build(b: *std.Build) void {
     }
     const console_ui_mod = b.createModule(.{
         .root_source_file = console_ui_root,
+    });
+
+    // ---- the Flash std library (the `core` module) ----
+    // Userland reaches std/io · std/tui · std/keys (and the rest) through the
+    // named `core` import: `use core` lowers to @import("core"), so the build
+    // must supply that module. The std modules import each other by relative
+    // @import("X.zig"), so — exactly like console_ui above and the Flash
+    // toolchain's own std composition — the generated .zig are composed into a
+    // single directory where the siblings resolve, and the module rooted at
+    // that directory's core.zig is attached to consumers as "core". Sources
+    // come from the pinned Flash checkout (-Dflash-std); none are vendored.
+    // The full set is transpiled, but importing `core` only pulls the submodule
+    // closure a consumer actually references — unused ones (json, math, …) are
+    // emitted but never analyzed, so they cost a transpile, not image bytes.
+    const core_std_dir = b.addWriteFiles();
+    const core_std_modules = [_][]const u8{
+        "base", "mem",  "list", "fmt", "math", "arena",
+        "json", "io",   "keys", "tui", "core",
+    };
+    var core_root: std.Build.LazyPath = undefined;
+    for (core_std_modules) |name| {
+        const gen = addFlashSourceAbs(b, b.pathJoin(&.{ flash_std_dir, b.fmt("{s}.flash", .{name}) }), name);
+        const dest = core_std_dir.addCopyFile(gen, b.fmt("{s}.zig", .{name}));
+        if (std.mem.eql(u8, name, "core")) core_root = dest;
+    }
+    const core_mod = b.createModule(.{
+        .root_source_file = core_root,
     });
 
     // User-space virtual address layout (text/data/heap/stack bases +
@@ -1423,6 +1479,9 @@ pub fn build(b: *std.Build) void {
     echo_mod.addImport("flibc", flibc_mod);
     echo_mod.addImport("flibc_start", flibc_start_mod);
     echo_mod.addImport("flibc_mem", flibc_mem_mod);
+    // echo is the first userland to route its output through the std io seam
+    // (core.io.Writer over a syscall-backed Sink) instead of a direct write_fd.
+    echo_mod.addImport("core", core_mod);
     const echo = b.addExecutable(.{
         .name = "echo.elf",
         .root_module = echo_mod,
