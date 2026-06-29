@@ -21,7 +21,7 @@ link "flibc_mem"
 const BUF_LEN usize = 512
 
 fn diag(msg []u8) {
-    _ = flibc.sys.write_fd(2, msg.ptr, msg.len)
+    flibc.errSink(msg)
 }
 
 // Copy src -> dst (dst created fresh). Returns true on a clean copy.

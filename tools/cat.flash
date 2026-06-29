@@ -25,7 +25,7 @@ fn drain(fd i32) {
         if n <= 0 {
             break
         }
-        _ = flibc.sys.write_fd(1, &buf, #intCast(n))
+        flibc.consoleSink(buf[0..#intCast(n)])
     }
 }
 
@@ -43,7 +43,7 @@ export fn main(argc usize, argv argv) noreturn {
                 if fd == -defs.EACCES {
                     msg = "cat: Permission denied\n"
                 }
-                _ = flibc.sys.write_fd(2, msg.ptr, msg.len)
+                flibc.errSink(msg)
                 continue
             }
             drain(fd)

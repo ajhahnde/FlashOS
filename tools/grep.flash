@@ -45,15 +45,15 @@ const LINE_MAX usize = 1024
 const PAT_MAX usize = 256
 
 fn diag(msg []u8) {
-    _ = flibc.sys.write_fd(2, msg.ptr, msg.len)
+    flibc.errSink(msg)
 }
 
 // Emit `ln` to fd 1 (plus the newline stripped during scanning) when it matches.
 fn emitMatch(ln []u8, pat []u8, ignore_case bool) {
     if grep_match.lineContains(ln, pat, ignore_case) {
-        _ = flibc.sys.write_fd(1, ln.ptr, ln.len)
+        flibc.consoleSink(ln)
         const nl []u8 = "\n"
-        _ = flibc.sys.write_fd(1, nl.ptr, nl.len)
+        flibc.consoleSink(nl)
     }
 }
 

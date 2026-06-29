@@ -15,7 +15,7 @@ link "flibc_start"
 link "flibc_mem"
 
 fn emit(s []u8) {
-    _ = flibc.sys.write_fd(1, s.ptr, s.len)
+    flibc.consoleSink(s)
 }
 
 fn listDir(path cstr) {
@@ -26,7 +26,7 @@ fn listDir(path cstr) {
         while n < d.name.len && d.name[n] != 0 {
             n += 1
         }
-        _ = flibc.sys.write_fd(1, &d.name, n)
+        flibc.consoleSink(d.name[0..n])
         if d.d_type == flibc.DT_DIR {
             emit("/")
         }

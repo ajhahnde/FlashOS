@@ -19,7 +19,7 @@ export fn main(_ usize, _ argv) noreturn {
     var buf [flibc.KLOG_SIZE]u8 = undefined
     n := flibc.sys.klog_read(&buf, buf.len)
     if n > 0 {
-        _ = flibc.sys.write_fd(1, &buf, #intCast(n))
+        flibc.consoleSink(buf[0..#intCast(n)])
     }
     flibc.exit()
 }
