@@ -4,13 +4,40 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="420">
   </picture>
 
+<h3>AArch64 bare-metal kernel for the Raspberry Pi 4B and QEMU <code>-M rpi4b</code></h3>
+
+<p>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
+    <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
+    <img src="https://img.shields.io/badge/version-v0.7.1-lightgrey?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/.flash-v1.0.0-f59e0b?style=flat-square" alt="Flash">
+    <img src="https://img.shields.io/badge/zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
+    <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
+    <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
+  </p>
+
+<p>
+    <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
+    <a href="SETUP.md"><b>Setup</b></a> ·
+    <a href="PORT.md"><b>Port</b></a> ·
+    <a href="VERSIONING.md"><b>Versioning</b></a> ·
+    <a href="CHANGELOG.md"><b>Changelog</b></a> ·
+    <a href="LICENSE.md"><b>License</b></a>
+  </p>
+
+<p>
+    <b>English</b> ·
+    <a href="docs/de/README.md">Deutsch</a>
+  </p>
+</div>
+
 ---
 
 <p align="center">
   Written in <b><a href="https://github.com/ajhahnde/Flash">Flash</a></b> — a systems language built with LLVM IR.
 </p>
 
-<p align="center">
+<p align="left">
   <img src="assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi into the fsh shell" width="780">
 </p>
 
@@ -35,12 +62,12 @@ harness and a host-side unit test suite.
 
 ## Specifications
 
-|                        |                                                                                             |
-| :--------------------- | :------------------------------------------------------------------------------------------ |
-| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                            |
-| **Architecture** | AArch64 (ARMv8-A)                                                                           |
-| **Languages**    | Flash, Zig + AArch64 assembly                                                             |
-| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils                                  |
+|                  |                                                                                       |
+| :--------------- | :------------------------------------------------------------------------------------ |
+| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                      |
+| **Architecture** | AArch64 (ARMv8-A)                                                                     |
+| **Languages**    | Flash, Zig + AArch64 assembly                                                         |
+| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils                                |
 | **Targets**      | RPi 4B hardware,`qemu-system-aarch64 -M raspi4b`, _and_ `qemu-system-aarch64 -M virt` |
 
 > The validated target is `-Dboard=rpi4b`. The QEMU `-M virt` board has not been
@@ -194,21 +221,21 @@ serial-console setup.
 
 ## Build steps
 
-| Step                                   | What it does                                                   |
-| :------------------------------------- | :------------------------------------------------------------- |
-| `zig build` (or `-Dboard=rpi4b`)   | Default — Pi:`kernel8.img` + `armstub8.bin`               |
-| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                         |
+| Step                                 | What it does                                                   |
+| :----------------------------------- | :------------------------------------------------------------- |
+| `zig build` (or `-Dboard=rpi4b`)     | Default — Pi:`kernel8.img` + `armstub8.bin`                    |
+| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                           |
 | `zig build kernel`                   | Kernel image only                                              |
 | `zig build armstub` (rpi4b only)     | Armstub only                                                   |
-| `zig build populate-syms`            | Regenerate`src/symbol_area.S` from the linked ELF            |
-| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to`$SD_BOOT`                   |
-| `zig build -Dboard=rpi4b run`        | Boot under`qemu-system-aarch64 -M raspi4b`                   |
-| `zig build -Dboard=virt run-virt`    | Boot under`qemu-system-aarch64 -M virt`                      |
+| `zig build populate-syms`            | Regenerate`src/symbol_area.S` from the linked ELF              |
+| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to`$SD_BOOT`                     |
+| `zig build -Dboard=rpi4b run`        | Boot under`qemu-system-aarch64 -M raspi4b`                     |
+| `zig build -Dboard=virt run-virt`    | Boot under`qemu-system-aarch64 -M virt`                        |
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
 | `zig build test`                     | Host-side unit tests (464 tests, 41 modules)                   |
-| `zig build clean`                    | Remove`.zig-cache/` and `zig-out/`                         |
+| `zig build clean`                    | Remove`.zig-cache/` and `zig-out/`                             |
 
 The default optimisation mode is `ReleaseSmall`. Override with
 `-Doptimize=ReleaseSafe` (or `Debug`, `ReleaseFast`).
