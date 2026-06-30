@@ -35,8 +35,6 @@
 
 ## See also: **[Flash](https://github.com/ajhahnde/Flash)** — the language used to write FlashOS.
 
----
-
 <p align="center">
   <img src="assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi into the fsh shell" width="780">
 </p>
