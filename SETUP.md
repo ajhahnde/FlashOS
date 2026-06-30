@@ -26,11 +26,8 @@
 
 ---
 
-This page covers the host toolchain, the SD-card layout the Raspberry
-Pi 4 expects, the serial console, QEMU, and the test runner.
-
 Reference:
-[BCM2711 ARM Peripherals (RPi 4)](https://pip-assets.raspberrypi.com/categories/545-raspberry-pi-4-model-b/documents/RP-008248-DS-1-bcm2711-peripherals.pdf?disposition=inline).
+[BCM2711 ARM Peripherals (RPi 4)](https://pip-assets.raspberrypi.com/categories/545-raspberry-pi-4-model-b/documents/RP-008248-DS-1-bcm2711-peripherals.pdf?disposition=inline)
 
 ## Contents
 
@@ -44,14 +41,14 @@ Reference:
 
 ## 1. Host toolchain
 
-| Tool                       | Minimum version | Purpose                                   |
-| :------------------------- | :-------------- | :---------------------------------------- |
-| Zig                        | 0.16.0          | Compile Zig + assembly, run `build.zig` |
-| `flashc`                   | pinned          | Transpile Flash (`.flash`) sources to Zig |
-| `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                         |
-| `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`   |
+| Tool                     | Minimum version | Purpose                                   |
+| :----------------------- | :-------------- | :---------------------------------------- |
+| Zig                      | 0.16.0          | Compile Zig + assembly, run `build.zig`   |
+| `flashc`                 | pinned          | Transpile Flash (`.flash`) sources to Zig |
+| `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                          |
+| `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`     |
 | `qemu-system-aarch64`    | 11.0.0+         | Run the kernel under QEMU                 |
-| `screen` (or equivalent) | –              | Serial console for the Pi                 |
+| `screen` (or equivalent) | –               | Serial console for the Pi                 |
 
 On macOS:
 
@@ -173,10 +170,10 @@ SD_BOOT=/Volumes/BOOT FIRMWARE=firmware zig build deploy
 
 The deploy step reads two environment variables:
 
-| Variable     | Default           | Purpose                                           |
-| :----------- | :---------------- | :------------------------------------------------ |
-| `SD_BOOT`  | `/Volumes/BOOT` | SD-card mount point on macOS                      |
-| `FIRMWARE` | `firmware`      | Directory holding the bundled RPi firmware files  |
+| Variable   | Default         | Purpose                                          |
+| :--------- | :-------------- | :----------------------------------------------- |
+| `SD_BOOT`  | `/Volumes/BOOT` | SD-card mount point on macOS                     |
+| `FIRMWARE` | `firmware`      | Directory holding the bundled RPi firmware files |
 
 ## 5. Serial console
 
@@ -291,8 +288,8 @@ in every shell. The legacy flat names (`picapture`, `piconnect`, `piquit`,
 - **`build`** — runs `./build.sh` from the repo root (works from any
   directory): clean, link pass 1, `populate-syms`, link pass 2,
   diff-check the symbol layout, optionally `deploy`. `BOARD=virt
-  build` selects the virt board (deploy is skipped); `NM=llvm-nm
-  build` overrides the symbol-dump binary.
+build` selects the virt board (deploy is skipped); `NM=llvm-nm
+build` overrides the symbol-dump binary.
 - **`run <mode>`** — builds and runs a board, runs the boot watchdog, or
   attaches to hardware. `run qemu` (alias `auto`) builds and launches the
   rpi4b model in QEMU; `run virt` does the same for the virt board; `run test`

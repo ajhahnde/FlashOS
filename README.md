@@ -8,12 +8,12 @@
 
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
-    <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.7.1-lightgrey?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/.flash-v1.0.0-f59e0b?style=flat-square" alt=".flash">
-    <img src="https://img.shields.io/badge/zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
+    <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=Coverage" alt="Coverage"></a>
+    <img src="https://img.shields.io/badge/Version-v0.7.1-lightgrey?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Flash-v1.0.0-f59e0b?style=flat-square" alt="Flash">
+    <img src="https://img.shields.io/badge/Zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
-    <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
+    <img src="https://img.shields.io/badge/License-Apache--2.0-lightgrey?style=flat-square" alt="License">
   </p>
 
 <p>
@@ -33,6 +33,10 @@
 
 ---
 
+## See also: **[Flash](https://github.com/ajhahnde/Flash)** — the language used to write FlashOS.
+
+---
+
 <p align="center">
   <img src="assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi into the fsh shell" width="780">
 </p>
@@ -46,11 +50,10 @@
 
 FlashOS is a bare-metal AArch64 kernel that boots on Raspberry Pi 4B
 hardware and under QEMU. The kernel core is written in
-[Flash](https://github.com/ajhahnde/Flash) — a systems language that
-transpiles to Zig — with the boot path, exception vectors, and context
+[Flash](https://github.com/ajhahnde/Flash) — a systems language built with `LLVM IR` — with the boot path, exception vectors, and context
 switch in AArch64 assembly. The build is driven entirely by
-`build.zig`, which transpiles the `.flash` modules through a pinned
-`flashc`.
+`build.zig`, which currently transpiles the `.flash` modules through a pinned
+`flashc`. Soon FlashOS will be compiled directly.
 The current release ships with a complete uniprocessor process
 lifecycle (`fork`, `exec`, `exit`, `wait`, `kill`), leak-free across
 stress cycles, exercised by an in-kernel `[TEST]/[PASS]/[FAIL]`
@@ -68,6 +71,7 @@ harness and a host-side unit test suite.
 
 ## Features
 
+- **Note**: `-Dboard=virt` is currently deprioritized (no validation).
 - **Two-stage boot.** EL3 armstub configures the GIC and `eret`s into
   the kernel at EL1 (Pi). On QEMU `-M virt`, `boot.S` does the EL3→EL1
   drop itself.
@@ -239,66 +243,36 @@ The default optimisation mode is `ReleaseSmall`. Override with
 ## Repository layout
 
 ```text
-src/                kernel core (Flash + AArch64 assembly)
-src/board/<name>/   per-board driver bag (rpi4b / virt) + linker script
-user_space/         PID 1 image + in-kernel test harness
-user_space/lib/flibc/  userland mini-libc for ELF demos
-lib/                shared kernel↔user constants (syscall IDs)
-tools/              hand-rolled ELF demos (hello, stackbomb, flibc_demo)
-tests/              host-side unit tests
-armstub/            EL3 → EL1 bootstrap shim (Pi only)
-scripts/            symbol-table generation, iso, QEMU test watchdog,
-                    Pi-baseline verifier
-assets/             logo and visual assets
-build.zig           the only build entry point
-build.sh            two-pass build orchestrator + deploy prompt
-flash-toolchain.lock  pinned flashc revision (Flash→Zig transpiler)
-config.txt          RPi 4 firmware configuration
+src/                        kernel core (Flash + AArch64 assembly)
+src/board/<name>/           per-board driver bag (rpi4b / virt) + linker script
+user_space/                 PID 1 image + in-kernel test harness
+user_space/lib/flibc/       userland mini-libc for ELF demos
+lib/                        shared kernel↔user constants (syscall IDs)
+tools/                      hand-rolled ELF demos (hello, stackbomb, flibc_demo)
+tests/                      host-side unit tests
+armstub/                    EL3 → EL1 bootstrap shim (Pi only)
+scripts/                    symbol-table generation, iso, QEMU test watchdog,
+                            Pi-baseline verifier
+assets/                     logo and visual assets
+build.zig                   the only build entry point
+build.sh                    two-pass build orchestrator + deploy prompt
+flash-toolchain.lock        pinned flashc revision (Flash→Zig transpiler)
+config.txt                  RPi 4 firmware configuration
 ```
 
 A deeper walk-through of each subsystem is in
 [Documentation](DOCUMENTATION.md).
 
-## Versioning
-
-`v[MAJOR].[MINOR].[PATCH]`. Per-tag notes live on the
-[releases page](https://github.com/ajhahnde/FlashOS/releases).
-
-## AI assistance
+## Authorship
 
 The prose docs in this repo (README, DOCUMENTATION, CHANGELOG, PORT)
-are LLM-drafted under my review. They're kept honest by the build,
-not by trust: the OS is verified by booting it, not by describing it.
+are LLM-drafted under my review and specifications.
+The docs are also kept up-to-date by an automated drift check on `git commit` that keeps
+the contract values quoted across them. Version, boot-contract numbers,
+ABI constants are in sync with the live tree.
 
-- Boots to a login shell on QEMU `virt` and Raspberry Pi 4B from the
-  same kernel ABI
-- `-Dboot-selftest=true` runs the in-kernel `[TEST]` harness at PID 1
-  before the login prompt — process, filesystem, memory-fault, and
-  device scenarios, each bracketed by free-page checkpoints to surface
-  leaks
-- The kernel is written in Flash and transpiled to Zig via the sibling
-  `flashc` compiler — pinned in `flash-toolchain.lock`
-
-If a doc claims a subsystem works, the boot path is what exercises it.
-
-The docs are also kept current by an automated drift check that keeps
-the contract values quoted across them — version, boot-contract numbers,
-ABI constants — in sync with the live tree, so a stale copy is caught
-rather than shipped.
-
-Source code (`src/*.flash`, the Zig drivers, the AArch64 assembly) is
-authored by me.
-
-## License
-
-Apache License, Version 2.0. See [License](LICENSE.md).
-
-## See also
-
-- **[Flash](https://github.com/ajhahnde/Flash)** — a systems language and Zig transpiler.
-- **[eeco](https://github.com/ajhahnde/eeco)** — self-maintaining workflow ecosystem.
-- **[the-way-out](https://github.com/ajhahnde/the-way-out)** — top-down pixel-art escape-room shooter.
-- **[Theria](https://github.com/ajhahnde/Theria)** — 2.5D MOBA built in Godot 4.
+Source code (`src/*.flash` & Zig drivers) is
+primarily authored by me.
 
 ---
 
