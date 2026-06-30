@@ -36,7 +36,7 @@ link "flibc_mem"
 const PASSWD_PATH cstr = "/etc/passwd"
 
 fn emit(s []u8) void {
-    _ = flibc.sys.write_fd(1, s.ptr, s.len)
+    flibc.consoleSink(s)
 }
 
 // Read a masked secret from fd 0 into `buf`. Drives flibc's pure, host-tested
@@ -48,12 +48,12 @@ fn emit(s []u8) void {
 // the only echo (no kernel double-echo).
 fn readMasked(buf []mut u8) usize {
     var state = flibc.readline_mod.State.init(buf)
-    var ch [1]u8 = undefined
     while true {
-        if flibc.sys.read(0, &ch, 1) <= 0 {
+        const c = flibc.consoleInput(0)
+        if c == null {
             break
         }
-        switch flibc.readline_mod.step(&state, ch[0]) {
+        switch flibc.readline_mod.step(&state, c.?) {
             .echo => emit("*"),
             .backspace => emit("\x08 \x08"),
             .submit, .eof => { break },

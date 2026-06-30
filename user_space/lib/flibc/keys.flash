@@ -148,16 +148,17 @@ pub const Decoder = struct {
 pub const readKey = driver.readKey
 
 const driver = if (has_driver) struct {
-    const sys = #import("syscalls.zig")
+    const io = #import("io.zig")
 
     pub fn readKey() Event {
         var dec = Decoder{}
         var b u8 = 0
         while true {
-            const n = sys.read(0, #ptrCast(&b), 1)
-            if n <= 0 {
+            const mb = io.consoleInput(0)
+            if mb == null {
                 return .{ .key = .eof }
             }
+            b = mb.?
             const ev = dec.feed(b)
             if ev.key != .none {
                 return ev

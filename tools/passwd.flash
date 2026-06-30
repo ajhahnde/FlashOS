@@ -28,11 +28,11 @@ link "flibc_mem"
 const PASSWD_PATH cstr = "/etc/passwd"
 
 fn emit(s []u8) void {
-    _ = flibc.sys.write_fd(1, s.ptr, s.len)
+    flibc.consoleSink(s)
 }
 
 fn emitErr(s []u8) void {
-    _ = flibc.sys.write_fd(2, s.ptr, s.len)
+    flibc.errSink(s)
 }
 
 // Read one line from fd 0 (raw, one byte at a time) into `buf`, stopping
@@ -42,15 +42,14 @@ fn emitErr(s []u8) void {
 fn readLine(buf []mut u8) usize {
     var n usize = 0
     while n < buf.len {
-        var ch [1]u8 = undefined
-        r := flibc.sys.read(0, &ch, 1)
-        if r <= 0 {
+        const c = flibc.consoleInput(0)
+        if c == null {
             break
         }
-        if ch[0] == '\n' || ch[0] == '\r' {
+        if c.? == '\n' || c.? == '\r' {
             break
         }
-        buf[n] = ch[0]
+        buf[n] = c.?
         n += 1
     }
     return n
