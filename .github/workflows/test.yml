@@ -121,9 +121,20 @@ jobs:
       # to Zig at build time by flashc. build.zig resolves the compiler at
       # ~/Flash/zig-out/bin/flashc-stage1 by default; the pinned revision
       # lives in flash-toolchain.lock. Flash ships no prebuilt binaries, so
-      # build the self-hosted stage1 from source at the pinned commit. The
-      # binary is cached on the lock hash, so it only rebuilds when the pin
-      # moves.
+      # build the self-hosted stage1 from source at the pinned commit.
+      #
+      # The checkout runs every time, before the cache restore: build.zig
+      # transpiles the Flash std modules (~/Flash/std/*.flash) directly, so
+      # the source tree must be present even on a flashc cache hit — the
+      # cache only carries the binary. Cloning first also keeps the restore
+      # from landing the cached binary into a path that `git clone` would
+      # then refuse as a non-empty destination.
+      - name: check out the pinned Flash toolchain
+        run: |
+          commit=$(grep -oE '^flash-commit[[:space:]]*=[[:space:]]*[0-9a-f]{40}' flash-toolchain.lock | grep -oE '[0-9a-f]{40}')
+          git clone https://github.com/ajhahnde/Flash.git ~/Flash
+          git -C ~/Flash checkout "$commit"
+
       - name: cache flashc (pinned Flash toolchain)
         id: flashc
         uses: actions/cache@v4
@@ -135,11 +146,9 @@ jobs:
         if: steps.flashc.outputs.cache-hit != 'true'
         # `zig build stage1` (not the bare `zig build`, which emits only the
         # stage0 bootstrap seed `flashc`) produces the self-hosted
-        # `flashc-stage1` that flash-toolchain.lock pins.
+        # `flashc-stage1` that flash-toolchain.lock pins. The binary is
+        # cached on the lock hash, so it only rebuilds when the pin moves.
         run: |
-          commit=$(grep -oE '^flash-commit[[:space:]]*=[[:space:]]*[0-9a-f]{40}' flash-toolchain.lock | grep -oE '[0-9a-f]{40}')
-          git clone https://github.com/ajhahnde/Flash.git ~/Flash
-          git -C ~/Flash checkout "$commit"
           ( cd ~/Flash && zig build stage1 )
           test -x ~/Flash/zig-out/bin/flashc-stage1
 
