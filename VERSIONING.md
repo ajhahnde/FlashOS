@@ -138,8 +138,8 @@ The model follows the Mesa driver tier convention.
 
 | Tier | Promise | Boards |
 |---|---|---|
-| **Tier 1 — guaranteed** | Every tagged release MUST boot to the kernel banner and pass the in-kernel test harness on this hardware. CI MUST exercise the boot path for every PR. A regression here is a release blocker. | Raspberry Pi 4 Model B (BCM2711, AArch64, 4-core); QEMU `aarch64` `-M virt` (the version pinned in [`SETUP.md`](SETUP.md)). |
-| **Tier 2 — best-effort** | Building, booting, and the test harness SHOULD work, but no PR is blocked on a regression here and no PATCH is issued for a Tier-2-only defect. | Other Raspberry Pi models; QEMU `aarch64` boards other than `virt`. |
+| **Tier 1 — guaranteed** | Every tagged release MUST boot to the kernel banner and pass the in-kernel test harness on this hardware. CI MUST exercise the boot path for every PR. A regression here is a release blocker. | Raspberry Pi 4 Model B (BCM2711, AArch64, 4-core); QEMU `aarch64` `-M raspi4b` (the version pinned in [`SETUP.md`](SETUP.md)). |
+| **Tier 2 — best-effort** | Building, booting, and the test harness SHOULD work, but no PR is blocked on a regression here and no PATCH is issued for a Tier-2-only defect. | Other Raspberry Pi models; QEMU `aarch64` `-M virt` (deprioritized since [v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0), the last release verified to boot it; no longer CI-gated) and other QEMU boards. |
 | **Tier 3 — experimental** | Actively being worked on. May break in any release without notice or CHANGELOG entry. | Anything not in Tier 1 or Tier 2. |
 
 A board MUST NOT be promoted from Tier 2 to Tier 1 in a PATCH; the

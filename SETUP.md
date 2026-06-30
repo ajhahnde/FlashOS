@@ -102,6 +102,11 @@ zig build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
 zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
+`-Dboard=rpi4b` is the validated board. `-M virt` has not been CI-gated since
+[v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0), the last
+release verified to boot it, so later releases may have regressed. For a
+known-good `-M virt` build, use v0.5.0.
+
 For a self-validating run that exits 0 when the boot reaches the
 interactive `fsh` prompt (the third `type 'help' for commands` homescreen
 marker — see below) with no `[FAIL]` / `ERROR CAUGHT` and the expected free-page
@@ -109,8 +114,8 @@ checkpoints, and 1 on a failure or watchdog timeout (no manual QEMU
 supervision):
 
 ```bash
-zig build -Dboard=virt  test-virt
-zig build -Dboard=rpi4b test-rpi4b  # (matches run)
+zig build -Dboard=rpi4b test-rpi4b  # (matches run); the CI boot gate
+zig build -Dboard=virt  test-virt   # deprioritized, not CI-gated
 ```
 
 To verify the Pi byte-identity baseline before flashing the SD card
@@ -130,8 +135,8 @@ directly on the controlling terminal. `run-virt` uses
 PL011 routed onto host stdio.
 
 A green run on either board lands `30/30 passed`, 34 per-scenario
-free-page checkpoints (`0xbbff2` on rpi4b, `0x3be46` on virt) plus the
-matching boot baseline (`0xbc000` / `0x3be54`), and 0 `ERROR CAUGHT`.
+free-page checkpoints (`0xbbff2` on rpi4b, `0x3be45` on virt) plus the
+matching boot baseline (`0xbc000` / `0x3be53`), and 0 `ERROR CAUGHT`.
 The boot then hands off to `/bin/login` → `/bin/fsh`; with the login
 lifecycle fsh's homescreen marker (`type 'help' for commands`) appears
 three times (two scripted `[TEST] login` sessions + the real boot

@@ -26,6 +26,12 @@
 
 ---
 
+> **Board note.** `-Dboard=rpi4b` is the validated board. The QEMU `-M virt`
+> target has been deprioritized since
+> [v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0), the last
+> release verified to boot it, and is no longer CI-gated. The per-board
+> descriptions below still document it, but later releases may have regressed.
+
 ## Contents
 
 1. [Source layout](#1-source-layout)
@@ -611,12 +617,10 @@ fd-redirect`, §8).
 
 ### Shell & userland (fsh)
 
-The syscall surface is assembled into an interactive shell,
-`fsh`, staged in the initramfs at `/bin/fsh`, plus the `/bin/echo` and
-`/bin/cat` coreutils, plus `/bin/ls`, `/bin/meminfo`,
-`/bin/forkbomb`, `/bin/grep` (literal line search), the FAT32
-file-management trio `/bin/cp` / `/bin/mv` / `/bin/rm`, the full-screen
-`/bin/less` pager, and the `/bin/edit` text editor. fsh and the coreutils link against **flibc**
+The syscall surface is assembled into an interactive shell, `fsh`, staged
+in the initramfs at `/bin/fsh`, alongside the `/bin` coreutils (`echo`,
+`cat`, `ls`, `grep`, the FAT32 trio `cp` / `mv` / `rm`, the `less` pager,
+the `edit` editor, and the system-info readers). fsh and the coreutils link against **flibc**
 (`user_space/lib/flibc/`), the userland mini-libc: SVC wrappers, a
 comptime-format `printf`, the `_start` argc/argv shim, and — for payloads
 that trip LLVM's `memcpy` / `strlen` idiom lowering — a freestanding
@@ -642,9 +646,8 @@ printable keys insert, Backspace / Delete remove, Enter splits the line,
 in-place: the FAT32 backend's `write` only grows `file_size` (there is no
 truncate), so recreating the file gives the correct, possibly smaller, size
 every time. Limits: one logical line per screen row (horizontal scroll, no
-soft-wrap), no undo, tabs shown as a single space, fixed 24×80 geometry. Like
-`/bin/less` it is interactive, so it is kept out of the CI boot script and its
-edit loop is validated on real Pi hardware.
+soft-wrap), no undo, tabs shown as a single space, fixed 24×80 geometry. The
+edit loop itself is validated on real Pi hardware.
 
 - **REPL.** `fsh` reads `/etc/fshrc` once at startup (`open` → `read` →
   `close`; comment and blank lines skipped, every other line dispatched),
@@ -1209,7 +1212,7 @@ kernel state:
   targets. Reachable only after the page-allocator / kernel-image overlap
   fix (see CHANGELOG).
 - `kill` — fork a child, kill it by pid, parent reaps.
-- `exec-elf` — fork a child, `exec` `tools/hello.elf` through the
+- `exec-elf` — fork a child, `exec` `/test/hello.elf` through the
   ELF path (parser + PT_LOAD walk + eager top-stack page),
   parent reaps.
 - `execve` — fork a child, `sys_execve("/test/argv_echo.elf",
@@ -1221,7 +1224,7 @@ kernel state:
 - `brk` — fork a child, grow heap by 16 pages (each touch fires
   `do_data_abort`'s heap-range demand-alloc), read pattern back,
   shrink to baseline, parent reaps.
-- `stack-overflow` — fork a child, `exec` `tools/stackbomb.elf`,
+- `stack-overflow` — fork a child, `exec` `/test/stackbomb.elf`,
   child recurses past `STACK_LOW` into the guard page, kernel zombies
   via `[KERN] stack overflow`, parent reaps.
 - `wild-pointer` — fork a child, write to `0xDEADBEEF000`
@@ -1231,7 +1234,7 @@ kernel state:
   assert it returns `-1` **without zombifying** the caller (the soft
   leg of `mm_user.check_and_prefault_user_range`).
   No fork; baseline holds (one parity `sys_dump_free`).
-- `flibc` — fork a child, `exec` `tools/flibc_demo.elf` (built against
+- `flibc` — fork a child, `exec` `/test/flibc_demo.elf` (built against
   `user_space/lib/flibc/`), demo runs `printf("flibc hello %d\n", 42)`
   - 32-byte malloc + pattern verify + `exit`, parent reaps. Validates
     flibc's printf / bump-allocator / exit layers end-to-end through the
@@ -1292,8 +1295,8 @@ kernel state:
   it twice across a reboot.
 - `readdir` — the directory-enumeration scenario. Walks
   `/bin` via the raw `sys_readdir(path, index, *Dirent)` from `index = 0`,
-  asserts the known coreutils `fsh` **and** `ls` are present (robust to
-  `/bin` growth — an exact count would be brittle), the end sentinel fires
+  asserts the known coreutils `fsh` **and** `ls` are present (unaffected by
+  `/bin` growth; an exact count would be brittle), the end sentinel fires
   (the call past the last entry returns -1, not a runaway), and the
   stateless walk leaks nothing (free count equals baseline — the one new
   `sys_dump_free` checkpoint this scenario adds). QEMU exercises the
@@ -1304,7 +1307,7 @@ kernel state:
   the ring) then `sys_klog_read` for the most-recent 256 bytes, and asserts
   the just-emitted `free_pages` marker is present — proving the
   `main_output` → ring tee and the slot-38 snapshot path. The marker is
-  kernel-emitted, so the assertion is robust to USB-console state on every
+  kernel-emitted, so the assertion is unaffected by USB-console state on every
   target. The single `sys_dump_free` doubles as the baseline checkpoint;
   the static-BSS ring and the warmed-stack snapshot buffer keep it
   leak-free. `/bin/dmesg` is the interactive consumer (not driven by the
@@ -1378,7 +1381,7 @@ Each scenario emits `[TEST] name` … `[PASS] name` (or `[FAIL]`), and
 identically under QEMU (`zig build -Dboard=virt run-virt` /
 `-Dboard=rpi4b run`) and on real hardware (`./build.sh` → SD-flash →
 `picapture`); a green run lands `30/30 passed` with 34 baseline
-checkpoints (`0xbbff2` rpi4b / `0x3be46` virt) and 0 `ERROR CAUGHT`
+checkpoints (`0xbbff2` rpi4b / `0x3be45` virt) and 0 `ERROR CAUGHT`
 on both boards, then hands off to
 `/bin/login` → `/bin/fsh`. With the login lifecycle fsh's homescreen
 marker (`type 'help' for commands`) appears **three times** per boot —
@@ -1484,8 +1487,8 @@ Any deviation indicates a leak in the scenario above the deviating
 checkpoint.
 
 The example above shows the rpi4b values. On virt the same structure
-holds with the board's own pair — boot baseline `0x3be54`,
-per-scenario checkpoint `0x3be46` — smaller because virt has 1 GiB of
+holds with the board's own pair — boot baseline `0x3be53`,
+per-scenario checkpoint `0x3be45` — smaller because virt has 1 GiB of
 RAM and its kernel is loaded _inside_ the page-pool window, so
 `mem_map_reserve_below` subtracts the kernel image (including the
 128 KiB `_symbols` section and the 16 KiB klog ring) and the 64 MiB
@@ -1494,7 +1497,7 @@ RAM and its kernel is loaded _inside_ the page-pool window, so
 can never overflow into its `TaskStruct` credentials (see "Security
 model" in §5) — widens the boot-to-scenario delta to `0xe` on both
 boards, landing the documented pairs: rpi4b `0xbbff2` / `0xbc000` and
-virt `0x3be46` / `0x3be54`.
+virt `0x3be45` / `0x3be53`.
 
 ### Coverage matrix
 

@@ -4,36 +4,11 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="420">
   </picture>
 
-<h3>AArch64 bare-metal kernel for the Raspberry Pi 4B and QEMU <code>-M virt</code></h3>
-
-<p>
-    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
-    <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.7.1-lightgrey?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/.flash-v1.0.0-f59e0b?style=flat-square" alt="Flash">
-    <img src="https://img.shields.io/badge/zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
-    <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
-    <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
-  </p>
-
-<p>
-    <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
-    <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="PORT.md"><b>Port</b></a> ·
-    <a href="VERSIONING.md"><b>Versioning</b></a> ·
-    <a href="CHANGELOG.md"><b>Changelog</b></a> ·
-    <a href="LICENSE.md"><b>License</b></a>
-  </p>
-
-<p>
-    <b>English</b> ·
-    <a href="docs/de/README.md">Deutsch</a>
-  </p>
-</div>
-
 ---
 
-## See also: **[Flash](https://github.com/ajhahnde/Flash)** — the language used to write FlashOS.
+<p align="center">
+  Written in <b><a href="https://github.com/ajhahnde/Flash">Flash</a></b> — a systems language built with LLVM IR.
+</p>
 
 <p align="center">
   <img src="assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi into the fsh shell" width="780">
@@ -41,14 +16,15 @@
 
 > The boot above is a captured serial console of FlashOS booting on real
 > Raspberry Pi 4B hardware to the `login:` prompt; the trailing `fsh`
-> session — `help`, `ls`, and `sysinfo` — replays the shell's real output at
+> session (`help`, `ls`, and `sysinfo`) replays the shell's real output at
 > a readable cadence, before a final `reboot` loops the demo back to the boot.
 
 ## About
 
 FlashOS is a bare-metal AArch64 kernel that boots on Raspberry Pi 4B
 hardware and under QEMU. The kernel core is written in
-[Flash](https://github.com/ajhahnde/Flash) — a systems language built with `LLVM IR` — with the boot path, exception vectors, and context
+[Flash](https://github.com/ajhahnde/Flash) (a systems language built with
+`LLVM IR`) with the boot path, exception vectors, and context
 switch in AArch64 assembly. The build is driven entirely by
 `build.zig`, which currently transpiles the `.flash` modules through a pinned
 `flashc`. Soon FlashOS will be compiled directly.
@@ -59,17 +35,22 @@ harness and a host-side unit test suite.
 
 ## Specifications
 
-|                  |                                                                                       |
-| :--------------- | :------------------------------------------------------------------------------------ |
-| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                      |
-| **Architecture** | AArch64 (ARMv8-A)                                                                     |
-| **Languages**    | Flash (transpiled to Zig) + AArch64 assembly                                          |
-| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils                                |
+|                        |                                                                                             |
+| :--------------------- | :------------------------------------------------------------------------------------------ |
+| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                            |
+| **Architecture** | AArch64 (ARMv8-A)                                                                           |
+| **Languages**    | Flash, Zig + AArch64 assembly                                                             |
+| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils                                  |
 | **Targets**      | RPi 4B hardware,`qemu-system-aarch64 -M raspi4b`, _and_ `qemu-system-aarch64 -M virt` |
+
+> The validated target is `-Dboard=rpi4b`. The QEMU `-M virt` board has not been
+> CI-gated since **[v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0)**,
+> the last release verified to boot it. The dual-target plumbing below is kept,
+> but later releases may have regressed; for a known-good `-M virt` build, use
+> v0.5.0.
 
 ## Features
 
-- **Note**: `-Dboard=virt` is currently deprioritized (no validation).
 - **Two-stage boot.** EL3 armstub configures the GIC and `eret`s into
   the kernel at EL1 (Pi). On QEMU `-M virt`, `boot.S` does the EL3→EL1
   drop itself.
@@ -106,24 +87,18 @@ harness and a host-side unit test suite.
   console slots, `fork` inherits the table and `execve` preserves it,
   so a shell can hand a child redirected stdio. Anonymous pipes
   (`sys_pipe`) ride the same table.
-- **Interactive shell (`fsh`).** A userland REPL at `/bin/fsh` over a
-  mini-libc (`flibc`): a `readline` line editor with TAB completion (double-TAB lists candidates), a tokenizer with a
-  single `|` pipe stage, in-process built-ins (`cd` / `pwd` / `exit` /
-  `logout` / `help` / `free` / `whoami` / `reboot`), a Unix-style `#`/`$`
-  privilege prompt, and `fork` +
-  `execvp` (`/bin/<name>` resolution) for externals — plus `/bin/echo`,
-  `/bin/cat`, `/bin/ls` (the stateless `sys_readdir` consumer),
-  `/bin/grep` (literal line search), `/bin/cp` / `/bin/mv` / `/bin/rm`
-  (FAT32 file management over the create/unlink/rename syscalls),
-  `/bin/meminfo`, `/bin/forkbomb` (a capped leak probe),
-  `/bin/sysinfo` (a key/value system summary), `/bin/cpuinfo` (CPU
-  temperature + clock), `/bin/uptime` (time since boot), `/bin/less` (a
-  full-screen pager), `/bin/edit` (a full-screen text editor), `/bin/clear`
-  (a screen wipe), and `/bin/passwd`. Reads
-  `/etc/fshrc` at startup; `sys_chdir` gives each
-  task a working directory. The coreutils use fixed-size stack/static
-  buffers; the userland heap (`brk`/`sbrk` behind flibc's bump `malloc`)
-  has its first consumer in `/bin/edit`'s growable buffer.
+- **Interactive shell (`fsh`).** A userland REPL at `/bin/fsh` over the
+  mini-libc (`flibc`): a `readline` line editor with TAB completion
+  (double-TAB lists candidates), a tokenizer with a single `|` pipe stage,
+  in-process built-ins (`cd` / `pwd` / `exit` / `logout` / `help` / `free` /
+  `whoami` / `reboot`), a Unix-style `#`/`$` privilege prompt, and
+  `fork` + `execvp` for externals. The `/bin` coreutils — `echo`, `cat`,
+  `ls`, `grep`, `cp`, `mv`, `rm`, `meminfo`, `forkbomb`, `sysinfo`,
+  `cpuinfo`, `uptime`, `less`, `edit`, `clear`, `passwd` — link the same
+  flibc; each is documented per-tool in
+  [Documentation §4](DOCUMENTATION.md#4-process-management--scheduling).
+  Reads `/etc/fshrc` at startup; `sys_chdir` gives each task a working
+  directory.
 - **Process identity, login & permissions.** Every task carries
   real + effective uid/gid (inherited across `fork`, preserved across
   `execve`) behind a `getuid`/`setuid`-family ABI, and every file carries
@@ -219,21 +194,21 @@ serial-console setup.
 
 ## Build steps
 
-| Step                                 | What it does                                                   |
-| :----------------------------------- | :------------------------------------------------------------- |
-| `zig build` (or `-Dboard=rpi4b`)     | Default — Pi:`kernel8.img` + `armstub8.bin`                    |
-| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                           |
+| Step                                   | What it does                                                   |
+| :------------------------------------- | :------------------------------------------------------------- |
+| `zig build` (or `-Dboard=rpi4b`)   | Default — Pi:`kernel8.img` + `armstub8.bin`               |
+| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                         |
 | `zig build kernel`                   | Kernel image only                                              |
 | `zig build armstub` (rpi4b only)     | Armstub only                                                   |
-| `zig build populate-syms`            | Regenerate `src/symbol_area.S` from the linked ELF             |
-| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to `$SD_BOOT`                    |
-| `zig build -Dboard=rpi4b run`        | Boot under `qemu-system-aarch64 -M raspi4b`                    |
-| `zig build -Dboard=virt run-virt`    | Boot under `qemu-system-aarch64 -M virt`                       |
+| `zig build populate-syms`            | Regenerate`src/symbol_area.S` from the linked ELF            |
+| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to`$SD_BOOT`                   |
+| `zig build -Dboard=rpi4b run`        | Boot under`qemu-system-aarch64 -M raspi4b`                   |
+| `zig build -Dboard=virt run-virt`    | Boot under`qemu-system-aarch64 -M virt`                      |
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
 | `zig build test`                     | Host-side unit tests (464 tests, 41 modules)                   |
-| `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                            |
+| `zig build clean`                    | Remove`.zig-cache/` and `zig-out/`                         |
 
 The default optimisation mode is `ReleaseSmall`. Override with
 `-Doptimize=ReleaseSafe` (or `Debug`, `ReleaseFast`).
@@ -264,14 +239,11 @@ A deeper walk-through of each subsystem is in
 
 ## Authorship
 
-The prose docs in this repo (README, DOCUMENTATION, CHANGELOG, PORT)
-are LLM-drafted under my review and specifications.
-The docs are also kept up-to-date by an automated drift check on `git commit` that keeps
-the contract values quoted across them. Version, boot-contract numbers,
-ABI constants are in sync with the live tree.
+The prose docs (README, DOCUMENTATION, CHANGELOG, PORT) are LLM-drafted
+under my review and to my specifications; their contract values are kept
+in sync with the live tree.
 
-Source code (`src/*.flash` & Zig drivers) is
-primarily authored by me.
+Source code (`src/*.flash` and the Zig drivers) is primarily my own.
 
 ---
 
