@@ -143,8 +143,8 @@ pub const Decoder = struct {
 }
 
 /// Block until one whole key is read from fd 0. Returns `.eof` when the stream
-/// closes. Use inside a full-screen loop; pair with console_ui.screen.enter /
-/// leave and console mode 0.
+/// closes. Use inside a full-screen loop; pair with the alternate-screen seam
+/// (flibc.altEnter / altLeave) and console mode 0.
 pub const readKey = driver.readKey
 
 const driver = if (has_driver) struct {

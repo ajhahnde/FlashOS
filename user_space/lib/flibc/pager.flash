@@ -10,8 +10,9 @@
 // Pure by construction, exactly like keys.Decoder and completion: no allocator
 // (the line index is a caller-owned []u32 — rule 1), no module state, no SVC,
 // no dependency on the kernel or the rest of flibc. The driver half — opening
-// the file, screen.enter/leave, readKey — lives in tools/less.flash; this
-// file holds only the logic worth host-testing in isolation.
+// the file, the alternate-screen takeover, and the key loop — lives in
+// tools/less.flash (over the std core.tui run loop); this file holds only the
+// logic worth host-testing in isolation.
 //
 // Zero footprint until referenced: like the other seams it is analysed only
 // when a call site names it, so re-exporting it from flibc leaves every current
