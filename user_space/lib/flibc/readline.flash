@@ -2,10 +2,10 @@
 //
 // The kernel console stays "dumb" — no termios, no cooked mode,
 // sys_setConsoleMode is inert (a future PTY concern). All line editing
-// lives here in userland: a per-byte state machine reads via
-// sys_read(0, &b, 1), echoes printable bytes through sys_write(1, …),
-// and submits on CR/LF. The caller owns the line buffer (rule 1 — no
-// allocator); overflow truncates silently.
+// lives here in userland: a per-byte state machine reads one byte through
+// the io seam (consoleInput over fd 0), echoes printable bytes back through
+// it (consoleSink over fd 1), and submits on CR/LF. The caller owns the line
+// buffer (rule 1 — no allocator); overflow truncates silently.
 //
 // Layout:
 //   * `State` + `Action` + `step` — the pure byte → buffer transition for the
@@ -172,7 +172,7 @@ pub const State = struct {
 }
 
 /// What the driver should do with a byte after `step` runs. Pure data —
-/// the driver translates this into sys_write_fd / return calls; tests
+/// the driver translates this into io-seam writes / return calls; tests
 /// inspect it directly.
 pub const Action = union(enum) {
     /// Byte consumed silently (overflow drop, ignored control char,
@@ -381,6 +381,7 @@ pub const Completion = struct {
 
 const driver = if (has_driver) struct {
     const sys = #import("syscalls.zig")
+    const io = #import("io.zig")
     const completion = #import("completion.zig")
     const keys = #import("keys.zig")
     const defs = #import("syscall_defs")
@@ -389,10 +390,11 @@ const driver = if (has_driver) struct {
         var state = State.init(buf)
         var byte u8 = 0
         while true {
-            const n = sys.read(0, #ptrCast(&byte), 1)
-            if n <= 0 {
+            const mb = io.consoleInput(0)
+            if mb == null {
                 return .eof
             }
+            byte = mb.?
             switch step(&state, byte) {
                 .none => {},
                 .echo => |b| echoByte(b),
@@ -420,10 +422,11 @@ const driver = if (has_driver) struct {
         var stuck_tabs u8 = 0
         var byte u8 = 0
         while true {
-            const n = sys.read(0, #ptrCast(&byte), 1)
-            if n <= 0 {
+            const mb = io.consoleInput(0)
+            if mb == null {
                 return .eof
             }
+            byte = mb.?
             const ev = dec.feed(byte)
             const was_stuck = stuck_tabs
             stuck_tabs = 0
@@ -483,13 +486,12 @@ const driver = if (has_driver) struct {
     }
 
     fn echoByte(b u8) void {
-        var out = b
-        _ = sys.write_fd(1, #ptrCast(&out), 1)
+        var out = [1]u8{b}
+        io.consoleSink(out[0..])
     }
 
     fn emitRubout() void {
-        const seq = "\x08 \x08"
-        _ = sys.write_fd(1, seq.ptr, seq.len)
+        io.consoleSink("\x08 \x08")
     }
 
     // Turn one Edit directive into VT100 bytes. The cursor arithmetic is
@@ -534,7 +536,7 @@ const driver = if (has_driver) struct {
 
     fn writeRange(s []u8) void {
         if s.len != 0 {
-            _ = sys.write_fd(1, s.ptr, s.len)
+            io.consoleSink(s)
         }
     }
 

@@ -62,16 +62,17 @@ export fn main(argc usize, argv argv) noreturn {
     flibc.exit()
 }
 
-// ---- I/O helpers (unified fd ABI) ----
+// ---- I/O helpers ----
 
+// The shell's one console-write helper: route by fd through the flibc io seam
+// (consoleSink = fd 1, errSink = fd 2) so every fsh write crosses the syscall
+// boundary at the one adapter, not a raw write_fd here.
 fn emit(fd i32, s []u8) {
-    _ = flibc.sys.write_fd(fd, s.ptr, s.len)
-}
-
-// console_ui Sink bound to stdout (fd 1), so the shared renderers reach the
-// shell's console.
-fn consoleSink(bytes []u8) {
-    emit(1, bytes)
+    if fd == 2 {
+        flibc.errSink(s)
+    } else {
+        flibc.consoleSink(s)
+    }
 }
 
 // ---- startup file ----
@@ -132,7 +133,7 @@ fn repl() {
     // before they are read back, so `undefined` backing is valid here.
     var hist_slots [HIST_N]flibc.HistSlot = undefined
     var hist = flibc.History.init(&hist_slots)
-    console_ui.homescreen(consoleSink, build_options.version, AUTHOR)
+    console_ui.homescreen(flibc.consoleSink, build_options.version, AUTHOR)
     while true {
         prompt := if (flibc.sys.geteuid() == 0) PROMPT_ROOT else PROMPT_USER
         emit(1, prompt)
