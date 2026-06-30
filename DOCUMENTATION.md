@@ -41,17 +41,19 @@
 ## 1. Source layout
 
 ```text
-src/                        Kernel core (Zig + AArch64 assembly)
-  start.zig                 Build root: comptime-imports every kernel module
-  kernel.flash              kernel_main + bring-up
+arch/aarch64/               AArch64 ISA core (assembly + shared asm macros)
   boot.S                    _start, EL3→EL1, MMU bring-up, jump to high VAs
   entry.S                   Exception vector table + syscall dispatch
   utils.S, mm.S             Assembly helpers
   sched.S, irq.S            Context switch + IRQ enable/disable
   generic_timer.S           CNTP system register helpers
-  symbol_area.S             Generated kernel symbol table (see §6)
   asm_defs.inc              Bridge header — pulls in board_asm_defs.inc
   asm_defs_common.inc       Shared assembler-only macros (board-independent)
+
+src/                        Kernel core (Flash modules + Zig drivers)
+  start.zig                 Build root: comptime-imports every kernel module
+  kernel.flash              kernel_main + bring-up
+  symbol_area.S             Generated kernel symbol table (see §6)
 
   board.flash               Comptime alias: build_options.board → board/<board>/*
   generic_timer.flash       ARM generic timer
@@ -59,17 +61,35 @@ src/                        Kernel core (Zig + AArch64 assembly)
   mm_user.flash             map_page, copy_virt_memory, do_data_abort
   fork.flash                copy_process, prepare_move_to_user[_elf]
   sched.flash               Priority round-robin scheduler
+  wait_queue.flash          Blocking-syscall wait queue
   sys.flash                 Syscall table + handlers
+  execve.flash              sys_execve — ELF load over the VFS + argv staging
   utilc.flash               memcpy/memset/panic + main_output helpers
+  klog_ring.flash           Kernel byte-ring backing klog_read / dmesg
+  console.flash             Console RX ring + line input
+  pipe.flash                Anonymous pipe ring
+  fdtable.flash             Per-task fd table (install / get / dup)
+  file.zig                  File-handle pages (offset cursor over a SuperBlock)
   elf.flash                 ELF64 header + program-header parser (host-testable)
   task_layout.flash         Canonical extern-struct layouts (TaskStruct, MmStruct, …)
   user_layout.flash         User VA constants (TEXT/DATA/HEAP/STACK bases + flags)
+  perm.flash                Owner/mode permission check (host-testable)
+  path.flash                joinResolve — path join + ./.. collapse (host-testable)
+  pwfile.flash              /etc/passwd line parser (host-testable)
+  shadow.flash              Shadow-db line parser (host-testable)
+  sha256.flash              SHA-256 + PBKDF2-HMAC + ctEql (host-testable)
+  hwrng.flash               Kernel entropy source (salt minting)
   block_dev.flash           BlockDev vtable: board-agnostic LBA read/write indirection
   sdhci_cmd.flash           SDHCI CMDTM bit layout, CMDx constants, CSD v2 parser, clock divisor
   mailbox.flash             VideoCore property-tag message layout + parsing (board-agnostic)
+  vfs.zig                   1-bit-superblock VFS dispatch layer
+  initramfs.flash           Read-only initramfs image decode (host-testable)
+  initramfs_backend.flash   initramfs VfsOps backend (read-only)
   fat32.flash               FAT32 BPB/FAT/dir-entry decode + cluster-chain walk (host-testable)
-  fat32_backend.flash       FAT32 VfsOps backend: read + writeBack over block_dev (real SD I/O — Pi-HW path; replaced the earlier fat32_stub.zig)
+  fat32_backend.flash       FAT32 VfsOps backend: read + writeBack over block_dev (real SD I/O — Pi-HW path)
+  overlay.flash             FAT32 permission-overlay parser (/mnt/PERMS.TAB)
   usb_descriptors.flash     USB CDC-ACM descriptor set + SETUP-packet decode (host-testable)
+  usb_tx_ring.flash         Bounded TX byte ring for the DWC2 CDC-ACM bulk-IN path (host-testable)
 
   board/rpi4b/              Raspberry Pi 4 driver bag
     uart.flash              Mini-UART driver (console)
@@ -78,6 +98,7 @@ src/                        Kernel core (Zig + AArch64 assembly)
     irq.flash               BCM2711 GIC + dispatch + invalid-entry reporter
     emmc2.flash             BCM2711 EMMC2 SDHCI driver — PIO single-block read/write
     mailbox.flash           VideoCore mailbox MMIO doorbell (pairs with src/mailbox.flash)
+    power.flash             Mailbox-driven power/reset (reboot)
     usb.flash               BCM2711 DWC2 USB-OTG device (gadget) — CDC-ACM console
     boot_quirks.S           Pi-specific boot fixups
     board_asm_defs.inc      Pi memory-layout addresses + macros
@@ -85,6 +106,7 @@ src/                        Kernel core (Zig + AArch64 assembly)
 
   board/virt/               QEMU `-M virt` driver bag
     uart.flash, gpio.flash, timer.flash, irq.flash   (virt MMIO addresses)
+    emmc2.flash, mailbox.flash, power.flash           (board-API parity with rpi4b)
     dtb.flash               Minimal DTB walker for runtime device-address discovery
     usb.flash               No-op USB gadget stub (board-API parity with rpi4b)
     image_header.S          Linux arm64 image header (UEFI/GRUB compatibility)
@@ -94,36 +116,67 @@ src/                        Kernel core (Zig + AArch64 assembly)
 
   trace/
     trace_main.zig          Patchable-entry tracing
+    sampler.zig             Sampling-profiler driver
+    fp_walk.zig             Frame-pointer stack walker
     utils.zig               Trace I/O helpers (PL011)
     ksyms.zig               Kernel symbol table lookup
     pl011_uart.zig          Dedicated PL011 trace UART driver
     hook.S                  Trace hook stub (saves regs, calls 'traced')
+    patchable_trampolines.S Patchable per-function entry trampolines
 
 user_space/
   init_main.flash           PID 1 ELF root (staged at /sbin/init)
   kernel_tests.flash        In-kernel test harness ([TEST]/[PASS]/[FAIL])
+  etc/                      Seed identity files staged into the initramfs
+    passwd                  Account database (name:uid:gid:…)
+    perms.tab               Initramfs permission table (owner/mode)
+  fsh/                      Flash shell
+    fsh.flash               Interactive shell main
+    tokenize.flash          Command-line tokenizer
+    fshrc                   Default shell rc
   lib/flibc/                Userland mini-libc for ELF-loaded programs
     flibc.flash             Root re-exports (printf, malloc, fork, ...)
+    start.flash             ELF entry crt0 (argv unpack → main → exit)
     syscalls.flash          Raw SVC wrappers (sys.write/fork/exit/...)
     io.flash                printf / puts / write on sys_writeConsole
     heap.flash              Bump allocator over sys_brk / sys_sbrk
+    mem.flash               memcpy / memset / memcmp
     process.flash           fork / wait / exit / execve glue
+    execvp.flash            PATH search + execve
+    readline.flash          Line editor (history, cursor edit)
+    completion.flash        TAB completion
+    keys.flash              Key decode (escape sequences → keycodes)
+    gapbuf.flash            Gap buffer (editor backing store)
+    pager.flash             Scroll pager (less core)
 
 lib/
   syscall_defs.flash        Shared SYS_* IDs (kernel + user side)
+  console_ui/               Shared console-UI rendering (kernel + user)
+    console_ui.flash        Logger sink + level/tag formatting
+    palette.flash           ANSI color palette
+    tags.flash              [ OK ] / [FAIL] / … status tags
+    screen.flash            Screen + cursor control sequences
 
-tools/
-  hello.flash               Hand-rolled ELF for [TEST] exec-elf
-  stackbomb.flash           Recursive stack-blower for [TEST] stack-overflow
-  flibc_demo.flash          flibc-driven demo for [TEST] flibc
-  hello_linker.ld           Single-PT_LOAD layout (hello + stackbomb)
-  flibc_demo_linker.ld      Single-PT_LOAD layout with .rodata folded in
+tools/                      Hand-rolled ELF programs (coreutils + [TEST] fixtures)
+  ls, cat, cp, mv, rm, grep, echo, clear   coreutils (coreutil_linker.ld)
+  edit, less, login, passwd, dmesg         interactive + identity tools
+  cpuinfo, meminfo, sysinfo, uptime        system-info readers
+  hello.flash, stackbomb.flash             [TEST] exec-elf / stack-overflow fixtures
+  flibc_demo, argv_echo, forkbomb          flibc / argv / fork [TEST] fixtures
+  grep_match.flash                         grep match engine (host-testable)
+  gen_shadow.zig                           Host tool: mint the seed shadow db
+  initramfs.S                              Embeds the staged initramfs image
+  *_linker.ld                              Per-program PT_LOAD layouts
 
 tests/
   host_stubs.zig            Shared linker stubs for 'zig build test'
   host_stubs_sched.zig      Sched-test HW-side stubs
+  host_stubs_fork.zig, fork_stubs.zig   Fork-test stubs
+  host_stubs_mm_user.zig    mm_user-test stubs
+  host_stubs_utilc.zig      utilc-test stubs
   host_stubs_initramfs.zig  File/initramfs stubs (typed `current`)
   host_stubs_vfs.zig        VFS-test stubs
+  host_alloc.zig            Host allocator shim for unit tests
 
 armstub/src/
   armstub8.S                EL3→EL1 bootstrap shim

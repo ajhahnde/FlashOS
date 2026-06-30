@@ -241,7 +241,8 @@ The default optimisation mode is `ReleaseSmall`. Override with
 ## Repository layout
 
 ```text
-src/                        kernel core (Flash + AArch64 assembly)
+arch/aarch64/               AArch64 ISA core (boot, vectors, context switch)
+src/                        kernel core (Flash modules + Zig drivers)
 src/board/<name>/           per-board driver bag (rpi4b / virt) + linker script
 user_space/                 PID 1 image + in-kernel test harness
 user_space/lib/flibc/       userland mini-libc for ELF demos
