@@ -42,6 +42,13 @@ pub const consoleSink = io.consoleSink
 pub const errSink = io.errSink
 pub const consoleInput = io.consoleInput
 
+// The terminal-control half of the console seam — alternate-screen enter/leave
+// and a cursor park, all over consoleSink. A full-screen program that hand-rolls
+// its loop (the editor) drives these directly.
+pub const altEnter = io.altEnter
+pub const altLeave = io.altLeave
+pub const parkCursor = io.parkCursor
+
 pub const malloc = heap.malloc
 pub const free = heap.free
 

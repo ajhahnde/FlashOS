@@ -1887,7 +1887,7 @@ pub fn build(b: *std.Build) void {
     edit_mod.addImport("flibc", flibc_mod);
     edit_mod.addImport("flibc_start", flibc_start_mod);
     edit_mod.addImport("flibc_mem", flibc_mem_mod);
-    edit_mod.addImport("console_ui", console_ui_mod);
+    edit_mod.addImport("core", core_mod);
     edit_mod.addImport("gapbuf", gapbuf_mod);
     edit_mod.addImport("grep_match", grep_match_mod);
     const edit = b.addExecutable(.{

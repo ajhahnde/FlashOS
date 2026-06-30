@@ -52,6 +52,42 @@ pub fn consoleInput(timeout_ms u32) ?u8 {
     return b
 }
 
+/// The terminal-control half of the console seam. A full-screen program enters
+/// the alternate buffer, paints with a core.tui render core, and parks a visible
+/// cursor at its logical position — all through consoleSink, so these three are
+/// the one place those control escapes live (the same confinement consoleSink
+/// gives ordinary output). std/tui's own enter/leave are private to its run
+/// loop, and a hand-rolled loop (the editor's — it cannot use run, see
+/// tools/edit.flash) needs its own; these are it.
+
+/// Enter the alternate screen, show the cursor, and clear. The cursor is shown
+/// (not hidden as a pager wants) because the editor parks a live edit cursor;
+/// the matching restore is altLeave.
+pub fn altEnter() void {
+    consoleSink("\x1b[?1049h\x1b[?25h\x1b[2J")
+}
+
+/// Show the cursor and leave the alternate screen — the exact inverse of
+/// altEnter, restoring whatever the shell had on the terminal before.
+pub fn altLeave() void {
+    consoleSink("\x1b[?25h\x1b[?1049l")
+}
+
+/// Park the cursor at 1-based (row, col) — `ESC [ row ; col H`. A render core's
+/// diff leaves the cursor wherever its last changed cell was, so a program that
+/// wants a visible cursor at a chosen spot calls this after the frame is drawn.
+pub fn parkCursor(row u16, col u16) void {
+    var buf [BUF_LEN]u8 = undefined
+    var pos usize = 0
+    buf_put_byte(&buf, &pos, 0x1b)
+    buf_put_byte(&buf, &pos, '[')
+    buf_put_unsigned(&buf, &pos, #as(u64, row))
+    buf_put_byte(&buf, &pos, ';')
+    buf_put_unsigned(&buf, &pos, #as(u64, col))
+    buf_put_byte(&buf, &pos, 'H')
+    consoleSink(buf[0..pos])
+}
+
 /// puts — write a null-terminated string followed by a newline. Mirrors
 /// the C library shape (line-buffered, sentinel-terminated input).
 pub fn puts(s [*:0]u8) void {

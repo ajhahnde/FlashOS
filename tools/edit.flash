@@ -1,18 +1,29 @@
 // edit — the full-screen text editor for /bin/edit.
 //
-// The second interactive consumer of the navigation scaffold (after /bin/less)
-// and the first writer: where less proved read-only paging over the pure
-// pager core, edit proves mutation over the pure gap-buffer core. It slurps a
-// file into a heap-backed gap buffer, takes over the console with
-// screen.enter(), turns keys from flibc.readKey()'s VT100 decoder into edits
-// and motions through flibc.gapbuf, and writes the buffer back on ctrl-O. It is
-// the first real consumer of the heap (brk/sbrk + flibc malloc); the kernel
-// already provides everything, so this slot is pure userland.
+// The second interactive consumer of the std render core (after /bin/less) and
+// the first writer: where less proved read-only paging, edit proves mutation
+// over the pure gap-buffer core. It slurps a file into a heap-backed gap buffer,
+// takes over the console with the alternate screen, turns keys from
+// flibc.readKey()'s VT100 decoder into edits and motions through flibc.gapbuf,
+// and writes the buffer back on ctrl-O. It is the first real consumer of the
+// heap (brk/sbrk + flibc malloc); the kernel already provides everything, so
+// this slot is pure userland.
+//
+// Why not core.tui.run (which less uses): run decodes keys through its own,
+// fixed std keys.Decoder, which knows only the pager's key set — it has no
+// home/end/page_up/page_down/delete/ctrl_o/ctrl_w/ctrl_x, exactly the eight
+// chords an editor binds, and would drop them. run also hides the cursor and
+// owns the loop end-to-end, leaving no place for a parked edit cursor or the
+// modal search / confirm sub-prompts. So edit adopts the render core a layer
+// down — it paints a core.tui.Buffer and emits the minimal core.tui.diff each
+// frame, the same incremental repaint run gives less — but keeps a hand-rolled
+// flibc.readKey loop (the full extended key set) and parks the cursor itself
+// after each frame.
 //
 // Architecture: the editing logic lives in three pure, host-tested cores —
 // gapbuf.GapBuf (storage), gapbuf.LineIndex (lines + cursor motions),
 // gapbuf.Viewport (scroll) — and grep_match.find (search). This file is the
-// driver: argv, slurp, the screen dance, the render loop, and the save path.
+// driver: argv, slurp, the alt-screen dance, the render loop, and the save path.
 // The interactive loop cannot run under QEMU (no PL011-RX stdin), so the cores'
 // host tests are the correctness proof and the Pi is the only live witness.
 //
@@ -34,7 +45,7 @@
 // FSH_SCRIPT — interactive, so the boot baseline stays deterministic.
 
 use flibc
-use console_ui
+use core
 use gapbuf
 use grep_match
 
@@ -48,15 +59,13 @@ const HEADER usize = 1
 const STATUS usize = 1
 const CONTENT usize = ROWS - HEADER - STATUS // visible content rows (22)
 const COLS usize = 80
+const CELLS usize = ROWS * COLS // cell-buffer length (front and back each)
+const STATUS_MAX usize = 96 // status-line scratch (position + legend)
 
 const MAX_LINES usize = 4096 // line-index slots (on the stack)
 const SLURP usize = 4096 // file read chunk
 const INITIAL_CAP usize = 64 * 1024 // first gap-buffer block (no fstat to size it)
 const MAX_CAP usize = 4 * 1024 * 1024 // refuse to grow past this — clean stop, no OOM zombie
-
-fn sink(bytes []u8) void {
-    _ = flibc.sys.write_fd(1, bytes.ptr, bytes.len)
-}
 
 // Editor state. The gap buffer's storage is on the heap (malloc, grown on a
 // full gap); the line index slots are caller-owned on main's stack.
@@ -68,12 +77,16 @@ const Ed = struct {
     cap usize, // current storage capacity in bytes
     dirty bool,
     is_new bool, // file did not exist at open — skip the unlink on save
+    // A modal prompt (search / confirm) overlaid the status row with raw bytes
+    // the diff's front buffer never saw; this forces the next frame to repaint
+    // in full so that residue is wiped. See render().
+    force bool,
     path [*:0]u8,
 }
 
 export fn main(argc usize, argv argv) noreturn {
     if argc < 2 || argv[1] == null {
-        sink("usage: edit <file>\n")
+        flibc.consoleSink("usage: edit <file>\n")
         flibc.exit()
     }
     path := argv[1].?
@@ -82,7 +95,7 @@ export fn main(argc usize, argv argv) noreturn {
     const cap usize = INITIAL_CAP
     const store_ptr = flibc.malloc(cap)
     if store_ptr == null {
-        sink("edit: out of memory\n")
+        flibc.consoleSink("edit: out of memory\n")
         flibc.exit()
     }
     const store = store_ptr.?[0..cap]
@@ -96,6 +109,7 @@ export fn main(argc usize, argv argv) noreturn {
         .cap = cap,
         .dirty = false,
         .is_new = false,
+        .force = false,
         .path = path,
     }
 
@@ -108,23 +122,32 @@ export fn main(argc usize, argv argv) noreturn {
     ed.gb.moveGap(0)
     ed.li.rebuild(ed.gb)
 
-    // Take over the console: raw mode (echo off) + alternate screen, and show
-    // the cursor (screen.enter hides it — a pager wants that, an editor does not).
-    _ = flibc.sys.set_console_mode(0)
-    console_ui.screen.enter(sink)
-    sink("\x1b[?25h")
-    render(&ed)
+    // The double buffer the render loop diffs over: front is what is on screen,
+    // back is where a frame is painted; render() swaps them each turn (the same
+    // shape core.tui.run carries internally, hand-rolled here).
+    var front_cells [CELLS]core.tui.Cell = undefined
+    var back_cells [CELLS]core.tui.Cell = undefined
+    var screen core.tui.Buffer = .{ .cells = front_cells[0..], .w = #intCast(COLS), .h = #intCast(ROWS) }
+    var scratch core.tui.Buffer = .{ .cells = back_cells[0..], .w = #intCast(COLS), .h = #intCast(ROWS) }
+    screen.clear() // front blanked so the first diff paints in full
 
-    loop(&ed)
+    // Take over the console: raw mode (echo off) so typed keys do not leak onto
+    // the alt-screen, then enter the alternate screen. altEnter shows the cursor
+    // (an editor parks a live one, unlike a pager).
+    _ = flibc.sys.set_console_mode(0)
+    flibc.altEnter()
+    render(&ed, &screen, &scratch)
+
+    loop(&ed, &screen, &scratch)
 
     // Every exit path restores the shell view. Mode stays 0 (the shell's own
     // baseline; fsh re-asserts it after wait() as a backstop), matching less.
-    console_ui.screen.leave(sink)
+    flibc.altLeave()
     flibc.exit()
 }
 
 // The key loop. Returns when the user exits (ctrl-X, or ctrl-C/EOF).
-fn loop(ed *mut Ed) void {
+fn loop(ed *mut Ed, screen *mut core.tui.Buffer, scratch *mut core.tui.Buffer) void {
     while true {
         ev := flibc.readKey()
         switch ev.key {
@@ -156,7 +179,7 @@ fn loop(ed *mut Ed) void {
             },
             else => {}, // tab / escape / none — ignored for now
         }
-        render(ed)
+        render(ed, screen, scratch)
     }
 }
 
@@ -252,6 +275,8 @@ fn save(ed *mut Ed) bool {
             _ = ed.gb.linearize(buf)
             var off usize = 0
             while off < total {
+                // The one console-free write here is the file FD (not stdout),
+                // so it stays a direct syscall, outside the console seam.
                 const w = flibc.sys.write_fd(fd, buf[off..].ptr, total - off)
                 if w <= 0 {
                     ok = false
@@ -278,7 +303,7 @@ fn exitConfirmed(ed *mut Ed) bool {
     if !ed.dirty {
         return true
     }
-    const c = confirm(" save modified buffer?  y = save   n = discard   esc = cancel")
+    const c = confirm(ed, " save modified buffer?  y = save   n = discard   esc = cancel")
     if c == 'y' {
         return save(ed)
     }
@@ -292,7 +317,7 @@ fn exitConfirmed(ed *mut Ed) bool {
 
 fn search(ed *mut Ed) void {
     var pbuf [COLS]u8 = undefined
-    if promptLine(" search: ", pbuf[0..]) |plen| {
+    if promptLine(ed, " search: ", pbuf[0..]) |plen| {
         if plen == 0 {
             return
         }
@@ -319,15 +344,21 @@ fn search(ed *mut Ed) void {
 
 // ---- prompts (status-line input) -------------------------------------------
 
+// A modal prompt overlays the status row with raw bytes that the diff's front
+// buffer never records, so it sets ed.force: the next render repaints in full
+// and wipes the overlay. Output and the cursor park go straight through the
+// console seam (consoleSink / parkCursor), the same path the frame diff uses.
+
 // Edit a short string on the status row. Returns its length, or null if the
 // user cancelled (escape / ctrl-C). Used for the search pattern.
-fn promptLine(label []u8, buf []mut u8) ?usize {
+fn promptLine(ed *mut Ed, label []u8, buf []mut u8) ?usize {
+    ed.force = true
     var len usize = 0
     while true {
-        console_ui.screen.moveTo(sink, #intCast(ROWS), 1)
-        sink("\x1b[2K") // erase the status line
-        sink(label)
-        sink(buf[0..len])
+        flibc.parkCursor(#intCast(ROWS), 1)
+        flibc.consoleSink("\x1b[2K") // erase the status line
+        flibc.consoleSink(label)
+        flibc.consoleSink(buf[0..len])
         const ev = flibc.readKey()
         switch ev.key {
             .enter => return len,
@@ -350,10 +381,11 @@ fn promptLine(label []u8, buf []mut u8) ?usize {
 
 // Draw a one-line prompt and read a single decision key. Returns 'y', 'n', or 0
 // (cancel: escape / ctrl-C / anything else).
-fn confirm(msg []u8) u8 {
-    console_ui.screen.moveTo(sink, #intCast(ROWS), 1)
-    sink("\x1b[2K")
-    sink(msg)
+fn confirm(ed *mut Ed, msg []u8) u8 {
+    ed.force = true
+    flibc.parkCursor(#intCast(ROWS), 1)
+    flibc.consoleSink("\x1b[2K")
+    flibc.consoleSink(msg)
     const ev = flibc.readKey()
     if ev.key == .char {
         if ev.ch == 'y' || ev.ch == 'Y' {
@@ -368,55 +400,68 @@ fn confirm(msg []u8) u8 {
 
 // ---- rendering -------------------------------------------------------------
 
-// Repaint the whole screen and park the visible cursor at the edit position.
-// scrollTo runs first so the content rows and the cursor share one viewport.
-fn render(ed *mut Ed) void {
+// Paint the whole frame into the back buffer, emit the minimal diff against the
+// front buffer, then park the visible cursor at the edit position. scrollTo runs
+// first so the content rows and the cursor share one viewport.
+fn render(ed *mut Ed, screen *mut core.tui.Buffer, scratch *mut core.tui.Buffer) void {
     const rc = ed.li.locate(ed.cur)
     ed.vp.scrollTo(rc.row, rc.col)
 
-    console_ui.screen.clear(sink)
-    renderHeader(ed)
-    renderContent(ed)
-    renderStatus(ed, rc)
+    // A modal prompt left raw bytes on the status row the front buffer never
+    // saw; blank front so this diff repaints the whole screen and wipes them.
+    if ed.force {
+        screen.clear()
+        ed.force = false
+    }
 
+    scratch.clear()
+    paintHeader(ed, scratch)
+    paintContent(ed, scratch)
+    paintStatus(ed, scratch, rc)
+    core.tui.diff(screen, scratch, flibc.consoleSink)
+
+    // The scratch just drawn is now what is on screen; swap the slice headers so
+    // next frame paints into the old screen (mirrors core.tui.run's own swap).
+    const tmp = screen.cells
+    screen.cells = scratch.cells
+    scratch.cells = tmp
+
+    // diff parks the cursor at its last changed cell; move it to the edit point.
     const trow u16 = #intCast(HEADER + ed.vp.screenRow(rc.row) + 1)
     const tcol u16 = #intCast(ed.vp.screenCol(rc.col) + 1)
-    console_ui.screen.moveTo(sink, trow, tcol)
+    flibc.parkCursor(trow, tcol)
 }
 
-// Row 1: program, filename, and a modified / new-file marker, padded to COLS.
-fn renderHeader(ed *Ed) void {
+// Row 1: program, filename, and a modified / new-file marker. The blank cells
+// already fill the row's tail, so only the text is painted.
+fn paintHeader(ed *Ed, buf *mut core.tui.Buffer) void {
     var hb [COLS]u8 = undefined
-    const dst [*]mut volatile u8 = hb[0..].ptr
     var i usize = 0
-    i = put(dst, i, "edit: ")
-    i = putc(dst, i, baseName(ed.path))
+    i += putStr(hb[0..], i, "edit: ")
+    i += putStr(hb[0..], i, baseName(ed.path))
     if ed.is_new {
-        i = put(dst, i, "  [New File]")
+        i += putStr(hb[0..], i, "  [New File]")
     } else if ed.dirty {
-        i = put(dst, i, "  *")
+        i += putStr(hb[0..], i, "  *")
     }
-    while i < COLS {
-        dst[i] = ' '
-        i += 1
-    }
-    sink(hb[0..COLS])
-    sink("\n")
+    buf.text(0, 0, hb[0..i], .{})
 }
 
 // Rows 2..ROWS-1: the visible content window, each logical line clipped to the
-// horizontal viewport and to COLS, non-printables substituted. '~' past EOF.
-fn renderContent(ed *Ed) void {
+// horizontal viewport and to COLS, non-printables substituted. '~' past EOF. The
+// blanked back buffer already supplies each row's spaces, so a line that shrank
+// between frames is erased by the diff.
+fn paintContent(ed *Ed, buf *mut core.tui.Buffer) void {
     var rb [COLS]u8 = undefined
     var row usize = 0
     while row < CONTENT {
+        const y u16 = #intCast(HEADER + row)
         const idx = ed.vp.top + row
         if idx < ed.li.n {
-            sink(rb[0..buildRow(ed, idx, rb[0..])])
+            buf.text(0, y, rb[0..buildRow(ed, idx, rb[0..])], .{})
         } else {
-            sink("~")
+            buf.text(0, y, "~", .{})
         }
-        sink("\n")
         row += 1
     }
 }
@@ -424,30 +469,37 @@ fn renderContent(ed *Ed) void {
 // Fill `buf` with line `idx`, starting at the viewport's left column, clipped to
 // COLS, each byte mapped to one display cell. Returns the count written.
 fn buildRow(ed *Ed, idx usize, buf []mut u8) usize {
-    const dst [*]mut volatile u8 = buf.ptr
     const start = ed.li.lineStart(idx)
     const llen = ed.li.lineLen(idx)
     var w usize = 0
     var c = ed.vp.left
     while c < llen && w < COLS {
-        dst[w] = displayByte(ed.gb.byteAt(start + c))
+        buf[w] = displayByte(ed.gb.byteAt(start + c))
         w += 1
         c += 1
     }
     return w
 }
 
-// Row ROWS: cursor position and the key legend. No trailing newline (the
-// alt-screen must not scroll). Cleared by the next frame's screen.clear.
-fn renderStatus(ed *Ed, rc gapbuf.RowCol) void {
-    sink(" ")
-    emitDec(rc.row + 1)
-    sink(":")
-    emitDec(rc.col + 1)
+// Row ROWS: cursor position and the key legend, the whole row in reverse video
+// so the bar spans full width (matching less's status bar). Padded with spaces
+// to STATUS_MAX so the reverse run is uniform; the buffer clips it to COLS.
+fn paintStatus(ed *Ed, buf *mut core.tui.Buffer, rc gapbuf.RowCol) void {
+    var sb [STATUS_MAX]u8 = undefined
+    var n usize = 0
+    n += putByte(sb[0..], n, ' ')
+    n += putDec(sb[0..], n, #as(u64, rc.row + 1))
+    n += putByte(sb[0..], n, ':')
+    n += putDec(sb[0..], n, #as(u64, rc.col + 1))
     if ed.dirty {
-        sink(" [modified]")
+        n += putStr(sb[0..], n, " [modified]")
     }
-    sink("   ^O write  ^W find  ^X exit")
+    n += putStr(sb[0..], n, "   ^O write  ^W find  ^X exit")
+    while n < sb.len {
+        sb[n] = ' '
+        n += 1
+    }
+    buf.text(0, #intCast(ROWS - 1), sb[0..n], .{ .attrs = core.tui.attr_reverse })
 }
 
 // '\t' -> single space, other non-printables -> '?', printables verbatim. Keeps
@@ -462,25 +514,47 @@ fn displayByte(b u8) u8 {
     return '?'
 }
 
-// ---- small helpers (mirror less.flash) -------------------------------------
+// ---- saturating byte builders (write into `out`, never past its end) --------
 
-// Copy a static string through the volatile dst (strict-align safe), returning
-// the new write offset.
-fn put(dst [*]mut volatile u8, at usize, s []u8) usize {
-    var i = at
-    for ch in s {
-        if i >= COLS {
-            break
-        }
-        dst[i] = ch
-        i += 1
+fn putByte(out []mut u8, pos usize, c u8) usize {
+    if pos < out.len {
+        out[pos] = c
+        return 1
     }
-    return i
+    return 0
 }
 
-// Like put, but for a runtime slice (the file's base name).
-fn putc(dst [*]mut volatile u8, at usize, s []u8) usize {
-    return put(dst, at, s)
+fn putStr(out []mut u8, pos usize, s []u8) usize {
+    var w usize = 0
+    while w < s.len && pos + w < out.len {
+        out[pos + w] = s[w]
+        w += 1
+    }
+    return w
+}
+
+// `v` as decimal ASCII at `out[pos..]`, returning the count written. The digits
+// fall out least-significant first into `tmp`, then copy in reading order.
+fn putDec(out []mut u8, pos usize, v u64) usize {
+    var tmp [20]u8 = undefined
+    var d usize = 0
+    if v == 0 {
+        tmp[0] = '0'
+        d = 1
+    } else {
+        var x u64 = v
+        while x != 0 {
+            tmp[d] = '0' + #as(u8, #intCast(x % 10))
+            d += 1
+            x /= 10
+        }
+    }
+    var w usize = 0
+    while w < d && pos + w < out.len {
+        out[pos + w] = tmp[d - 1 - w]
+        w += 1
+    }
+    return w
 }
 
 // Last path component as a slice into the argv string (no copy).
@@ -498,32 +572,6 @@ fn baseName(path cstr) []u8 {
         i += 1
     }
     return path[start..len]
-}
-
-fn emitDec(v u64) void {
-    var buf [20]u8 = undefined
-    sink(buf[0..u64dec(buf[0..], v)])
-}
-
-fn u64dec(out []mut u8, v u64) usize {
-    if v == 0 {
-        out[0] = '0'
-        return 1
-    }
-    var tmp [20]u8 = undefined
-    var n usize = 0
-    var x u64 = v
-    while x != 0 {
-        tmp[n] = '0' + #as(u8, #intCast(x % 10))
-        n += 1
-        x /= 10
-    }
-    var i usize = 0
-    while i < n {
-        out[i] = tmp[n - 1 - i]
-        i += 1
-    }
-    return n
 }
 
 // ---- file slurp ------------------------------------------------------------
