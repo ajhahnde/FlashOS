@@ -9,7 +9,7 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.7.0-f59e0b?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.7.1-f59e0b?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/zig-0.16.0-lightgrey?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
@@ -152,7 +152,7 @@ harness and a host-side unit test suite.
   currently inert — Zig has no `-fpatchable-function-entry=2`
   equivalent yet).
 - **In-kernel test harness** (`[TEST]/[PASS]/[FAIL]` + tally, 30
-  scenarios) plus a host-side `zig build test` suite (468 host
+  scenarios) plus a host-side `zig build test` suite (464 host
   tests across 41 modules).
 
 ## Quick start
@@ -229,7 +229,7 @@ serial-console setup.
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
-| `zig build test`                     | Host-side unit tests (468 tests, 41 modules)                   |
+| `zig build test`                     | Host-side unit tests (464 tests, 41 modules)                   |
 | `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                        |
 
 The default optimisation mode is `ReleaseSmall`. Override with

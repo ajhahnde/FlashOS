@@ -29,6 +29,41 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [v0.7.1] - 2026-06-30
+
+Internal release: the userland is re-platformed onto the Flash standard
+library's I/O and terminal-UI modules, and every userland console read and
+write is confined to a single adapter. The boot contract, the syscall ABI,
+and the `zig build` targets are unchanged.
+
+### Changed
+
+- **The pager and editor now render through the Flash standard library's
+  terminal-UI core.** `/bin/less` and `/bin/edit` previously drove the
+  serial console with hand-rolled escape sequences and whole-screen
+  repaints; they now paint a styled cell buffer and emit only the minimal
+  screen diff each frame (incremental repaint), built on the standard
+  library's `io`, `tui`, and `keys` modules (adopted at the library's
+  `v1.0.0`). The pager runs on the library's run loop; the editor keeps its
+  own key loop — the library's key set does not cover the editor's extended
+  chords (Home / End / PgUp / PgDn / Delete and the `ctrl` shortcuts) — over
+  the same render core. Both status bars are now full-width reverse-video;
+  all other behaviour is unchanged.
+- **All userland console I/O is confined to one adapter.** Every console
+  read and write — in the shell, the line editor, the coreutils, the pager,
+  the editor, and the `login` / `passwd` prompts — now crosses the syscall
+  boundary at a single flibc seam (`consoleSink` / `errSink` /
+  `consoleInput`) instead of calling the read / write syscalls directly.
+  Output bytes, password masking, and prompts are byte-for-byte identical.
+
+### Removed
+
+- **The unused full-screen panel scaffolding in the internal
+  `console_ui.screen` module** — the alternate-screen lifecycle, cursor
+  positioning, and bordered-panel renderers had no callers once the pager
+  and editor moved to the standard library's render core. The screen-clear
+  and aligned key/value line helpers the status tools use remain.
+
 ## [v0.7.0] - 2026-06-18
 
 ### Added
@@ -367,7 +402,8 @@ highlights are below.
 - **Kernel symbol table** generated from the linked ELF by a two-pass
   build step, so panics and the profiler can print real names.
 
-[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.7.1...HEAD
+[v0.7.1]: https://github.com/ajhahnde/FlashOS/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/ajhahnde/FlashOS/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/ajhahnde/FlashOS/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/ajhahnde/FlashOS/compare/v0.4.0...v0.5.0
