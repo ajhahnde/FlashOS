@@ -73,7 +73,7 @@ harness and a host-side unit test suite.
 > The validated target is `-Dboard=rpi4b`. The QEMU `-M virt` board has not been
 > CI-gated since **[v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0)**,
 > the last release verified to boot it. The dual-target plumbing below is kept,
-> but later releases may have regressed; for a known-good `-M virt` build, use
+> but later releases may have regressed; for a known-stable `-M virt` build, use
 > v0.5.0.
 
 ## Features
@@ -266,11 +266,11 @@ A deeper walk-through of each subsystem is in
 
 ## Authorship
 
-The prose docs (README, DOCUMENTATION, CHANGELOG, PORT) are LLM-drafted
-under my review and to my specifications; their contract values are kept
-in sync with the live tree.
+The prose docs (README, DOCUMENTATION, CHANGELOG, PORT) and commit messages are drafted
+using LLMs, based on my specifications and subject to my review. Their contract values are
+automatically kept in sync with the live source tree upon commit.
 
-Source code (`src/*.flash` and the Zig drivers) is primarily my own.
+Source code (`src/*.flash` and the Zig drivers) is primarily my own work.
 
 ---
 
