@@ -9,7 +9,7 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.7.1-lightgrey?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v0.7.2-lightgrey?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/.flash-v1.0.0-f59e0b?style=flat-square" alt="Flash">
     <img src="https://img.shields.io/badge/zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">

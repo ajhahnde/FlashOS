@@ -110,8 +110,8 @@ src/                                        Kernel core (Flash modules + Zig dri
     linker.ld                               Per-board kernel link script
 
   board/virt/                               QEMU `-M virt` driver bag
-    uart.-, gpio.-, timer.-, irq.flash      (virt MMIO addresses)
-    emmc2.-, mailbox.-, power.flash         (board-API parity with rpi4b)
+    uart, gpio, timer, irq.flash            (virt MMIO addresses)
+    emmc2, mailbox, power.flash             (board-API parity with rpi4b)
     dtb.flash                               Minimal DTB walker for runtime device-address discovery
     usb.flash                               No-op USB gadget stub (board-API parity with rpi4b)
     image_header.S                          Linux arm64 image header (UEFI/GRUB compatibility)
