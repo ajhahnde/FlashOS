@@ -105,7 +105,7 @@ zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 `-Dboard=rpi4b` is the validated board. `-M virt` has not been CI-gated since
 [v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0), the last
 release verified to boot it, so later releases may have regressed. For a
-known-good `-M virt` build, use v0.5.0.
+known-stable `-M virt` build, use v0.5.0.
 
 For a self-validating run that exits 0 when the boot reaches the
 interactive `fsh` prompt (the third `type 'help' for commands` homescreen
@@ -302,7 +302,8 @@ build` overrides the symbol-dump binary.
   attaches to the Pi over serial (`--trace` selects the MU adapter).
 - **`run watchdog [virt|rpi4b]`** — runs the unattended boot watchdog with the
   required `-Dci-login-seed=true` and `-Dboot-selftest=true` flags applied
-  automatically; defaults to the virt board (`rpi4b` is a slower TCG run).
+  automatically; defaults to the rpi4b board (the live boot gate — a slower
+  ~5-8 min TCG run; virt is deprioritized and no longer CI-gated).
 - **`flashos`** — lists the shell helpers defined in
   [`flashos.env.zsh`](flashos.env.zsh) and the available `zig build` steps —
   a quick inventory of targets.

@@ -26,11 +26,8 @@
 
 ---
 
-Diese Seite behandelt die Host-Toolchain, das SD-Karten-Layout, das der
-Raspberry Pi 4 erwartet, die serielle Konsole, QEMU und den Test-Runner.
-
 Referenz:
-[BCM2711 ARM Peripherals (RPi 4)](https://pip-assets.raspberrypi.com/categories/545-raspberry-pi-4-model-b/documents/RP-008248-DS-1-bcm2711-peripherals.pdf?disposition=inline).
+[BCM2711 ARM Peripherals (RPi 4)](https://pip-assets.raspberrypi.com/categories/545-raspberry-pi-4-model-b/documents/RP-008248-DS-1-bcm2711-peripherals.pdf?disposition=inline)
 
 ## Inhalt
 
@@ -44,14 +41,14 @@ Referenz:
 
 ## 1. Host-Toolchain
 
-| Tool                       | Mindestversion | Zweck                                     |
-| :------------------------- | :-------------- | :---------------------------------------- |
-| Zig                        | 0.16.0          | Zig + Assembly kompilieren, `build.zig` ausführen |
-| `flashc`                   | pinned          | Flash-Quellen (`.flash`) nach Zig transpilieren |
-| `aarch64-elf-objcopy`    | 2.40+           | ELF → Roh-Binary                         |
-| `aarch64-elf-nm`         | 2.40+           | Symbol-Extraktion für `populate-syms`   |
+| Tool                     | Mindestversion | Zweck                                     |
+| :----------------------- | :-------------- | :---------------------------------------- |
+| Zig                      | 0.16.0          | Zig + Assembly kompilieren, `build.zig` ausführen |
+| `flashc`                 | pinned          | Flash-Quellen (`.flash`) nach Zig transpilieren |
+| `aarch64-elf-objcopy`    | 2.40+           | ELF → Roh-Binary                          |
+| `aarch64-elf-nm`         | 2.40+           | Symbol-Extraktion für `populate-syms`     |
 | `qemu-system-aarch64`    | 11.0.0+         | Den kernel unter QEMU ausführen           |
-| `screen` (oder Äquivalent) | –              | Serielle Konsole für den Pi               |
+| `screen` (oder Äquivalent) | –             | Serielle Konsole für den Pi               |
 
 Unter macOS:
 
@@ -107,6 +104,12 @@ zig build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
 zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
+`-Dboard=rpi4b` ist das validierte Board. `-M virt` ist seit
+[v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0) nicht mehr
+CI-gegated — dem letzten Release, dessen Boot dort verifiziert wurde —, sodass
+spätere Releases regrediert sein könnten. Für einen bekanntermaßen stabilen
+`-M virt`-Build verwende v0.5.0.
+
 Für einen selbstvalidierenden Lauf, der mit 0 endet, wenn der Boot den
 interaktiven `fsh`-Prompt erreicht (die dritte Homescreen-Markierung
 `type 'help' for commands` — siehe unten) ohne `[FAIL]` / `ERROR CAUGHT` und mit
@@ -114,8 +117,8 @@ den erwarteten Free-Page-Checkpoints, und mit 1 bei einem Fehler oder einem
 watchdog-Timeout (keine manuelle QEMU-Überwachung):
 
 ```bash
-zig build -Dboard=virt  test-virt
-zig build -Dboard=rpi4b test-rpi4b  # (matches run)
+zig build -Dboard=rpi4b test-rpi4b  # (matches run); das CI-Boot-Gate
+zig build -Dboard=virt  test-virt   # depriorisiert, nicht CI-gegated
 ```
 
 Um die Byte-Identitäts-Baseline des Pi vor dem Flashen der SD-Karte zu
@@ -135,8 +138,8 @@ direkt im steuernden Terminal erscheinen. `run-virt` verwendet
 Host-stdio geleiteten PL011.
 
 Ein grüner Lauf auf beiden Boards landet bei `30/30 passed`, 34
-Free-Page-Checkpoints pro Szenario (`0xbbff2` auf rpi4b, `0x3be46` auf virt)
-plus der passenden Boot-Baseline (`0xbc000` / `0x3be54`) und 0 `ERROR CAUGHT`.
+Free-Page-Checkpoints pro Szenario (`0xbbff2` auf rpi4b, `0x3be45` auf virt)
+plus der passenden Boot-Baseline (`0xbc000` / `0x3be53`) und 0 `ERROR CAUGHT`.
 Der Boot übergibt dann an `/bin/login` → `/bin/fsh`; mit dem
 Login-Lifecycle erscheint die Homescreen-Markierung von fsh
 (`type 'help' for commands`) dreimal (zwei skriptgesteuerte
@@ -175,9 +178,9 @@ SD_BOOT=/Volumes/BOOT FIRMWARE=firmware zig build deploy
 
 Der Deploy-Schritt liest zwei Umgebungsvariablen:
 
-| Variable     | Default           | Zweck                                             |
-| :----------- | :---------------- | :------------------------------------------------ |
-| `SD_BOOT`  | `/Volumes/BOOT` | SD-Karten-Mountpunkt unter macOS                  |
+| Variable   | Default         | Zweck                                            |
+| :--------- | :-------------- | :----------------------------------------------- |
+| `SD_BOOT`  | `/Volumes/BOOT` | SD-Karten-Mountpunkt unter macOS                 |
 | `FIRMWARE` | `firmware`      | Verzeichnis mit den gebündelten RPi-firmware-Dateien |
 
 ## 5. Serielle Konsole
@@ -307,8 +310,9 @@ bleiben als dünne Aliase für die entsprechenden `pi`-Verben erhalten.
   MU-Adapter).
 - **`run watchdog [virt|rpi4b]`** — fährt den unbeaufsichtigten Boot-Watchdog mit
   den erforderlichen Flags `-Dci-login-seed=true` und `-Dboot-selftest=true`
-  automatisch gesetzt; default ist das virt-Board (`rpi4b` ist ein langsamerer
-  TCG-Lauf).
+  automatisch gesetzt; default ist das rpi4b-Board (das Live-Boot-Gate — ein
+  langsamerer ~5–8-min-TCG-Lauf; virt ist depriorisiert und nicht mehr
+  CI-gegated).
 - **`flashos`** — listet die in [`flashos.env.zsh`](../../flashos.env.zsh)
   definierten Shell-Helfer und die verfügbaren `zig build`-Schritte auf — eine
   schnelle Inventur der Targets.
@@ -353,7 +357,7 @@ zig build test
 Führt die host-seitigen Unit-Tests gegen Pure-Logic-kernel-Module aus.
 Jedes Modul mit Tests bildet seinen eigenen Test-Root, gelinkt gegen
 `tests/host_stubs.zig` (Stubs für reine Assembly-Externs). Die aktuelle
-Suite deckt 41 Module ab (468 Host-Tests); sie ist weit unter einer Sekunde
+Suite deckt 41 Module ab (464 Host-Tests); sie ist weit unter einer Sekunde
 fertig und ist das schnellste Signal dafür, dass die Kernlogik des kernel
 weiterhin hält.
 
@@ -361,4 +365,4 @@ weiterhin hält.
 
 [← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Port →](../../PORT.md)
 
-<!-- sync-ref: SETUP.md @ 0a9d568ee52436afe4be497a523c67c369df150e | synced 2026-06-18 -->
+<!-- sync-ref: SETUP.md @ 8d306a79130b85ad3ba5502a83d80be45709d1f9 | synced 2026-07-01 -->

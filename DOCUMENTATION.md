@@ -580,13 +580,13 @@ independently, plus the synthetic console fd. The mechanics live in
 `isConsole` / `close` / `dup2` / `dupAll` / `closeAll`), which is
 kernel + host-testable pure pointer bookkeeping.
 
-```zig
-pub const Kind = enum(u8) { none = 0, console = 1, pipe = 2, file = 3 };
+```flash
+pub const Kind = enum(u8) { none = 0, console = 1, pipe = 2, file = 3 }
 pub const FdSlot = extern struct {        // 16 B; 8 slots = 128 B
-    ptr: ?*anyopaque = null,              // *Pipe | *File | null (console)
-    kind: u8 = 0,                         // Kind; `none` == free slot
-    _pad: [7]u8 = .{0} ** 7,
-};
+    ptr ?*mut anyopaque = null,           // *Pipe | *File | null (console)
+    kind u8 = 0,                          // Kind; `none` == free slot
+    _pad [7]u8 = .{0} ** 7,
+}
 ```
 
 - **Dispatch by tag.** `sys_read` / `sys_write` / `sys_close` (slots
@@ -663,7 +663,8 @@ edit loop itself is validated on real Pi hardware.
   host-tested.
 - **Built-ins** run in-process (no fork): `cd` (`sys_chdir`), `pwd`
   (`sys_getcwd`), `exit` / `logout`, `help`, `free` (wraps
-  `sys_dump_free`), `reboot`
+  `sys_dump_free`), `whoami` (`/etc/passwd` lookup via `src/pwfile.flash`),
+  `reboot`
   (`sys_reboot`, resets the board). Externals fork + `execvp`;
   `execvp` resolves a bare name to `/bin/<name>` (no `$PATH` yet, no
   environment) and a slashed name verbatim. A single `|` wires `sys_pipe` +
@@ -747,10 +748,10 @@ x0       return value
 
 The vector at `vbar_el1 + 0x400` (`el0_svc` in `arch/aarch64/entry.S`)
 indexes into `sys_call_table` (`src/sys.flash`) and `blr`s to the
-selected handler. `NR_SYSCALLS = 53` (in `arch/aarch64/asm_defs_common.inc`)
+selected handler. `NR_SYSCALLS = 56` (in `arch/aarch64/asm_defs_common.inc`)
 is enforced by a `b.hs` check on `x8`; out-of-range numbers fall
 through to the invalid-entry path. A comptime guard in `src/sys.flash`
-re-asserts `defs.NR_SYSCALLS == 53` so the Zig table and the asm
+re-asserts `defs.NR_SYSCALLS == 56` so the Zig table and the asm
 literal stay in lockstep.
 
 Because the user PGD is installed in TTBR0 at the time of the SVC,
@@ -820,7 +821,7 @@ The live file ABI is `sys_openFile` (slot 7) and `sys_seek`
 backend. FAT32 write-back is live: writes to `/mnt/…`
 route to the FAT32 backend, every other path returns -EROFS from the
 initramfs backend. The former per-kind read/write/close legs (slots
-8/9/11) are **retired** — the unified read/write/close (slots 32/34)
+8/9/11) are **retired** — the unified read/write/close (slots 32/33/34)
 replaced them, and those slot numbers stay reserved and return `-1`. Slots
 `14..17` (`sys_mmap`, `sys_munmap`, `sys_mlock`, `sys_munlock`) and
 `19..22` (socket / IPC stubs) are present in `src/sys.flash` for forward
@@ -1165,10 +1166,10 @@ converged (i.e. inserting symbol data did not perturb addresses).
 ## 7. Tracing
 
 - `-fpatchable-function-entry=2` is not enabled in the current
-  Zig-only build, so the patchable-functions section is empty and
+  build, so the patchable-functions section is empty and
   `trace_init` is effectively a no-op. The runtime machinery is
-  intact and ready to be wired up again once Zig grows an equivalent
-  flag.
+  intact and ready to be wired up again once the Zig backend grows an
+  equivalent flag.
 - When patchable entries exist, `trace_init`
   (`src/trace/trace_main.zig`) relocates the address table, overwrites
   the first `nop` of every entry with `mov x9, lr`, then patches the

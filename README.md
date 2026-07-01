@@ -121,7 +121,7 @@ harness and a host-side unit test suite.
   `whoami` / `reboot`), a Unix-style `#`/`$` privilege prompt, and
   `fork` + `execvp` for externals. The `/bin` coreutils — `echo`, `cat`,
   `ls`, `grep`, `cp`, `mv`, `rm`, `meminfo`, `forkbomb`, `sysinfo`,
-  `cpuinfo`, `uptime`, `less`, `edit`, `clear`, `passwd` — link the same
+  `cpuinfo`, `uptime`, `dmesg`, `less`, `edit`, `clear`, `passwd` — link the same
   flibc; each is documented per-tool in
   [Documentation §4](DOCUMENTATION.md#4-process-management--scheduling).
   Reads `/etc/fshrc` at startup; `sys_chdir` gives each task a working
