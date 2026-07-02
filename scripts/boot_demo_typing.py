@@ -20,7 +20,7 @@
 # + `help`, and `/bin/ls` of the initramfs root): the login gate blocks
 # capturing the authenticated session under QEMU (the guest console receives
 # no host stdin). Every byte emitted here is what those programs print — only
-# the pacing and the green OK tint are added.
+# the pacing, the green OK tint, and the colored shell prompt are added.
 #
 # The replayed content lives in scripts/boot_demo_session.txt (committed),
 # not in boot.log: boot.log is gitignored and gets overwritten/truncated by
@@ -50,6 +50,19 @@ RESET = "\x1b[0m"
 def colorize(line):
     return line.replace("[ OK ]", "[ " + GREEN + "OK" + RESET + " ]")
 
+# The live `fsh` prompt carries color too (console_ui.renderPrompt, `color`
+# on): `<user> @ <cwd> <sigil>` with a bold-amber user, a dimmed separator, a
+# white cwd, and an amber sigil. session.txt holds the plain `$ ` sigil for
+# readability; the full colored prompt is spelled once here and substituted at
+# emit time, mirroring renderPrompt exactly. The demo runs as `flash` (non-
+# root, so no bold sigil) from `/` — the root the `ls` block lists.
+BOLD = "\x1b[1m"
+YELLOW = "\x1b[33m"
+DIM = "\x1b[2m"
+WHITE = "\x1b[37m"
+SHELL_PROMPT = (BOLD + YELLOW + "flash" + RESET + DIM + " @ " + RESET +
+                WHITE + "/" + RESET + " " + YELLOW + "$ " + RESET)
+
 # A line a user types: a prompt prefix + the typed text. `login: ` (the
 # username), `Password: ` (the kernel masks each keystroke with '*', so the
 # masked `*****` types out char-by-char), and each `$ ` command. A bare `# `
@@ -76,6 +89,8 @@ def is_comment(line):
 
 
 def type_command(prompt, text):
+    if prompt == "$ ":                  # the shell sigil carries the live color
+        prompt = SHELL_PROMPT
     out(prompt)                         # prompt — instant
     time.sleep(AFTER_PROMPT)
     for ch in text:                     # typed text — key by key
@@ -143,7 +158,9 @@ def main():
             i += 1
 
     if final is not None:
-        out(final + " ")                # waiting prompt, no newline
+        # The trailing live prompt: the colored shell prompt when it is the
+        # `$` sigil, otherwise the raw text (a re-spawned `login:`) + a space.
+        out(SHELL_PROMPT if final.rstrip() == "$" else final + " ")
     time.sleep(HOLD)
 
 
