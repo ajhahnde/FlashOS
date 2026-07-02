@@ -39,16 +39,15 @@ const CWD_MAX usize = 256 // getcwd buffer — matches the TaskStruct.cwd ABI ce
 // the 64 KiB user stack. Bumping this only costs stack.
 const HIST_N usize = 16
 
-// Unix-style privilege prompt: `# ` for root (euid 0), `$ ` for
-// everyone else. Selected per REPL iteration via geteuid so a future
-// in-shell privilege change is reflected immediately.
-const PROMPT_ROOT = "# "
-const PROMPT_USER = "$ "
+// Unix-style privilege prompt: `# ` for root (euid 0), `$ ` for everyone else,
+// selected per REPL iteration via geteuid so a future in-shell privilege change
+// is reflected immediately. The prompt strings (with the amber accent) live in
+// console_ui — no ANSI escape is spelled here.
 // Homescreen banner, emitted once when fsh reaches its interactive REPL —
 // rendered by console_ui.homescreen(), fed the project version from
 // build.zig.zon via build_options, so no version literal lives here.
 const AUTHOR = "ajhahnde"
-const HELP_TEXT = "Commands:\n" ++ "  cd [dir]       change working directory\n" ++ "  pwd            print working directory\n" ++ "  free           show free page count\n" ++ "  whoami         print the logged-in user\n" ++ "  reboot         restart the machine\n" ++ "  exit / logout  end the session\n" ++ "  help           show this help\n" ++ "\n" ++ "Run a program:  <cmd> [args]    pipe:  <a> | <b>\n" ++ "TAB completes commands + paths\n" ++ "\n"
+const HELP_TEXT = console_ui.palette.bold ++ "Commands:" ++ console_ui.palette.reset ++ "\n" ++ "  cd [dir]       change working directory\n" ++ "  pwd            print working directory\n" ++ "  free           show free page count\n" ++ "  whoami         print the logged-in user\n" ++ "  reboot         restart the machine\n" ++ "  exit / logout  end the session\n" ++ "  help           show this help\n" ++ "\n" ++ "Run a program:  <cmd> [args]    pipe:  <a> | <b>\n" ++ "TAB completes commands + paths\n" ++ "\n"
 
 // Built-in command names, offered alongside /bin for first-token TAB
 // completion (these dispatch in-process, so they are not in /bin).
@@ -69,7 +68,11 @@ export fn main(argc usize, argv argv) noreturn {
 // boundary at the one adapter, not a raw write_fd here.
 fn emit(fd i32, s []u8) {
     if fd == 2 {
+        // Tint every diagnostic red at the one seam, so no `fsh:`/`cd:` call
+        // site spells an escape. Bracketed by reset; color off => bare bytes.
+        flibc.errSink(console_ui.palette.red)
         flibc.errSink(s)
+        flibc.errSink(console_ui.palette.reset)
     } else {
         flibc.consoleSink(s)
     }
@@ -135,7 +138,7 @@ fn repl() {
     var hist = flibc.History.init(&hist_slots)
     console_ui.homescreen(flibc.consoleSink, build_options.version, AUTHOR)
     while true {
-        prompt := if (flibc.sys.geteuid() == 0) PROMPT_ROOT else PROMPT_USER
+        prompt := if (flibc.sys.geteuid() == 0) console_ui.prompt_root else console_ui.prompt_user
         emit(1, prompt)
         // Hand readline the live prompt so its double-TAB candidate listing can
         // reprint `prompt` + line after the list. align(16): the >16-byte
@@ -309,7 +312,9 @@ fn listBin() {
             n += 1
         }
         emit(1, " ")
+        emit(1, console_ui.palette.cyan)
         emit(1, d.name[0..n])
+        emit(1, console_ui.palette.reset)
         i += 1
     }
     emit(1, "\n")

@@ -54,6 +54,15 @@ pub const unicode bool = palette.unicode
 /// scripts/run_qemu_test.sh.
 pub const marker_ready = " - type 'help' for commands"
 
+/// Shell privilege prompts, single-sourced here so no ANSI escape lives in fsh.
+/// Amber (`palette.yellow`) is the Flash-brand accent — the same tone the
+/// `[WARN]` / `[LOAD]` tags carry. Root gets bold on top. With `color` off both
+/// collapse to the bare `# ` / `$ ` bytes, so nothing downstream changes. The
+/// trailing `reset` bounds the escape to the prompt glyphs; the line the user
+/// then types renders in the default color.
+pub const prompt_root = palette.bold ++ palette.yellow ++ "# " ++ palette.reset
+pub const prompt_user = palette.yellow ++ "$ " ++ palette.reset
+
 // ---- renderers -------------------------------------------------------------
 
 /// Write a tag as `<pre><word><post>` with the brackets + padding in the
@@ -162,10 +171,21 @@ pub fn logger(sink Sink) Logger {
 /// place. The `type 'help' for commands` tail is the frozen boot-success marker
 /// (run_qemu_test.sh greps it x3) — keep it byte-for-byte.
 pub fn homescreen(sink Sink, version []u8, author []u8) void {
-    sink("FlashOS [v")
+    // Amber product name, grey version + author, then the frozen marker in the
+    // default color. Every escape is closed with `reset` BEFORE `marker_ready`
+    // so the boot-watchdog substring grep still matches bare bytes — an unclosed
+    // color here would splice an escape into the marker and break the contract.
+    sink(palette.yellow)
+    sink("FlashOS")
+    sink(palette.reset)
+    sink(" [v")
+    sink(palette.grey)
     sink(version)
+    sink(palette.reset)
     sink("] by ")
+    sink(palette.grey)
     sink(author)
+    sink(palette.reset)
     sink(marker_ready)
     sink("\n\n")
 }

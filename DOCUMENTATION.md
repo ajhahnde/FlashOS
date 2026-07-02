@@ -46,6 +46,9 @@
 
 ## 1. Source layout
 
+<details>
+<summary>Source tree</summary>
+
 ```text
 arch/aarch64/                               AArch64 ISA core (assembly + shared asm macros)
   boot.S                                    _start, EL3→EL1, MMU bring-up, jump to high VAs
@@ -200,6 +203,8 @@ build.zig                                   The only build entry point
 build.sh                                    Two-pass build orchestrator + deploy prompt
 config.txt                                  RPi 4 firmware configuration
 ```
+
+</details>
 
 ## 2. Boot path
 
@@ -580,6 +585,9 @@ independently, plus the synthetic console fd. The mechanics live in
 `isConsole` / `close` / `dup2` / `dupAll` / `closeAll`), which is
 kernel + host-testable pure pointer bookkeeping.
 
+<details>
+<summary>FdSlot / fd-table layout</summary>
+
 ```flash
 pub const Kind = enum(u8) { none = 0, console = 1, pipe = 2, file = 3 }
 pub const FdSlot = extern struct {        // 16 B; 8 slots = 128 B
@@ -588,6 +596,8 @@ pub const FdSlot = extern struct {        // 16 B; 8 slots = 128 B
     _pad [7]u8 = .{0} ** 7,
 }
 ```
+
+</details>
 
 - **Dispatch by tag.** `sys_read` / `sys_write` / `sys_close` (slots
   32/33/34) switch on the slot's `kind` and call the per-backend helper
@@ -739,12 +749,17 @@ User-space invokes a syscall by placing the syscall number in `x8`,
 arguments in `x0..x5`, and executing `svc #0`. The return value is
 in `x0`.
 
+<details>
+<summary>Syscall ABI</summary>
+
 ```text
 x8       syscall number
 x0..x5   arguments (per syscall)
 svc #0   trap into the kernel
 x0       return value
 ```
+
+</details>
 
 The vector at `vbar_el1 + 0x400` (`el0_svc` in `arch/aarch64/entry.S`)
 indexes into `sys_call_table` (`src/sys.flash`) and `blr`s to the
@@ -1448,6 +1463,9 @@ hwmon-core / hwmon-mailbox / creds / authenticate / perm / login / passwd —
 i.e. 34 × `0xbbff2` (the user-space baseline plus 33 scenario checkpoints) +
 1 × `0xbc000`.
 
+<details>
+<summary>Free-page invariants</summary>
+
 ```text
 free_pages: 00000000000bc000   (kernel boot baseline)
 free_pages: 00000000000bbff2   (PID 1 baseline)
@@ -1482,6 +1500,8 @@ free_pages: 00000000000bbff2   (perm)
 free_pages: 00000000000bbff2   (login)
 free_pages: 00000000000bbff2   (passwd)
 ```
+
+</details>
 
 Any deviation indicates a leak in the scenario above the deviating
 checkpoint.
