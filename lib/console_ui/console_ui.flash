@@ -54,14 +54,47 @@ pub const unicode bool = palette.unicode
 /// scripts/run_qemu_test.sh.
 pub const marker_ready = " - type 'help' for commands"
 
-/// Shell privilege prompts, single-sourced here so no ANSI escape lives in fsh.
-/// Amber (`palette.yellow`) is the Flash-brand accent — the same tone the
-/// `[WARN]` / `[LOAD]` tags carry. Root gets bold on top. With `color` off both
-/// collapse to the bare `# ` / `$ ` bytes, so nothing downstream changes. The
-/// trailing `reset` bounds the escape to the prompt glyphs; the line the user
-/// then types renders in the default color.
-pub const prompt_root = palette.bold ++ palette.yellow ++ "# " ++ palette.reset
-pub const prompt_user = palette.yellow ++ "$ " ++ palette.reset
+/// Assemble the shell prompt `<user> @ <cwd> <sigil> ` into `buf`, returning the
+/// filled slice (it points into `buf`, which the caller owns — rule 1). The ANSI
+/// escapes are spelled only here, never in fsh: amber user (bold when root),
+/// dim `@`, grey cwd, amber sigil (`# ` for root / `$ ` otherwise). With `color`
+/// off every escape collapses to "" and the bytes are the bare
+/// `<user> @ <cwd> # ` / `$ ` form. `buf` must hold user + cwd + the fixed
+/// glyphs + the escapes; fsh sizes it CWD_MAX + name + slack. A short buffer
+/// truncates rather than overruns (the appends clamp to buf.len).
+pub fn renderPrompt(buf []mut u8, user []u8, cwd []u8, root bool) []u8 {
+    var n usize = 0
+    // user: bold amber (the Flash-brand accent).
+    n = append(buf, n, palette.bold)
+    n = append(buf, n, palette.yellow)
+    n = append(buf, n, user)
+    n = append(buf, n, palette.reset)
+    // separator: dim so the two identity halves read as one unit.
+    n = append(buf, n, palette.dim)
+    n = append(buf, n, " @ ")
+    n = append(buf, n, palette.reset)
+    // cwd: white — bright neutral, stands apart from the amber identity + sigil.
+    n = append(buf, n, palette.white)
+    n = append(buf, n, cwd)
+    n = append(buf, n, palette.reset)
+    n = append(buf, n, " ")
+    // sigil: amber like the user; root also bold to flag elevated privilege.
+    if root { n = append(buf, n, palette.bold) }
+    n = append(buf, n, palette.yellow)
+    n = append(buf, n, if (root) "# " else "$ ")
+    n = append(buf, n, palette.reset)
+    return buf[0..n]
+}
+
+/// Copy `s` into `buf` at `at`, clamped to buf.len; returns the new offset.
+fn append(buf []mut u8, at usize, s []u8) usize {
+    var i usize = 0
+    while i < s.len && at + i < buf.len {
+        buf[at + i] = s[i]
+        i += 1
+    }
+    return at + i
+}
 
 // ---- renderers -------------------------------------------------------------
 

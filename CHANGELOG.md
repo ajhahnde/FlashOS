@@ -29,6 +29,30 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [v0.7.2] - 2026-07-02
+
+Interactive polish: the shell prompt now carries the login identity, the
+current directory, and colour accents, all single-sourced in the shared
+console-UI module so no escape sequence lives in the shell itself. The boot
+contract, the syscall ABI, and the `zig build` targets are unchanged.
+
+### Changed
+
+- **The `fsh` prompt now shows `<user> @ <cwd> <sigil>`.** Where the prompt
+  was previously a bare `#` / `$` sigil, it now leads with the resolved login
+  name and the current working directory, so the shell states who you are and
+  where you are on every line. The login name is amber (bold for `root`), the
+  `@` separator is dimmed, the directory is bright neutral, and the sigil
+  keeps the amber accent (`#` bold for `root`, `$` otherwise). The prompt is
+  assembled by a single `renderPrompt` helper in the internal `console_ui`
+  module — no ANSI escape lives in the shell — and with colour disabled every
+  escape collapses so the bytes are the plain `<user> @ <cwd> # ` / `$ ` form.
+- **`whoami` and the prompt now resolve the login name one way only.** The
+  name lookup (real uid against `/etc/passwd`, decimal-uid fallback when the
+  file is unreadable or the uid has no entry) is shared through a single
+  `resolveUser` helper instead of living inside the `whoami` built-in, so the
+  prompt and the command can never disagree.
+
 ## [v0.7.1] - 2026-06-30
 
 Internal release: the userland is re-platformed onto the Flash standard
@@ -402,7 +426,8 @@ highlights are below.
 - **Kernel symbol table** generated from the linked ELF by a two-pass
   build step, so panics and the profiler can print real names.
 
-[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.7.2...HEAD
+[v0.7.2]: https://github.com/ajhahnde/FlashOS/compare/v0.7.1...v0.7.2
 [v0.7.1]: https://github.com/ajhahnde/FlashOS/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/ajhahnde/FlashOS/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/ajhahnde/FlashOS/compare/v0.5.0...v0.6.0

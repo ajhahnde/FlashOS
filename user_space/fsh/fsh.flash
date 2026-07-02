@@ -34,6 +34,8 @@ const TOK_BUF usize = 256 // tokenizer scratch (NUL-joined argv bytes)
 const FSHRC_MAX usize = 512 // /etc/fshrc slurp buffer
 const PASSWD_MAX usize = 512 // /etc/passwd slurp buffer (whoami)
 const CWD_MAX usize = 256 // getcwd buffer — matches the TaskStruct.cwd ABI ceiling (pwd)
+const USER_MAX usize = 32 // login-name buffer for the prompt / whoami (numeric-uid fallback fits too)
+const PROMPT_MAX usize = CWD_MAX + USER_MAX + 64 // user + cwd + fixed glyphs + ANSI escapes
 // Command-history depth. The ring's slots live on the REPL's stack frame
 // (rule 1 — no allocator / no .bss); 16 × HistSlot ≈ 4.2 KiB, comfortable on
 // the 64 KiB user stack. Bumping this only costs stack.
@@ -137,8 +139,17 @@ fn repl() {
     var hist_slots [HIST_N]flibc.HistSlot = undefined
     var hist = flibc.History.init(&hist_slots)
     console_ui.homescreen(flibc.consoleSink, build_options.version, AUTHOR)
+    // Resolve the login name once: the shell never changes uid mid-session, so
+    // there is no need to re-read /etc/passwd on every prompt. `?` only if the
+    // uid syscall fails. cwd, by contrast, is re-read each iteration (cd moves).
+    var user_buf [USER_MAX]u8 = undefined
+    user := resolveUser(&user_buf) orelse "?"
     while true {
-        prompt := if (flibc.sys.geteuid() == 0) console_ui.prompt_root else console_ui.prompt_user
+        var cwd_buf [CWD_MAX]u8 = undefined
+        cn := flibc.sys.getcwd(&cwd_buf, cwd_buf.len)
+        cwd := if (cn > 0) cwd_buf[0..#intCast(cn)] else "?"
+        var prompt_buf [PROMPT_MAX]u8 = undefined
+        prompt := console_ui.renderPrompt(&prompt_buf, user, cwd, flibc.sys.geteuid() == 0)
         emit(1, prompt)
         // Hand readline the live prompt so its double-TAB candidate listing can
         // reprint `prompt` + line after the list. align(16): the >16-byte
@@ -320,16 +331,28 @@ fn listBin() {
     emit(1, "\n")
 }
 
-// Print the login name matching the real uid, resolved against
-// /etc/passwd through the shared pwfile parser (the same module the
-// kernel and /bin/login use). Falls back to the numeric uid when the
-// file is unreadable or the uid has no entry — a dropped uid without an
-// account is still identifiable. Stack buffer only (rule 1).
+// Print the login name of the real uid — the `whoami` built-in, now a thin
+// wrapper over resolveUser (shared with the prompt so the name is resolved one
+// way only). Prints `?`-path error to fd 2 only when the uid syscall fails.
 fn whoami() {
+    var buf [USER_MAX]u8 = undefined
+    if resolveUser(&buf) |u| {
+        emit(1, u)
+        emit(1, "\n")
+    } else {
+        emit(2, "whoami: cannot read uid\n")
+    }
+}
+
+// Resolve the real uid's login name into `out`, returning the filled slice.
+// Reads /etc/passwd through the shared pwfile parser (the same module the
+// kernel and /bin/login use); on a parser miss or an unreadable file it formats
+// the decimal uid instead — a dropped uid without an account stays identifiable.
+// Null only when the getuid syscall itself fails. Stack buffers only (rule 1).
+fn resolveUser(out []mut u8) ?[]u8 {
     uid_raw := flibc.sys.getuid()
     if uid_raw < 0 {
-        emit(2, "whoami: cannot read uid\n")
-        return
+        return null
     }
     const uid u32 = #intCast(uid_raw)
 
@@ -346,12 +369,39 @@ fn whoami() {
         }
         _ = flibc.sys.close(fd)
         if pwfile.lookupByUid(buf[0..n], uid) |entry| {
-            emit(1, entry.user)
-            emit(1, "\n")
-            return
+            var i usize = 0
+            while i < entry.user.len && i < out.len {
+                out[i] = entry.user[i]
+                i += 1
+            }
+            return out[0..i]
         }
     }
-    flibc.printf("%u\n", .{#as(u64, uid)})
+    return out[0..fmtU32(out, uid)]
+}
+
+// Write `v` as decimal into `out` (clamped to out.len), returning the digit
+// count. Local because flibc's decimal formatter is fd-bound (printf) — this
+// needs the digits in a buffer for the prompt / whoami fallback.
+fn fmtU32(out []mut u8, v u32) usize {
+    var tmp [10]u8 = undefined
+    var n usize = 0
+    var x = v
+    if x == 0 {
+        tmp[0] = '0'
+        n = 1
+    }
+    while x > 0 {
+        tmp[n] = #intCast('0' + (x % 10))
+        n += 1
+        x /= 10
+    }
+    var i usize = 0
+    while i < n && i < out.len {
+        out[i] = tmp[n - 1 - i]
+        i += 1
+    }
+    return i
 }
 
 fn streq(a [*:0]u8, b []u8) bool {
