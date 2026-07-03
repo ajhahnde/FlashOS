@@ -3,5 +3,75 @@
     "id": "intro",
     "title": "1. What is FlashOS",
     "file": "chapters/ch1_intro.md"
+  },
+  {
+    "id": "build_boot",
+    "title": "2. Build & First Boot (QEMU)",
+    "file": "chapters/ch2_build_boot.md"
+  },
+  {
+    "id": "poweron",
+    "title": "3. Power-on: Firmware to start.S",
+    "file": "chapters/ch3_poweron.md"
+  },
+  {
+    "id": "memory",
+    "title": "4. Memory: MMU & Page Allocator",
+    "file": "chapters/ch4_memory.md"
+  },
+  {
+    "id": "console",
+    "title": "5. The Console: UART & console_ui",
+    "file": "chapters/ch5_console.md"
+  },
+  {
+    "id": "scheduler",
+    "title": "6. Tasks & the Scheduler",
+    "file": "chapters/ch6_scheduler.md"
+  },
+  {
+    "id": "syscalls",
+    "title": "7. The Syscall Boundary",
+    "file": "chapters/ch7_syscalls.md"
+  },
+  {
+    "id": "userland",
+    "title": "8. Userland: ELF, execve & flibc",
+    "file": "chapters/ch8_userland.md"
+  },
+  {
+    "id": "login",
+    "title": "9. Login & Identity",
+    "file": "chapters/ch9_login.md"
+  },
+  {
+    "id": "fsh",
+    "title": "10. fsh — the Shell",
+    "file": "chapters/ch10_fsh.md"
+  },
+  {
+    "id": "filesystem",
+    "title": "11. Files: VFS & FAT32",
+    "file": "chapters/ch11_filesystem.md"
+  },
+  {
+    "id": "fullscreen",
+    "title": "12. Full-screen Apps: less & edit",
+    "file": "chapters/ch12_fullscreen.md"
+  },
+  {
+    "id": "testing",
+    "title": "13. How FlashOS Tests Itself",
+    "file": "chapters/ch13_testing.md"
+  },
+  {
+    "id": "build",
+    "title": "14. The Build Pipeline: Flash → Zig → Kernel",
+    "file": "chapters/ch14_build.md"
+  },
+  {
+    "id": "hardware",
+    "title": "15. On Real Hardware (Pi 4)",
+    "file": "chapters/ch15_hardware.md"
   }
 ]
