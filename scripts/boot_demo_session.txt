@@ -34,6 +34,9 @@ Commands:
 Run a program:  <cmd> [args]    pipe:  <a> | <b>
 TAB completes commands + paths
 
+Programs in /bin:
+  cat clear cp cpuinfo dmesg echo edit forkbomb fsh grep less ls meminfo mv rm sysinfo uptime login passwd
+
 $ ls
 bin/
 etc/

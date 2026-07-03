@@ -46,9 +46,52 @@ HOLD = 5.0              # hold the final live-prompt frame at the end
 GREEN = "\x1b[32m"
 RESET = "\x1b[0m"
 
+# The fsh homescreen banner and `help` output carry color in the real console
+# too (console_ui.homescreen / fsh HELP_TEXT + listBin, `color` on). session.txt
+# holds the plain text for readability; the escapes are spelled once here and
+# added at emit time, mirroring those renderers byte-for-byte:
+#   * banner  — amber `FlashOS`, grey version + author, marker in default fg
+#               (console_ui.homescreen).
+#   * help    — bold `Commands:` (fsh HELP_TEXT), then the `/bin` listing with
+#               each program name in cyan (fsh listBin, palette.cyan).
+GREY = "\x1b[90m"       # palette.grey (bright_black)
+CYAN = "\x1b[36m"       # palette.cyan — the listBin program-name color
+YELLOW = "\x1b[33m"     # palette.yellow — the amber product name / sigil
+BOLD = "\x1b[1m"
+
+# `FlashOS [v<version>] by <author><marker>` — the homescreen line. The marker
+# tail (` - type 'help' for commands`) stays the default fg, exactly as
+# homescreen() closes every color with reset before emitting it.
+BANNER = re.compile(r"^FlashOS \[v(.+?)\] by (\S+)(.*)$")
+
 
 def colorize(line):
-    return line.replace("[ OK ]", "[ " + GREEN + "OK" + RESET + " ]")
+    line = line.replace("[ OK ]", "[ " + GREEN + "OK" + RESET + " ]")
+    m = BANNER.match(line)
+    if m:
+        version, author, tail = m.group(1), m.group(2), m.group(3)
+        return (YELLOW + "FlashOS" + RESET + " [v" + GREY + version + RESET +
+                "] by " + GREY + author + RESET + tail)
+    if line == "Commands:":                 # fsh HELP_TEXT header, bold
+        return BOLD + "Commands:" + RESET
+    return line
+
+
+def colorize_lines(lines):
+    # Second pass over the emit-ready lines: colorize each in place, plus the
+    # one line that needs its predecessor for context — the `/bin` names line
+    # that follows `Programs in /bin:` gets every whitespace-delimited program
+    # name tinted cyan (listBin colors the names, not the spacing).
+    out_lines = []
+    prev_bin_header = False
+    for ln in lines:
+        if prev_bin_header:
+            out_lines.append(re.sub(r"\S+", lambda t: CYAN + t.group(0) + RESET, ln))
+            prev_bin_header = False
+            continue
+        out_lines.append(colorize(ln))
+        prev_bin_header = ln.startswith("Programs in /bin:")
+    return out_lines
 
 # The live `fsh` prompt carries color too (console_ui.renderPrompt, `color`
 # on): `<user> @ <cwd> <sigil>` with a bold-amber user, a dimmed separator, a
@@ -56,10 +99,8 @@ def colorize(line):
 # readability; the full colored prompt is spelled once here and substituted at
 # emit time, mirroring renderPrompt exactly. The demo runs as `flash` (non-
 # root, so no bold sigil) from `/` — the root the `ls` block lists.
-BOLD = "\x1b[1m"
-YELLOW = "\x1b[33m"
-DIM = "\x1b[2m"
-WHITE = "\x1b[37m"
+DIM = "\x1b[2m"         # palette.dim — the ` @ ` prompt separator
+WHITE = "\x1b[37m"      # palette.white — the prompt cwd
 SHELL_PROMPT = (BOLD + YELLOW + "flash" + RESET + DIM + " @ " + RESET +
                 WHITE + "/" + RESET + " " + YELLOW + "$ " + RESET)
 
@@ -114,6 +155,9 @@ def main():
         lines.pop()
     version = zon_version()
     lines = [ln.replace("{{VERSION}}", version) for ln in lines]
+    # Tint the emit-ready lines once (boot `OK`, banner, `help` output). Typed
+    # command lines are left untouched, so TYPED still matches their raw text.
+    lines = colorize_lines(lines)
 
     # The trailing line is the live prompt waiting for input — the `$ ` shell
     # prompt after the last command, or a re-spawned `login:`. Print it
@@ -153,7 +197,7 @@ def main():
                     time.sleep(BLOCK_PAUSE)
                     k = j
         else:
-            out(colorize(line) + "\r\n")  # boot / handshake — whole line, OK tinted
+            out(line + "\r\n")  # boot / handshake — whole line, already tinted
             time.sleep(BOOT_LINE)
             i += 1
 
