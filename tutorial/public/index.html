@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+    <title>FlashOS — Tutorial</title>
+    <!-- Favicon: the brand bolt in Flash amber (#FBBF24) -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23FBBF24' d='M13 2 3 14h7l-1 8 10-12h-7l1-8z'/%3E%3C/svg%3E">
+    <!-- Fonts: Inter (UI), JetBrains Mono (code), Orbitron (wordmark only) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- CSS Style -->
+    <link rel="stylesheet" href="index.css">
+    <!-- Marked library for parsing Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Monaco Editor Loader -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
+</head>
+<body>
+    <!-- Pick theme before first paint: 'auto' follows the OS, else the saved manual mode. -->
+    <script>
+        (function () {
+            var mode = localStorage.getItem('theme') || 'auto';
+            var theme = mode === 'auto'
+                ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+                : mode;
+            document.body.className = theme + '-theme';
+        })();
+    </script>
+    <header class="app-header">
+        <div class="header-logo-section">
+            <!-- Chapters drawer toggle: only visible on narrow screens -->
+            <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="Toggle chapters" aria-expanded="false">
+                <i data-lucide="menu"></i>
+            </button>
+            <!-- Brand wordmark: bold neutral "Flash" + regular gold "OS", set in Orbitron -->
+            <h1 class="wordmark"><span class="wordmark-f">Flash</span><span class="wordmark-lash">OS</span></h1>
+            <span class="sub-badge">Tutorial</span>
+        </div>
+        <div class="header-actions">
+            <a href="https://github.com/ajhahnde/FlashOS" target="_blank" class="github-btn" title="View Source on GitHub">
+                <i data-lucide="github"></i><span class="github-label"> GitHub</span>
+            </a>
+            <button id="theme-toggle" class="theme-toggle-btn" aria-label="Toggle theme">
+                <i data-lucide="monitor" class="auto-icon"></i>
+                <i data-lucide="sun" class="light-icon"></i>
+                <i data-lucide="moon" class="dark-icon"></i>
+            </button>
+            <button id="layout-toggle" class="layout-toggle-btn" title="Toggle full-width reader / split editor">
+                <i data-lucide="columns"></i>
+            </button>
+        </div>
+    </header>
+
+    <div class="app-layout">
+        <!-- Dim layer behind the off-canvas chapters drawer (narrow screens) -->
+        <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+        <!-- Sidebar Navigation -->
+        <aside class="app-sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3>Chapters</h3>
+            </div>
+            <nav class="sidebar-nav" id="chapters-list">
+                <!-- Chapters will be injected dynamically -->
+                <div class="nav-loading">Loading chapters...</div>
+            </nav>
+        </aside>
+
+        <!-- Main Workspace Pane (Split Screen) -->
+        <main class="workspace-pane">
+            <!-- Left Pane: Content Reader -->
+            <section class="content-panel" id="content-panel">
+                <div class="content-body" id="chapter-content">
+                    <!-- Chapter Markdown content will load here -->
+                    <div class="content-loading">
+                        <div class="spinner"></div>
+                        <p>Loading chapter content...</p>
+                    </div>
+                </div>
+                <div class="content-nav-buttons">
+                    <button id="prev-btn" class="nav-btn" disabled>
+                        <i data-lucide="arrow-left"></i> Previous
+                    </button>
+                    <button id="next-btn" class="nav-btn">
+                        Next <i data-lucide="arrow-right"></i>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Right Pane: Interactive Live Playground -->
+            <section class="playground-panel" id="playground-panel">
+                <div class="playground-header">
+                    <div class="tab-selectors">
+                        <button class="tab-btn active" data-tab="editor">
+                            <i data-lucide="edit-3"></i> Flash Editor
+                        </button>
+                        <button class="tab-btn" data-tab="output">
+                            <i data-lucide="file-code"></i> Lowered Zig
+                        </button>
+                    </div>
+                    <div class="playground-actions">
+                        <button id="transpile-btn" class="action-btn primary" title="Compile Flash to Zig">
+                            <i data-lucide="zap"></i> Transpile
+                        </button>
+                    </div>
+                </div>
+
+                <div class="playground-body">
+                    <!-- Flash Code Editor Container -->
+                    <div class="tab-content active" id="tab-editor">
+                        <div id="editor-container"></div>
+                    </div>
+
+                    <!-- Transpiled Output Container -->
+                    <div class="tab-content" id="tab-output">
+                        <div id="output-container"></div>
+                    </div>
+                </div>
+
+                <!-- Terminal drawer for warnings/errors -->
+                <div class="playground-terminal" id="terminal-drawer">
+                    <div class="terminal-header" id="terminal-header">
+                        <span class="terminal-title">
+                            <i data-lucide="terminal"></i> Compiler Console
+                        </span>
+                        <div class="terminal-controls">
+                            <span id="terminal-status" class="status-indicator idle">Idle</span>
+                            <button id="clear-terminal" class="control-btn" title="Clear console">
+                                <i data-lucide="trash-2"></i>
+                            </button>
+                            <i data-lucide="chevron-down" class="terminal-chevron"></i>
+                        </div>
+                    </div>
+                    <div class="terminal-output" id="terminal-body">
+                        Welcome to the FlashOS tutorial environment. Write Flash code in the editor and click "Transpile" to lower it to Zig.
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Main Client-Side JS -->
+    <script src="index.js"></script>
+
+    <!-- Live reload (dev only): refresh on any change under public/. Probe the
+         backend first so a static build (GitHub Pages) never opens an
+         EventSource against a 404 and loops on reconnect. -->
+    <script>
+      (function () {
+        fetch('/api/chapters', { method: 'HEAD' })
+          .then((res) => {
+            if (!res.ok) return;
+            const es = new EventSource('/api/livereload');
+            es.onmessage = () => location.reload();
+            // onerror fires on transient blips; EventSource auto-reconnects via
+            // the server's `retry:` hint, so nothing to do here.
+          })
+          .catch(() => {});
+      })();
+    </script>
+</body>
+</html>

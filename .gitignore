@@ -16,3 +16,8 @@ stdbuf_test.log
 boot.log
 qemu_output.log
 screenlog.*
+
+# tutorial web app — keep source, drop deps & scratch
+tutorial/node_modules/
+tutorial/temp/
+tutorial/SETUP.md
