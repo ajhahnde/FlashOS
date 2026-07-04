@@ -14,8 +14,13 @@ const PORT = process.env.PORT || 3000;
 // Path to the flashc compiler built in the Flash workspace. FlashOS itself
 // doesn't vendor a compiler build (it consumes flashc via a pinned commit,
 // see flash-toolchain.lock), so the default points at the sibling Flash repo.
+// Since Flash v1.0.1, the pinned checkout's `zig build` installs the live,
+// self-hosted compiler as `flashc`. The lab pins `--backend=zig` because
+// that is the bootstrap mode FlashOS's own build currently consumes —
+// flag-less flashc now builds a native host binary instead of printing
+// anything to stdout.
 const COMPILER_PATH = process.env.FLASHC
-  || path.join(homedir(), 'Flash', 'zig-out', 'bin', 'flashc-stage1');
+  || path.join(homedir(), 'Flash', 'zig-out', 'bin', 'flashc');
 const TEMP_DIR = path.join(__dirname, 'temp');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -54,7 +59,7 @@ app.post('/api/transpile', async (req, res) => {
 
     // Run the local flashc compiler
     // We run it and capture output
-    exec(`"${COMPILER_PATH}" "${tempFilePath}"`, async (error, stdout, stderr) => {
+    exec(`"${COMPILER_PATH}" --backend=zig "${tempFilePath}"`, async (error, stdout, stderr) => {
       // Clean up the temp file
       try {
         await fs.unlink(tempFilePath);

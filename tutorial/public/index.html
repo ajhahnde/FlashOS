@@ -99,12 +99,12 @@
                             <i data-lucide="edit-3"></i> Flash Editor
                         </button>
                         <button class="tab-btn" data-tab="output">
-                            <i data-lucide="file-code"></i> Lowered Zig
+                            <i data-lucide="file-code"></i> Zig (bootstrap)
                         </button>
                     </div>
                     <div class="playground-actions">
-                        <button id="transpile-btn" class="action-btn primary" title="Compile Flash to Zig">
-                            <i data-lucide="zap"></i> Transpile
+                        <button id="transpile-btn" class="action-btn primary" title="Compile with flashc's bootstrap backend — the mode FlashOS's build currently consumes">
+                            <i data-lucide="zap"></i> Compile
                         </button>
                     </div>
                 </div>
@@ -115,7 +115,7 @@
                         <div id="editor-container"></div>
                     </div>
 
-                    <!-- Transpiled Output Container -->
+                    <!-- Compiled (bootstrap) Output Container -->
                     <div class="tab-content" id="tab-output">
                         <div id="output-container"></div>
                     </div>
@@ -136,7 +136,7 @@
                         </div>
                     </div>
                     <div class="terminal-output" id="terminal-body">
-                        Welcome to the FlashOS tutorial environment. Write Flash code in the editor and click "Transpile" to lower it to Zig.
+                        Welcome to the FlashOS tutorial environment. Write Flash code and click "Compile". flashc is a native LLVM compiler; FlashOS still builds through its bootstrap Zig backend during the native transition, so the lab shows that output.
                     </div>
                 </div>
             </section>

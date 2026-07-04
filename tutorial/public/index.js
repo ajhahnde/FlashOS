@@ -330,7 +330,7 @@ function initMonaco() {
 
         // 5. Create Zig editor (read-only)
         state.zigEditor = monaco.editor.create(dom.zigEditorContainer, {
-            value: `// Click 'Transpile' to see the lowered Zig output`,
+            value: `// Click 'Compile' to see the bootstrap output FlashOS's build consumes`,
             language: 'rust', // Monaco doesn't have Zig built-in by default, Rust/C highlight matches Zig syntax tags fairly closely
             theme: state.theme === 'dark' ? 'atomo-one-dark' : 'atomo-one-light',
             readOnly: true,
@@ -611,13 +611,13 @@ async function highlightFlashBlocks(root) {
 }
 
 // ==========================================================================
-// Transpiler API Pipeline Integration
+// Compiler API Pipeline Integration
 // ==========================================================================
-// One-line notice shown whenever the transpile backend is absent (static build).
+// One-line notice shown whenever the compile backend is absent (static build).
 function logStaticNotice() {
     logTerminal(
         "Static build — reading chapters and loading examples into the editor work, " +
-        "but live transpilation needs the local dev server.\n" +
+        "but live compilation needs the local dev server.\n" +
         "Clone https://github.com/ajhahnde/Flash and run `npm start` in tutorial/.",
         "warning"
     );
@@ -634,7 +634,7 @@ async function runTranspilation() {
 
     const code = state.flashEditor.getValue();
     
-    updateTerminalStatus('transpiling', 'Transpiling...');
+    updateTerminalStatus('transpiling', 'Compiling...');
     logTerminal("Invoking compiler backend...", "info");
 
     try {
@@ -660,7 +660,7 @@ async function runTranspilation() {
             // Log status
             updateTerminalStatus('success', 'Success');
             
-            let logMsg = "Transpilation succeeded.\n";
+            let logMsg = "Compiled (bootstrap backend).\n";
             if (result.error) {
                 logMsg += `\nCompiler Warnings:\n${result.error}`;
                 logTerminal(logMsg, "warning");
@@ -669,7 +669,7 @@ async function runTranspilation() {
             }
             
         } else {
-            // Transpilation failed (compiler returned non-zero code)
+            // Compilation failed (compiler returned non-zero code)
             updateTerminalStatus('error', 'Compiler Error');
             logTerminal(`Compiler Execution Failed:\n\n${result.error}`, "error");
             
@@ -678,7 +678,7 @@ async function runTranspilation() {
         }
 
     } catch (err) {
-        console.error("Transpilation API call failed:", err);
+        console.error("Compilation API call failed:", err);
         updateTerminalStatus('error', 'Network Error');
         logTerminal(`HTTP network error while communicating with backend: ${err.message}\nEnsure the local server is running on http://localhost:3000.`, "error");
     }
@@ -718,7 +718,7 @@ function updateTerminalStatus(statusClass, label) {
 // Initialization
 // ==========================================================================
 document.addEventListener('DOMContentLoaded', () => {
-    // 0. Probe the transpile backend once; static hosting (GitHub Pages) has none.
+    // 0. Probe the compile backend once; static hosting (GitHub Pages) has none.
     fetch('/api/chapters')
         .then(r => { state.backend = r.ok; })
         .catch(() => { state.backend = false; })
