@@ -29,6 +29,30 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [v0.7.3] - 2026-07-04
+
+Toolchain identity flip: FlashOS now consumes Flash **v1.0.1**, where the
+installed `flashc` binary became the live self-hosted compiler itself (a
+native LLVM driver) rather than a separate `flashc-stage1` produced by a
+`zig build stage1` step. The boot contract, the syscall ABI, and the
+`zig build` targets are unchanged.
+
+### Changed
+
+- **The pinned Flash toolchain is v1.0.1.** `flash-toolchain.lock` names the
+  new commit; every `flashc` invocation across `build.zig`, CI, the Pi
+  baseline script, and the tutorial lab now passes the Zig-emission mode
+  explicitly (`--backend=zig`), since flag-less `flashc` now compiles a
+  native host binary instead of printing lowered Zig. FlashOS's own build
+  still consumes that bootstrap backend — that stays deliberate until the
+  native-object port; only the naming changed.
+- **Setup instructions and the learning tutorial now describe `flashc` as
+  the compiler it is.** `SETUP.md`, `README.md`, both German translations,
+  and the interactive tutorial's chapters and lab UI — previously written
+  around a "Flash transpiles to Zig" narrative — now say "compile", and
+  build the pinned toolchain with plain `zig build` instead of
+  `zig build stage1`.
+
 ## [v0.7.2] - 2026-07-02
 
 Interactive polish: the shell prompt now carries the login identity, the
@@ -426,7 +450,8 @@ highlights are below.
 - **Kernel symbol table** generated from the linked ELF by a two-pass
   build step, so panics and the profiler can print real names.
 
-[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.7.3...HEAD
+[v0.7.3]: https://github.com/ajhahnde/FlashOS/compare/v0.7.2...v0.7.3
 [v0.7.2]: https://github.com/ajhahnde/FlashOS/compare/v0.7.1...v0.7.2
 [v0.7.1]: https://github.com/ajhahnde/FlashOS/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/ajhahnde/FlashOS/compare/v0.6.0...v0.7.0
