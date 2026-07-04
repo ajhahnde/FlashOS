@@ -8,11 +8,11 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# The OS-image modules transpile through flashc (the Flash compiler), so a
-# bare `zig build` cannot find it. Resolve it the same way build.zig's
-# -Dflashc default does: $FLASHC if set, else the pinned stage1 binary in the
-# Flash checkout ($FLASH_DIR, default ~/Flash).
-FLASHC="${FLASHC:-${FLASH_DIR:-$HOME/Flash}/zig-out/bin/flashc-stage1}"
+# The OS-image modules compile through flashc (the Flash compiler), so a
+# baseline run needs the pinned toolchain. Resolution mirrors what build.zig's
+# -Dflashc default does: $FLASHC if set, else the pinned binary in the
+# Flash checkout.
+FLASHC="${FLASHC:-${FLASH_DIR:-$HOME/Flash}/zig-out/bin/flashc}"
 
 BASELINE="scripts/pi_baseline.sha256"
 if [ ! -f "$BASELINE" ]; then

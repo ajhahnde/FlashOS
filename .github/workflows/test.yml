@@ -119,9 +119,9 @@ jobs:
 
       # FlashOS source modules are written in Flash (*.flash) and transpiled
       # to Zig at build time by flashc. build.zig resolves the compiler at
-      # ~/Flash/zig-out/bin/flashc-stage1 by default; the pinned revision
+      # ~/Flash/zig-out/bin/flashc by default; the pinned revision
       # lives in flash-toolchain.lock. Flash ships no prebuilt binaries, so
-      # build the self-hosted stage1 from source at the pinned commit.
+      # build the self-hosted compiler from source at the pinned commit.
       #
       # The checkout runs every time, before the cache restore: build.zig
       # transpiles the Flash std modules (~/Flash/std/*.flash) directly, so
@@ -139,18 +139,17 @@ jobs:
         id: flashc
         uses: actions/cache@v4
         with:
-          path: ~/Flash/zig-out/bin/flashc-stage1
-          key: flashc-stage1-${{ runner.os }}-${{ hashFiles('flash-toolchain.lock') }}
+          path: ~/Flash/zig-out/bin/flashc
+          key: flashc-${{ runner.os }}-${{ hashFiles('flash-toolchain.lock') }}
 
       - name: build flashc from the pinned Flash commit
         if: steps.flashc.outputs.cache-hit != 'true'
-        # `zig build stage1` (not the bare `zig build`, which emits only the
-        # stage0 bootstrap seed `flashc`) produces the self-hosted
-        # `flashc-stage1` that flash-toolchain.lock pins. The binary is
-        # cached on the lock hash, so it only rebuilds when the pin moves.
+        # `zig build` produces the self-hosted `flashc` that flash-toolchain.lock
+        # pins. The binary is cached on the lock hash, so it only rebuilds when
+        # the pin moves.
         run: |
-          ( cd ~/Flash && zig build stage1 )
-          test -x ~/Flash/zig-out/bin/flashc-stage1
+          ( cd ~/Flash && zig build )
+          test -x ~/Flash/zig-out/bin/flashc
 
       - name: host unit tests
         run: zig build test
