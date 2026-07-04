@@ -283,7 +283,7 @@ export fn main(_ usize, _ argv) noreturn {
 > moment `refill_counters` handles for the real scheduler, just with a
 > flat `+2` instead of a priority-weighted decay.
 
-Transpile it with the button below and read the generated Zig: two plain
+Compile it with the button below and read the compiler's output: two plain
 loops over a fixed array and a `printf` call per round, the same shape
 `pick_next_running` and `refill_counters` have, minus the pointer-based
 task table and the `i64` arithmetic shift.

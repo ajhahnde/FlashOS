@@ -233,7 +233,7 @@ export fn main(_ usize, _ argv) noreturn {
 > unsigned decimal here) that formats into a stack buffer and flushes it
 > with a single `write_fd` call.
 
-Transpile it with the button below: allocating three pages should hand
+Compile it with the button below: allocating three pages should hand
 back indices `0`, `1`, `2`; freeing index `1` and allocating again
 should reuse it rather than moving on to `3`.
 

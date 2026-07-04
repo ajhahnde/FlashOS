@@ -10,7 +10,7 @@ subsystem that a later chapter (3 through 8) digs into on its own.
 | Tool                  | Minimum version | Purpose                                   |
 | :-------------------- | :-------------- | :----------------------------------------- |
 | Zig                   | 0.16.0          | Compile Zig + assembly, run `build.zig`   |
-| `flashc`              | pinned          | Transpile Flash (`.flash`) sources to Zig |
+| `flashc`              | pinned          | Compile Flash (`.flash`) sources          |
 | `aarch64-elf-binutils`| 2.40+           | ELF → raw binary, symbol extraction       |
 | `qemu-system-aarch64` | 11.0.0+         | Run the kernel under QEMU                 |
 
@@ -21,7 +21,7 @@ step is already done.
 
 ## Building
 
-Every build transpiles the `.flash` source modules with `flashc` first,
+Every build compiles the `.flash` source modules with `flashc` first,
 so `flashc` has to be on the resolved path (or passed via `-Dflashc=`)
 before either of these commands works:
 

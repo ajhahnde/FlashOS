@@ -220,7 +220,7 @@ export fn main(argc usize, argv argv) noreturn {
 > the single already-NUL-terminated `argv[1]` in place — enough to show
 > the whitespace-splitting logic without fsh's buffer bookkeeping.
 
-Transpile it with the button below.
+Compile it with the button below.
 
 ## What's next
 

@@ -188,7 +188,7 @@ declared `main(_ usize, _ argv)` and discarded both. This program walks
 its argument vector and prints each entry, then exits — a simplified,
 standalone version of `argv_echo.flash` above, without the page-padding
 trick (that exists only to force a kernel-side loader edge case, which
-has nothing to do with a reader transpiling this locally).
+has nothing to do with a reader compiling this locally).
 
 ```flash
 // argv_dump.flash - walk argv[0..argc] and print each one, then exit.
@@ -213,8 +213,8 @@ export fn main(argc usize, argv argv) noreturn {
 > length has to be tracked or passed separately. `flibc.io`'s format
 > spec comment documents `%s` alongside `%d`/`%u`/`%x`/`%c`/`%%`.
 
-Transpile it with the button below: since this Lab reads `argc`/`argv`
-at all, that only proves the source transpiles cleanly to Zig — running
+Compile it with the button below: since this Lab reads `argc`/`argv`
+at all, that only proves the source compiles cleanly — running
 it with real arguments only happens inside FlashOS itself, where
 `sys_execve` is the one thing that ever puts values in `x0`/`x1` before
 `_start_shim` runs.

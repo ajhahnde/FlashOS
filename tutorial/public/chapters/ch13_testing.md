@@ -106,6 +106,6 @@ scenarios).
 ## What's next
 
 Chapter 14 turns from *what* gets tested to *how the source gets built
-at all* — the two-pass symbol-table build, the Flash-to-Zig transpile
-step every `.flash` module goes through, and the toolchain pin that
-keeps that transpile reproducible.
+at all* — the two-pass symbol-table build, the compile step every
+`.flash` module goes through, and the toolchain pin that keeps it
+reproducible.

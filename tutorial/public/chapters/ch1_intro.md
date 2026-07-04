@@ -9,8 +9,10 @@ kernel and the userland.
 The kernel core, the board drivers, and the userland (including the
 `fsh` shell and its coreutils) are written in
 [Flash](https://github.com/ajhahnde/Flash), a systems language whose
-compiler, `flashc`, transpiles Flash source to Zig at build time; the
-ordinary Zig toolchain then compiles that generated Zig as before. As
+compiler, `flashc`, is a native LLVM compiler. (Transitional note: FlashOS's
+build still consumes flashc's bootstrap Zig backend while the native-object
+port completes — this tour says so once, here and in Chapter 14, and
+otherwise talks about the compiler as it is.) As
 `PORT.md` (in the repository root) documents, FlashOS did not start
 this way — it began as a C kernel, was rewritten in pure Zig and
 AArch64 assembly, and later had its OS-image modules ported from Zig
@@ -32,7 +34,7 @@ bootable image. The tour closes on real Raspberry Pi 4 hardware, where
 everything covered along the way is running outside of QEMU.
 
 Each chapter pairs a short read with a hands-on lab: a real, runnable
-piece of Flash source you transpile and inspect yourself, the same way
+piece of Flash source you compile and inspect yourself, the same way
 the actual kernel and userland are built.
 
 ## Lab: Hello, World!
@@ -63,6 +65,6 @@ export fn main(_ usize, _ argv) noreturn {
 > wrapper over the `write` syscall, and `flibc.exit()` wraps `exit` —
 > the same syscalls a shell like `fsh` or a coreutil like `cat` uses.
 
-Transpile it with the button below and read the generated Zig: a
+Compile it with the button below and read the output: a
 `main` with C calling convention, wired to the same `flibc` module the
 rest of FlashOS's userland imports.
