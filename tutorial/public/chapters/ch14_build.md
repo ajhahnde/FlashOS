@@ -84,8 +84,8 @@ lives too.
 
 Not every source file in the tree carries the `.flash` extension. Boot
 assembly and linker scripts (`arch/`, `.ld` files) are outside Flash's
-domain by construction — a systems language that compiles down to
-machine code has no reason to also reinvent AArch64 assembly. The
+domain by construction — the young language's scope doesn't yet cover
+boot-time register and exception-level plumbing, so that stays hand-written AArch64 assembly. The
 kernel's own force-link boot trampoline, `src/start.zig`, hosts the
 build's module wiring and stays Zig for the same structural reason.
 And, as chapter 11 already noted in passing, a couple of low-level
