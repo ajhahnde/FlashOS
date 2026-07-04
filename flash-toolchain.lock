@@ -6,8 +6,9 @@
 # deliberate, single-commit step (rebuild + both boot watchdogs green).
 #
 # The build resolves the binary via -Dflashc=<path>; the default
-# expects a Flash checkout at ~/Flash built with `zig build stage1`.
+# expects a Flash checkout at ~/Flash built with `zig build` — since Flash v1.0.1 the installed `flashc` IS the live self-hosted
+# compiler (native LLVM driver; Zig emission needs the explicit `--backend=zig`).
 
-flash-version = 1.0.0
-flash-commit  = 11c22fde8cf95bffdfbfebd13c4c9025667f05c0
-flashc-binary = zig-out/bin/flashc-stage1
+flash-version = 1.0.1
+flash-commit  = 89cb2fc43ccfe3a2f912ac86350bad1c53998e0f
+flashc-binary = zig-out/bin/flashc

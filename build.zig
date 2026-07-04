@@ -98,6 +98,8 @@ fn addHostTest(b: *std.Build, step: *std.Build.Step, cfg: HostTest) *std.Build.M
 }
 
 // Set from the -Dflashc option in build(); read by addFlashSource below.
+// flashc is a native LLVM compiler; FlashOS consumes its bootstrap
+// --backend=zig mode until the native-object port (transitional, deliberate).
 var flashc_path: []const u8 = "flashc";
 
 // Flash transpile helper. Registers a flashc run step (Flash -> Zig) and
@@ -108,7 +110,7 @@ var flashc_path: []const u8 = "flashc";
 // fingerprint, so a stale cached output could otherwise green a boot
 // that no longer matches its source.
 fn addFlashSource(b: *std.Build, src: []const u8) std.Build.LazyPath {
-    const run = b.addSystemCommand(&.{flashc_path});
+    const run = b.addSystemCommand(&.{ flashc_path, "--backend=zig" });
     run.setName(b.fmt("flashc {s}", .{src}));
     run.addFileArg(b.path(src));
     run.addArg("-o");
@@ -123,7 +125,7 @@ fn addFlashSource(b: *std.Build, src: []const u8) std.Build.LazyPath {
 // rather than b.path. `stem` names the generated .zig (the caller composes the
 // sibling set into one directory; see the `core` module below).
 fn addFlashSourceAbs(b: *std.Build, abs_path: []const u8, stem: []const u8) std.Build.LazyPath {
-    const run = b.addSystemCommand(&.{flashc_path});
+    const run = b.addSystemCommand(&.{ flashc_path, "--backend=zig" });
     run.setName(b.fmt("flashc {s}", .{abs_path}));
     run.addFileArg(.{ .cwd_relative = abs_path });
     run.addArg("-o");
@@ -274,10 +276,10 @@ pub fn build(b: *std.Build) void {
     flashc_path = b.option(
         []const u8,
         "flashc",
-        "Path to the flashc transpiler binary (default: ~/Flash/zig-out/bin/flashc-stage1)",
+        "Path to the flashc transpiler binary (default: ~/Flash/zig-out/bin/flashc)",
     ) orelse blk: {
-        const home = b.graph.environ_map.get("HOME") orelse break :blk "flashc-stage1";
-        break :blk b.pathJoin(&.{ home, "Flash", "zig-out", "bin", "flashc-stage1" });
+        const home = b.graph.environ_map.get("HOME") orelse break :blk "flashc";
+        break :blk b.pathJoin(&.{ home, "Flash", "zig-out", "bin", "flashc" });
     };
 
     // Path to the Flash std/ directory whose modules compose the `core` import
