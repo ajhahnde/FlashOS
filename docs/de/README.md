@@ -55,7 +55,7 @@ Hardware und unter QEMU bootet. Der Kernel-Core ist in
 Systemsprache, gebaut mit `LLVM IR`), mit dem Boot-Pfad, den
 Exception-Vektoren und dem Context Switch in AArch64-Assembly. Der
 Build wird vollständig von `build.zig` gesteuert, das derzeit die
-`.flash`-Module durch einen gepinnten `flashc` transpiliert. Bald wird
+`.flash`-Module durch einen gepinnten `flashc` kompiliert. Bald wird
 FlashOS direkt kompiliert.
 Der aktuelle Release liefert einen vollständigen Uniprozessor-Prozess-
 Lebenszyklus (`fork`, `exec`, `exit`, `wait`, `kill`), leckfrei über
@@ -180,16 +180,18 @@ brew install zig aarch64-elf-binutils qemu
 ```
 
 Die Source-Module von FlashOS sind in
-[Flash](https://github.com/ajhahnde/Flash) geschrieben und werden zur
-Build-Zeit von `flashc` zu Zig transpiliert. Den gepinnten Compiler
-einmal bauen — `build.zig` sucht ihn standardmäßig unter
-`~/Flash/zig-out/bin/flashc-stage1` (mit `-Dflashc=<path>`
+[Flash](https://github.com/ajhahnde/Flash) geschrieben und werden von
+`flashc` kompiliert — einem nativen LLVM-Compiler, dessen
+Bootstrap-Modus (`--backend=zig`) der FlashOS-Build während der
+nativen Umstellung noch nutzt. Den gepinnten Compiler einmal bauen —
+`build.zig` sucht ihn standardmäßig unter
+`~/Flash/zig-out/bin/flashc` (mit `-Dflashc=<path>`
 überschreiben):
 
 ```bash
 git clone https://github.com/ajhahnde/Flash.git ~/Flash
 git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
-( cd ~/Flash && zig build stage1 )   # → ~/Flash/zig-out/bin/flashc-stage1
+( cd ~/Flash && zig build )   # → ~/Flash/zig-out/bin/flashc
 ```
 
 Alles für den Pi bauen (`kernel8.img` + `armstub8.bin` landen in
@@ -269,7 +271,7 @@ scripts/                    symbol-table generation, iso, QEMU test watchdog,
 assets/                     logo and visual assets
 build.zig                   the only build entry point
 build.sh                    two-pass build orchestrator + deploy prompt
-flash-toolchain.lock        pinned flashc revision (Flash→Zig transpiler)
+flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration
 ```
 

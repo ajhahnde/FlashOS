@@ -44,7 +44,7 @@ Reference:
 | Tool                     | Minimum version | Purpose                                   |
 | :----------------------- | :-------------- | :---------------------------------------- |
 | Zig                      | 0.16.0          | Compile Zig + assembly, run `build.zig`   |
-| `flashc`                 | pinned          | Transpile Flash (`.flash`) sources to Zig |
+| `flashc`                 | pinned          | Compile Flash (`.flash`) sources          |
 | `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                          |
 | `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`     |
 | `qemu-system-aarch64`    | 11.0.0+         | Run the kernel under QEMU                 |
@@ -59,26 +59,23 @@ brew install zig aarch64-elf-binutils qemu
 ### Flash compiler (`flashc`)
 
 FlashOS's source modules are written in
-[Flash](https://github.com/ajhahnde/Flash) and transpiled to Zig at
-build time. `build.zig` resolves the `flashc` binary at
-`~/Flash/zig-out/bin/flashc-stage1` by default; override the path with
-`-Dflashc=<path>`. Flash publishes no prebuilt binaries, so build the
-pinned self-hosted compiler from source — run this from the FlashOS
-checkout so the pin is read from `flash-toolchain.lock`:
+[Flash](https://github.com/ajhahnde/Flash) and compiled by `flashc` — a
+native LLVM compiler whose bootstrap `--backend=zig` mode FlashOS's
+build consumes during the native transition. `build.zig` resolves the
+`flashc` binary at `~/Flash/zig-out/bin/flashc` by default; override
+the path with `-Dflashc=<path>`. Flash publishes no prebuilt binaries,
+so build the pinned self-hosted compiler from source — run this from
+the FlashOS checkout so the pin is read from `flash-toolchain.lock`:
 
 ```bash
 git clone https://github.com/ajhahnde/Flash.git ~/Flash
 git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
-( cd ~/Flash && zig build stage1 )   # → ~/Flash/zig-out/bin/flashc-stage1
+( cd ~/Flash && zig build )   # → ~/Flash/zig-out/bin/flashc
 ```
-
-`zig build stage1` — not the bare `zig build`, which emits only the
-stage0 bootstrap seed `flashc` — produces `flashc-stage1`, the revision
-pinned in `flash-toolchain.lock`. Rebuild it only when that pin moves.
 
 ## 2. Building
 
-Every build transpiles the `.flash` source modules with `flashc`, so
+Every build compiles the `.flash` source modules with `flashc`, so
 build it first (see §1).
 
 ```bash

@@ -80,9 +80,9 @@ compiler, and a clean checkout always lowers the same Flash to the same
 Zig.
 
 The build resolves the compiler binary through the `-Dflashc=<path>`
-option, defaulting to `~/Flash/zig-out/bin/flashc-stage1`. Flash ships no
-prebuilt binaries, so the pinned self-hosted `flashc-stage1` is built
-from source at the pinned commit (`zig build stage1`); see
+option, defaulting to `~/Flash/zig-out/bin/flashc`. Flash ships no
+prebuilt binaries, so the pinned self-hosted `flashc` is built
+from source at the pinned commit (`zig build`); see
 [Setup §1](SETUP.md#1-host-toolchain). Bumping the pin is a deliberate,
 isolated step — rebuild, then re-run both boot watchdogs — never folded
 into an unrelated change.

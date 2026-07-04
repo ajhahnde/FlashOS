@@ -53,7 +53,7 @@ hardware and under QEMU. The kernel core is written in
 [Flash](https://github.com/ajhahnde/Flash) (a systems language built with
 `LLVM IR`) with the boot path, exception vectors, and context
 switch in AArch64 assembly. The build is driven entirely by
-`build.zig`, which currently transpiles the `.flash` modules through a pinned
+`build.zig`, which currently compiles the `.flash` modules through a pinned
 `flashc`. Soon FlashOS will be compiled directly.
 The current release ships with a complete uniprocessor process
 lifecycle (`fork`, `exec`, `exit`, `wait`, `kill`), leak-free across
@@ -169,15 +169,16 @@ brew install zig aarch64-elf-binutils qemu
 ```
 
 FlashOS's source modules are written in
-[Flash](https://github.com/ajhahnde/Flash) and transpiled to Zig at
-build time by `flashc`. Build the pinned compiler once — `build.zig`
-looks for it at `~/Flash/zig-out/bin/flashc-stage1` by default
-(override with `-Dflashc=<path>`):
+[Flash](https://github.com/ajhahnde/Flash) and compiled by `flashc` — a
+native LLVM compiler whose bootstrap `--backend=zig` mode FlashOS's
+build consumes during the native transition. Build the pinned compiler
+once — `build.zig` looks for it at `~/Flash/zig-out/bin/flashc` by
+default (override with `-Dflashc=<path>`):
 
 ```bash
 git clone https://github.com/ajhahnde/Flash.git ~/Flash
 git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
-( cd ~/Flash && zig build stage1 )   # → ~/Flash/zig-out/bin/flashc-stage1
+( cd ~/Flash && zig build )   # → ~/Flash/zig-out/bin/flashc
 ```
 
 Build everything for the Pi (`kernel8.img` + `armstub8.bin` land in
@@ -257,7 +258,7 @@ scripts/                    symbol-table generation, iso, QEMU test watchdog,
 assets/                     logo and visual assets
 build.zig                   the only build entry point
 build.sh                    two-pass build orchestrator + deploy prompt
-flash-toolchain.lock        pinned flashc revision (Flash→Zig transpiler)
+flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration
 ```
 

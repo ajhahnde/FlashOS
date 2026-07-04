@@ -44,7 +44,7 @@ Referenz:
 | Tool                     | Mindestversion | Zweck                                     |
 | :----------------------- | :-------------- | :---------------------------------------- |
 | Zig                      | 0.16.0          | Zig + Assembly kompilieren, `build.zig` ausführen |
-| `flashc`                 | pinned          | Flash-Quellen (`.flash`) nach Zig transpilieren |
+| `flashc`                 | pinned          | Flash-Quellen (`.flash`) kompilieren      |
 | `aarch64-elf-objcopy`    | 2.40+           | ELF → Roh-Binary                          |
 | `aarch64-elf-nm`         | 2.40+           | Symbol-Extraktion für `populate-syms`     |
 | `qemu-system-aarch64`    | 11.0.0+         | Den kernel unter QEMU ausführen           |
@@ -59,9 +59,11 @@ brew install zig aarch64-elf-binutils qemu
 ### Flash-Compiler (`flashc`)
 
 Die Source-Module von FlashOS sind in
-[Flash](https://github.com/ajhahnde/Flash) geschrieben und werden zur
-Build-Zeit nach Zig transpiliert. `build.zig` löst das `flashc`-Binary
-standardmäßig unter `~/Flash/zig-out/bin/flashc-stage1` auf; überschreibe
+[Flash](https://github.com/ajhahnde/Flash) geschrieben und werden von
+`flashc` kompiliert — einem nativen LLVM-Compiler, dessen
+Bootstrap-Modus (`--backend=zig`) der FlashOS-Build während der
+nativen Umstellung noch nutzt. `build.zig` löst das Binary
+standardmäßig unter `~/Flash/zig-out/bin/flashc` auf; überschreibe
 den Pfad mit `-Dflashc=<path>`. Flash veröffentlicht keine vorgebauten
 Binaries, also baue den gepinnten, selbst-gehosteten Compiler aus dem
 Source — führe dies aus dem FlashOS-Checkout aus, damit der Pin aus
@@ -70,17 +72,12 @@ Source — führe dies aus dem FlashOS-Checkout aus, damit der Pin aus
 ```bash
 git clone https://github.com/ajhahnde/Flash.git ~/Flash
 git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
-( cd ~/Flash && zig build stage1 )   # → ~/Flash/zig-out/bin/flashc-stage1
+( cd ~/Flash && zig build )   # → ~/Flash/zig-out/bin/flashc
 ```
-
-`zig build stage1` — nicht das bloße `zig build`, das nur den
-stage0-Bootstrap-Seed `flashc` ausgibt — erzeugt `flashc-stage1`, die in
-`flash-toolchain.lock` gepinnte Revision. Baue es nur dann neu, wenn sich
-dieser Pin verschiebt.
 
 ## 2. Bauen
 
-Jeder Build transpiliert die `.flash`-Source-Module mit `flashc`, also
+Jeder Build kompiliert die `.flash`-Source-Module mit `flashc`, also
 baue ihn zuerst (siehe §1).
 
 ```bash
