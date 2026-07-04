@@ -6,8 +6,6 @@
 
 <h1>Port</h1>
 
-<p><i>How FlashOS's source moved from Zig to Flash, a self-hosted systems language that transpiles to Zig.</i></p>
-
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
@@ -32,7 +30,7 @@ the first ported module to the last.
 > **Lineage.** FlashOS began as a C bare-metal kernel by Wei-Lin Chang
 > (rhythm16; see [License](LICENSE.md)), was rewritten in pure Zig +
 > AArch64 assembly, and now carries its OS-image code in Flash. This page
-> covers the Zig → Flash step: the *OS-image* modules moved to Flash while
+> covers the Zig → Flash step: the _OS-image_ modules moved to Flash while
 > the boot assembly, the host build tooling, and a small, documented set of
 > modules stay Zig (see [§4](#4-what-stays-zig)).
 
@@ -92,18 +90,18 @@ into an unrelated change.
 The OS-image code — everything that ends up in the kernel image or the
 PID-1 user image — was ported, leaves first, then their consumers:
 
-| Layer            | Modules (representative)                                                                 |
-| :--------------- | :-------------------------------------------------------------------------------------- |
+| Layer            | Modules (representative)                                                                                                                                |
+| :--------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Kernel core      | page allocator, user memory mapper, scheduler, fork, the path-resolved ELF loader and `execve`, the syscall dispatcher, pipes, wait queues, permissions |
-| Filesystem       | the FAT32 driver and its block-device backend, the initramfs backend, the file-descriptor table, path resolution |
-| Board drivers    | per-board MMIO (UART, GPIO, timer, mailbox, power), the interrupt controllers, the SD-card (EMMC2) and USB drivers, the hardware RNG fallback |
-| Identity         | the shadow / password files and the SHA-256 used to verify logins                        |
-| User space       | the PID-1 init image, the `fsh` shell, and the `flibc` userland syscall wrappers          |
-| Shared constants | the syscall-number and task/user memory-layout definitions both the kernel and user side import |
-| Test harness     | the in-kernel `[TEST]` suite, ported last so it stayed an independent oracle until the end |
+| Filesystem       | the FAT32 driver and its block-device backend, the initramfs backend, the file-descriptor table, path resolution                                        |
+| Board drivers    | per-board MMIO (UART, GPIO, timer, mailbox, power), the interrupt controllers, the SD-card (EMMC2) and USB drivers, the hardware RNG fallback           |
+| Identity         | the shadow / password files and the SHA-256 used to verify logins                                                                                       |
+| User space       | the PID-1 init image, the `fsh` shell, and the `flibc` userland syscall wrappers                                                                        |
+| Shared constants | the syscall-number and task/user memory-layout definitions both the kernel and user side import                                                         |
+| Test harness     | the in-kernel `[TEST]` suite, ported last so it stayed an independent oracle until the end                                                              |
 
 The kernel symbol table (`src/symbol_area.S`) is regenerated once per
-stage, not per module; its only churn from the port was symbol *renames*
+stage, not per module; its only churn from the port was symbol _renames_
 as modules were promoted to named build modules, with the symbol count
 and image addresses unchanged.
 

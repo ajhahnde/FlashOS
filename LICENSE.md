@@ -6,8 +6,6 @@
 
 <h1>License</h1>
 
-<p><i>Apache License 2.0 — the project's license notice.</i></p>
-
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
@@ -37,7 +35,7 @@ permissions and limitations under the License.
 
 ## 2. Copyright notice
 
-**Copyright © 2026 ajhahnde.**
+**Copyright 2026 ajhahnde.**
 
 FlashOS is a port and substantial rewrite in Zig of the C-based
 architecture originally developed by **Wei-Lin Chang (rhythm16)**.

@@ -10,13 +10,14 @@
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
     <img src="https://img.shields.io/badge/version-v0.7.3-lightgrey?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/.flash-v1.0.0-f59e0b?style=flat-square" alt="Flash">
+    <img src="https://img.shields.io/badge/flash-v1.0.1-f59e0b?style=flat-square" alt="Flash">
     <img src="https://img.shields.io/badge/zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
   </p>
 
 <p>
+    <b>README</b> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="PORT.md"><b>Port</b></a> ·
@@ -34,10 +35,6 @@
 ---
 
 <p align="center">
-  Written in <b><a href="https://github.com/ajhahnde/Flash">Flash</a></b> — a systems language built with LLVM IR.
-</p>
-
-<p align="left">
   <img src="assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi into the fsh shell" width="780">
 </p>
 
@@ -272,6 +269,12 @@ using LLMs, based on my specifications and subject to my review. Their contract 
 automatically kept in sync with the live source tree upon commit.
 
 Source code (`src/*.flash` and the Zig drivers) is primarily my own work.
+
+## See also
+
+- **[FlashOS walktrough](https://ajhahn.de/flashos/)**
+- **[Flash](https://github.com/ajhahnde/Flash)** — the operating system written in Flash.
+- **[Flash Tutorial](https://ajhahn.de/flash/)**
 
 ---
 

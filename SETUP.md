@@ -6,8 +6,6 @@
 
 <h1>Setup</h1>
 
-<p><i>Host toolchain, SD-card layout, serial console, QEMU, and the test runner.</i></p>
-
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
@@ -41,14 +39,14 @@ Reference:
 
 ## 1. Host toolchain
 
-| Tool                     | Minimum version | Purpose                                   |
-| :----------------------- | :-------------- | :---------------------------------------- |
-| Zig                      | 0.16.0          | Compile Zig + assembly, run `build.zig`   |
-| `flashc`                 | pinned          | Compile Flash (`.flash`) sources          |
-| `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                          |
-| `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`     |
-| `qemu-system-aarch64`    | 11.0.0+         | Run the kernel under QEMU                 |
-| `screen` (or equivalent) | –               | Serial console for the Pi                 |
+| Tool                     | Minimum version | Purpose                                 |
+| :----------------------- | :-------------- | :-------------------------------------- |
+| Zig                      | 0.16.0          | Compile Zig + assembly, run `build.zig` |
+| `flashc`                 | pinned          | Compile Flash (`.flash`) sources        |
+| `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                        |
+| `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`   |
+| `qemu-system-aarch64`    | 11.0.0+         | Run the kernel under QEMU               |
+| `screen` (or equivalent) | –               | Serial console for the Pi               |
 
 On macOS:
 

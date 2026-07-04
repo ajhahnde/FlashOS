@@ -6,8 +6,6 @@
 
 <h1>Changelog</h1>
 
-<p><i>All notable changes to FlashOS, release by release.</i></p>
-
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
@@ -161,7 +159,7 @@ and the `zig build` targets are unchanged.
   source files use the 8.3-safe `.fl` extension (`.flash` does not fit an
   8.3 short name); there is no LFN.
 - **`/bin/grep`.** A literal-pattern line search — `grep [-i] PATTERN
-  [FILE...]`, reading stdin when given no file — over a pure, host-tested
+[FILE...]`, reading stdin when given no file — over a pure, host-tested
   substring matcher with optional ASCII case folding. No regex, no
   new syscall.
 - **`[TEST] fs-roundtrip` now exercises the full create/unlink/rename
@@ -211,7 +209,7 @@ and the `zig build` targets are unchanged.
   an already-privilege-dropped shell, `login` would still authenticate the
   entered credentials — the kernel verifier does not gate on the caller's
   uid — and only then fail the privilege drop with a misleading `login:
-  cannot drop privilege`, a confusing half-success that could never grant a
+cannot drop privilege`, a confusing half-success that could never grant a
   higher uid since `setuid` is one-way. `login` now checks `geteuid()` at
   entry and exits with `login: must be root`, leaving session minting to the
   PID-1 supervisor. Switch users by logging out back to that supervisor,
@@ -288,7 +286,7 @@ and the `zig build` targets are unchanged.
   cursor rather than only at the end of the line. History lives in a
   fixed, caller-owned ring (no allocator) and needs no new syscall.
 - **`-Dtest-filter` for the host-test step.** `zig build test
-  -Dtest-filter=<substr>` runs only host tests whose name contains the
+-Dtest-filter=<substr>` runs only host tests whose name contains the
   substring, for faster focused iteration; the default runs the full
   suite.
 - **`/bin/less`.** A full-screen text pager — the first interactive
@@ -354,7 +352,7 @@ and the `zig build` targets are unchanged.
   the kernel and every userland tool at codegen. The virt boot-watchdog
   checkpoints shift one page as a result (see Changed).
 - **Line editing at the `login:` and password prompt.** `/bin/login` read
-  the username and password through a dumb byte loop that *appended* a
+  the username and password through a dumb byte loop that _appended_ a
   backspace byte instead of erasing it, so a single mistype was
   uncorrectable and the attempt failed as "Login incorrect." Login now
   drives flibc's line editor in echo-off mode: the username gets full
@@ -371,7 +369,7 @@ and the `zig build` targets are unchanged.
   encoded the whole mount-relative path as a single 8.3 name, so any
   `/`-separated path was rejected and only files in the mount root were
   reachable. The open hook now walks the path one component at a time,
-  descending into each subdirectory entry. Directory *listing*
+  descending into each subdirectory entry. Directory _listing_
   (`readdir`) stays root-only for now — opening a known path works.
 - **FAT32 write to an empty file.** Writing to a file whose directory
   entry has no data cluster yet (`first_cluster == 0`, the on-disk shape
@@ -382,7 +380,7 @@ and the `zig build` targets are unchanged.
   file growth works for subdirectory files too. Covered by host tests and
   a Pi-only `[TEST] fs-empty-write` in-kernel scenario; the boot contract
   moves to **28 in-kernel scenarios / 32 per-scenario checkpoints** (was
-  27 / 31). Create-if-missing for a *non-existent* path and crash-atomic
+  27 / 31). Create-if-missing for a _non-existent_ path and crash-atomic
   writes remain future work.
 - **`-Dboot-selftest` build option (default off).** Gates the in-kernel
   test harness: a normal `zig build run-virt` / `deploy` now boots

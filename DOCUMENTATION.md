@@ -6,8 +6,6 @@
 
 <h1>Documentation</h1>
 
-<p><i>How the boot path, memory layout, scheduler, syscalls, IRQs, tracing, and the test harness fit together.</i></p>
-
 <p>
     <a href="README.md"><b>README</b></a> ·
     <b>Documentation</b> ·

@@ -6,8 +6,6 @@
 
 <h1>Versioning Policy</h1>
 
-<p><i>The contract for how FlashOS is versioned, released, supported, and retired.</i></p>
-
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
@@ -60,10 +58,10 @@ A release version is `vMAJOR.MINOR.PATCH` (the leading `v` is preserved
 on every git tag, GitHub Release, and CHANGELOG section header)
 optionally followed by a pre-release identifier as defined in §6.
 
-| Component | Trigger |
-|---|---|
-| **MAJOR** | A breaking change to any item enumerated in §3 *(reserved; no MAJOR bump has been issued yet — the first MAJOR is v1.0.0, the stability-freeze release)*. |
-| **MINOR** | Under pre-1.0 (§2.1): any change, including a breaking change. Under post-1.0: an additive change to the public surface — a new boot option, a new syscall, a new test-harness output line. |
+| Component | Trigger                                                                                                                                                                                               |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **MAJOR** | A breaking change to any item enumerated in §3 _(reserved; no MAJOR bump has been issued yet — the first MAJOR is v1.0.0, the stability-freeze release)_.                                             |
+| **MINOR** | Under pre-1.0 (§2.1): any change, including a breaking change. Under post-1.0: an additive change to the public surface — a new boot option, a new syscall, a new test-harness output line.           |
 | **PATCH** | A bug fix, performance improvement, documentation change, build-system fix, or internal refactor that does not alter the public surface. PATCH is **always** backwards-compatible, including pre-1.0. |
 
 A change that fits more than one bucket MUST take the most disruptive
@@ -136,11 +134,11 @@ MAY change in any release:
 FlashOS commits explicitly to which hardware it intends to run on.
 The model follows the Mesa driver tier convention.
 
-| Tier | Promise | Boards |
-|---|---|---|
-| **Tier 1 — guaranteed** | Every tagged release MUST boot to the kernel banner and pass the in-kernel test harness on this hardware. CI MUST exercise the boot path for every PR. A regression here is a release blocker. | Raspberry Pi 4 Model B (BCM2711, AArch64, 4-core); QEMU `aarch64` `-M raspi4b` (the version pinned in [`SETUP.md`](SETUP.md)). |
-| **Tier 2 — best-effort** | Building, booting, and the test harness SHOULD work, but no PR is blocked on a regression here and no PATCH is issued for a Tier-2-only defect. | Other Raspberry Pi models; QEMU `aarch64` `-M virt` (deprioritized since [v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0), the last release verified to boot it; no longer CI-gated) and other QEMU boards. |
-| **Tier 3 — experimental** | Actively being worked on. May break in any release without notice or CHANGELOG entry. | Anything not in Tier 1 or Tier 2. |
+| Tier                      | Promise                                                                                                                                                                                        | Boards                                                                                                                                                                                                                       |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tier 1 — guaranteed**   | Every tagged release MUST boot to the kernel banner and pass the in-kernel test harness on this hardware. CI MUST exercise the boot path for every PR. A regression here is a release blocker. | Raspberry Pi 4 Model B (BCM2711, AArch64, 4-core); QEMU `aarch64` `-M raspi4b` (the version pinned in [`SETUP.md`](SETUP.md)).                                                                                               |
+| **Tier 2 — best-effort**  | Building, booting, and the test harness SHOULD work, but no PR is blocked on a regression here and no PATCH is issued for a Tier-2-only defect.                                                | Other Raspberry Pi models; QEMU `aarch64` `-M virt` (deprioritized since [v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0), the last release verified to boot it; no longer CI-gated) and other QEMU boards. |
+| **Tier 3 — experimental** | Actively being worked on. May break in any release without notice or CHANGELOG entry.                                                                                                          | Anything not in Tier 1 or Tier 2.                                                                                                                                                                                            |
 
 A board MUST NOT be promoted from Tier 2 to Tier 1 in a PATCH; the
 promotion is a feature-add and goes in a MINOR. A demotion from Tier 1
@@ -149,11 +147,11 @@ change** and MUST take a MAJOR bump once the project is post-1.0.
 
 ## 5. Release cadence
 
-| Bump | Target cadence | Hard rule |
-|---|---|---|
-| **PATCH** | As-ready. | Never blocked on a feature. A confirmed defect on Tier-1 hardware (§4) SHOULD reach a tagged PATCH within **14 days**. |
-| **MINOR** | As-ready pre-1.0; soft target of one per month post-1.0. | Each MINOR MUST boot cleanly on every Tier-1 board (§4) under the CI matrix. |
-| **MAJOR** | As-needed (post-1.0 only). A MAJOR MUST be announced under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md) and on the GitHub Releases page **at least 60 days** before its tag. The announcement enumerates every breaking change. | An RC train (§6) MUST precede the GA tag of any post-1.0 MAJOR. |
+| Bump      | Target cadence                                                                                                                                                                                                                         | Hard rule                                                                                                              |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **PATCH** | As-ready.                                                                                                                                                                                                                              | Never blocked on a feature. A confirmed defect on Tier-1 hardware (§4) SHOULD reach a tagged PATCH within **14 days**. |
+| **MINOR** | As-ready pre-1.0; soft target of one per month post-1.0.                                                                                                                                                                               | Each MINOR MUST boot cleanly on every Tier-1 board (§4) under the CI matrix.                                           |
+| **MAJOR** | As-needed (post-1.0 only). A MAJOR MUST be announced under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md) and on the GitHub Releases page **at least 60 days** before its tag. The announcement enumerates every breaking change. | An RC train (§6) MUST precede the GA tag of any post-1.0 MAJOR.                                                        |
 
 The §1.0.0 stability-freeze release is the **single exception** to the
 60-day announcement window: v1.0.0 may be cut from the last
@@ -200,11 +198,11 @@ backporting, no security maintenance window, no LTS.
 
 The support model that takes effect at v1.0.0 is:
 
-| Tier | Receives | Applies to | Ends |
-|---|---|---|---|
-| **Active** | Every bug fix, every applicable feature, every security fix. | The **current MAJOR**. | When the next MAJOR's GA ships. |
-| **Maintenance** | **Security fixes** and **critical bug fixes** (boot regression on Tier-1 hardware, syscall-ABI regression, panic-format regression that breaks the test harness). No feature backports. | The **previous MAJOR**. | **6 months after the next MAJOR's GA tag.** |
-| **Archived** | Nothing. | Every MAJOR older than Maintenance, and the entire pre-v1.0.0 line. | Permanent. |
+| Tier            | Receives                                                                                                                                                                                | Applies to                                                          | Ends                                        |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------- |
+| **Active**      | Every bug fix, every applicable feature, every security fix.                                                                                                                            | The **current MAJOR**.                                              | When the next MAJOR's GA ships.             |
+| **Maintenance** | **Security fixes** and **critical bug fixes** (boot regression on Tier-1 hardware, syscall-ABI regression, panic-format regression that breaks the test harness). No feature backports. | The **previous MAJOR**.                                             | **6 months after the next MAJOR's GA tag.** |
+| **Archived**    | Nothing.                                                                                                                                                                                | Every MAJOR older than Maintenance, and the entire pre-v1.0.0 line. | Permanent.                                  |
 
 The trailing-maintenance window of 6 months is deliberately shorter
 than eeco's 12 months because FlashOS is a research kernel: the
