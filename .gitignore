@@ -21,3 +21,4 @@ screenlog.*
 tutorial/node_modules/
 tutorial/temp/
 tutorial/SETUP.md
+.superpowers/
