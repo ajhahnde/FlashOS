@@ -9,8 +9,8 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.7.3-lightgrey?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/flash-v1.0.1-f59e0b?style=flat-square" alt="Flash">
+    <img src="https://img.shields.io/badge/version-v0.7.4-lightgrey?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/flash-v1.1.1-f59e0b?style=flat-square" alt="Flash">
     <img src="https://img.shields.io/badge/zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
@@ -50,8 +50,8 @@ hardware and under QEMU. The kernel core is written in
 [Flash](https://github.com/ajhahnde/Flash) (a systems language built with
 `LLVM IR`) with the boot path, exception vectors, and context
 switch in AArch64 assembly. The build is driven entirely by
-`build.zig`, which currently compiles the `.flash` modules through a pinned
-`flashc`. Soon FlashOS will be compiled directly.
+`build.zig`, which currently compiles the `.flash` modules through the
+`flashc`.
 The current release ships with a complete uniprocessor process
 lifecycle (`fork`, `exec`, `exit`, `wait`, `kill`), leak-free across
 stress cycles, exercised by an in-kernel `[TEST]/[PASS]/[FAIL]`
