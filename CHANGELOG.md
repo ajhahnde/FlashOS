@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/flashos_logo_dark.png">
-    <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
+    <img src="assets/flashos_logo_light.png" alt=".flashOS" width="280">
   </picture>
 
 <h1>Changelog</h1>
@@ -26,6 +26,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 [releases page](https://github.com/ajhahnde/FlashOS/releases).
 
 ## [Unreleased]
+
+### Changed
+
+- **The product wordmark is now `.flashOS`** (neutral `.flash`, amber `OS`),
+  replacing the all-amber `FlashOS` mark. Updated at every rendering: the fsh
+  homescreen banner (`console_ui.homescreen`), the README/docs logo assets,
+  and the boot-demo GIF. The boot contract markers (`[ OK ]` lines, the
+  `type 'help' for commands` tail) are unchanged.
 
 ## [v0.7.3] - 2026-07-04
 

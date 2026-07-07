@@ -50,8 +50,8 @@ RESET = "\x1b[0m"
 # too (console_ui.homescreen / fsh HELP_TEXT + listBin, `color` on). session.txt
 # holds the plain text for readability; the escapes are spelled once here and
 # added at emit time, mirroring those renderers byte-for-byte:
-#   * banner  — amber `FlashOS`, grey version + author, marker in default fg
-#               (console_ui.homescreen).
+#   * banner  — default-fg `.flash`, amber `OS`, grey version + author, marker
+#               in default fg (console_ui.homescreen).
 #   * help    — bold `Commands:` (fsh HELP_TEXT), then the `/bin` listing with
 #               each program name in cyan (fsh listBin, palette.cyan).
 GREY = "\x1b[90m"       # palette.grey (bright_black)
@@ -59,10 +59,10 @@ CYAN = "\x1b[36m"       # palette.cyan — the listBin program-name color
 YELLOW = "\x1b[33m"     # palette.yellow — the amber product name / sigil
 BOLD = "\x1b[1m"
 
-# `FlashOS [v<version>] by <author><marker>` — the homescreen line. The marker
+# `.flashOS [v<version>] by <author><marker>` — the homescreen line. The marker
 # tail (` - type 'help' for commands`) stays the default fg, exactly as
 # homescreen() closes every color with reset before emitting it.
-BANNER = re.compile(r"^FlashOS \[v(.+?)\] by (\S+)(.*)$")
+BANNER = re.compile(r"^\.flashOS \[v(.+?)\] by (\S+)(.*)$")
 
 
 def colorize(line):
@@ -70,7 +70,7 @@ def colorize(line):
     m = BANNER.match(line)
     if m:
         version, author, tail = m.group(1), m.group(2), m.group(3)
-        return (YELLOW + "FlashOS" + RESET + " [v" + GREY + version + RESET +
+        return (".flash" + YELLOW + "OS" + RESET + " [v" + GREY + version + RESET +
                 "] by " + GREY + author + RESET + tail)
     if line == "Commands:":                 # fsh HELP_TEXT header, bold
         return BOLD + "Commands:" + RESET
@@ -114,7 +114,7 @@ TYPED = re.compile(r'^(login: |Password: |\$ )(\S.*)$')
 def zon_version():
     # Single-source the banner version from build.zig.zon (the one truth, the
     # same field fsh derives its homescreen version from via build_options) so
-    # the demo's `FlashOS [v…]` line never drifts from the shipped release.
+    # the demo's `.flashOS [v…]` line never drifts from the shipped release.
     with open(ZON, "r", encoding="utf-8") as f:
         m = re.search(r'\.version\s*=\s*"([^"]+)"', f.read())
     return m.group(1) if m else "?"

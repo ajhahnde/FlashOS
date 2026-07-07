@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/flashos_logo_dark.png">
-    <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
+    <img src="assets/flashos_logo_light.png" alt=".flashOS" width="280">
   </picture>
 
 <h1>Versioning Policy</h1>

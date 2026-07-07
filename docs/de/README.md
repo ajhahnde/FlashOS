@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../../assets/flashos_logo_dark.png">
-    <img src="../../assets/flashos_logo_light.png" alt="FlashOS" width="420">
+    <img src="../../assets/flashos_logo_light.png" alt=".flashOS" width="420">
   </picture>
 
 <h3>AArch64-Bare-Metal-Kernel für den Raspberry Pi 4B und QEMU <code>-M rpi4b</code></h3>

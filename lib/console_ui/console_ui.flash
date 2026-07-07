@@ -197,19 +197,21 @@ pub fn logger(sink Sink) Logger {
     return .{ .sink = sink }
 }
 
-/// FlashOS shell homescreen: `FlashOS [v<version>] by <author> - type 'help'
+/// FlashOS shell homescreen: `.flashOS [v<version>] by <author> - type 'help'
 /// for commands`, followed by a blank line. `version` and `author` are passed
 /// in (this module is freestanding) — fsh feeds `build_options.version`, itself
 /// sourced from build.zig.zon, so the release version lives in exactly one
 /// place. The `type 'help' for commands` tail is the frozen boot-success marker
 /// (run_qemu_test.sh greps it x3) — keep it byte-for-byte.
 pub fn homescreen(sink Sink, version []u8, author []u8) void {
-    // Amber product name, grey version + author, then the frozen marker in the
-    // default color. Every escape is closed with `reset` BEFORE `marker_ready`
-    // so the boot-watchdog substring grep still matches bare bytes — an unclosed
-    // color here would splice an escape into the marker and break the contract.
+    // Product name: default-color ".flash", amber "OS", grey version + author,
+    // then the frozen marker in the default color. Every escape is closed with
+    // `reset` BEFORE `marker_ready` so the boot-watchdog substring grep still
+    // matches bare bytes — an unclosed color here would splice an escape into
+    // the marker and break the contract.
+    sink(".flash")
     sink(palette.yellow)
-    sink("FlashOS")
+    sink("OS")
     sink(palette.reset)
     sink(" [v")
     sink(palette.grey)

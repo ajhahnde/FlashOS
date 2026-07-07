@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/flashos_logo_dark.png">
-    <img src="assets/flashos_logo_light.png" alt="FlashOS" width="420">
+    <img src="assets/flashos_logo_light.png" alt=".flashOS" width="420">
   </picture>
 
 <h3>AArch64 bare-metal kernel for the Raspberry Pi 4B and QEMU <code>-M rpi4b</code></h3>
@@ -10,7 +10,7 @@
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
     <img src="https://img.shields.io/badge/version-v0.7.4-lightgrey?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/flash-v1.1.1-f59e0b?style=flat-square" alt="Flash">
+    <img src="https://img.shields.io/badge/flash-v1.2.0-f59e0b?style=flat-square" alt="Flash">
     <img src="https://img.shields.io/badge/zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
