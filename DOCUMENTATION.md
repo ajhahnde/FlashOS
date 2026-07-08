@@ -16,10 +16,6 @@
     <a href="LICENSE.md"><b>License</b></a>
   </p>
 
-<p>
-    <b>English</b> ·
-    <a href="docs/de/DOCUMENTATION.md">Deutsch</a>
-  </p>
 </div>
 
 ---

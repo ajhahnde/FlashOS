@@ -4,7 +4,7 @@
     <img src="assets/flashos_logo_light.png" alt=".flashOS" width="420">
   </picture>
 
-<h3>AArch64 bare-metal kernel for the Raspberry Pi 4B and QEMU <code>-M rpi4b</code></h3>
+<h3>AArch64 bare-metal kernel for the RPi 4B and QEMU <code>-M rpi4b</code></h3>
 
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
@@ -26,10 +26,6 @@
     <a href="LICENSE.md"><b>License</b></a>
   </p>
 
-<p>
-    <b>English</b> ·
-    <a href="docs/de/README.md">Deutsch</a>
-  </p>
 </div>
 
 ---
@@ -38,10 +34,8 @@
   <img src="assets/boot_demo.gif" alt="FlashOS booting on a Raspberry Pi into the fsh shell" width="780">
 </p>
 
-> The boot above is a captured serial console of FlashOS booting on real
-> Raspberry Pi 4B hardware to the `login:` prompt; the trailing `fsh`
-> session (`help`, `ls`, and `sysinfo`) replays the shell's real output at
-> a readable cadence, before a final `reboot` loops the demo back to the boot.
+> The boot above is a replicate of FlashOS booting on
+> Raspberry Pi 4B hardware to the `login:` prompt.
 
 ## About
 
@@ -50,28 +44,23 @@ hardware and under QEMU. The kernel core is written in
 [Flash](https://github.com/ajhahnde/Flash) (a systems language built with
 `LLVM IR`) with the boot path, exception vectors, and context
 switch in AArch64 assembly. The build is driven entirely by
-`build.zig`, which currently compiles the `.flash` modules through the
-`flashc`.
+`build.zig`, which currently compiles the `.flash` modules through
+a pinned `flashc`.
 The current release ships with a complete uniprocessor process
 lifecycle (`fork`, `exec`, `exit`, `wait`, `kill`), leak-free across
 stress cycles, exercised by an in-kernel `[TEST]/[PASS]/[FAIL]`
 harness and a host-side unit test suite.
 
-## Specifications
+## Specs
 
-|                  |                                                                                       |
-| :--------------- | :------------------------------------------------------------------------------------ |
-| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                      |
-| **Architecture** | AArch64 (ARMv8-A)                                                                     |
-| **Languages**    | Flash, Zig + AArch64 assembly                                                         |
-| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils                                |
-| **Targets**      | RPi 4B hardware,`qemu-system-aarch64 -M raspi4b`, _and_ `qemu-system-aarch64 -M virt` |
+**Hardware**: Raspberry Pi 4 Model B (BCM2711)  
+**Architecture**: AArch64 (ARMv8-A)  
+**Languages**: Flash, Zig + AArch64 assembly  
+**Toolchain**: `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils  
+**Targets**: RPi 4B hardware,`qemu-system-aarch64 -M raspi4b`, _and_ `qemu-system-aarch64 -M virt`
 
 > The validated target is `-Dboard=rpi4b`. The QEMU `-M virt` board has not been
-> CI-gated since **[v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0)**,
-> the last release verified to boot it. The dual-target plumbing below is kept,
-> but later releases may have regressed; for a known-stable `-M virt` build, use
-> v0.5.0.
+> CI-gated since **[v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0)**
 
 ## Features
 
@@ -219,24 +208,24 @@ serial-console setup.
 
 ## Build steps
 
-| Step                                 | What it does                                                   |
+| Build step                           | Explanation                                                    |
 | :----------------------------------- | :------------------------------------------------------------- |
-| `zig build` (or `-Dboard=rpi4b`)     | Default — Pi:`kernel8.img` + `armstub8.bin`                    |
-| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                           |
+| `zig build` (or `-Dboard=rpi4b`)     | Default — Pi: `kernel8.img` + `armstub8.bin`                   |
+| `zig build -Dboard=virt`             | virt: `kernel8.img` only (no armstub)                          |
 | `zig build kernel`                   | Kernel image only                                              |
 | `zig build armstub` (rpi4b only)     | Armstub only                                                   |
-| `zig build populate-syms`            | Regenerate`src/symbol_area.S` from the linked ELF              |
-| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to`$SD_BOOT`                     |
-| `zig build -Dboard=rpi4b run`        | Boot under`qemu-system-aarch64 -M raspi4b`                     |
-| `zig build -Dboard=virt run-virt`    | Boot under`qemu-system-aarch64 -M virt`                        |
+| `zig build populate-syms`            | Regenerate `src/symbol_area.S` from the linked ELF             |
+| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to `$SD_BOOT`                    |
+| `zig build -Dboard=rpi4b run`        | Boot under `qemu-system-aarch64 -M raspi4b`                    |
+| `zig build -Dboard=virt run-virt`    | Boot under `qemu-system-aarch64 -M virt`                       |
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
 | `zig build test`                     | Host-side unit tests (464 tests, 41 modules)                   |
-| `zig build clean`                    | Remove`.zig-cache/` and `zig-out/`                             |
+| `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                            |
 
-The default optimisation mode is `ReleaseSmall`. Override with
-`-Doptimize=ReleaseSafe` (or `Debug`, `ReleaseFast`).
+> The default optimisation mode is `ReleaseSmall`. Override with
+> `-Doptimize=ReleaseSafe` (or `Debug`, `ReleaseFast`).
 
 ## Repository layout
 
@@ -262,19 +251,11 @@ config.txt                  RPi 4 firmware configuration
 A deeper walk-through of each subsystem is in
 [Documentation](DOCUMENTATION.md).
 
-## Authorship
-
-The prose docs (README, DOCUMENTATION, CHANGELOG, PORT) and commit messages are drafted
-using LLMs, based on my specifications and subject to my review. Their contract values are
-automatically kept in sync with the live source tree upon commit.
-
-Source code (`src/*.flash` and the Zig drivers) is primarily my own work.
-
 ## See also
 
-- **[FlashOS walktrough](https://ajhahn.de/flashos/)**
 - **[Flash](https://github.com/ajhahnde/Flash)** — the operating system written in Flash.
-- **[Flash Tutorial](https://ajhahn.de/flash/)**
+- **[FlashOS Tour →](https://ajhahn.de/flashos/)**
+- **[Flash Tour →](https://ajhahn.de/flash/)**
 
 ---
 
