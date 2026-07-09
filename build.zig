@@ -297,13 +297,16 @@ pub fn build(b: *std.Build) void {
     };
 
     // ---- hygiene checks (trailing space, hard tabs, lowercase hex) ----
+    const skip_hygiene = b.option(bool, "skip-hygiene", "Skip the hygiene check step") orelse false;
     const hygiene_step = b.step("check-hygiene", "Fail on whitespace or hex-literal regressions");
 
-    const whitespace_check = b.addSystemCommand(&.{ "sh", "scripts/check_whitespace_hygiene.sh" });
-    hygiene_step.dependOn(&whitespace_check.step);
+    if (!skip_hygiene) {
+        const whitespace_check = b.addSystemCommand(&.{ "sh", "scripts/check_whitespace_hygiene.sh" });
+        hygiene_step.dependOn(&whitespace_check.step);
 
-    const hex_check = b.addSystemCommand(&.{ "sh", "scripts/check_hex_hygiene.sh" });
-    hygiene_step.dependOn(&hex_check.step);
+        const hex_check = b.addSystemCommand(&.{ "sh", "scripts/check_hex_hygiene.sh" });
+        hygiene_step.dependOn(&hex_check.step);
+    }
 
     // Shared syscall ID constants — single source of truth for the
     // kernel-side dispatch table (src/sys.zig) and the user-side
@@ -2265,7 +2268,7 @@ pub fn build(b: *std.Build) void {
     const populate = b.addSystemCommand(&.{
         "sh", "-c",
         "aarch64-elf-nm -n " ++
-            "\"$1\" | sort | grep -v '\\$' | grep -v 'compiler_rt\\.' | " ++
+            "\"$1\" | grep -v '\\$' | grep -v 'compiler_rt\\.' | " ++
             "zig run scripts/generate_syms.zig",
         "--",
     });
