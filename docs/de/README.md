@@ -224,10 +224,14 @@ zig build test
 ```
 
 Für den vollständigen Hardware-Ablauf (zweiphasiger Build mit
-Symboltabellen-Befüllung und einem interaktiven `deploy`-Prompt):
+Symboltabellen-Befüllung) die Shell-Helper sourcen und die
+`build`-Funktion ausführen; mit `-d` werden die Artefakte zusätzlich auf
+die SD-Karte deployt:
 
 ```bash
-./build.sh
+source flashos.zsh
+build        # nur zweiphasiger Build
+build -d     # zweiphasiger Build + Deploy auf die SD-Karte
 ```
 
 Siehe [Setup](SETUP.md) für das SD-Karten-Layout, die Firmware-Dateien
@@ -270,7 +274,7 @@ scripts/                    symbol-table generation, iso, QEMU test watchdog,
                             Pi-baseline verifier
 assets/                     logo and visual assets
 build.zig                   the only build entry point
-build.sh                    two-pass build orchestrator + deploy prompt
+flashos.zsh             shell helpers incl. the two-pass `build` orchestrator
 flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration
 ```

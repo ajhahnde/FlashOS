@@ -30,14 +30,17 @@ zig build                 # default: kernel8.img + armstub8.bin → zig-out/
 ```
 
 ```bash
-./build.sh                # full two-pass build with optional deploy
+source flashos.zsh    # provides the `build` helper
+build                     # full two-pass build
+build -d                  # full two-pass build + deploy to the SD card
 ```
 
-`build.sh` invokes `zig build`, `zig build populate-syms`, then `zig
-build` again, diff-checks that the symbol layout converged, and
-optionally runs `zig build deploy`. Either command is enough to produce
-a bootable `zig-out/kernel8.img`; `build.sh` is the one the project's
-own release process uses.
+The `build` helper invokes `zig build`, `zig build populate-syms`, then
+`zig build` again, diff-checks that the symbol layout converged, and —
+when called with `-d` — runs `zig build deploy` (no interactive prompt;
+the `-d` flag is the deploy consent). Either path is enough to produce a
+bootable `zig-out/kernel8.img`; the `build` helper is the one the
+project's own release process uses.
 
 ## Running under QEMU
 

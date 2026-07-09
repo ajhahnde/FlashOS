@@ -20,7 +20,7 @@
         "assets",
         "firmware",
         "config.txt",
-        "build.sh",
+        "flashos.zsh",
         ".zigversion",
         "README.md",
         "SETUP.md",

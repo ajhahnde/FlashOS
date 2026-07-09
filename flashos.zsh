@@ -1,11 +1,11 @@
 # FlashOS shell helpers. Source from ~/.zshrc:
-#   [[ -f /path/to/FlashOS/flashos.env.zsh ]] && source /path/to/FlashOS/flashos.env.zsh
+#   [[ -f /path/to/FlashOS/flashos.zsh ]] && source /path/to/FlashOS/flashos.zsh
 #
 # Public interface — two verb dispatchers plus a build wrapper:
 #   pi    connect|capture|list|quit|log|tail   serial-console helpers (Raspberry Pi)
 #   run   qemu|virt|test|watchdog|hw|auto       build-and-run a board, the boot-watchdog, or attach to HW
 #   port  check|diff|gates|pin                  Flash-port helpers (transpile, review-diff, gate battery)
-#   build                                       two-pass kernel build (wraps ./build.sh)
+#   build                                       two-pass kernel build orchestrator
 #   flashos                                     list shell helpers + zig build steps
 # Legacy flat names (piconnect/picapture/pilist/piquit) stay as thin aliases.
 
@@ -545,7 +545,7 @@ build() {
   fi
 
   _flashos_root zsh -c '
-    set -eo pipefail
+    set -euo pipefail
 
     local BOARD="${BOARD:-rpi4b}"
     local DEPLOY=0
@@ -602,7 +602,7 @@ build() {
     fi
 
     # Create a temporary directory for symbol diffs. Auto-cleaned on exit (even on failure).
-    local NM_TMPDIR=$(mktemp -d -t flashos_buildsh.XXXXXX)
+    local NM_TMPDIR=$(mktemp -d -t flashos_build.XXXXXX)
     trap "rm -rf \"$NM_TMPDIR\"" EXIT
 
     # Helper: Runs a command in the background, showing a loading animation
@@ -616,39 +616,46 @@ build() {
         "$@" > "$logfile" 2>&1 &
         local pid=$!
 
-        local -a dots=( ".  " ".. " "..." "   " )
-        local i=1
+        if [[ -t 1 ]]; then
+            local -a dots=( ".  " ".. " "..." "   " )
+            local i=1
 
-        # Animate while the background process is running
-        while kill -0 $pid 2>/dev/null; do
-            printf "\r\033[K[ ${YELLOW}%s${NC} ] %s" "${dots[i]}" "$task_name"
-            i=$(( (i % 4) + 1 ))
-            sleep 0.2
-        done
+            # Animate while the background process is running (tty only)
+            while kill -0 $pid 2>/dev/null; do
+                printf "\r\033[K[ ${YELLOW}%s${NC} ] %s" "${dots[i]}" "$task_name"
+                i=$(( (i % 4) + 1 ))
+                sleep 0.2
+            done
+        fi
 
         # Wait for the exact exit code. || exit_code=$? prevents set -e from aborting the script.
         local exit_code=0
         wait $pid || exit_code=$?
 
+        # In a pipe/CI/editor (non-tty), emit plain result lines without the
+        # \r\033[K animation control codes that would otherwise garble logs.
+        local clear_seq=""
+        [[ -t 1 ]] && clear_seq="\r\033[K"
+
         if (( exit_code == 0 )); then
             # Use exactly "[ OK ]" as requested.
-            printf "\r\033[K[ ${GREEN}OK${NC} ] %s\n" "$task_name"
+            printf "${clear_seq}[ ${GREEN}OK${NC} ] %s\n" "$task_name"
             if [[ -s "$logfile" ]]; then
                 cat "$logfile"
             fi
         else
-            printf "\r\033[K[ ${RED}ERR${NC} ] %s\n" "$task_name"
+            printf "${clear_seq}[ ${RED}ERR${NC} ] %s\n" "$task_name"
             cat "$logfile"
             exit 1
         fi
     }
 
     save_first_pass() {
-        "$NM_BIN" -n "$KERNEL_ELF" | grep -v "[\$]" > "$NM_TMPDIR/nmfirstpass"
+        "$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v "[\$]" > "$NM_TMPDIR/nmfirstpass"
     }
 
     save_second_pass() {
-        "$NM_BIN" -n "$KERNEL_ELF" | grep -v "[\$]" > "$NM_TMPDIR/nmsecondpass"
+        "$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v "[\$]" > "$NM_TMPDIR/nmsecondpass"
     }
 
     check_diff() {
@@ -660,7 +667,7 @@ build() {
     run_task "clean build cache" rm -rf .zig-cache zig-out
     run_task "check whitespace" sh scripts/check_whitespace_hygiene.sh
     run_task "check hex hygiene" sh scripts/check_hex_hygiene.sh
-    run_task "link kernel (pass 1: initial)" zig build -Dboard="$BOARD" "${ZIG_ARGS[@]}"
+    run_task "link kernel (pass 1: initial)" zig build -Dboard="$BOARD" -Dskip-hygiene=true "${ZIG_ARGS[@]}"
     run_task "extract symbol table (pass 1)" save_first_pass
     run_task "generate layout (src/symbol_area.S)" zig build populate-syms -Dboard="$BOARD" -Dskip-hygiene=true "${ZIG_ARGS[@]}"
     run_task "link kernel (pass 2: final)" zig build -Dboard="$BOARD" -Dskip-hygiene=true "${ZIG_ARGS[@]}"
@@ -678,12 +685,20 @@ build() {
     local hist=".build_history/$BOARD"
     mkdir -p "$hist/img" "$hist/elf"
 
-    # 2. Check if artifacts are identical to the previous build
+    # 2. Check if artifacts are identical to the previous build.
+    # 2a. Boards that emit kernel8.img (rpi4b): dedup on the image.
     if [[ -f zig-out/kernel8.img ]] && [[ -f "$hist/img/kernel8_1.img" ]] && cmp -s zig-out/kernel8.img "$hist/img/kernel8_1.img"; then
-      # Update slot 1 so that the .elf debug symbols always match the current source code,
+      # Refresh slot-1 .elf so its debug symbols always match the current source code,
       # even if the compiled binary instructions (.img) did not change (e.g. comment changes).
-      [[ -f zig-out/kernel8.img ]] && cp zig-out/kernel8.img "$hist/img/kernel8_1.img"
       [[ -f zig-out/bin/kernel8.elf ]] && cp zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"
+      print -- "[ \033[0;32mOK\033[0m ] Build successful (Artifacts identical to previous, history unchanged)"
+      return 0
+    fi
+
+    # 2b. Boards without a kernel8.img (virt): dedup on the .elf instead, so an
+    # unchanged build does not rotate history on every invocation.
+    if [[ ! -f zig-out/kernel8.img ]] && [[ -f zig-out/bin/kernel8.elf ]] && [[ -f "$hist/elf/kernel8_1.elf" ]] && cmp -s zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"; then
+      cp zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"
       print -- "[ \033[0;32mOK\033[0m ] Build successful (Artifacts identical to previous, history unchanged)"
       return 0
     fi
@@ -930,11 +945,11 @@ port() {
 # than `help` so sourcing this file does not clobber a user's `help`/`run-help`.
 flashos() {
   emulate -L zsh
-  local project_file="$_FLASHOS_DIR/flashos.env.zsh"
+  local project_file="$_FLASHOS_DIR/flashos.zsh"
   local zig_file="$_FLASHOS_DIR/build.zig"
 
   # Only the public surface — internal _flashos_* helpers start with '_'.
-  print -- "--- shell functions (flashos.env.zsh) ---"
+  print -- "--- shell functions (flashos.zsh) ---"
   if [[ -f "$project_file" ]]; then
     grep -E '^[[:alpha:]][[:alnum:]_-]*\(\)' "$project_file" | sed 's/().*//'
   else

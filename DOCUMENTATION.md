@@ -194,7 +194,7 @@ scripts/
 assets/                                     Logo and visual assets
 
 build.zig                                   The only build entry point
-build.sh                                    Two-pass build orchestrator + deploy prompt
+flashos.zsh                             Shell helpers incl. the two-pass `build` orchestrator
 config.txt                                  RPi 4 firmware configuration
 ```
 
@@ -1169,8 +1169,9 @@ part of the linked image, so the build is a two-pass process:
    — one 64-byte entry per symbol, terminated by a zero-byte sentinel.
 3. **Pass 2.** Another `zig build` relinks with the populated section.
 
-`build.sh` runs both passes and diff-checks that the symbol layout
-converged (i.e. inserting symbol data did not perturb addresses).
+The `build` helper (from `flashos.zsh`) runs both passes and
+diff-checks that the symbol layout converged (i.e. inserting symbol data
+did not perturb addresses).
 
 ## 7. Tracing
 
@@ -1388,7 +1389,7 @@ kernel state:
 Each scenario emits `[TEST] name` … `[PASS] name` (or `[FAIL]`), and
 `run_all` prints a final `X/Y passed` tally. The harness runs
 identically under QEMU (`zig build -Dboard=virt run-virt` /
-`-Dboard=rpi4b run`) and on real hardware (`./build.sh` → SD-flash →
+`-Dboard=rpi4b run`) and on real hardware (`build -d` → SD-flash →
 `picapture`); a green run lands `30/30 passed` with 34 baseline
 checkpoints (`0xbbff2` rpi4b / `0x3be45` virt) and 0 `ERROR CAUGHT`
 on both boards, then hands off to

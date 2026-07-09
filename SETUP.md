@@ -77,12 +77,15 @@ zig build                 # default: kernel8.img + armstub8.bin → zig-out/
 ```
 
 ```bash
-./build.sh                # full two-pass build with optional deploy
+source flashos.zsh    # provides the `build` helper
+build                     # full two-pass build
+build -d                  # full two-pass build + deploy to the SD card
 ```
 
-`build.sh` invokes `zig build`, `zig build populate-syms`, then
-`zig build` again, diff-checks that the symbol layout converged, and
-optionally runs `zig build deploy`.
+The `build` helper invokes `zig build`, `zig build populate-syms`, then
+`zig build` again, diff-checks that the symbol layout converged, and — when
+called with `-d` — runs `zig build deploy`. There is no interactive prompt;
+the `-d` flag is the deploy consent.
 
 ## 3. Running under QEMU
 
@@ -248,10 +251,10 @@ the Pi.
 
 ## 6. Helper shell functions
 
-The repo ships [`flashos.env.zsh`](flashos.env.zsh) with a handful of
+The repo ships [`flashos.zsh`](flashos.zsh) with a handful of
 helpers, exposed as two verb dispatchers — `pi <verb>` (serial console) and
 `run <mode>` (build, emulate, or attach) — plus `build` and `flashos`. Source
-it from `~/.zshrc` (`source ~/FlashOS/flashos.env.zsh`) to make them available
+it from `~/.zshrc` (`source ~/FlashOS/flashos.zsh`) to make them available
 in every shell. The legacy flat names (`picapture`, `piconnect`, `piquit`,
 `pilist`) remain as thin aliases for the corresponding `pi` verbs.
 
@@ -281,9 +284,9 @@ in every shell. The legacy flat names (`picapture`, `piconnect`, `piquit`,
 - **`pi log`** — pages the most recent `boot.log` capture.
 - **`pi tail [N]`** — live-tails `boot.log` (last `N` lines, default 40),
   following across the next capture's log rotation.
-- **`build`** — runs `./build.sh` from the repo root (works from any
+- **`build`** — the two-pass build orchestrator (works from any
   directory): clean, link pass 1, `populate-syms`, link pass 2,
-  diff-check the symbol layout, optionally `deploy`. `BOARD=virt
+  diff-check the symbol layout, and — with `-d` — `deploy`. `BOARD=virt
 build` selects the virt board (deploy is skipped); `NM=llvm-nm
 build` overrides the symbol-dump binary.
 - **`run <mode>`** — builds and runs a board, runs the boot watchdog, or
@@ -296,7 +299,7 @@ build` overrides the symbol-dump binary.
   automatically; defaults to the rpi4b board (the live boot gate — a slower
   ~5-8 min TCG run; virt is deprioritized and no longer CI-gated).
 - **`flashos`** — lists the shell helpers defined in
-  [`flashos.env.zsh`](flashos.env.zsh) and the available `zig build` steps —
+  [`flashos.zsh`](flashos.zsh) and the available `zig build` steps —
   a quick inventory of targets.
 
 The MU trace adapter is auto-detected from `/dev/cu.usbserial-*` and
@@ -308,7 +311,7 @@ connected. The `picapture` timeouts default to 120 s (overall) and 30 s
 
 ### Auto-source on `cd` (optional)
 
-To load `flashos.env.zsh` automatically whenever the shell enters
+To load `flashos.zsh` automatically whenever the shell enters
 `~/FlashOS`, append a `chpwd` hook to `~/.zshrc`. The command below
 is idempotent:
 
@@ -319,7 +322,7 @@ grep -q '_FLASHOS_LOADED' ~/.zshrc || cat >> ~/.zshrc <<'EOF'
 autoload -Uz add-zsh-hook
 load_flashos_env() {
   if [[ "$PWD" == "$HOME/FlashOS"* && -z "$_FLASHOS_LOADED" ]]; then
-    [[ -f "$HOME/FlashOS/flashos.env.zsh" ]] && source "$HOME/FlashOS/flashos.env.zsh" && typeset -g _FLASHOS_LOADED=1
+    [[ -f "$HOME/FlashOS/flashos.zsh" ]] && source "$HOME/FlashOS/flashos.zsh" && typeset -g _FLASHOS_LOADED=1
   fi
 }
 add-zsh-hook chpwd load_flashos_env

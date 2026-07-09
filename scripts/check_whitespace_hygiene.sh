@@ -24,7 +24,7 @@ cd "$ROOT"
 
 PATHS="src lib user_space tools tests armstub/src scripts .github/workflows
 README.md DOCUMENTATION.md SETUP.md CHANGELOG.md LICENSE.md
-build.zig build.zig.zon build.sh config.txt docs/de"
+build.zig build.zig.zon config.txt docs/de"
 
 EXTS="--include=*.zig --include=*.S --include=*.inc \
       --include=*.md --include=*.sh --include=*.zon \

@@ -102,29 +102,30 @@ Chapter 7's tracing mention and the debugger-friendly `nm`/`objdump`
 output both depend on the kernel image carrying its own symbol table —
 but a symbol table can't be computed until the kernel is fully linked,
 and the kernel can't be linked with a symbol table that doesn't exist
-yet. `build.sh` resolves this with a two-pass build:
+yet. The `build` helper in `flashos.zsh` resolves this with a
+two-pass build:
 
 ```text
-echo "link kernel8.elf first pass"
-zig build -Dboard="$BOARD"
+# pass 1: link with a placeholder symbol section (hygiene runs once, up front)
+zig build -Dboard="$BOARD" -Dskip-hygiene=true
 
-echo "save first pass symbols"
+# save first-pass symbols
 "$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v '\$' > "$NM_TMPDIR/nmfirstpass"
 
-echo "generate symbol area and overwrite src/symbol_area.S"
-zig build populate-syms -Dboard="$BOARD"
+# generate the symbol area and overwrite src/symbol_area.S
+zig build populate-syms -Dboard="$BOARD" -Dskip-hygiene=true
 
-echo "compile symbol area and link kernel8.elf second pass"
-zig build -Dboard="$BOARD"
+# pass 2: compile the symbol area and relink kernel8.elf
+zig build -Dboard="$BOARD" -Dskip-hygiene=true
 
-echo "save second pass symbols"
+# save second-pass symbols
 "$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v '\$' > "$NM_TMPDIR/nmsecondpass"
 
-echo "show diff of symbols (should be nothing):"
+# diff the two symbol dumps (should be empty)
 diff "$NM_TMPDIR/nmfirstpass" "$NM_TMPDIR/nmsecondpass"
 ```
 
-*(excerpt from `build.sh` — not standalone-compilable)*
+*(excerpt from the `build` helper — not standalone-compilable)*
 
 Pass one links the kernel with a *placeholder* symbol section, sized
 large enough to hold the real table but filled with nothing meaningful.
@@ -138,7 +139,7 @@ real symbol data must not have perturbed any other symbol's address, or
 something about the placeholder's size assumption was wrong. A clean
 diff (nothing printed) is the pass; any output fails the build.
 
-`build.sh` also gates on a pinned Zig version — checked against
+The `build` helper also gates on a pinned Zig version — checked against
 `.zigversion` before anything else runs — for the same reproducibility
 reason the Flash toolchain is pinned: a kernel and its build tooling
 should compile identically on any machine that follows the setup

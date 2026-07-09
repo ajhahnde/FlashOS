@@ -92,7 +92,7 @@ and "silently passing" is deliberate everywhere this pattern appears.
 zig build test                      # host-side unit tests
 zig build -Dboard=virt run-virt     # in-kernel harness, QEMU virt
 zig build -Dboard=rpi4b run         # in-kernel harness, QEMU rpi4b
-./build.sh                          # two-pass build; optional real-HW deploy
+build -d                            # two-pass build; deploy to real HW (via flashos.zsh)
 ```
 
 The in-kernel harness runs identically whether the board is emulated or

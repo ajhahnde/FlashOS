@@ -198,7 +198,7 @@ scripts/
 assets/                                     Logo and visual assets
 
 build.zig                                   The only build entry point
-build.sh                                    Two-pass build orchestrator + deploy prompt
+flashos.zsh                             Shell helpers incl. the two-pass `build` orchestrator
 config.txt                                  RPi 4 firmware configuration
 ```
 
@@ -1175,8 +1175,9 @@ Teil des gelinkten Images, sodass der Build ein Two-Pass-Prozess ist:
    Zero-Byte-Sentinel.
 3. **Pass 2.** Ein weiteres `zig build` relinkt mit der populierten Section.
 
-`build.sh` läuft beide Passes und diff-checkt, dass das Symbol-Layout
-konvergierte (d. h. das Einfügen der Symbol-Daten störte keine Adressen).
+Der `build`-Helper (aus `flashos.zsh`) läuft beide Passes und
+diff-checkt, dass das Symbol-Layout konvergierte (d. h. das Einfügen der
+Symbol-Daten störte keine Adressen).
 
 ## 7. Tracing
 
@@ -1397,7 +1398,7 @@ Kernel-State ausübt:
 Jedes Szenario emittiert `[TEST] name` … `[PASS] name` (oder `[FAIL]`), und
 `run_all` druckt einen finalen `X/Y passed`-Tally. Die Harness läuft
 identisch unter QEMU (`zig build -Dboard=virt run-virt` /
-`-Dboard=rpi4b run`) und auf echter Hardware (`./build.sh` → SD-Flash →
+`-Dboard=rpi4b run`) und auf echter Hardware (`build -d` → SD-Flash →
 `picapture`); ein grüner Run landet `30/30 passed` mit 34 Baseline-
 Checkpoints (`0xbbff2` rpi4b / `0x3be45` virt) und 0 `ERROR CAUGHT`
 auf beiden Boards, übergibt dann an

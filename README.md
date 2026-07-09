@@ -198,11 +198,14 @@ Run host-side unit tests (page allocator + ELF parser):
 zig build test
 ```
 
-For the full hardware flow (two-pass build with symbol-table population
-and an interactive `deploy` prompt):
+For the full hardware flow (two-pass build with symbol-table population),
+source the shell helpers and run the `build` function; add `-d` to also
+deploy the artefacts to the SD card:
 
 ```bash
-./build.sh
+source flashos.zsh
+build        # two-pass build only
+build -d     # two-pass build + deploy to the SD card
 ```
 
 See [Setup](SETUP.md) for the SD-card layout, firmware files, and
@@ -245,7 +248,7 @@ scripts/                    symbol-table generation, iso, QEMU test watchdog,
                             Pi-baseline verifier
 assets/                     logo and visual assets
 build.zig                   the only build entry point
-build.sh                    two-pass build orchestrator + deploy prompt
+flashos.zsh             shell helpers incl. the two-pass `build` orchestrator
 flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration
 ```
