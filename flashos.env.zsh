@@ -454,18 +454,257 @@ piquit()    { _flashos_pi_quit "$@"; }
 
 # ── run domain: build + emulate/run ────────────────────────────────────────
 
-# Two-pass kernel build — thin wrapper around ./build.sh, anchored to the
-# project root so it works from any directory. All build logic (zig version
-# pin, nm passes, symbol diff, deploy prompt) lives in build.sh; keep it
-# there so the two can never drift apart. NOTE: `build` runs the separate
-# ./build.sh script (two passes); `run *` invokes the zig build system — they
-# share a word but are different tools.
-#   build               rpi4b build, deploy prompt at the end
+# Two-pass kernel build orchestrator.
+#   build               rpi4b build (two-pass)
+#   build -d            build and deploy to SD card
+#   build -clean-stack  clear the build history stack
+#   build -t            show both stacks (img, elf) as a tree
+#   build -s <stack> <id>     show stats (creation date, etc.) for a specific build ID in a stack (img/elf)
+#   build help          show usage information
 #   BOARD=virt build    virt build (deploy skipped)
 #   NM=llvm-nm build    override the nm binary
+#
+# NOTE on Caching: This wrapper manages the rotating .build_history stack.
+# The actual Zig compiler cache (.zig-cache) is wiped automatically to prevent bloat.
+_flashos_build_usage() {
+  print -- "usage: build [args...]"
+  print -- "  -d                  build and deploy to SD card (rpi4b only)"
+  print -- "  -clean-stack        clear the build history stack (.build_history)"
+  print -- "  -t                  show both stacks (img, elf) as a tree"
+  print -- "  -s <stack> <id>     show stats (creation date, etc.) for a specific build ID in a stack (img/elf)"
+  print -- "  help                show this usage information"
+  print -- "  [zig args...]       passed transparently to the underlying build passes"
+}
+
 build() {
   emulate -L zsh
-  _flashos_root ./build.sh "$@"
+
+  # Check if help flag is present anywhere in the arguments
+  if (( ${@[(I)help]} )) || (( ${@[(I)-h]} )) || (( ${@[(I)--help]} )); then
+    _flashos_build_usage
+    print -- ""
+    print -- "--- zig build options ---"
+    _flashos_root zig build --help
+    return 0
+  fi
+
+  # Check if -clean-stack is present anywhere in the arguments
+  if (( ${@[(I)-clean-stack]} )); then
+    _flashos_root zsh -c '
+      rm -rf .build_history
+      print -- "[ \033[0;32mOK\033[0m ] Build history stack cleared"
+    '
+    return 0
+  fi
+
+  if (( ${@[(I)-t]} )); then
+    _flashos_root zsh -c '
+      if command -v tree >/dev/null 2>&1; then
+        tree .build_history
+      else
+        print -- "tree command not found, falling back to ls:"
+        ls -R -lh .build_history
+      fi
+    '
+    return 0
+  fi
+
+  local idx_s=${@[(I)-s]}
+  if (( idx_s > 0 )); then
+    local stack="${@[$((idx_s + 1))]}"
+    local id="${@[$((idx_s + 2))]}"
+    if [[ -z "$stack" || -z "$id" ]]; then
+      print -- "usage: build -s <img|elf> <id>"
+      return 1
+    fi
+    _flashos_root zsh -c '
+      local s=$1
+      local i=$2
+      local search_dir
+      case "$s" in
+        img) search_dir="img" ;;
+        elf) search_dir="elf" ;;
+        *) print -- "Unknown stack: $s (must be img or elf)"; return 1 ;;
+      esac
+
+      local target=(.build_history/*/$search_dir/*${i}*(N))
+      if (( ${#target[@]} > 0 )); then
+        print -- "--- Stats for $s (ID: $i) ---"
+        for t in "${target[@]}"; do
+          print -- "Board: ${t:h:h:t}"
+          # macOS stat -x provides detailed creation/modification output
+          stat -x "$t" 2>/dev/null || stat "$t" 2>/dev/null || ls -lhd "$t"
+          print -- ""
+        done
+      else
+        print -- "Not found: No entry for ID $i in .build_history/*/$search_dir"
+        return 1
+      fi
+    ' _ "$stack" "$id"
+    return 0
+  fi
+
+  _flashos_root zsh -c '
+    set -eo pipefail
+
+    local BOARD="${BOARD:-rpi4b}"
+    local DEPLOY=0
+    local -a ZIG_ARGS=()
+
+    # Parse arguments: extract -d for deploy, extract -Dboard, forward all others to Zig
+    for arg in "$@"; do
+      if [[ "$arg" == "-d" ]]; then
+        DEPLOY=1
+      elif [[ "$arg" == -Dboard=* ]]; then
+        BOARD="${arg#-Dboard=}"
+      else
+        ZIG_ARGS+=("$arg")
+      fi
+    done
+
+    print -- "BOARD: $BOARD"
+
+    local RED="\033[0;31m"
+    local GREEN="\033[0;32m"
+    local YELLOW="\033[1;33m"
+    local NC="\033[0m"
+
+    local KERNEL_ELF="zig-out/bin/kernel8.elf"
+    local NM_BIN="${NM:-aarch64-elf-nm}"
+
+    # Pre-flight 1: Ensure nm (symbol extraction tool) is installed
+    if ! command -v "$NM_BIN" >/dev/null 2>&1; then
+      print -- "${RED}error: $NM_BIN not found in PATH (set \$NM to override).${NC}"
+      exit 1
+    fi
+
+    # Pre-flight 2: Verify execution from project root
+    if [[ ! -f .zigversion ]]; then
+      print -- "${RED}error: .zigversion not found — build must run from the project root.${NC}"
+      exit 1
+    fi
+
+    local REQUIRED_ZIG_VERSION="$(cat .zigversion)"
+    # Pre-flight 3: check zig command exists before running it
+    if ! command -v zig >/dev/null 2>&1; then
+      print -- "${RED}error: zig not found in PATH.${NC}"
+      exit 1
+    fi
+    local ACTUAL_ZIG_VERSION="$(zig version)"
+    # Pre-flight 3: Strictly pin the Zig version to prevent silent compiler regressions
+    if [[ "$ACTUAL_ZIG_VERSION" != "$REQUIRED_ZIG_VERSION" ]]; then
+      print -- "${RED}error: flashos requires zig ${REQUIRED_ZIG_VERSION} (found ${ACTUAL_ZIG_VERSION}).${NC}"
+      print -- "${YELLOW}switch with one of:${NC}"
+      print -- "  zigup ${REQUIRED_ZIG_VERSION}"
+      print -- "  zvm use ${REQUIRED_ZIG_VERSION}"
+      print -- "  anyzig use ${REQUIRED_ZIG_VERSION}"
+      exit 1
+    fi
+
+    # Create a temporary directory for symbol diffs. Auto-cleaned on exit (even on failure).
+    local NM_TMPDIR=$(mktemp -d -t flashos_buildsh.XXXXXX)
+    trap "rm -rf \"$NM_TMPDIR\"" EXIT
+
+    # Helper: Runs a command in the background, showing a loading animation
+    # and hiding output unless an error occurs.
+    run_task() {
+        local task_name="$1"
+        shift
+        local logfile="$NM_TMPDIR/step.log"
+
+        # Start command in background
+        "$@" > "$logfile" 2>&1 &
+        local pid=$!
+
+        local -a dots=( ".  " ".. " "..." "   " )
+        local i=1
+
+        # Animate while the background process is running
+        while kill -0 $pid 2>/dev/null; do
+            printf "\r\033[K[ ${YELLOW}%s${NC} ] %s" "${dots[i]}" "$task_name"
+            i=$(( (i % 4) + 1 ))
+            sleep 0.2
+        done
+
+        # Wait for the exact exit code. || exit_code=$? prevents set -e from aborting the script.
+        local exit_code=0
+        wait $pid || exit_code=$?
+
+        if (( exit_code == 0 )); then
+            # Use exactly "[ OK ]" as requested.
+            printf "\r\033[K[ ${GREEN}OK${NC} ] %s\n" "$task_name"
+            if [[ -s "$logfile" ]]; then
+                cat "$logfile"
+            fi
+        else
+            printf "\r\033[K[ ${RED}ERR${NC} ] %s\n" "$task_name"
+            cat "$logfile"
+            exit 1
+        fi
+    }
+
+    save_first_pass() {
+        "$NM_BIN" -n "$KERNEL_ELF" | grep -v "[\$]" > "$NM_TMPDIR/nmfirstpass"
+    }
+
+    save_second_pass() {
+        "$NM_BIN" -n "$KERNEL_ELF" | grep -v "[\$]" > "$NM_TMPDIR/nmsecondpass"
+    }
+
+    check_diff() {
+        diff "$NM_TMPDIR/nmfirstpass" "$NM_TMPDIR/nmsecondpass"
+    }
+
+    # --- Core Two-Pass Build Pipeline ---
+    # 1. First pass linking -> 2. Symbol layout generation -> 3. Final linking -> 4. Verification
+    run_task "clean build cache" rm -rf .zig-cache zig-out
+    run_task "check whitespace" sh scripts/check_whitespace_hygiene.sh
+    run_task "check hex hygiene" sh scripts/check_hex_hygiene.sh
+    run_task "link kernel (pass 1: initial)" zig build -Dboard="$BOARD" "${ZIG_ARGS[@]}"
+    run_task "extract symbol table (pass 1)" save_first_pass
+    run_task "generate layout (src/symbol_area.S)" zig build populate-syms -Dboard="$BOARD" -Dskip-hygiene=true "${ZIG_ARGS[@]}"
+    run_task "link kernel (pass 2: final)" zig build -Dboard="$BOARD" -Dskip-hygiene=true "${ZIG_ARGS[@]}"
+    run_task "extract symbol table (pass 2)" save_second_pass
+    run_task "verify symbol layout consistency" check_diff
+
+    if [[ "$BOARD" != "rpi4b" ]]; then
+        printf "[ ${YELLOW}SKIP${NC} ] deploy (board=$BOARD, rpi4b-only)\n"
+    elif (( DEPLOY == 1 )); then
+        run_task "deploy to SD card" zig build deploy -Dboard="$BOARD" "${ZIG_ARGS[@]}"
+    else
+        printf "[ ${YELLOW}SKIP${NC} ] deploy (run with -d to deploy)\n"
+    fi
+
+    local hist=".build_history/$BOARD"
+    mkdir -p "$hist/img" "$hist/elf"
+
+    # 2. Check if artifacts are identical to the previous build
+    if [[ -f zig-out/kernel8.img ]] && [[ -f "$hist/img/kernel8_1.img" ]] && cmp -s zig-out/kernel8.img "$hist/img/kernel8_1.img"; then
+      # Update slot 1 so that the .elf debug symbols always match the current source code,
+      # even if the compiled binary instructions (.img) did not change (e.g. comment changes).
+      [[ -f zig-out/kernel8.img ]] && cp zig-out/kernel8.img "$hist/img/kernel8_1.img"
+      [[ -f zig-out/bin/kernel8.elf ]] && cp zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"
+      print -- "[ \033[0;32mOK\033[0m ] Build successful. (Artifacts identical to previous, history unchanged)"
+      return 0
+    fi
+
+    # 3. Rotate and save build history
+    # Drop oldest entry (ID 5)
+    rm -f "$hist/img"/kernel8_5.img "$hist/elf"/kernel8_5.elf 2>/dev/null
+
+    # Rotate remaining entries (4->5, 3->4, 2->3, 1->2)
+    for i in {4..1}; do
+      local next=$((i+1))
+      [[ -f "$hist/img/kernel8_$i.img" ]] && mv "$hist/img/kernel8_$i.img" "$hist/img/kernel8_$next.img"
+      [[ -f "$hist/elf/kernel8_$i.elf" ]] && mv "$hist/elf/kernel8_$i.elf" "$hist/elf/kernel8_$next.elf"
+    done
+
+    # Save the new build as ID 1
+    [[ -f zig-out/kernel8.img ]] && cp zig-out/kernel8.img "$hist/img/kernel8_1.img"
+    [[ -f zig-out/bin/kernel8.elf ]] && cp zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"
+
+    print -- "[ \033[0;32mOK\033[0m ] Build successful. Artifacts saved to stack ($hist/*_1)"
+  ' _ "$@"
 }
 
 # run <mode> — build-and-run a board in QEMU, run the boot-watchdog, or attach
@@ -777,8 +1016,28 @@ _flashos_port_completion() {
   fi
 }
 
+_flashos_build_completion() {
+  local -a args=(
+    '-d:build and deploy to SD card'
+    '-clean-stack:clear the build history stack'
+    '-t:show all three stacks (img, elf, zig) as a tree'
+    '-s:show stats (creation date, etc.) for a specific build ID'
+    'help:usage'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t args 'build flag' args
+  elif (( CURRENT == 3 )) && [[ "${words[2]}" == "-s" ]]; then
+    local -a stacks=(img elf zig)
+    _describe -t stacks 'stack' stacks
+  elif (( CURRENT == 4 )) && [[ "${words[2]}" == "-s" ]]; then
+    local -a ids=(1 2 3 4 5)
+    _describe -t ids 'build ID' ids
+  fi
+}
+
 if (( $+functions[compdef] )); then
   compdef _flashos_pi_completion pi
   compdef _flashos_run_completion run
   compdef _flashos_port_completion port
+  compdef _flashos_build_completion build
 fi
