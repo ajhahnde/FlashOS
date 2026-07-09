@@ -14,7 +14,7 @@ use "kernel_tests" as tests
 use build_options
 
 const OK = "[ \x1b[32mOK\x1b[0m ] "
-const PID1_MSG [*:0]u8 = OK ++ "Reached target Userspace\n"
+const PID1_MSG [*:0]u8 = OK ++ "Userspace init\n"
 const LOGIN_PATH [*:0]u8 = "/bin/login"
 
 // CI credential script. When the `ci-login-seed` build flag is set,
@@ -68,7 +68,7 @@ export fn pid1_main() noreturn {
             tests.sys_console_inject(b)
         }
     }
-    const argv = [_:null]?[*:0]u8{ LOGIN_PATH }
+    argv := [_:null]?[*:0]u8{LOGIN_PATH}
     _ = tests.sys_execve(#intFromPtr(LOGIN_PATH), #intFromPtr(&argv))
     tests.sys_exit()
 }

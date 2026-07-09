@@ -24,7 +24,9 @@ const console_ui = #import("console_ui")
 // NUL-terminated main_output without a buffer — and without growing the tight
 // per-task kernel stack.
 fn bootSink(bytes []u8) void {
-    for b in bytes { main_output_char(MU, b) }
+    for b in bytes {
+        main_output_char(MU, b)
+    }
 }
 const boot = console_ui.logger(&bootSink)
 
@@ -106,12 +108,12 @@ export var state u32 = 0
 /// TTBR1-mapped, no allocation) go to `prepare_move_to_user_elf`,
 /// the same loader the exec-elf / flibc test payloads use.
 export fn kernel_process() void {
-    const entry_opt = initramfs.locate("/sbin/init") catch null
+    entry_opt := initramfs.locate("/sbin/init") catch null
     if (entry_opt == null) {
         main_output(MU, "PID 1: /sbin/init missing from initramfs\n")
         return
     }
-    const entry = entry_opt.?
+    entry := entry_opt.?
 
     // Pre-install stdio as console fds before handing control to EL0.
     // Console slots are refcount-exempt
@@ -125,7 +127,7 @@ export fn kernel_process() void {
     _ = fdtable.install(cur, .console, null)
 
     const blob_kva u64 = #intFromPtr(entry.data.ptr)
-    const err = prepare_move_to_user_elf(blob_kva, entry.data.len)
+    err := prepare_move_to_user_elf(blob_kva, entry.data.len)
     if (err < 0) {
         main_output(MU, "PID 1: ELF load failed\n")
     }
@@ -181,6 +183,7 @@ fn run_emmc2_smoke() void {
 }
 
 export fn kernel_main_impl(id u64) void {
+    init_ui := " init"
     // core 0 initializes mini-uart and handles uart interrupts
     if (id == 0) {
         // Page allocator bitmap zeroed first so anything later in bring-up
@@ -203,54 +206,55 @@ export fn kernel_main_impl(id u64) void {
         // Mini-UART first so the boot status lines land on the same cable
         // (pin 14/15) as the exception handler's "ERROR CAUGHT" output.
         mini_uart_init()
-        boot.ok("Initialized Mini-UART console")
+        boot.ok("Mini-UART" ++ init_ui)
 
         // Startup banner right after the console comes up, so the log reads
         // chronologically: core 0 is the first thing running, before any of
         // the subsystem bring-up below. (Secondary cores park at the
         // `while (id != 0)` gate and never reach here, so this is core-0 only.)
         console_ui.tagged(&bootSink, console_ui.ok)
-        bootSink("Booted core ")
+        bootSink("Boot core ")
         main_output_char(MU, #intCast(id + '0'))
         bootSink(" (EL")
         main_output_char(MU, #intCast(get_el() + '0'))
         bootSink(")\n")
 
         pl011_uart_init()
-        boot.ok("Initialized PL011 trace UART")
+        boot.ok("PL011 UART init")
 
         irq_init_vectors()
-        boot.ok("Loaded exception vectors")
+        boot.ok("IRQ vectors init")
 
         // Board-specific GIC bring-up: GICv3 needs ICC_*_EL1 + per-core
         // redistributor wakeup. Pi's GICv2 inlines to nothing.
         board_irq_init()
 
         enable_interrupt_gic(VC_AUX_IRQ, #intCast(id))
-        boot.ok("Enabled interrupt controller")
+        boot.ok("Enable GIC v3")
 
         // USB-OTG gadget bring-up (DWC2). The device MMIO at 0xFE980000 is
         // already device-mapped by boot.S, so this needs no page allocator.
         // Fails soft on QEMU (no DWC2 device path) — bounded waits return
         // -1 and the polled console simply never enumerates. Serviced from
         // the PID-0 idle loop below.
+        dwc2_init := "USB DWC2 init"
         if (board_usb_init() < 0) {
-            boot.skip("USB gadget (no controller)")
+            boot.skip(dwc2_init)
         } else {
-            boot.ok("Started USB gadget")
+            boot.ok(dwc2_init)
         }
 
         ksyms_init()
-        boot.ok("Loaded kernel symbols")
+        boot.ok("KSYMS init")
 
         sys_call_table_relocate()
-        boot.ok("Relocated syscall table")
+        boot.ok("Syscall table relocate")
 
         trace_init()
-        boot.ok("Initialized trace subsystem")
+        boot.ok("Trace init")
 
         trace_output_kernel_pts(PL)
-        boot.ok("Started kernel trace output")
+        boot.ok("Trace output kernel")
 
         // VFS root mount bring-up. initramfs_backend
         // only sets pointers — no get_free_page — so it slots in ahead
@@ -258,7 +262,7 @@ export fn kernel_main_impl(id u64) void {
         // /mnt mount is wired later, after board.emmc2.init() has wired
         // block_dev.sd_dev (fat32_backend.init issues block reads).
         initramfs_backend.init()
-        boot.ok("Mounted initramfs root")
+        boot.ok("Initramfs init")
 
         // Block-device bring-up. On virt
         // the memory-backed fake never fails — graceful degradation
@@ -267,13 +271,16 @@ export fn kernel_main_impl(id u64) void {
         // The smoke check below covers acceptance #2 + #7 in one
         // shot: it exercises the BlockDev vtable end-to-end and
         // proves init() wired `block_dev.sd_dev`.
+        emmc2_init := "EMMC2 init"
         if (board_emmc2_init() < 0) {
-            boot.skip("EMMC2 block device (init failed)")
+            boot.skip(emmc2_init)
         } else {
-            boot.ok("Initialized EMMC2 block device")
+            boot.ok(emmc2_init)
             // Pre-PID-1 block-device smoke — part of the boot-as-test path,
             // gated so a clean (non-selftest) boot stays quiet.
-            if (build_options.boot_selftest) { run_emmc2_smoke() }
+            if (build_options.boot_selftest) {
+                run_emmc2_smoke()
+            }
             // FAT32 /mnt mount — needs block_dev.sd_dev, wired just
             // above by board.emmc2.init(). Fails soft: a blank/bad
             // disk leaves mount_table[1] null and /mnt/* resolves to
@@ -303,7 +310,9 @@ export fn kernel_main_impl(id u64) void {
         // Boot-time free-page baseline. Logged before any task is created
         // so the user-space dumps later in the trace can be compared
         // against this absolute reference.
-        if (build_options.boot_selftest) { _ = dump_free_count() }
+        if (build_options.boot_selftest) {
+            _ = dump_free_count()
+        }
 
         state = 0
     }
@@ -322,10 +331,12 @@ export fn kernel_main_impl(id u64) void {
     state += 1
 
     while (true) {
-        if (id != 0 || state != 1) { continue }
+        if (id != 0 || state != 1) {
+            continue
+        }
         sched_init()
         // create pid 1, kernel threads don't need a user stack page
-        const res = copy_process(KTHREAD, #intFromPtr(&kernel_process), 0)
+        res := copy_process(KTHREAD, #intFromPtr(&kernel_process), 0)
         if (res <= 0) {
             main_output(MU, "fork error\n")
         }

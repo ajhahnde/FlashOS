@@ -66,13 +66,17 @@ use console_ui
 // console_ui Sink bound to the same Mini-UART boot console the kernel logs to
 // (byte-at-a-time; see src/kernel.zig `bootSink` for the rationale).
 fn bootSink(bytes []u8) void {
-    for b in bytes { main_output_char(MU, b) }
+    for b in bytes {
+        main_output_char(MU, b)
+    }
 }
 const boot = console_ui.logger(&bootSink)
 
 // Which entropy source produced the bytes. Only the weak fallback
 // exists today; the hardware source joins with the RNG200 driver.
-pub const Source = enum { fallback }
+pub const Source = enum {
+    fallback,
+}
 
 var mixer Mixer = .{ .state = 0 }
 
@@ -112,14 +116,16 @@ export fn hwrng_init() void {
     var same = true
     var i usize = 0
     while (i < 16) {
-        if (a[i] != b[i]) { same = false }
+        if (a[i] != b[i]) {
+            same = false
+        }
         i += 1
     }
     if (same) {
-        boot.warn("hwrng: self-test failed (constant output)")
+        boot.warn("HWRNG: self-test failed (constant output)")
         return
     }
-    boot.ok("Initialized hwrng")
+    boot.ok("HWRNG init")
 }
 
 // ---- Host tests ----
@@ -132,7 +138,7 @@ test "SplitMix64 reference sequence from seed 0" {
     // A transcription error in the multiplier constants or shift amounts
     // changes every value.
     var state u64 = 0
-    const expected = [_]u64{ 0xE220A8397B1DCDAF, 0x6E789E6AA1B965F4, 0x06C45D188009454F }
+    expected := [_]u64{ 0xE220A8397B1DCDAF, 0x6E789E6AA1B965F4, 0x06C45D188009454F }
     for want in expected {
         state +%= GAMMA
         try testing.expectEqual(want, splitmix64(state))
@@ -154,9 +160,9 @@ test "Mixer: outputs differ even with a stuck entropy input" {
     // The property the boot self-test relies on: even if CNTPCT were
     // stuck, the gamma increment alone changes every draw.
     var m = Mixer.init(0)
-    const first = m.next(0xDEADBEEF)
-    const second = m.next(0xDEADBEEF)
-    const third = m.next(0xDEADBEEF)
+    first := m.next(0xDEADBEEF)
+    second := m.next(0xDEADBEEF)
+    third := m.next(0xDEADBEEF)
     try testing.expect(first != second)
     try testing.expect(second != third)
     try testing.expect(first != third)
@@ -178,7 +184,9 @@ test "Mixer: different seeds diverge" {
     var collisions u32 = 0
     var i usize = 0
     while (i < 64) {
-        if (m1.next(0) == m2.next(0)) { collisions += 1 }
+        if (m1.next(0) == m2.next(0)) {
+            collisions += 1
+        }
         i += 1
     }
     try testing.expectEqual(#as(u32, 0), collisions)
