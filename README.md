@@ -53,11 +53,13 @@ harness and a host-side unit test suite.
 
 ## Specs
 
-**Hardware**: Raspberry Pi 4 Model B (BCM2711)  
-**Architecture**: AArch64 (ARMv8-A)  
-**Languages**: Flash, Zig + AArch64 assembly  
-**Toolchain**: `flashc` (pinned) + Zig 0.16.0 +`aarch64-elf` binutils  
-**Targets**: RPi 4B hardware,`qemu-system-aarch64 -M raspi4b`, _and_ `qemu-system-aarch64 -M virt`
+|                  |                                                                                        |
+| :--------------- | :------------------------------------------------------------------------------------- |
+| **Hardware**     | Raspberry Pi 4 Model B (BCM2711)                                                       |
+| **Architecture** | AArch64 (ARMv8-A)                                                                      |
+| **Languages**    | Flash, Zig + AArch64 assembly                                                          |
+| **Toolchain**    | `flashc` (pinned) + Zig 0.16.0 + `aarch64-elf` binutils                                |
+| **Targets**      | RPi 4B hardware, `qemu-system-aarch64 -M raspi4b`, _and_ `qemu-system-aarch64 -M virt` |
 
 > The validated target is `-Dboard=rpi4b`. The QEMU `-M virt` board has not been
 > CI-gated since **[v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0)**
@@ -221,7 +223,7 @@ serial-console setup.
 | `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
 | `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
 | `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
-| `zig build test`                     | Host-side unit tests (464 tests, 41 modules)                   |
+| `zig build test`                     | Host-side unit tests (`464 tests`, `41 modules`)               |
 | `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                            |
 
 > The default optimisation mode is `ReleaseSmall`. Override with
@@ -236,7 +238,7 @@ src/board/<name>/           per-board driver bag (rpi4b / virt) + linker script
 user_space/                 PID 1 image + in-kernel test harness
 user_space/lib/flibc/       userland mini-libc for ELF demos
 lib/                        shared kernel↔user constants (syscall IDs)
-tools/                      hand-rolled ELF demos (hello, stackbomb, flibc_demo)
+tools/                      hand-rolled ELF demos (hello, stackbomb, UNIX utils etc.)
 tests/                      host-side unit tests
 armstub/                    EL3 → EL1 bootstrap shim (Pi only)
 scripts/                    symbol-table generation, iso, QEMU test watchdog,
