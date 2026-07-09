@@ -77,4 +77,4 @@ if [ "$status" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_whitespace_hygiene: clean"
+

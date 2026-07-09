@@ -33,4 +33,4 @@ if [ -n "$hits" ]; then
     exit 1
 fi
 
-echo "check_hex_hygiene: clean"
+

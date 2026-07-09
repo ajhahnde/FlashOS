@@ -19,7 +19,6 @@ pub fn main(init: std.process.Init) !void {
     var stdout_obj = std.Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_obj.interface;
 
-    try stdout.writeAll("generating symbol area\n");
 
     var file = try std.Io.Dir.cwd().createFile(io, symbol_area_file, .{});
     defer file.close(io);
@@ -89,7 +88,6 @@ pub fn main(init: std.process.Init) !void {
     // flush buffered output before exiting
     try writer.flush();
 
-    try stdout.print("symbol area: {d}\n", .{used_space});
-    try stdout.writeAll("please be sure the pre_allocated_size == the .space value in the first pass!\n");
+    try stdout.print("       -> symbol area: {d}\n", .{used_space});
     try stdout.flush();
 }
