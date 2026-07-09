@@ -679,7 +679,7 @@ build() {
     elif (( DEPLOY == 1 )); then
         run_task "deploy to SD card" zig build deploy -Dboard="$BOARD" "${ZIG_ARGS[@]}"
     else
-        printf "[ ${YELLOW}SKIP${NC} ] deploy (run with -d to deploy)\n"
+        printf "[${YELLOW}SKIP${NC}] deploy (run with -d to deploy)\n"
     fi
 
     local hist=".build_history/$BOARD"
