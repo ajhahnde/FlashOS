@@ -88,6 +88,6 @@ pub fn main(init: std.process.Init) !void {
     // flush buffered output before exiting
     try writer.flush();
 
-    try stdout.print("       -> symbol area: {d}\n", .{used_space});
+    try stdout.print("       -> symbol area: \x1b[1;36m{d}\x1b[0m\n", .{used_space});
     try stdout.flush();
 }

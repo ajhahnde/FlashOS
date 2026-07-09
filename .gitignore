@@ -4,6 +4,7 @@
 # Zig build artefacts
 .zig-cache/
 zig-out/
+.build_history/
 
 # Private notes and tools
 ajhahnde/

@@ -684,7 +684,7 @@ build() {
       # even if the compiled binary instructions (.img) did not change (e.g. comment changes).
       [[ -f zig-out/kernel8.img ]] && cp zig-out/kernel8.img "$hist/img/kernel8_1.img"
       [[ -f zig-out/bin/kernel8.elf ]] && cp zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"
-      print -- "[ \033[0;32mOK\033[0m ] Build successful. (Artifacts identical to previous, history unchanged)"
+      print -- "[ \033[0;32mOK\033[0m ] Build successful (Artifacts identical to previous, history unchanged)"
       return 0
     fi
 

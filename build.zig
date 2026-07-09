@@ -2321,7 +2321,8 @@ pub fn build(b: *std.Build) void {
             \\cp user_space/etc/perms.tab "$SD_BOOT/PERMS.TAB"
             \\rm -f "$SD_BOOT"/._SHADOW "$SD_BOOT"/._PERMS* 2>/dev/null || true
             \\sync
-            \\diskutil eject "$SD_BOOT"
+            \\out=$(diskutil eject "$SD_BOOT")
+            \\echo "[ \x1b[32mOK\x1b[0m ] $out"
         });
         deploy.step.dependOn(all_step);
         deploy.step.dependOn(&install_shadow.step);
