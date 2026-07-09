@@ -4,7 +4,7 @@
     <img src="assets/flashos_logo_light.png" alt=".flashOS" width="420">
   </picture>
 
-<h3>AArch64 bare-metal kernel for the RPi 4B and QEMU <code>-M rpi4b</code></h3>
+<h3>UNIX-like AArch64 bare-metal kernel for the RPi 4B and QEMU <code>-M rpi4b</code></h3>
 
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
