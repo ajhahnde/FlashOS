@@ -28,8 +28,8 @@
 #   * 34 × per-scenario checkpoint at the board's PID-1 baseline
 #   *  1 × initial boot-baseline checkpoint (baseline + 0xe = 14 pages,
 #         the PID-1 fork delta over the PID-0 boot snapshot)
-#   *  1 × healthy kernel-entropy announce (`Initialized hwrng ...`), 0 ×
-#         failed self-test announce
+#   *  1 × healthy kernel-entropy announce (`HWRNG init`), 0 × failed
+#         self-test announce
 #   *  3 × homescreen marker (`type 'help' for commands`) — two scripted
 #         [TEST] login sessions + the real boot login; each session
 #         authenticated, dropped privilege in its child, and reached the
@@ -65,6 +65,10 @@
 # eventual revive — at which point re-validate and refresh these values.
 #
 # Drift history (legitimate free-page baseline shifts, newest first):
+#   * v0.7.4 — marker WORDING only, no hex shift, no tally bump: the boot-log
+#              restyle renamed hwrng's announce lines ("Initialized hwrng" →
+#              "HWRNG init", "hwrng: self-test failed" → "HWRNG: self-test
+#              failed"); the hwrng greps below track the new strings.
 #   * v0.6.0 — NO hex shift, NO tally bump. The FAT32 create/unlink/rename
 #              ABI is folded into the existing [TEST] fs-roundtrip (a CRUD
 #              leg: create→write→readback→rename→unlink, Pi-only, self-
@@ -209,9 +213,11 @@ fi
 # The kernel entropy source must announce a healthy bring-up.
 # Both QEMU targets take the weak timer-mix fallback (QEMU emulates no
 # BCM2711 RNG200); the announce must be the healthy "ok" form and the
-# failed-self-test form must never appear.
-hwrng_ok=$(grep -cF "Initialized hwrng" "$LOG" || true)
-hwrng_bad=$(grep -cF "hwrng: self-test failed" "$LOG" || true)
+# failed-self-test form must never appear. Wording per src/hwrng.zig
+# ("HWRNG init" / "HWRNG: self-test failed" since the v0.7.4 boot-log
+# restyle — see src/hwrng.flash).
+hwrng_ok=$(grep -cF "HWRNG init" "$LOG" || true)
+hwrng_bad=$(grep -cF "HWRNG: self-test failed" "$LOG" || true)
 
 # Every login session must reach the interactive shell — exactly three per
 # boot: [TEST] login's two scripted sessions (flash, then root, each

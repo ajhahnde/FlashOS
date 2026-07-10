@@ -749,7 +749,8 @@ pub fn build(b: *std.Build) void {
     // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
     // pulls hwrng_init into the ELF with `_ = @import("hwrng")` and sys.zig
     // reaches fill()/Source through the same named module; kernel.zig calls
-    // hwrng_init via a C-ABI `extern fn`. console_ui supplies the boot Sink.
+    // hwrng_init via a C-ABI `extern fn` and owns its status line (the module
+    // draws to no console).
     // The one transpile is shared with the host-test build below (src_lazy).
     const hwrng_src = addFlashSource(b, "src/hwrng.flash");
     const hwrng_mod = b.createModule(.{
@@ -757,7 +758,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    hwrng_mod.addImport("console_ui", console_ui_mod);
 
     // generic_timer — generic ARM timer driver (absolute CNTP_CVAL cadence).
     // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
@@ -928,6 +928,8 @@ pub fn build(b: *std.Build) void {
     sys_mod.addImport("perm", perm_mod);
     sys_mod.addImport("pwfile", pwfile_mod);
     sys_mod.addImport("hwrng", hwrng_mod);
+    // console_ui supplies the shared `[Debug]` trace-prefix bytes.
+    sys_mod.addImport("console_ui", console_ui_mod);
 
     // Boot sequence + main loop. Ported to Flash; flashc transpiles it via
     // addFlashSource. Moved from a relative `@import("kernel.zig")` in
@@ -1001,6 +1003,8 @@ pub fn build(b: *std.Build) void {
     rpi4b_emmc2_mod.addImport("block_dev", block_dev_mod);
     rpi4b_emmc2_mod.addImport("mailbox", mailbox_mod);
     rpi4b_emmc2_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
+    // console_ui supplies the shared `[Debug]` trace-prefix bytes.
+    rpi4b_emmc2_mod.addImport("console_ui", console_ui_mod);
     const rpi4b_usb_src = addFlashSource(b, "src/board/rpi4b/usb.flash");
     const rpi4b_usb_mod = b.createModule(.{
         .root_source_file = rpi4b_usb_src,
@@ -2028,6 +2032,9 @@ pub fn build(b: *std.Build) void {
         .strip = true,
     });
     pid1_mod.addImport("syscall_defs", syscall_defs_mod);
+    // console_ui supplies the shared status-tag and self-test marker bytes
+    // (PID 1's `[ OK ]` line, kernel_tests' [TEST]/[PASS]/[FAIL] markers).
+    pid1_mod.addImport("console_ui", console_ui_mod);
     // pid1 reads build_options for the CI auto-login seed gate (see the
     // ci-login-seed option above). Off by default → the shipped boot stops
     // at `login:`; the watchdog builds with the flag for unattended auth.

@@ -51,6 +51,24 @@ pub const warn = tag("[", "WARN", "]", palette.yellow)
 pub const fail = tag("[", "FAIL", "]", palette.red)
 pub const skip = tag("[", "SKIP", "]", palette.grey)
 
+// ---- raw marker bytes -------------------------------------------------------
+// Prefixes for writers that cannot render through a `Sink` — the in-kernel
+// test harness and PID 1 emit whole NUL-terminated lines through a single
+// console write, and the boot watchdog greps some of these markers as bare
+// bytes (grep -F). The test markers therefore stay uncolored on purpose: an
+// SGR escape inside the brackets would break the byte-exact contract match.
+// Building a line is a comptime concat: `test_mark ++ "name\n"`.
+
+/// `[TEST] ` / `[PASS] ` / `[FAIL] ` — the self-test scenario markers.
+pub const test_mark = "[TEST] "
+pub const pass_mark = "[PASS] "
+pub const fail_mark = "[FAIL] "
+
+/// `[Debug] ` — kernel diagnostic traces. These deliberately bypass the tag
+/// taxonomy and the console mux (they must stay on the UART regardless of USB
+/// state), but their prefix is still spelled only here.
+pub const debug_mark = "[Debug] "
+
 /// Map a `Level` to its `Tag`. The exhaustive switch makes a new `Level`
 /// variant a compile error here until it is given a tag.
 pub fn of(level Level) Tag {

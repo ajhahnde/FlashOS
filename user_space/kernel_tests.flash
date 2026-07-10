@@ -13,6 +13,8 @@
 // linksection decorations and the user_start / user_end blob wrapping
 // are retired — tools/pid1_linker.ld places every section.
 
+use console_ui
+
 // ---- Syscall ABI ----
 //
 // Numbers come from lib/syscall_defs.zig — same constants the kernel
@@ -355,66 +357,66 @@ const BRK_OK_MSG [*:0]u8 = "brk ok\n"
 const BRK_CHILD_OK_MSG [*:0]u8 = "brk child ok\n"
 const BRK_CHILD_BAD_MSG [*:0]u8 = "brk child bad\n"
 
-const TEST_FORK_STRESS [*:0]u8 = "[TEST] fork-stress\n"
-const PASS_FORK_STRESS [*:0]u8 = "[PASS] fork-stress\n"
-const FAIL_FORK_STRESS [*:0]u8 = "[FAIL] fork-stress\n"
-const TEST_OOM_GRACEFUL [*:0]u8 = "[TEST] oom-graceful\n"
-const PASS_OOM_GRACEFUL [*:0]u8 = "[PASS] oom-graceful\n"
-const FAIL_OOM_GRACEFUL [*:0]u8 = "[FAIL] oom-graceful\n"
-const TEST_KILL [*:0]u8 = "[TEST] kill\n"
-const PASS_KILL [*:0]u8 = "[PASS] kill\n"
-const FAIL_KILL [*:0]u8 = "[FAIL] kill\n"
-const TEST_EXEC_ELF [*:0]u8 = "[TEST] exec-elf\n"
-const PASS_EXEC_ELF [*:0]u8 = "[PASS] exec-elf\n"
-const FAIL_EXEC_ELF [*:0]u8 = "[FAIL] exec-elf\n"
-const TEST_EXECVE [*:0]u8 = "[TEST] execve\n"
-const PASS_EXECVE [*:0]u8 = "[PASS] execve\n"
-const FAIL_EXECVE [*:0]u8 = "[FAIL] execve\n"
-const TEST_BRK [*:0]u8 = "[TEST] brk\n"
-const PASS_BRK [*:0]u8 = "[PASS] brk\n"
-const FAIL_BRK [*:0]u8 = "[FAIL] brk\n"
-const TEST_STACK_OVERFLOW [*:0]u8 = "[TEST] stack-overflow\n"
-const PASS_STACK_OVERFLOW [*:0]u8 = "[PASS] stack-overflow\n"
-const FAIL_STACK_OVERFLOW [*:0]u8 = "[FAIL] stack-overflow\n"
-const TEST_WILD_POINTER [*:0]u8 = "[TEST] wild-pointer\n"
-const PASS_WILD_POINTER [*:0]u8 = "[PASS] wild-pointer\n"
-const FAIL_WILD_POINTER [*:0]u8 = "[FAIL] wild-pointer\n"
-const TEST_EXEC_FAULT [*:0]u8 = "[TEST] exec-fault\n"
-const PASS_EXEC_FAULT [*:0]u8 = "[PASS] exec-fault\n"
-const FAIL_EXEC_FAULT [*:0]u8 = "[FAIL] exec-fault\n"
-const TEST_UNDEF_INSTR [*:0]u8 = "[TEST] undef-instr\n"
-const PASS_UNDEF_INSTR [*:0]u8 = "[PASS] undef-instr\n"
-const FAIL_UNDEF_INSTR [*:0]u8 = "[FAIL] undef-instr\n"
-const TEST_EFAULT_SYSCALL [*:0]u8 = "[TEST] efault-syscall\n"
-const PASS_EFAULT_SYSCALL [*:0]u8 = "[PASS] efault-syscall\n"
-const FAIL_EFAULT_SYSCALL [*:0]u8 = "[FAIL] efault-syscall\n"
-const TEST_FLIBC [*:0]u8 = "[TEST] flibc\n"
-const PASS_FLIBC [*:0]u8 = "[PASS] flibc\n"
-const FAIL_FLIBC [*:0]u8 = "[FAIL] flibc\n"
-const TEST_TRACE [*:0]u8 = "[TEST] trace\n"
-const PASS_TRACE [*:0]u8 = "[PASS] trace\n"
-const FAIL_TRACE [*:0]u8 = "[FAIL] trace\n"
-const TEST_PIPE [*:0]u8 = "[TEST] pipe\n"
-const PASS_PIPE [*:0]u8 = "[PASS] pipe\n"
-const FAIL_PIPE [*:0]u8 = "[FAIL] pipe\n"
+const TEST_FORK_STRESS [*:0]u8 = console_ui.tags.test_mark ++ "fork-stress\n"
+const PASS_FORK_STRESS [*:0]u8 = console_ui.tags.pass_mark ++ "fork-stress\n"
+const FAIL_FORK_STRESS [*:0]u8 = console_ui.tags.fail_mark ++ "fork-stress\n"
+const TEST_OOM_GRACEFUL [*:0]u8 = console_ui.tags.test_mark ++ "oom-graceful\n"
+const PASS_OOM_GRACEFUL [*:0]u8 = console_ui.tags.pass_mark ++ "oom-graceful\n"
+const FAIL_OOM_GRACEFUL [*:0]u8 = console_ui.tags.fail_mark ++ "oom-graceful\n"
+const TEST_KILL [*:0]u8 = console_ui.tags.test_mark ++ "kill\n"
+const PASS_KILL [*:0]u8 = console_ui.tags.pass_mark ++ "kill\n"
+const FAIL_KILL [*:0]u8 = console_ui.tags.fail_mark ++ "kill\n"
+const TEST_EXEC_ELF [*:0]u8 = console_ui.tags.test_mark ++ "exec-elf\n"
+const PASS_EXEC_ELF [*:0]u8 = console_ui.tags.pass_mark ++ "exec-elf\n"
+const FAIL_EXEC_ELF [*:0]u8 = console_ui.tags.fail_mark ++ "exec-elf\n"
+const TEST_EXECVE [*:0]u8 = console_ui.tags.test_mark ++ "execve\n"
+const PASS_EXECVE [*:0]u8 = console_ui.tags.pass_mark ++ "execve\n"
+const FAIL_EXECVE [*:0]u8 = console_ui.tags.fail_mark ++ "execve\n"
+const TEST_BRK [*:0]u8 = console_ui.tags.test_mark ++ "brk\n"
+const PASS_BRK [*:0]u8 = console_ui.tags.pass_mark ++ "brk\n"
+const FAIL_BRK [*:0]u8 = console_ui.tags.fail_mark ++ "brk\n"
+const TEST_STACK_OVERFLOW [*:0]u8 = console_ui.tags.test_mark ++ "stack-overflow\n"
+const PASS_STACK_OVERFLOW [*:0]u8 = console_ui.tags.pass_mark ++ "stack-overflow\n"
+const FAIL_STACK_OVERFLOW [*:0]u8 = console_ui.tags.fail_mark ++ "stack-overflow\n"
+const TEST_WILD_POINTER [*:0]u8 = console_ui.tags.test_mark ++ "wild-pointer\n"
+const PASS_WILD_POINTER [*:0]u8 = console_ui.tags.pass_mark ++ "wild-pointer\n"
+const FAIL_WILD_POINTER [*:0]u8 = console_ui.tags.fail_mark ++ "wild-pointer\n"
+const TEST_EXEC_FAULT [*:0]u8 = console_ui.tags.test_mark ++ "exec-fault\n"
+const PASS_EXEC_FAULT [*:0]u8 = console_ui.tags.pass_mark ++ "exec-fault\n"
+const FAIL_EXEC_FAULT [*:0]u8 = console_ui.tags.fail_mark ++ "exec-fault\n"
+const TEST_UNDEF_INSTR [*:0]u8 = console_ui.tags.test_mark ++ "undef-instr\n"
+const PASS_UNDEF_INSTR [*:0]u8 = console_ui.tags.pass_mark ++ "undef-instr\n"
+const FAIL_UNDEF_INSTR [*:0]u8 = console_ui.tags.fail_mark ++ "undef-instr\n"
+const TEST_EFAULT_SYSCALL [*:0]u8 = console_ui.tags.test_mark ++ "efault-syscall\n"
+const PASS_EFAULT_SYSCALL [*:0]u8 = console_ui.tags.pass_mark ++ "efault-syscall\n"
+const FAIL_EFAULT_SYSCALL [*:0]u8 = console_ui.tags.fail_mark ++ "efault-syscall\n"
+const TEST_FLIBC [*:0]u8 = console_ui.tags.test_mark ++ "flibc\n"
+const PASS_FLIBC [*:0]u8 = console_ui.tags.pass_mark ++ "flibc\n"
+const FAIL_FLIBC [*:0]u8 = console_ui.tags.fail_mark ++ "flibc\n"
+const TEST_TRACE [*:0]u8 = console_ui.tags.test_mark ++ "trace\n"
+const PASS_TRACE [*:0]u8 = console_ui.tags.pass_mark ++ "trace\n"
+const FAIL_TRACE [*:0]u8 = console_ui.tags.fail_mark ++ "trace\n"
+const TEST_PIPE [*:0]u8 = console_ui.tags.test_mark ++ "pipe\n"
+const PASS_PIPE [*:0]u8 = console_ui.tags.pass_mark ++ "pipe\n"
+const FAIL_PIPE [*:0]u8 = console_ui.tags.fail_mark ++ "pipe\n"
 const PIPE_OK_MSG [*:0]u8 = "pipe ok\n"
 const PIPE_BAD_MSG [*:0]u8 = "pipe bad\n"
-const TEST_CONSOLE_ECHO [*:0]u8 = "[TEST] console-echo\n"
-const PASS_CONSOLE_ECHO [*:0]u8 = "[PASS] console-echo\n"
-const FAIL_CONSOLE_ECHO [*:0]u8 = "[FAIL] console-echo\n"
+const TEST_CONSOLE_ECHO [*:0]u8 = console_ui.tags.test_mark ++ "console-echo\n"
+const PASS_CONSOLE_ECHO [*:0]u8 = console_ui.tags.pass_mark ++ "console-echo\n"
+const FAIL_CONSOLE_ECHO [*:0]u8 = console_ui.tags.fail_mark ++ "console-echo\n"
 const ECHO_OK_MSG [*:0]u8 = "echo ok\n"
 const ECHO_BAD_MSG [*:0]u8 = "echo bad\n"
-const TEST_FD_REDIRECT [*:0]u8 = "[TEST] fd-redirect\n"
-const PASS_FD_REDIRECT [*:0]u8 = "[PASS] fd-redirect\n"
-const FAIL_FD_REDIRECT [*:0]u8 = "[FAIL] fd-redirect\n"
+const TEST_FD_REDIRECT [*:0]u8 = console_ui.tags.test_mark ++ "fd-redirect\n"
+const PASS_FD_REDIRECT [*:0]u8 = console_ui.tags.pass_mark ++ "fd-redirect\n"
+const FAIL_FD_REDIRECT [*:0]u8 = console_ui.tags.fail_mark ++ "fd-redirect\n"
 const FD_REDIRECT_OK_MSG [*:0]u8 = "fd-redirect ok\n"
 const FD_REDIRECT_BAD_MSG [*:0]u8 = "fd-redirect bad\n"
-const TEST_INITRAMFS_OPEN [*:0]u8 = "[TEST] initramfs-open\n"
-const PASS_INITRAMFS_OPEN [*:0]u8 = "[PASS] initramfs-open\n"
-const FAIL_INITRAMFS_OPEN [*:0]u8 = "[FAIL] initramfs-open\n"
-const TEST_VFS_DISPATCH [*:0]u8 = "[TEST] vfs-dispatch\n"
-const PASS_VFS_DISPATCH [*:0]u8 = "[PASS] vfs-dispatch\n"
-const FAIL_VFS_DISPATCH [*:0]u8 = "[FAIL] vfs-dispatch\n"
+const TEST_INITRAMFS_OPEN [*:0]u8 = console_ui.tags.test_mark ++ "initramfs-open\n"
+const PASS_INITRAMFS_OPEN [*:0]u8 = console_ui.tags.pass_mark ++ "initramfs-open\n"
+const FAIL_INITRAMFS_OPEN [*:0]u8 = console_ui.tags.fail_mark ++ "initramfs-open\n"
+const TEST_VFS_DISPATCH [*:0]u8 = console_ui.tags.test_mark ++ "vfs-dispatch\n"
+const PASS_VFS_DISPATCH [*:0]u8 = console_ui.tags.pass_mark ++ "vfs-dispatch\n"
+const FAIL_VFS_DISPATCH [*:0]u8 = console_ui.tags.fail_mark ++ "vfs-dispatch\n"
 const INIT_PATH [*:0]u8 = "/sbin/init"
 const HELLO_ELF_PATH [*:0]u8 = "/test/hello.elf"
 const ARGV_ECHO_PATH [*:0]u8 = "/test/argv_echo.elf"
@@ -429,12 +431,12 @@ const FLIBC_DEMO_ELF_PATH [*:0]u8 = "/test/flibc_demo.elf"
 // const TEST_FSH: [*:0]const u8 = "[TEST] fsh\n";
 // const PASS_FSH: [*:0]const u8 = "[PASS] fsh\n";
 // const FAIL_FSH: [*:0]const u8 = "[FAIL] fsh\n";
-const TEST_READDIR [*:0]u8 = "[TEST] readdir\n"
-const PASS_READDIR [*:0]u8 = "[PASS] readdir\n"
-const FAIL_READDIR [*:0]u8 = "[FAIL] readdir\n"
-const TEST_KLOG [*:0]u8 = "[TEST] klog\n"
-const PASS_KLOG [*:0]u8 = "[PASS] klog\n"
-const FAIL_KLOG [*:0]u8 = "[FAIL] klog\n"
+const TEST_READDIR [*:0]u8 = console_ui.tags.test_mark ++ "readdir\n"
+const PASS_READDIR [*:0]u8 = console_ui.tags.pass_mark ++ "readdir\n"
+const FAIL_READDIR [*:0]u8 = console_ui.tags.fail_mark ++ "readdir\n"
+const TEST_KLOG [*:0]u8 = console_ui.tags.test_mark ++ "klog\n"
+const PASS_KLOG [*:0]u8 = console_ui.tags.pass_mark ++ "klog\n"
+const FAIL_KLOG [*:0]u8 = console_ui.tags.fail_mark ++ "klog\n"
 // Marker run_klog searches the ring snapshot for. `free_pages: ` is
 // emitted by the kernel's dump_free_count via main_output(MU) *directly*
 // (not the user console_tx mux), so it is teed into the ring regardless of
@@ -442,46 +444,51 @@ const FAIL_KLOG [*:0]u8 = "[FAIL] klog\n"
 // unlike the userland scenario header. run_klog prints it (via
 // sys_dump_free) right before the snapshot, so it is the freshest line.
 const KLOG_MARKER []u8 = "free_pages"
-const TEST_RNG [*:0]u8 = "[TEST] rng\n"
-const PASS_RNG [*:0]u8 = "[PASS] rng\n"
-const FAIL_RNG [*:0]u8 = "[FAIL] rng\n"
+const TEST_RNG [*:0]u8 = console_ui.tags.test_mark ++ "rng\n"
+const PASS_RNG [*:0]u8 = console_ui.tags.pass_mark ++ "rng\n"
+const FAIL_RNG [*:0]u8 = console_ui.tags.fail_mark ++ "rng\n"
 // Markers run_rng scans the ring snapshot for. hwrng_init (src/hwrng.zig)
 // announces the active entropy source over main_output(MU) during kernel
 // bring-up, so the line is teed into the ring on every target before
 // PID 1 exists. The positive token matches any announce; the negative
 // token is printed only by the failed boot self-test and must be absent —
 // both together assert "the announce ran AND it was healthy".
-const HWRNG_MARKER []u8 = "hwrng"
-const HWRNG_FAIL_MARKER []u8 = "hwrng: self-test failed"
-const TEST_HWMON_CORE [*:0]u8 = "[TEST] hwmon-core\n"
-const PASS_HWMON_CORE [*:0]u8 = "[PASS] hwmon-core\n"
-const FAIL_HWMON_CORE [*:0]u8 = "[FAIL] hwmon-core\n"
-const TEST_HWMON_MAILBOX [*:0]u8 = "[TEST] hwmon-mailbox\n"
-const PASS_HWMON_MAILBOX [*:0]u8 = "[PASS] hwmon-mailbox\n"
-const FAIL_HWMON_MAILBOX [*:0]u8 = "[FAIL] hwmon-mailbox\n"
-const TEST_CREDS [*:0]u8 = "[TEST] creds\n"
-const PASS_CREDS [*:0]u8 = "[PASS] creds\n"
-const FAIL_CREDS [*:0]u8 = "[FAIL] creds\n"
-const TEST_AUTH [*:0]u8 = "[TEST] authenticate\n"
-const PASS_AUTH [*:0]u8 = "[PASS] authenticate\n"
-const FAIL_AUTH [*:0]u8 = "[FAIL] authenticate\n"
-const TEST_PERM [*:0]u8 = "[TEST] perm\n"
-const PASS_PERM [*:0]u8 = "[PASS] perm\n"
-const FAIL_PERM [*:0]u8 = "[FAIL] perm\n"
+//
+// Copies of the announce wording, not the announce itself: this file is
+// compiled into pid1.elf, which cannot link the kernel-side hwrng module.
+// Rewording hwrng_init's lines means updating these two tokens and the
+// hwrng greps in scripts/run_qemu_test.sh in the same commit.
+const HWRNG_MARKER []u8 = "HWRNG"
+const HWRNG_FAIL_MARKER []u8 = "HWRNG: self-test failed"
+const TEST_HWMON_CORE [*:0]u8 = console_ui.tags.test_mark ++ "hwmon-core\n"
+const PASS_HWMON_CORE [*:0]u8 = console_ui.tags.pass_mark ++ "hwmon-core\n"
+const FAIL_HWMON_CORE [*:0]u8 = console_ui.tags.fail_mark ++ "hwmon-core\n"
+const TEST_HWMON_MAILBOX [*:0]u8 = console_ui.tags.test_mark ++ "hwmon-mailbox\n"
+const PASS_HWMON_MAILBOX [*:0]u8 = console_ui.tags.pass_mark ++ "hwmon-mailbox\n"
+const FAIL_HWMON_MAILBOX [*:0]u8 = console_ui.tags.fail_mark ++ "hwmon-mailbox\n"
+const TEST_CREDS [*:0]u8 = console_ui.tags.test_mark ++ "creds\n"
+const PASS_CREDS [*:0]u8 = console_ui.tags.pass_mark ++ "creds\n"
+const FAIL_CREDS [*:0]u8 = console_ui.tags.fail_mark ++ "creds\n"
+const TEST_AUTH [*:0]u8 = console_ui.tags.test_mark ++ "authenticate\n"
+const PASS_AUTH [*:0]u8 = console_ui.tags.pass_mark ++ "authenticate\n"
+const FAIL_AUTH [*:0]u8 = console_ui.tags.fail_mark ++ "authenticate\n"
+const TEST_PERM [*:0]u8 = console_ui.tags.test_mark ++ "perm\n"
+const PASS_PERM [*:0]u8 = console_ui.tags.pass_mark ++ "perm\n"
+const FAIL_PERM [*:0]u8 = console_ui.tags.fail_mark ++ "perm\n"
 // Login-lifecycle capstone: drives the real /bin/login through
 // two console-scripted sessions (flash, then root) via its session-limit
 // argv. Named "login" — not "auth" — so greps for the existing
 // "authenticate" scenario never collide with it.
-const TEST_LOGIN [*:0]u8 = "[TEST] login\n"
-const PASS_LOGIN [*:0]u8 = "[PASS] login\n"
-const FAIL_LOGIN [*:0]u8 = "[FAIL] login\n"
+const TEST_LOGIN [*:0]u8 = console_ui.tags.test_mark ++ "login\n"
+const PASS_LOGIN [*:0]u8 = console_ui.tags.pass_mark ++ "login\n"
+const FAIL_LOGIN [*:0]u8 = console_ui.tags.fail_mark ++ "login\n"
 const LOGIN_BIN_PATH [*:0]u8 = "/bin/login"
 // Password change: sys_passwd roundtrip against the writable
 // FAT32 shadow; SKIP-PASSes on virt (no SD card), mirroring fs-roundtrip.
-const TEST_PASSWD [*:0]u8 = "[TEST] passwd\n"
-const PASS_PASSWD [*:0]u8 = "[PASS] passwd\n"
-const PASS_PASSWD_SKIP [*:0]u8 = "[PASS] passwd (skip)\n"
-const FAIL_PASSWD [*:0]u8 = "[FAIL] passwd\n"
+const TEST_PASSWD [*:0]u8 = console_ui.tags.test_mark ++ "passwd\n"
+const PASS_PASSWD [*:0]u8 = console_ui.tags.pass_mark ++ "passwd\n"
+const PASS_PASSWD_SKIP [*:0]u8 = console_ui.tags.pass_mark ++ "passwd (skip)\n"
+const FAIL_PASSWD [*:0]u8 = console_ui.tags.fail_mark ++ "passwd\n"
 const MNT_SHADOW_PATH [*:0]u8 = "/mnt/shadow"
 // Paths the perm scenario probes: the 0600 shadow file (denied to a
 // dropped child, open to root) and the 0644 passwd file (world-readable
@@ -491,12 +498,12 @@ const ETC_PASSWD_PATH [*:0]u8 = "/etc/passwd"
 const BIN_DIR [*:0]u8 = "/bin"
 const MNT_MISSING_PATH [*:0]u8 = "/mnt/this-does-not-exist"
 const MNT_BARE_PATH [*:0]u8 = "/mnt"
-const TEST_FS_ROUNDTRIP [*:0]u8 = "[TEST] fs-roundtrip\n"
-const PASS_WRITE [*:0]u8 = "[PASS] fs-roundtrip-write (reboot to verify)\n"
-const PASS_VERIFY [*:0]u8 = "[PASS] fs-roundtrip\n"
-const PASS_SKIP [*:0]u8 = "[PASS] fs-roundtrip (skip)\n"
-const FAIL_FS_ROUNDTRIP [*:0]u8 = "[FAIL] fs-roundtrip\n"
-const FAIL_MAGIC [*:0]u8 = "[FAIL] fs-roundtrip (magic corrupted)\n"
+const TEST_FS_ROUNDTRIP [*:0]u8 = console_ui.tags.test_mark ++ "fs-roundtrip\n"
+const PASS_WRITE [*:0]u8 = console_ui.tags.pass_mark ++ "fs-roundtrip-write (reboot to verify)\n"
+const PASS_VERIFY [*:0]u8 = console_ui.tags.pass_mark ++ "fs-roundtrip\n"
+const PASS_SKIP [*:0]u8 = console_ui.tags.pass_mark ++ "fs-roundtrip (skip)\n"
+const FAIL_FS_ROUNDTRIP [*:0]u8 = console_ui.tags.fail_mark ++ "fs-roundtrip\n"
+const FAIL_MAGIC [*:0]u8 = console_ui.tags.fail_mark ++ "fs-roundtrip (magic corrupted)\n"
 // 1-byte sub-sector writeBack regression probe. [DBG] prefix so
 // run_qemu_test.sh's [FAIL]/14-14/ERROR-CAUGHT greps are untouched.
 // Catches the FAT32 splice reorder regression
@@ -523,10 +530,10 @@ const CRUD_OK [*:0]u8 = "[DBG] fs-crud OK (create/write/rename/unlink)\n"
 // [TEST] fs-empty-write — drives fat32_backend.write's step-0 (give a
 // first_cluster == 0 file its first data cluster). Seeded as a 0-byte
 // /mnt/EMPTY.TXT (make_test_disk.sh + the real Pi card).
-const TEST_FS_EMPTY [*:0]u8 = "[TEST] fs-empty-write\n"
-const PASS_FS_EMPTY [*:0]u8 = "[PASS] fs-empty-write\n"
-const PASS_FS_EMPTY_SKIP [*:0]u8 = "[PASS] fs-empty-write (skip)\n"
-const FAIL_FS_EMPTY [*:0]u8 = "[FAIL] fs-empty-write\n"
+const TEST_FS_EMPTY [*:0]u8 = console_ui.tags.test_mark ++ "fs-empty-write\n"
+const PASS_FS_EMPTY [*:0]u8 = console_ui.tags.pass_mark ++ "fs-empty-write\n"
+const PASS_FS_EMPTY_SKIP [*:0]u8 = console_ui.tags.pass_mark ++ "fs-empty-write (skip)\n"
+const FAIL_FS_EMPTY [*:0]u8 = console_ui.tags.fail_mark ++ "fs-empty-write\n"
 const EMPTY_PATH [*:0]u8 = "/mnt/empty.txt"
 const EMPTY_MARK = [_]u8{ 'E', 'M', 'P', 'T', 'Y', 'O', 'K', '\n' }
 
@@ -1171,7 +1178,7 @@ fn run_pipe(baseline u64) bool {
         }
         const n = sys_write(wfd, #intFromPtr(&out), PIPE_PAYLOAD_LEN)
         if (n != PIPE_PAYLOAD_LEN) {
-            sys_writeConsole("[FAIL] pipe (short write)\n")
+            sys_writeConsole(console_ui.tags.fail_mark ++ "pipe (short write)\n")
         }
         _ = sys_close(wfd)
         sys_exit()
@@ -1346,7 +1353,7 @@ fn run_fd_redirect(baseline u64) bool {
         }
         const n = sys_write(1, #intFromPtr(&out), FD_REDIRECT_PAYLOAD_LEN)
         if (n != FD_REDIRECT_PAYLOAD_LEN) {
-            sys_writeConsole("[FAIL] fd-redirect (short write)\n")
+            sys_writeConsole(console_ui.tags.fail_mark ++ "fd-redirect (short write)\n")
         }
         _ = sys_close(1)
         _ = sys_close(wfd)

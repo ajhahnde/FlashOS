@@ -1,20 +1,20 @@
 
 
-[ OK ] Initialized Mini-UART console
-[ OK ] Booted core 0 (EL1)
-[ OK ] Initialized PL011 trace UART
-[ OK ] Loaded exception vectors
-[ OK ] Enabled interrupt controller
-[ OK ] Started USB gadget
-[ OK ] Loaded kernel symbols
-[ OK ] Relocated syscall table
-[ OK ] Initialized trace subsystem
-[ OK ] Started kernel trace output
-[ OK ] Mounted initramfs root
-[ OK ] Initialized EMMC2 block device
-[ OK ] Mounted /mnt (FAT32)
-[ OK ] Initialized hwrng
-[ OK ] Reached target Userspace
+[ OK ] Mini-UART init
+[ OK ] Boot core 0 (EL1)
+[ OK ] PL011 UART init
+[ OK ] IRQ vectors init
+[ OK ] GIC init
+[ OK ] USB DWC2 init
+[ OK ] KSYMS init
+[ OK ] Syscall table relocate
+[ OK ] Trace init
+[ OK ] Kernel trace -> PL011
+[ OK ] Initramfs mount (/)
+[ OK ] EMMC2 init
+[ OK ] FAT32 mount (/mnt)
+[ OK ] HWRNG init
+[ OK ] Userspace init
 
 login: flash
 Password: *****

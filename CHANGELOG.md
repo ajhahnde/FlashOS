@@ -29,11 +29,36 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Boot status lines are single-sourced and reworded.** Every bracket tag now
+  comes from `lib/console_ui/tags.flash` — the self-test markers (`[TEST]`,
+  `[PASS]`, `[FAIL]`), the `[Debug]` trace prefix, and PID 1's `[ OK ]` line,
+  which previously carried a hand-rolled copy of the tag bytes. The kernel's
+  bring-up lines were levelled to a consistent noun-terse voice: `Enable GIC v3`
+  → `GIC init` (the Pi 4B carries a GIC-400, not a GICv3), `Trace output kernel`
+  → `Kernel trace -> PL011`, `Initramfs init` → `Initramfs mount (/)`,
+  `Mounted /mnt (FAT32)` → `FAT32 mount (/mnt)`. Marker bytes themselves are
+  unchanged, so the boot contract holds.
+- **Subsystems no longer draw their own status lines.** `hwrng_init` returned
+  `void` and announced itself over a private console sink; it now returns
+  `i32` under the same negative-is-failure contract the other bring-up calls
+  use, and `kernel_main` owns the line. PID 1 likewise binds a real
+  `console_ui` logger over `write(2)` instead of emitting a pre-rendered
+  prefix, so the kernel and userspace status lines share one renderer.
 - **The product wordmark is now `.flashOS`** (neutral `.flash`, amber `OS`),
   replacing the all-amber `FlashOS` mark. Updated at every rendering: the fsh
   homescreen banner (`console_ui.homescreen`), the README/docs logo assets,
   and the boot-demo GIF. The boot contract markers (`[ OK ]` lines, the
   `type 'help' for commands` tail) are unchanged.
+
+### Fixed
+
+- **`[TEST] rng` failed on every boot.** The entropy source's announce lines
+  were reworded without updating the two consumers that cannot import the
+  emitting module: the in-kernel scenario scans the kernel log ring for the
+  announce, and the QEMU boot watchdog greps it from the serial log. Both
+  tracked the pre-rename wording, so the scenario reported `[FAIL] rng` and
+  the watchdog counted a healthy announce as missing. Both now track the
+  live wording, and each site documents the coupling.
 
 ## [v0.7.3] - 2026-07-04
 

@@ -20,6 +20,7 @@ const sha256 = #import("sha256")
 const shadow = #import("shadow")
 const perm = #import("perm")
 const pwfile = #import("pwfile")
+const console_ui = #import("console_ui")
 // Kernel entropy source (salt minting for sys_passwd). Named module —
 // hwrng was promoted to a named module when it moved to Flash (the
 // generated .zig lives in the build cache, so a path import would not
@@ -1128,7 +1129,7 @@ export fn sys_authenticate(user_uva u64, user_len u64, pass_uva u64, pass_len u6
             .match => return 0,
             .mismatch, .no_user => return -1,
             // Nothing parseable → announce + fall through to the seed.
-            .corrupt => main_output(MU, "[Debug] /mnt/shadow corrupt - falling back to initramfs seed\n"),
+            .corrupt => main_output(MU, console_ui.tags.debug_mark ++ "/mnt/shadow corrupt - falling back to initramfs seed\n"),
         }
     } else |err| {
         // OpenFailed is the normal miss (virt / fresh card) → silent.
@@ -1138,7 +1139,7 @@ export fn sys_authenticate(user_uva u64, user_len u64, pass_uva u64, pass_len u6
         // capture-less `else if` in stage1, dropping the `|err|` binding.)
         const unreadable = err == error.ReadFailed
         if unreadable {
-            main_output(MU, "[Debug] /mnt/shadow unreadable - falling back to initramfs seed\n")
+            main_output(MU, console_ui.tags.debug_mark ++ "/mnt/shadow unreadable - falling back to initramfs seed\n")
         }
     }
 

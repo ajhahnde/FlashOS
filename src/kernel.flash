@@ -48,7 +48,7 @@ extern fn get_el() u32
 // Generic timer
 extern fn generic_timer_init() void
 extern fn get_sys_count() u64
-extern fn hwrng_init() void
+extern fn hwrng_init() i32
 
 // IRQ
 extern fn enable_interrupt_gic(intid u32, core u32) void
@@ -162,24 +162,24 @@ fn run_emmc2_smoke() void {
         i += 1
     }
 
-    main_output(MU, "[TEST] emmc2-block\n")
+    main_output(MU, console_ui.tags.test_mark ++ "emmc2-block\n")
     if (board_emmc2_write_block(EMMC2_BLOCK_LBA, &write_buf) != 0) {
-        main_output(MU, "[FAIL] emmc2-block (write)\n")
+        main_output(MU, console_ui.tags.fail_mark ++ "emmc2-block (write)\n")
         return
     }
     if (board_emmc2_read_block(EMMC2_BLOCK_LBA, &read_buf) != 0) {
-        main_output(MU, "[FAIL] emmc2-block (read)\n")
+        main_output(MU, console_ui.tags.fail_mark ++ "emmc2-block (read)\n")
         return
     }
     i = 0
     while (i < 512) {
         if (read_buf[i] != write_buf[i]) {
-            main_output(MU, "[FAIL] emmc2-block (mismatch)\n")
+            main_output(MU, console_ui.tags.fail_mark ++ "emmc2-block (mismatch)\n")
             return
         }
         i += 1
     }
-    main_output(MU, "[PASS] emmc2-block\n")
+    main_output(MU, console_ui.tags.pass_mark ++ "emmc2-block\n")
 }
 
 export fn kernel_main_impl(id u64) void {
@@ -230,19 +230,14 @@ export fn kernel_main_impl(id u64) void {
         board_irq_init()
 
         enable_interrupt_gic(VC_AUX_IRQ, #intCast(id))
-        boot.ok("Enable GIC v3")
+        boot.ok("GIC init")
 
         // USB-OTG gadget bring-up (DWC2). The device MMIO at 0xFE980000 is
         // already device-mapped by boot.S, so this needs no page allocator.
         // Fails soft on QEMU (no DWC2 device path) — bounded waits return
         // -1 and the polled console simply never enumerates. Serviced from
         // the PID-0 idle loop below.
-        dwc2_init := "USB DWC2 init"
-        if (board_usb_init() < 0) {
-            boot.skip(dwc2_init)
-        } else {
-            boot.ok(dwc2_init)
-        }
+        boot.status(if (board_usb_init() < 0) .skip else .ok, "USB DWC2 init")
 
         ksyms_init()
         boot.ok("KSYMS init")
@@ -254,7 +249,7 @@ export fn kernel_main_impl(id u64) void {
         boot.ok("Trace init")
 
         trace_output_kernel_pts(PL)
-        boot.ok("Trace output kernel")
+        boot.ok("Kernel trace -> PL011")
 
         // VFS root mount bring-up. initramfs_backend
         // only sets pointers — no get_free_page — so it slots in ahead
@@ -262,7 +257,7 @@ export fn kernel_main_impl(id u64) void {
         // /mnt mount is wired later, after board.emmc2.init() has wired
         // block_dev.sd_dev (fat32_backend.init issues block reads).
         initramfs_backend.init()
-        boot.ok("Initramfs init")
+        boot.ok("Initramfs mount (/)")
 
         // Block-device bring-up. On virt
         // the memory-backed fake never fails — graceful degradation
@@ -271,11 +266,9 @@ export fn kernel_main_impl(id u64) void {
         // The smoke check below covers acceptance #2 + #7 in one
         // shot: it exercises the BlockDev vtable end-to-end and
         // proves init() wired `block_dev.sd_dev`.
-        emmc2_init := "EMMC2 init"
-        if (board_emmc2_init() < 0) {
-            boot.skip(emmc2_init)
-        } else {
-            boot.ok(emmc2_init)
+        emmc2_ok := board_emmc2_init() >= 0
+        boot.status(if (emmc2_ok) .ok else .skip, "EMMC2 init")
+        if (emmc2_ok) {
             // Pre-PID-1 block-device smoke — part of the boot-as-test path,
             // gated so a clean (non-selftest) boot stays quiet.
             if (build_options.boot_selftest) {
@@ -286,9 +279,9 @@ export fn kernel_main_impl(id u64) void {
             // disk leaves mount_table[1] null and /mnt/* resolves to
             // ENOENT.
             if (fat32_backend.init() < 0) {
-                boot.skip("/mnt (no FAT32 volume)")
+                boot.skip("FAT32 mount (no volume)")
             } else {
-                boot.ok("Mounted /mnt (FAT32)")
+                boot.ok("FAT32 mount (/mnt)")
                 // Permission overlay: init() parsed PERMS.TAB
                 // into the backend's table. A mounted volume without a
                 // parseable overlay is the loud anti-brick announcement:
@@ -302,10 +295,16 @@ export fn kernel_main_impl(id u64) void {
 
         // Entropy source bring-up. Seeds the fallback generator
         // from CNTPCT (readable from reset — independent of the
-        // generic-timer IRQ setup below), self-tests, and announces the
-        // active source. The announce line tees into the kernel log ring,
-        // where [TEST] rng asserts it later. Allocates nothing.
-        hwrng_init()
+        // generic-timer IRQ setup below) and self-tests it. A stuck source
+        // would mint the same salt for every credential, so the failure is
+        // announced loudly rather than degraded silently. The announce line
+        // tees into the kernel log ring, where [TEST] rng asserts it later.
+        // Allocates nothing.
+        if (hwrng_init() < 0) {
+            boot.warn("HWRNG: self-test failed (constant output)")
+        } else {
+            boot.ok("HWRNG init")
+        }
 
         // Boot-time free-page baseline. Logged before any task is created
         // so the user-space dumps later in the trace can be compared

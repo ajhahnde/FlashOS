@@ -12,9 +12,17 @@
 
 use "kernel_tests" as tests
 use build_options
+use console_ui
 
-const OK = "[ \x1b[32mOK\x1b[0m ] "
-const PID1_MSG [*:0]u8 = OK ++ "Userspace init\n"
+// console_ui Sink bound to fd 1 — the same renderers the kernel's boot log
+// uses, over a syscall instead of the Mini-UART. PID 1 announces its own
+// arrival because nothing below EL0 can attest that userspace actually
+// started: the kernel only knows it handed off.
+fn consoleSink(bytes []u8) void {
+    _ = tests.sys_write(1, #intFromPtr(bytes.ptr), bytes.len)
+}
+const boot = console_ui.logger(&consoleSink)
+
 const LOGIN_PATH [*:0]u8 = "/bin/login"
 
 // CI credential script. When the `ci-login-seed` build flag is set,
@@ -41,7 +49,7 @@ export fn _start() callconv(.naked) noreturn {
 }
 
 export fn pid1_main() noreturn {
-    tests.sys_writeConsole(PID1_MSG)
+    boot.ok("Userspace init")
     // The in-kernel [TEST] harness is the boot-as-test path the QEMU
     // watchdog asserts (28 scenarios + 32 free-page checkpoints). Gated so
     // deploy/run boot clean straight to login; -Dboot-selftest=true

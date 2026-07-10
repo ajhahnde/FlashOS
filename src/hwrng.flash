@@ -53,24 +53,9 @@ pub const Mixer = struct {
     }
 }
 
-// ---- Kernel glue (timer-backed, announce over the UART) ----
-
-const MU i32 = 0
+// ---- Kernel glue (timer-backed) ----
 
 extern fn get_sys_count() u64
-extern fn main_output(interface i32, str [*:0]u8) void
-extern fn main_output_char(interface i32, ch u8) void
-
-use console_ui
-
-// console_ui Sink bound to the same Mini-UART boot console the kernel logs to
-// (byte-at-a-time; see src/kernel.zig `bootSink` for the rationale).
-fn bootSink(bytes []u8) void {
-    for b in bytes {
-        main_output_char(MU, b)
-    }
-}
-const boot = console_ui.logger(&bootSink)
 
 // Which entropy source produced the bytes. Only the weak fallback
 // exists today; the hardware source joins with the RNG200 driver.
@@ -98,12 +83,14 @@ pub fn fill(buf []mut u8) Source {
     return .fallback
 }
 
-// Boot-time init: seed the mixer, self-test, announce the active source.
-// Called once from kernel_main after the Mini-UART is up and before
-// PID 1 is created, so the announce line sits in the kernel log ring by
-// the time the EL0 harness scenario snapshots it. Allocates nothing —
-// the free-page baseline emitted right after is unaffected.
-export fn hwrng_init() void {
+// Boot-time init: seed the mixer, then self-test. Returns 0 on a healthy
+// bring-up and -1 when the self-test caught a stuck source — the same
+// negative-is-failure contract the other subsystem inits use. kernel_main
+// owns the status line (this module never draws to the console), so the
+// announce lands in the kernel log ring before PID 1 exists, where the EL0
+// harness scenario snapshots it. Allocates nothing — the free-page baseline
+// emitted right after is unaffected.
+export fn hwrng_init() i32 {
     mixer = Mixer.init(get_sys_count())
 
     // Self-test: two draws must differ. A stuck counter or a mixer
@@ -122,10 +109,9 @@ export fn hwrng_init() void {
         i += 1
     }
     if (same) {
-        boot.warn("HWRNG: self-test failed (constant output)")
-        return
+        return -1
     }
-    boot.ok("HWRNG init")
+    return 0
 }
 
 // ---- Host tests ----
@@ -193,10 +179,10 @@ test "Mixer: different seeds diverge" {
 }
 
 test "fill + hwrng_init: end-to-end with the stubbed counter" {
-    // tests/host_stubs.zig provides a ramping get_sys_count and a no-op
-    // main_output, so the real boot path (seed → self-test → announce)
-    // runs here exactly as in the kernel.
-    hwrng_init()
+    // tests/host_stubs.zig provides a ramping get_sys_count, so the real boot
+    // path (seed → self-test) runs here exactly as in the kernel. A ramping
+    // counter must clear the self-test.
+    try testing.expectEqual(#as(i32, 0), hwrng_init())
     var a [23]u8 = undefined // odd length: exercises the partial last word
     var b [23]u8 = undefined
     try testing.expectEqual(Source.fallback, fill(a[0..]))
