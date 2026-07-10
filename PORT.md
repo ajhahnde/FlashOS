@@ -27,6 +27,11 @@ then compiles as before. The port preserved behaviour, not just source:
 the boot contract's per-board free-page checkpoints held unchanged from
 the first ported module to the last.
 
+> **Historical scope.** This page records the v0.4 source migration and
+> its former Zig-backend pipeline. Starting with v0.8, `build.flash` and
+> `flash build` are authoritative; current build instructions live in
+> [Setup](SETUP.md).
+
 > **Lineage.** FlashOS began as a C bare-metal kernel by Wei-Lin Chang
 > (rhythm16; see [License](LICENSE.md)), was rewritten in pure Zig +
 > AArch64 assembly, and now carries its OS-image code in Flash. This page
@@ -40,7 +45,7 @@ the first ported module to the last.
 2. [The toolchain pin](#2-the-toolchain-pin)
 3. [What moved to Flash](#3-what-moved-to-flash)
 4. [What stays Zig](#4-what-stays-zig)
-5. [How the build transpiles](#5-how-the-build-transpiles)
+5. [How the original build transpiled](#5-how-the-original-build-transpiled)
 6. [Validation](#6-validation)
 
 End state of the port:
@@ -130,7 +135,7 @@ Not everything is Flash, by design:
   developer's machine during the build, never in the OS image, and stay
   Zig.
 
-## 5. How the build transpiles
+## 5. How the original build transpiled
 
 `build.zig` registers each `.flash` module through a transpile step that
 invokes `flashc` to lower it to Zig in the build cache; that generated

@@ -110,9 +110,9 @@ union of:
   syscall entry points and the calling convention for each. Once
   enumerated under v1.0.0 in [`DOCUMENTATION.md`](DOCUMENTATION.md),
   removal or renumbering is a MAJOR change.
-- **Build-system entry points.** The top-level `build.zig` targets
-  the [`SETUP.md`](SETUP.md) names (`zig build`, `zig build qemu`,
-  `zig build pi`, `zig build test`). Adding a target is a MINOR;
+- **Build-system entry points.** The top-level `build.flash` targets
+  the [`SETUP.md`](SETUP.md) names (`flash build`, run targets,
+  deployment, and `flash build test`). Adding a target is a MINOR;
   removing or renaming a target is a MAJOR.
 - **Hardware support matrix.** The OS×board tiers defined in §4.
 

@@ -43,8 +43,8 @@ Referenz:
 
 | Tool                     | Mindestversion | Zweck                                     |
 | :----------------------- | :-------------- | :---------------------------------------- |
-| Zig                      | 0.16.0          | Zig + Assembly kompilieren, `build.zig` ausführen |
-| `flashc`                 | pinned          | Flash-Quellen (`.flash`) kompilieren      |
+| Flash                    | 1.4.1           | Flash kompilieren und `build.flash` ausführen |
+| Zig                      | 0.16.0          | Verbleibende Zig-Host-Tools kompilieren   |
 | `aarch64-elf-objcopy`    | 2.40+           | ELF → Roh-Binary                          |
 | `aarch64-elf-nm`         | 2.40+           | Symbol-Extraktion für `populate-syms`     |
 | `qemu-system-aarch64`    | 11.0.0+         | Den kernel unter QEMU ausführen           |
@@ -58,16 +58,10 @@ brew install zig aarch64-elf-binutils qemu
 
 ### Flash-Compiler (`flashc`)
 
-Die Source-Module von FlashOS sind in
-[Flash](https://github.com/ajhahnde/Flash) geschrieben und werden von
-`flashc` kompiliert — einem nativen LLVM-Compiler, dessen
-Bootstrap-Modus (`--backend=zig`) der FlashOS-Build während der
-nativen Umstellung noch nutzt. `build.zig` löst das Binary
-standardmäßig unter `~/Flash/zig-out/bin/flashc` auf; überschreibe
-den Pfad mit `-Dflashc=<path>`. Flash veröffentlicht keine vorgebauten
-Binaries, also baue den gepinnten, selbst-gehosteten Compiler aus dem
-Source — führe dies aus dem FlashOS-Checkout aus, damit der Pin aus
-`flash-toolchain.lock` gelesen wird:
+FlashOS nutzt die gepinnte
+[Flash](https://github.com/ajhahnde/Flash)-Toolchain. Flash veröffentlicht
+keine vorgebauten Binaries; baue sie deshalb aus dem in
+`flash-toolchain.lock` festgelegten Source-Stand:
 
 ```bash
 git clone https://github.com/ajhahnde/Flash.git ~/Flash
@@ -77,11 +71,10 @@ git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
 
 ## 2. Bauen
 
-Jeder Build kompiliert die `.flash`-Source-Module mit `flashc`, also
-baue ihn zuerst (siehe §1).
+Baue zuerst Flash (siehe §1) und starte anschließend den nativen Build:
 
 ```bash
-zig build                 # default: kernel8.img + armstub8.bin → zig-out/
+flash build                 # default: kernel8.img + armstub8.bin → flash-out/
 ```
 
 ```bash
@@ -90,18 +83,39 @@ build                     # vollständiger zweiphasiger Build
 build -d                  # zweiphasiger Build + Deploy auf die SD-Karte
 ```
 
-Der `build`-Helper ruft `zig build`, `zig build populate-syms` und dann
-erneut `zig build` auf, prüft per Diff, dass das Symbol-Layout
-konvergiert ist, und führt — mit `-d` — `zig build deploy` aus. Es gibt
+Der `build`-Helper ruft `flash build`, `flash build populate-syms` und dann
+erneut `flash build` auf, prüft per Diff, dass das Symbol-Layout
+konvergiert ist, und führt — mit `-d` — `flash build deploy` aus. Es gibt
 keinen interaktiven Prompt; das `-d`-Flag ist die Deploy-Zustimmung.
+
+### Build-Schritte
+
+| Kommando                                  | Ergebnis                                    |
+| :---------------------------------------- | :------------------------------------------ |
+| `flash build`                             | Pi-Kernel und Armstub                       |
+| `flash build -Dboard=virt`                | `virt`-Kernel ohne Armstub                  |
+| `flash build kernel`                      | Nur das Kernel-Image                        |
+| `flash build armstub`                     | Nur der Pi-Armstub                          |
+| `flash build populate-syms`               | `src/symbol_area.S` neu erzeugen            |
+| `flash build deploy`                      | Pi-Build und Firmware nach `$SD_BOOT` kopieren |
+| `flash build -Dboard=rpi4b run`           | QEMU `-M raspi4b` starten                   |
+| `flash build -Dboard=virt run-virt`       | QEMU `-M virt` starten                      |
+| `flash build -Dboard=rpi4b test-rpi4b`    | Einen `raspi4b`-Boot validieren             |
+| `flash build -Dboard=virt test-virt`      | Einen `virt`-Boot validieren                |
+| `flash build -Dboard=virt iso`            | GRUB-EFI-Rescue-ISO bauen                   |
+| `flash build test`                        | Host-Tests ausführen                        |
+| `flash build clean`                       | Cache und Build-Ausgabe entfernen           |
+
+Der Standard-Optimierungsmodus ist `ReleaseSmall`. Überschreibe ihn mit
+`-Doptimize=ReleaseSafe`, `Debug` oder `ReleaseFast`.
 
 ## 3. Ausführen unter QEMU
 
 Zwei QEMU-Maschinen sind verdrahtet; Auswahl über `-Dboard=`:
 
 ```bash
-zig build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
-zig build -Dboard=virt  run-virt   # generic ARMv8 (virt)
+flash build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
+flash build -Dboard=virt  run-virt   # generic ARMv8 (virt)
 ```
 
 `-Dboard=rpi4b` ist das validierte Board. `-M virt` ist seit
@@ -117,8 +131,8 @@ den erwarteten Free-Page-Checkpoints, und mit 1 bei einem Fehler oder einem
 watchdog-Timeout (keine manuelle QEMU-Überwachung):
 
 ```bash
-zig build -Dboard=rpi4b test-rpi4b  # (matches run); das CI-Boot-Gate
-zig build -Dboard=virt  test-virt   # depriorisiert, nicht CI-gegated
+flash build -Dboard=rpi4b test-rpi4b  # (matches run); das CI-Boot-Gate
+flash build -Dboard=virt  test-virt   # depriorisiert, nicht CI-gegated
 ```
 
 Um die Byte-Identitäts-Baseline des Pi vor dem Flashen der SD-Karte zu
@@ -130,7 +144,7 @@ scripts/verify_pi_baseline.sh
 ```
 
 `run` ruft
-`qemu-system-aarch64 -M raspi4b -serial null -serial stdio -kernel zig-out/kernel8.img`
+`qemu-system-aarch64 -M raspi4b -serial null -serial stdio -kernel flash-out/kernel8.img`
 auf — die Mini-UART (UART1) wird auf das Host-stdio geleitet, sodass die
 Ausgabe des kernel und die `[TEST]/[PASS]/[FAIL]`-Zeilen des Test-Harness
 direkt im steuernden Terminal erscheinen. `run-virt` verwendet
@@ -157,8 +171,8 @@ mindestens Folgendes enthalten muss:
 
 ```text
 config.txt              # ships in this repo
-kernel8.img             # built by `zig build`
-armstub8.bin            # built by `zig build`
+kernel8.img             # built by `flash build`
+armstub8.bin            # built by `flash build`
 bcm2711-rpi-4-b.dtb     # bundled in this repo
 start4.elf              # bundled in this repo
 fixup4.dat              # bundled in this repo
@@ -173,7 +187,7 @@ und werden hier der Bequemlichkeit sowie der Lizenz-/Credit-Klarheit halber
 mitgeführt. Der Deploy-Schritt verweist standardmäßig auf dieses Verzeichnis:
 
 ```bash
-SD_BOOT=/Volumes/BOOT FIRMWARE=firmware zig build deploy
+SD_BOOT=/Volumes/BOOT FIRMWARE=firmware flash build deploy
 ```
 
 Der Deploy-Schritt liest zwei Umgebungsvariablen:
@@ -261,102 +275,45 @@ Kabels also hängt, mache einen Power-Cycle des Pi.
 
 ## 6. Hilfs-Shell-Funktionen
 
-Das Repo liefert [`flashos.zsh`](../../flashos.zsh) mit einer Handvoll Helfern,
-bereitgestellt als zwei Verb-Dispatcher — `pi <verb>` (serielle Konsole) und
-`run <mode>` (bauen, emulieren oder verbinden) — plus `build` und `flashos`. Source es
-aus `~/.zshrc` (`source ~/FlashOS/flashos.zsh`), um sie in jeder Shell verfügbar
-zu machen. Die alten flachen Namen (`picapture`, `piconnect`, `piquit`, `pilist`)
-bleiben als dünne Aliase für die entsprechenden `pi`-Verben erhalten.
-
-- **`picapture [usb|mu]`** — führt den kanonischen Boot-Capture-Ablauf aus
-  und protokolliert die Sitzung in `boot.log` im Root-Verzeichnis des Repos
-  (unabhängig vom aktuellen Verzeichnis; abgedeckt durch die `.gitignore` des
-  Repos).
-  - `usb` (default): wartet, bis das CDC-Gadget auf `/dev/cu.usbmodem*`
-    enumeriert (das Einstecken des C-zu-C-Kabels versorgt den Pi mit Strom,
-    sodass das Erscheinen des Nodes selbst das erste Boot-Signal ist), und
-    fragt dann die Konsole einmal pro Sekunde ab, bis die Boot-Markierung
-    `type 'help' for commands` erscheint (fsh hat seine interaktive REPL erreicht).
-  - `mu`: erfasst den Mini-UART-Trace-Adapter
-    (`/dev/cu.usbserial-*`), bis `type 'help' for commands` (der Boot hat die
-    Shell über den MU-Fallback erreicht — kein USB-Host angeschlossen) oder
-    `ERROR CAUGHT` erscheint. Mache einen Power-Cycle des Pi, wenn dazu
-    aufgefordert.
-  - kernel-Faults werden ausschließlich auf dem MU-Adapter ausgegeben —
-    verwende den `mu`-Modus (Trace-Adapter + externe Stromversorgung) zur
-    Fault-Diagnose.
-- **`piconnect [usb|mu]`** — öffnet eine interaktive `screen`-Sitzung auf der
-  Pi-Konsole mit 115200 Baud. Ohne Argument wählt es automatisch die
-  USB-CDC-Konsole (`fsh`), wenn vorhanden, sonst den MU-Trace-Adapter;
-  `usb` / `mu` erzwingen einen bestimmten Kanal.
-- **`piquit`** — beendet die abgetrennte `pi_capture`-screen-Sitzung, die von
-  `picapture` gestartet wurde. Von einem zweiten Terminal verwenden.
-- **`pilist`** — listet die angeschlossenen Konsolengeräte auf: die
-  USB-CDC-Konsole (`/dev/cu.usbmodem*`) und alle USB-Serial-Adapter
-  (`/dev/cu.usbserial-*`, MU-Trace).
-- **`pi log`** — zeigt die letzte `boot.log`-Aufzeichnung im Pager an.
-- **`pi tail [N]`** — folgt `boot.log` live (letzte `N` Zeilen, default 40)
-  und übersteht die Log-Rotation der nächsten Aufzeichnung.
-- **`build`** — der zweiphasige Build-Orchestrator
-  (funktioniert aus jedem Verzeichnis): clean, Link-Pass 1, `populate-syms`,
-  Link-Pass 2, Diff-Prüfung des Symbol-Layouts, mit `-d` auch `deploy`. `BOARD=virt
-  build` wählt das virt-Board (deploy wird übersprungen); `NM=llvm-nm build`
-  überschreibt das Symbol-Dump-Binary.
-- **`run <mode>`** — baut und startet ein Board, fährt den Boot-Watchdog oder
-  verbindet sich mit Hardware. `run qemu` (Alias `auto`) baut und startet das
-  rpi4b-Modell in QEMU; `run virt` macht dasselbe für das virt-Board; `run test`
-  führt die Host-Unit-Tests aus (`run test --NAME` filtert nach Name); `run hw`
-  verbindet sich über die serielle Konsole mit dem Pi (`--trace` wählt den
-  MU-Adapter).
-- **`run watchdog [virt|rpi4b]`** — fährt den unbeaufsichtigten Boot-Watchdog mit
-  den erforderlichen Flags `-Dci-login-seed=true` und `-Dboot-selftest=true`
-  automatisch gesetzt; default ist das rpi4b-Board (das Live-Boot-Gate — ein
-  langsamerer ~5–8-min-TCG-Lauf; virt ist depriorisiert und nicht mehr
-  CI-gegated).
-- **`flashos`** — listet die in [`flashos.zsh`](../../flashos.zsh)
-  definierten Shell-Helfer und die verfügbaren `zig build`-Schritte auf — eine
-  schnelle Inventur der Targets.
-
-Der MU-Trace-Adapter wird automatisch aus `/dev/cu.usbserial-*` erkannt und
-die USB-CDC-Konsole aus `/dev/cu.usbmodem*`; überschreibe mit
-`PI_SERIAL_DEVICE=/dev/cu.usbserial-XXXX` /
-`PI_USB_CONSOLE_DEVICE=/dev/cu.usbmodemXXXX`, wenn mehrere Geräte
-angeschlossen sind. Die `picapture`-Timeouts liegen bei 120 s (gesamt) und
-30 s (Prompt-Probe); überschreibe mit `PI_CAPTURE_TIMEOUT` / `PI_PROBE_TIMEOUT`.
-
-### Auto-Source bei `cd` (optional)
-
-Um `flashos.zsh` automatisch zu laden, sobald die Shell `~/FlashOS`
-betritt, hänge einen `chpwd`-Hook an `~/.zshrc` an. Der folgende Befehl ist
-idempotent:
+Lade [`flashos.zsh`](../../flashos.zsh) aus dem Repository oder über
+`~/.zshrc`:
 
 ```bash
-grep -q '_FLASHOS_LOADED' ~/.zshrc || cat >> ~/.zshrc <<'EOF'
-
-# --- FlashOS auto-source on cd ---
-autoload -Uz add-zsh-hook
-load_flashos_env() {
-  if [[ "$PWD" == "$HOME/FlashOS"* && -z "$_FLASHOS_LOADED" ]]; then
-    [[ -f "$HOME/FlashOS/flashos.zsh" ]] && source "$HOME/FlashOS/flashos.zsh" && typeset -g _FLASHOS_LOADED=1
-  fi
-}
-add-zsh-hook chpwd load_flashos_env
-load_flashos_env
-EOF
+source ~/FlashOS/flashos.zsh
 ```
 
-Öffne eine neue Shell oder führe `source ~/.zshrc` aus, um zu aktivieren.
-Setzt voraus, dass das Repo unter `~/FlashOS` liegt.
+| Helper | Zweck |
+| :----- | :---- |
+| `build [-d]` | Zweiphasiger Symbol-Build; `-d` deployt zusätzlich |
+| `run qemu` / `run virt` | Gewähltes QEMU-Board bauen und starten |
+| `run watchdog [rpi4b|virt]` | Unbeaufsichtigte Boot-Validierung |
+| `run test [--NAME]` | Alle oder gefilterte Host-Tests ausführen |
+| `run hw [--trace]` | Mit der Pi-Konsole verbinden |
+| `pi capture [usb|mu]` | Boot nach `boot.log` mitschneiden |
+| `pi connect [usb|mu]` | Interaktive Konsole öffnen |
+| `pi list` / `pi quit` | Geräte anzeigen oder Capture beenden |
+| `pi log` / `pi tail [N]` | Letzten Mitschnitt lesen oder verfolgen |
+| `flashos` | Helper und Build-Schritte auflisten |
+
+Die alten Namen `picapture`, `piconnect`, `piquit` und `pilist`
+bleiben Aliase. USB CDC wird als `/dev/cu.usbmodem*`, Mini-UART als
+`/dev/cu.usbserial-*` erkannt. Überschreibe die Erkennung mit
+`PI_USB_CONSOLE_DEVICE` oder `PI_SERIAL_DEVICE`; die Timeouts mit
+`PI_CAPTURE_TIMEOUT` und `PI_PROBE_TIMEOUT`.
+
+Mit `BOARD=virt` zielt `build` auf `virt`; `NM=llvm-nm` überschreibt
+das Symbol-Tool. Kernel-Fehler erscheinen nur auf Mini-UART, daher eignet
+sich `pi capture mu` zur Fehlerdiagnose.
 
 ## 7. Host-seitige Unit-Tests
 
 ```bash
-zig build test
+flash build test
 ```
 
 Führt die host-seitigen Unit-Tests gegen Pure-Logic-kernel-Module aus.
 Jedes Modul mit Tests bildet seinen eigenen Test-Root, gelinkt gegen
-`tests/host_stubs.zig` (Stubs für reine Assembly-Externs). Die aktuelle
+`tests/host_stubs.flash` (Stubs für reine Assembly-Externs). Die aktuelle
 Suite deckt 41 Module ab (464 Host-Tests); sie ist weit unter einer Sekunde
 fertig und ist das schnellste Signal dafür, dass die Kernlogik des kernel
 weiterhin hält.

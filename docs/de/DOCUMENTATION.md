@@ -57,8 +57,8 @@ arch/aarch64/                               AArch64 ISA core (assembly + shared 
   asm_defs.inc                              Bridge header — pulls in board_asm_defs.inc
   asm_defs_common.inc                       Shared assembler-only macros (board-independent)
 
-src/                                        Kernel core (Flash modules + Zig drivers)
-  start.zig                                 Build root: comptime-imports every kernel module
+src/                                        Kernel core (Flash modules + drivers)
+  start.flash                               Build root: comptime-imports every kernel module
   kernel.flash                              kernel_main + bring-up
   symbol_area.S                             Generated kernel symbol table (see §6)
   board.flash                               Comptime alias: build_options.board → board/<board>/*
@@ -75,7 +75,7 @@ src/                                        Kernel core (Flash modules + Zig dri
   console.flash                             Console RX ring + line input
   pipe.flash                                Anonymous pipe ring
   fdtable.flash                             Per-task fd table (install / get / dup)
-  file.zig                                  File-handle pages (offset cursor over a SuperBlock)
+  file.flash                                File-handle pages (offset cursor over a SuperBlock)
   elf.flash                                 ELF64 header + program-header parser (host-testable)
   task_layout.flash                         Canonical extern-struct layouts (TaskStruct, MmStruct, …)
   user_layout.flash                         User VA constants (TEXT/DATA/HEAP/STACK bases + flags)
@@ -88,7 +88,7 @@ src/                                        Kernel core (Flash modules + Zig dri
   block_dev.flash                           BlockDev vtable: board-agnostic LBA read/write indirection
   sdhci_cmd.flash                           SDHCI CMDTM bit layout, CMDx constants, CSD v2 parser, clock divisor
   mailbox.flash                             VideoCore property-tag message layout + parsing (board-agnostic)
-  vfs.zig                                   1-bit-superblock VFS dispatch layer
+  vfs.flash                                 1-bit-superblock VFS dispatch layer
   initramfs.flash                           Read-only initramfs image decode (host-testable)
   initramfs_backend.flash                   initramfs VfsOps backend (read-only)
   fat32.flash                               FAT32 BPB/FAT/dir-entry decode + cluster-chain walk (host-testable)
@@ -121,12 +121,12 @@ src/                                        Kernel core (Flash modules + Zig dri
     linker.ld                               virt kernel link script
 
   trace/
-    trace_main.zig                          Patchable-entry tracing
-    sampler.zig                             Sampling-profiler driver
-    fp_walk.zig                             Frame-pointer stack walker
-    utils.zig                               Trace I/O helpers (PL011)
-    ksyms.zig                               Kernel symbol table lookup
-    pl011_uart.zig                          Dedicated PL011 trace UART driver
+    trace_main.flash                        Patchable-entry tracing
+    sampler.flash                           Sampling-profiler driver
+    fp_walk.flash                           Frame-pointer stack walker
+    utils.flash                             Trace I/O helpers (PL011)
+    ksyms.flash                             Kernel symbol table lookup
+    pl011_uart.flash                        Dedicated PL011 trace UART driver
     hook.S                                  Trace hook stub (saves regs, calls 'traced')
     patchable_trampolines.S                 Patchable per-function entry trampolines
 
@@ -170,34 +170,34 @@ tools/                                      Hand-rolled ELF programs (coreutils 
   hello.flash, stackbomb.flash              [TEST] exec-elf / stack-overflow fixtures
   flibc_demo, argv_echo, forkbomb           flibc / argv / fork [TEST] fixtures
   grep_match.flash                          grep match engine (host-testable)
-  gen_shadow.zig                            Host tool: mint the seed shadow db
+  gen_shadow.flash                          Host tool: mint the seed shadow db
   initramfs.S                               Embeds the staged initramfs image
   *_linker.ld                               Per-program PT_LOAD layouts
 
 tests/
-  host_stubs.zig                            Shared linker stubs for 'zig build test'
-  host_stubs_sched.zig                      Sched-test HW-side stubs
-  host_stubs_fork.zig, fork_stubs.zig       Fork-test stubs
-  host_stubs_mm_user.zig                    mm_user-test stubs
-  host_stubs_utilc.zig                      utilc-test stubs
-  host_stubs_initramfs.zig                  File/initramfs stubs (typed `current`)
-  host_stubs_vfs.zig                        VFS-test stubs
-  host_alloc.zig                            Host allocator shim for unit tests
+  host_stubs.flash                          Shared linker stubs for `flash build test`
+  host_stubs_sched.flash                    Sched-test HW-side stubs
+  host_stubs_fork.flash, fork_stubs.flash   Fork-test stubs
+  host_stubs_mm_user.flash                  mm_user-test stubs
+  host_stubs_utilc.flash                    utilc-test stubs
+  host_stubs_initramfs.flash                File/initramfs stubs (typed `current`)
+  host_stubs_vfs.flash                      VFS-test stubs
+  host_alloc.flash                          Host allocator shim for unit tests
 
 armstub/src/
   armstub8.S                                EL3→EL1 bootstrap shim
   asm_defs.inc                              Armstub-only assembler macros
   linker.ld                                 Armstub link script (.text at 0)
-  root.zig                                  Empty Zig root (build API requirement)
+  root.flash                                Empty Flash root (build API requirement)
 
 scripts/
-  clear_syms.zig                            Reset src/symbol_area.S to its placeholder form
-  generate_syms.zig                         Read 'aarch64-elf-nm' and emit src/symbol_area.S
+  clear_syms.flash                          Reset src/symbol_area.S to its placeholder form
+  generate_syms.flash                       Read 'aarch64-elf-nm' and emit src/symbol_area.S
   make_iso.sh                               GRUB-EFI rescue ISO builder (virt only)
 
 assets/                                     Logo and visual assets
 
-build.zig                                   The only build entry point
+build.flash                                 Native Flash build definition
 flashos.zsh                             Shell helpers incl. the two-pass `build` orchestrator
 config.txt                                  RPi 4 firmware configuration
 ```
@@ -396,7 +396,7 @@ Das initramfs wird als `.initramfs`-Section zwischen `bss_end` und
 zwischen den Labels `__initramfs_start` / `__initramfs_end`; der Build
 stellt `pid1.elf` bei `/sbin/init` und `hello.elf` / `stackbomb.elf`
 / `flibc_demo.elf` bei `/test/*.elf` bereit, via den handgefertigten
-`scripts/build_initramfs.zig`-Encoder über eine
+`scripts/build_initramfs.flash`-Encoder über eine
 sortierte Arc-Liste (fixe mtime/uid/gid/ino, sodass das Archiv eine reine
 Funktion von Inhalt + Namensliste ist). `src/initramfs.flash`
 exponiert einen `Iterator` + `locate(path)`-Walker über die newc-Bytes
@@ -407,7 +407,7 @@ Harness-Szenarien erreichen `/test/{hello,stackbomb,flibc_demo}.elf`
 entweder von Hand (`sys_openFile` + `sys_read`) oder durch den
 path-aufgelösten Loader `sys_execve`. Das gesamte Archiv
 ist read-only und lebt im Address-Space des Kernels — `File`-Handles,
-die von `src/file.zig` allokiert werden, tragen einen Offset in die
+die von `src/file.flash` allokiert werden, tragen einen Offset in die
 Section, keine Kopie der Bytes. Die File-Syscalls erreichen dieses Archiv
 durch den VFS-Shim (nächster Unterabschnitt) statt `initramfs.locate` direkt
 aufzurufen; PID 1s `kernel_process` ist der eine verbleibende direkte Caller,
@@ -415,7 +415,7 @@ weil es läuft, bevor der Syscall-Pfad verdrahtet ist.
 
 ### Filesystem-Layout (VFS-Shim)
 
-`src/vfs.zig` ist ein 1-Bit-Superblock-Dispatch-Layer,
+`src/vfs.flash` ist ein 1-Bit-Superblock-Dispatch-Layer,
 der zwischen den File-Syscalls und den Storage-Backends sitzt. Er besitzt
 eine fixe Zwei-Slot-Mount-Table und routet jeden Pfad nach Prefix:
 
@@ -438,7 +438,7 @@ Words durch `DATAPORT` und wartet dann auf `DATA_DONE` (das kanonische
 SDHCI-Single-Block-PIO-Pattern).
 
 Der `/mnt`-Slot wird vom echten
-`src/fat32_backend.flash` gebacked (es ersetzte `fat32_stub.zig`): `fat32.flash`
+`src/fat32_backend.flash` gebacked (es ersetzte `fat32_stub.flash`): `fat32.flash`
 dekodiert das BPB / FAT / Root-Dir bei `init()`, und die
 `open` / `read` / `seek` / `close` / `write` / `create` / `unlink` /
 `rename` des Backends durchlaufen und mutieren die Cluster-Chain über
@@ -475,7 +475,7 @@ Roundtrip (`[PASS] fs-roundtrip-write` auf Boot 1, `[PASS] fs-roundtrip`
 nach einem Power-Cycle auf Boot 2), das CRUD-Bein und alle von
 `fat32_backend.writeBack` / `create` / `unlink` / `rename` / `sys_write`
 werden **nur auf echter Pi-4-Hardware** validiert;
-`zig build test` deckt die Decode-Units von `src/fat32.flash` ab, aber nicht
+`flash build test` deckt die Decode-Units von `src/fat32.flash` ab, aber nicht
 `fat32_backend.flash`. Der Dispatch ist ein
 einzelner `startsWith("/mnt/")`-Branch; der Trailing Slash ist
 tragend, sodass `/mnt2/foo` ein initramfs-Pfad bleibt und `/mnt` ohne
@@ -783,7 +783,7 @@ statt in den UVA-Space zu jagen.
 |  4   | `dump_free`       | (keine)                                                                                                                        |                                                                `u64` Anzahl freier Pages                                                                 | **Public-Introspection-ABI.** Druckt + gibt den Free-Page-Count zurück. Die In-Kernel-Test-Harness nutzt den Return-Value als ihr Leak-Detection-Signal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 |  5   | ~~`exec`~~        | —                                                                                                                              |                                                                            —                                                                            | **AUSGEMUSTERT** — Legacy-Blob/ELF-Loader entfernt, nachdem Slot 31 `execve` ihn ersetzte; die Slot-Nummer bleibt für immer reserviert und gibt `-1` zurück                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 |  6   | `kill`            | `x0 = pid`                                                                                                                     |                                                               `i32` 0 bei Treffer, -1 bei Fehltreffer                                                    | Findet den Task mit passender `pid`, flippt ihn zu `TASK_ZOMBIE`, weckt den Parent. **Self-Kill wird abgelehnt** — nutze `exit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-|  7   | `openFile`        | `x0 = const u8 *` (NUL-terminierter Pfad)                                                                                      |                               `i32` fd ≥ 0 bei Erfolg, -1 bei Fehltreffer / Alloc-Failure, -13 (`-EACCES`) bei einer Permission-Verweigerung             | Dispatcht den Pfad durch den VFS-Shim (`vfs.vfs_open`, siehe §3) an das passende Backend, führt den Permission-Check aus (open ist Read-Intent — die Effective-IDs des Callers gegen die Mode/Owner der Datei, root bypasst; Verweigerung gibt `-EACCES` zurück, bevor eine `File`-Page allokiert wird), allokiert eine `File`-Page (`src/file.zig`), verstaut den backenden `SuperBlock` + die Mode/uid/gid der Datei im `File`, installiert das Handle in den Per-Task-`open_files`-Slot. Die Pfad-UVA erreicht den Kernel via `copy_from_user`; eine Wild-UVA gibt `-1` zurück via den Soft-Pfad in `mm_user.check_and_prefault_user_range` — Caller zombifiziert **nicht**                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|  7   | `openFile`        | `x0 = const u8 *` (NUL-terminierter Pfad)                                                                                      |                               `i32` fd ≥ 0 bei Erfolg, -1 bei Fehltreffer / Alloc-Failure, -13 (`-EACCES`) bei einer Permission-Verweigerung             | Dispatcht den Pfad durch den VFS-Shim (`vfs.vfs_open`, siehe §3) an das passende Backend, führt den Permission-Check aus (open ist Read-Intent — die Effective-IDs des Callers gegen die Mode/Owner der Datei, root bypasst; Verweigerung gibt `-EACCES` zurück, bevor eine `File`-Page allokiert wird), allokiert eine `File`-Page (`src/file.flash`), verstaut den backenden `SuperBlock` + die Mode/uid/gid der Datei im `File`, installiert das Handle in den Per-Task-`open_files`-Slot. Die Pfad-UVA erreicht den Kernel via `copy_from_user`; eine Wild-UVA gibt `-1` zurück via den Soft-Pfad in `mm_user.check_and_prefault_user_range` — Caller zombifiziert **nicht**                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 |  8   | ~~`readFile`~~    | —                                                                                                                              |                                                                            —                                                                            | **AUSGEMUSTERT** — Legacy-Per-Kind-File-Read entfernt, nachdem Slot 32 `read` ihn ersetzte; die Slot-Nummer bleibt für immer reserviert und gibt `-1` zurück                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 |  9   | ~~`writeFile`~~   | —                                                                                                                              |                                                                            —                                                                            |  **AUSGEMUSTERT** — Legacy-Per-Kind-File-Write entfernt, nachdem Slot 33 `write` ihn ersetzte; die Slot-Nummer bleibt für immer reserviert und gibt `-1` zurück. FAT32-Write-Back (`/mnt/…`) routet jetzt durch das vereinheitlichte `write`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 |  10  | `seek`            | `x0 = fd`, `x1 = i64 off`, `x2 = whence`                                                                                       |                                                     `i64` neuer Offset, `-1` bei bad fd / Out-of-Range                                                    | `whence = 0` SEEK_SET, `1` SEEK_CUR, `2` SEEK_END. Bounds-Check `[0, File.size]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -910,7 +910,7 @@ getrandom-artiger Syscall existiert. Das sha256-Modul wird immer ReleaseSmall
 gebaut — selbst in Debug-Kernel-Builds — weil die PBKDF2 → HMAC → SHA-256-
 Call-Chain auf dem Per-Task-Kernel-Stack läuft und Debug-Mode-Frames groß
 genug sind, um eine einzelne 4-KiB-Stack-Page zu überlaufen (siehe die Notiz in
-`build.zig`). Dieser Stack ist seine eigene Page, separat vom
+`build.flash`). Dieser Stack ist seine eigene Page, separat vom
 `TaskStruct` allokiert, sodass selbst ein Overflow die Credential-Felder, die
 auf dem Task gespeichert sind, nicht mehr erreichen kann — der Failure-Mode,
 den die `[TEST] authenticate`-Canary bewacht (§8).
@@ -919,16 +919,16 @@ den die `[TEST] authenticate`-Canary bewacht (§8).
 world-readable, ein committetes File — überall geparst vom host-getesteten
 `src/pwfile.flash`) und `/etc/shadow`
 (`user:iterations:salt_hex:hash_hex`, zur Build-Zeit generiert von
-`tools/gen_shadow.zig`, das dieselbe `src/sha256.flash`-PBKDF2 läuft, mit der
+`tools/gen_shadow.flash`, das dieselbe `src/sha256.flash`-PBKDF2 läuft, mit der
 der Kernel verifiziert) shippen im initramfs. `/etc/shadow` ist Mode `0o100600`
 root:root — der cpio-Encoder stempelt Per-File-Modes aus der Policy-Liste des
-Builds (`build.zig`), und der VFS-Permission-Layer (unten) verweigert ein
+Builds (`build.flash`), und der VFS-Permission-Layer (unten) verweigert ein
 Non-Root-Open mit `-EACCES`, sodass die Passwort-Hashes für einen gedroppten
 Prozess unlesbar sind.
 
 Die initramfs-Kopie ist der immutable **Seed**; die _Live_-Shadow-Datenbank
 ist `/mnt/shadow` auf der FAT32-Karte (mit denselben Bytes geseedt von
-`scripts/make_test_disk.sh` für QEMU und `zig build deploy` für echte
+`scripts/make_test_disk.sh` für QEMU und `flash build deploy` für echte
 Hardware, geschützt auf `0600 root:root` durch das Permission-Overlay unten).
 `sys_authenticate` liest `/mnt/shadow` zuerst und fällt auf den Seed zurück;
 `sys_passwd` + `/bin/passwd` schreiben es mit Per-Change-Random-Salts um,
@@ -958,8 +958,8 @@ und erzwungen an der Syscall-Grenze vom puren, host-test-gegateten
 
 - **Woher die Metadaten kommen.** initramfs-Einträge tragen die
   Mode/uid/gid-Felder des newc-cpio-Headers; der deterministische Encoder
-  (`scripts/build_initramfs.zig`) stempelt sie aus der Per-File-Policy-Liste
-  in `build.zig` — Binaries (`/bin/*`, `/sbin/init`, `/test/*.elf`)
+  (`scripts/build_initramfs.flash`) stempelt sie aus der Per-File-Policy-Liste
+  in `build.flash` — Binaries (`/bin/*`, `/sbin/init`, `/test/*.elf`)
   sind `0o100755`, Config-Files (`/etc/passwd`, `/etc/fshrc`) `0o100644`,
   und `/etc/shadow` `0o100600`, alle root:root. FAT32 hat kein natives
   Owner/Mode-Konzept, sodass `/mnt`-Metadaten aus dem **Permission-
@@ -1165,15 +1165,15 @@ Future Work.
 Die Trace-Maschinerie schlägt Funktionsnamen per Adresse nach. Die Table ist
 Teil des gelinkten Images, sodass der Build ein Two-Pass-Prozess ist:
 
-1. **Pass 1.** `zig build` linkt `kernel8.elf` mit einer Platzhalter-
+1. **Pass 1.** `flash build` linkt `kernel8.elf` mit einer Platzhalter-
    `_symbols`-Section, groß genug, um die populierte Table zu halten
-   (`scripts/generate_syms.zig:pre_allocated_size`).
-2. **Extraktion.** `zig build populate-syms` läuft
-   `aarch64-elf-nm -n kernel8.elf | sort | grep -v '\$' | zig run scripts/generate_syms.zig`, das
+   (`scripts/generate_syms.flash:pre_allocated_size`).
+2. **Extraktion.** `flash build populate-syms` läuft
+   `aarch64-elf-nm -n kernel8.elf | sort | grep -v '\$' | flash run scripts/generate_syms.flash`, das
    `src/symbol_area.S` mit `.quad` / `.string` / `.space`-Direktiven
    überschreibt — ein 64-Byte-Eintrag pro Symbol, terminiert von einem
    Zero-Byte-Sentinel.
-3. **Pass 2.** Ein weiteres `zig build` relinkt mit der populierten Section.
+3. **Pass 2.** Ein weiteres `flash build` relinkt mit der populierten Section.
 
 Der `build`-Helper (aus `flashos.zsh`) läuft beide Passes und
 diff-checkt, dass das Symbol-Layout konvergierte (d. h. das Einfügen der
@@ -1187,7 +1187,7 @@ Symbol-Daten störte keine Adressen).
   intakt und bereit, wieder verdrahtet zu werden, sobald das Zig-Backend ein
   äquivalentes Flag bekommt.
 - Wenn Patchable-Einträge existieren, reloциert `trace_init`
-  (`src/trace/trace_main.zig`) die Adress-Table, überschreibt
+  (`src/trace/trace_main.flash`) die Adress-Table, überschreibt
   den ersten `nop` jedes Eintrags mit `mov x9, lr` und patcht dann den
   zweiten `nop` mit `bl hook`.
 - `hook` (`src/trace/hook.S`) sichert die Argument- und Link-Register,
@@ -1197,250 +1197,39 @@ Symbol-Daten störte keine Adressen).
 
 ## 8. Testen
 
-FlashOS shippt zwei komplementäre Test-Surfaces.
+FlashOS besitzt zwei komplementäre Testebenen:
 
-**Host-seitige Unit-Tests** (`zig build test`).
-Pure-Logic-Kernel-Module können ohne die AArch64-Runtime getestet werden.
-Jedes getestete Kernel-Modul ist sein eigener Test-Root, gelinkt gegen ein
-Host-Stub-Objekt, das die Assembly-only-Externs füllt (`memzero`,
-`panic`, `main_output*`, `core_switch_to`, `set_pgd`, das IRQ-
-Masking-Paar, die Page-Allocator-Entry-Points). Das geteilte Stub-Set
-lebt in `tests/host_stubs.zig`; `sched.flash` und das
-initramfs/file-Paar bekommen dedizierte Per-Target-Stub-Objekte
-(`tests/host_stubs_sched.zig`, `tests/host_stubs_initramfs.zig`,
-`tests/host_stubs_vfs.zig`), um
-Doppel-Definitionen von Symbolen zu vermeiden, die das Modul-under-Test bereits
-exportiert. Die aktuelle Suite umfasst insgesamt **464 Host-Tests** über 41
-Module — siehe die Coverage-Matrix unten für den Per-Modul-Split.
+- **Host-Tests** (`flash build test`) prüfen reine Kernel- und
+  Userland-Logik mit Stubs für Assembly- und MMIO-Abhängigkeiten. Die
+  Suite umfasst derzeit **464 Tests in 41 Modulen**.
+- **Runtime-Tests** (`user_space/kernel_tests.flash`) führen als PID 1
+  dreißig Szenarien gegen echten Kernel-Zustand aus. Jedes Szenario prüft
+  sein Ergebnis und stellt die Free-Page-Baseline wieder her.
 
-**In-Kernel-Runtime-Harness** (`user_space/kernel_tests.flash`).
-PID 1 tritt in `run_all()` ein, das dreißig Szenarien auf echtem
-Kernel-State ausübt:
+| Bereich | Szenarien |
+| :------ | :-------- |
+| Prozesse und Speicher | `rng`, `fork-stress`, `oom-graceful`, `kill`, `brk`, `stack-overflow`, `wild-pointer`, `exec-fault`, `undef-instr`, `efault-syscall` |
+| Programme und ABI | `exec-elf`, `execve`, `flibc`, `trace` |
+| I/O und Dateisysteme | `pipe`, `console-echo`, `fd-redirect`, `initramfs-open`, `vfs-dispatch`, `fs-roundtrip`, `readdir`, `klog` |
+| Hardware-Monitoring | `hwmon-core`, `hwmon-mailbox` |
+| Identität und Sicherheit | `creds`, `authenticate`, `perm`, `login`, `passwd` |
 
-- `fork-stress` — 3 × 5 Fork/Reap-Runden mit Per-Round- und finalen
-  Free-Page-Count-Baseline-Checks.
-- `oom-graceful` — akkumuliert Children (jedes `sys_exit`t sofort, aber ein
-  laufendes-oder-zombiehaftes Child hält einen `task[]`-Slot), bis `fork()`
-  `-1` beim 64-Slot-Cap zurückgibt, asserted das saubere `-1` (kein Crash, kein
-  halbgebauter Zombie), reapt alle und checkt, dass die Baseline
-  wiederhergestellt ist. Der echte Page-Pool wird nie erschöpft (das 8-MiB-
-  Live-Memory-Ceiling); der Slot-Cap ist der deterministische Limiter, sodass
-  das Szenario auf beiden QEMU-Targets identisch ist. Nur nach dem
-  Page-Allocator- / Kernel-Image-Overlap-Fix erreichbar (siehe CHANGELOG).
-- `kill` — forke ein Child, kille es per pid, Parent reapt.
-- `exec-elf` — forke ein Child, `exec` `/test/hello.elf` durch den
-  ELF-Pfad (Parser + PT_LOAD-Walk + eager Top-Stack-Page),
-  Parent reapt.
-- `execve` — forke ein Child, `sys_execve("/test/argv_echo.elf",
-{"argv_echo","A","B"})` durch den path-aufgelösten ELF-Loader (Slot
-  31): VFS-Resolve + Whole-File-Stream in den statischen
-  `exec_buf` + argv-on-Stack + Address-Space-Teardown + Remap. Child
-  läuft bis zur Completion, Parent reapt; der Teardown gibt die alten Pages
-  frei und der Reap sweept die Allokationen des Loaders, nettend zur Baseline.
-- `brk` — forke ein Child, wachse Heap um 16 Pages (jeder Touch feuert
-  den Heap-Range-Demand-Alloc von `do_data_abort`), lies Pattern zurück,
-  shrinke zur Baseline, Parent reapt.
-- `stack-overflow` — forke ein Child, `exec` `/test/stackbomb.elf`,
-  Child rekursiert über `STACK_LOW` in die Guard-Page, Kernel zombiet
-  via `[KERN] stack overflow`, Parent reapt.
-- `wild-pointer` — forke ein Child, schreibe zu `0xDEADBEEF000`
-  (Heap-Stack-Gap), Kernel zombiet via `[KERN] invalid uva`, Parent
-  reapt.
-- `efault-syscall` — übergib eine Wild-Canonical-UVA an `sys_openFile` und
-  asserted, dass es `-1` zurückgibt **ohne den Caller zu zombifizieren** (das
-  Soft-Bein von `mm_user.check_and_prefault_user_range`).
-  Kein Fork; Baseline hält (ein Parity-`sys_dump_free`).
-- `flibc` — forke ein Child, `exec` `/test/flibc_demo.elf` (gebaut gegen
-  `user_space/lib/flibc/`), Demo läuft `printf("flibc hello %d\n", 42)`
-  - 32-Byte-malloc + Pattern-Verify + `exit`, Parent reapt. Validiert
-    flibcs printf / Bump-Allocator / exit-Layers End-to-End durch den
-    ELF-Loader.
-- `pipe` — forke ein Child, übergib eine 16-Byte-Payload durch eine anonyme
-  Pipe (Parent liest, Child schreibt), schließe beide Enden, Parent reapt.
-  Validiert `sys_pipe`-Allokation, `fork`-Dup der vereinheitlichten `fds`-
-  Table, den vereinheitlichten `read` / `write`-Round-Trip über die Pipe-Enden
-  und `close`-Ref-Drop + Page-Free.
-- `console-echo` — forke ein Child, das 8 deterministische Bytes
-  (`0xC0..0xC7`) via `sys_console_inject` nach einem kurzen Delay injectet,
-  Parent blockiert im vereinheitlichten `sys_read` auf dem vorinstallierten
-  Console-fd 0 (leerer Ring, deckt den `console.rx_wq.wait`-Pfad), leert via
-  Short-Reads, bis die Payload gesammelt ist, dann Byte-Vergleich. Free-Page-
-  Baseline weiterhin das [PASS]-Gate. Läuft komplett über die vereinheitlichte
-  `fds`-Table.
-- `fd-redirect` — treibt die vereinheitlichte `read`/`write`/`close`/`dup2`-ABI
-  (Slots 32-35) End-to-End über eine Fork-Grenze, so wie eine Shell
-  einem Child ihr redirektetes stdio übergibt. `sys_pipe` → `fork` → Child
-  `sys_dup2(wfd, 1)` dann `sys_write(1, …)` (fd 1 startet als Console-
-  Slot, sodass der Write beweist, dass dup2 ihn auf das Pipe-Backend re-pointet) →
-  Parent `sys_dup2(rfd, 0)` dann `sys_read(0, …)` → 16-Byte-
-  Byte-Vergleich → beide Enden schließen alle fds → Child exitet, Parent reapt.
-  Die Refcount-Choreografie gibt die Pipe-Page beim finalen
-  `sys_close(rfd)` des Parents vor dem Checkpoint frei, sodass die Baseline
-  hält.
-- `initramfs-open` — `sys_openFile("/sbin/init")` + vereinheitlichtes `read`
-  der ersten 4 Bytes, asserted ELF-Magic `0x7f 'E' 'L' 'F'`, vereinheitlichtes
-  `close`, Baseline hält. Demonstriert den Read-only-File-Pfad
-  End-to-End gegen das eingebettete initramfs.
-- `vfs-dispatch` — übt die zwei Beine des VFS-Shims: `/sbin/init`
-  löst durch das initramfs-Backend auf (positiv, fd ≥ 0 + sauberes
-  close), `/mnt/this-does-not-exist` routet zum FAT32-Stub und
-  gibt -1 zurück (negativ-aber-geroutet), `/mnt` ohne Trailing-Slash
-  bleibt ein initramfs-Pfad und fehlt dort. Asserted den Dispatch-
-  Kontrakt, nicht den Mechanismus; Baseline hält (eine File-Page
-  allokiert und freigegeben).
-- `trace` — vier sequenzielle Fork/Exit/Wait-Zyklen, die die
-  gepatchten Trampolines `copy_process` (fork), `do_wait` (wait) und
-  `_schedule` (Timer-Tick + expliziter Yield) ausüben. Auf Pi landet das
-  `bl hook` der Trampolines auf PL011 (UART4) mit jedem kanonischen Namen; auf
-  virt ist `pl011_uart_send_string` comptime-gestubbt und der Patch-Pfad
-  läuft still. Das Pass-Kriterium spiegelt die anderen reap-basierten
-  Szenarien: Free-Page-Count nach der Loop gleich der Suite-Baseline.
-- `fs-roundtrip` — das Variant-B-Magic-File-Persistence-Szenario.
-  Öffnet `/mnt/ROUNDTR.MAG`: ein negativer fd bedeutet `/mnt` ist unmounted
-  (kein FAT32 — **Mount-detected SKIP**, `[PASS] fs-roundtrip (skip)`,
-  ein Parity-`sys_dump_free`). Magic-Byte `0` → First-Boot-Phase:
-  schreibe ein 4-KiB-Pattern zu `/mnt/ROUNDTR.DAT` via das vereinheitlichte
-  `write`, setze magic = 1, emittiere
-  `[PASS] fs-roundtrip-write (reboot to verify)`.
-  Magic-Byte `1` → Second-Boot-Phase: lies `ROUNDTR.DAT` zurück,
-  Byte-Vergleich gegen die Formel, resette magic zu `0`, emittiere
-  `[PASS] fs-roundtrip`. Baseline-Check gatet jeden Non-Skip-Branch.
-  Dies ist das einzige Szenario, das einen Power-Cycle quert, sodass es
-  `fat32_backend.writeBack` + Persistence End-to-End validiert —
-  **aber nur auf echter Pi-4-Hardware**: QEMU `-M raspi4b` kann
-  EMMC2 CMD8 nicht bestehen und `virt` hat kein SD-Device, sodass auf beiden
-  QEMU-Boards dieses Szenario den SKIP-Pfad nimmt (siehe §3). Der Pi-HW-Operator
-  läuft es zweimal über einen Reboot.
-- `readdir` — das Directory-Enumeration-Szenario. Durchläuft
-  `/bin` via das rohe `sys_readdir(path, index, *Dirent)` von `index = 0`,
-  asserted, dass die bekannten Coreutils `fsh` **und** `ls` vorhanden sind
-  (unbeeinflusst von `/bin`-Wachstum; ein exakter Count wäre brüchig), das
-  End-Sentinel feuert (der Call jenseits des letzten Eintrags gibt -1 zurück,
-  kein Runaway), und der zustandslose Walk nichts leakt (Free-Count gleich
-  Baseline — der eine neue `sys_dump_free`-Checkpoint, den dieses Szenario
-  hinzufügt). QEMU übt das initramfs-Synthesized-Directory-Bein (der Root-Mount);
-  das FAT32-8.3-Bein ist nur Pi (`/mnt/*` mountet nicht unter QEMU → -1 sauber).
-- `klog` — das Kernel-Log-Szenario. Ruft `sys_dump_free` (das
-  `free_pages:` durch das `main_output` des Kernels emittiert, es in den
-  Ring tee'nd), dann `sys_klog_read` für die neuesten 256 Bytes, und asserted,
-  dass der gerade emittierte `free_pages`-Marker vorhanden ist — den
-  `main_output` → Ring-Tee und den Slot-38-Snapshot-Pfad beweisend. Der Marker
-  ist kernel-emittiert, sodass die Assertion vom USB-Console-State auf jedem
-  Target unbeeinflusst ist. Das einzelne `sys_dump_free` dient doppelt als
-  Baseline-Checkpoint; der Static-BSS-Ring und der warmed-Stack-Snapshot-Buffer
-  halten es leak-free. `/bin/dmesg` ist der interaktive Consumer (nicht von der
-  Harness getrieben, wie `meminfo` / `forkbomb`).
-- `rng` — das Kernel-Entropy-Szenario. Läuft **zuerst** in der
-  Szenario-Reihenfolge per Kontrakt: es snapshottet die neuesten 4 KiB des
-  Kernel-Log-Rings via `sys_klog_read` und asserted, dass der Boot-Time-Entropy-
-  Announce vorhanden (`hwrng:`) und gesund ist (`hwrng: self-test failed`
-  abwesend) — beweisend, dass `hwrng_init` lief, sein Two-Draw-Self-Test bestand,
-  und der Announce den Ring erreichte. Zuerst zu laufen hält den Gap zwischen
-  dem Boot-Announce und dem Snapshot bounded; zuletzt zu laufen würde mehrere
-  KiB Harness-Output dazwischen legen, jenseits jedes Baseline-safe Stack-Fensters.
-  Beide QEMU-Targets nehmen den schwachen Timer-Mix-Fallback (QEMU emuliert
-  keinen BCM2711-RNG200); der Hardware-Pfad ist nur Pi-Bench. Das einzelne
-  `sys_dump_free` dient doppelt als Baseline-Checkpoint; der 4-KiB-Snapshot-
-  Buffer ist ein Scenario-Frame-Stack-Array (dasselbe Budget wie der Payload-
-  Buffer von `fs-roundtrip`), sodass das Szenario leak-free ist.
-- `creds` — das Prozess-Credential-Szenario. PID-1 asserted, dass seine
-  eigenen Getter root berichten, forkt dann ein Child, das Privilegien droppt
-  (`setgid(1000)` + `setuid(1000)`), die Getter neu liest und verifiziert, dass
-  ein gedroppter Prozess `setuid(0)` verweigert wird. Das Child berichtet ein
-  einzelnes Y/N-Verdict über eine Pipe, sodass PID-1 selbst nie root droppt
-  (es muss root bleiben, um `/bin/login` nach der Harness zu exec). Reap-basiert
-  und baseline-neutral wie `pipe` / `fork-stress`.
-- `authenticate` — das Kernel-Credential-Verify-Szenario. Treibt
-  `sys_authenticate` direkt: der geseedte CI-Account muss verifizieren (0), ein
-  falsches Passwort und ein unbekannter User müssen beide fehlschlagen (-1).
-  Auch eine Kernel-Stack-Overflow-Canary: es liest PID-1s eigene Credentials
-  nach den Auth-Calls erneut. Die Crypto-Call-Chain ist der tiefste Syscall-
-  Stack im Kernel; bevor der Kernel-Stack jedes Tasks auf seine eigene
-  Page zog, teilte der Stack eine Page mit dem `TaskStruct`, und ein tief
-  genuger Frame überlief zuerst in die Credential-Felder — sodass diese Canary
-  zu `[FAIL]` flippt, falls diese Regression je zurückkehrt. Kein Fork;
-  `/etc/shadow` wird durch den No-Alloc-VFS-Pfad des Kernels gelesen, sodass das
-  Szenario baseline-neutral ist.
-- `perm` — das VFS-Permission-Szenario. Forkt ein Child, das
-  auf uid/gid 1000 droppt und die Enforcement-Points probet: `/etc/shadow` zu
-  öffnen (Mode `0o100600` root:root) muss mit genau `-EACCES` (-13 — ein
-  bloßes -1 würde „not found" bedeuten, d. h. der Permission-Layer feuerte nie)
-  fehlschlagen, `/etc/passwd` zu öffnen (`0o100644`) muss gelingen, und `execve`
-  dieses No-x-Bit-Files muss ebenfalls mit genau `-EACCES` fehlschlagen. Das
-  Child berichtet ein Y/N-Verdict über eine Pipe; PID-1 (noch root) öffnet dann
-  dasselbe Shadow-File erneut erfolgreich, den Root-Bypass beweisend. Reap-
-  basiert und baseline-neutral wie `creds`.
-- `login` — der Login-Lifecycle-Capstone. Injectet ein Two-Session-
-  Console-Script (`flash`, dann `root`, jedes endend in `exit`), forkt ein
-  Child, das das echte `/bin/login` mit seinem Session-Limit-argv exect
-  (`"2"`), und reapt es. login authentifiziert jede Session, forkt ein Child,
-  das Privilegien droppt und die Shell exect, reapt es bei `exit` und
-  re-promptet — der volle Supervisor-Lifecycle durch die echte Binary. Jede
-  Session emittiert fshs Homescreen-Marker (`type 'help' for commands`), sodass
-  ein grüner Boot drei trägt (zwei von hier + das echte Boot-
-  Login); `scripts/run_qemu_test.sh` keyt sein Success-Kriterium und
-  guardet auf genau diese Counts. Reap-basiert und baseline-neutral — der
-  ganze Tree (login + zwei Session-Shells) muss reclaimed werden.
-- `passwd` — das Passwort-Änderungs-Szenario. Auf einem Board mit einem
-  schreibbaren FAT32-Shadow (`/mnt/shadow` — das QEMU-rpi4b-SD-Image und eine
-  deployte Karte sind damit geseedt) läuft es den vollen Roundtrip: root
-  resettet den `flash`-Record ohne das alte Passwort (der Self-Healing-
-  Recovery-Pfad), rotiert es zu einem Temp-Passwort und beweist die Änderung
-  durch `sys_authenticate` (neu verifiziert, alt hört auf zu funktionieren),
-  dann wird einem gedroppten Child (uid 1000) ein fremder Record und sein
-  eigener Record mit einem falschen alten Passwort verweigert (beide genau
-  `-EACCES`), bevor es das Seed-Passwort durch den legitimen Own-Record-+-
-  Correct-Old-Password-Pfad wiederherstellt. Auf virt (keine SD-Karte) muss
-  `sys_passwd` das dokumentierte `-1` beantworten und das Szenario emittiert
-  `[PASS] passwd (skip)` — dasselbe SKIP-Pattern wie
-  `fs-roundtrip`. Trägt dieselbe Kernel-Stack-Canary wie `authenticate`.
+Target-spezifisches Verhalten:
 
-Jedes Szenario emittiert `[TEST] name` … `[PASS] name` (oder `[FAIL]`), und
-`run_all` druckt einen finalen `X/Y passed`-Tally. Die Harness läuft
-identisch unter QEMU (`zig build -Dboard=virt run-virt` /
-`-Dboard=rpi4b run`) und auf echter Hardware (`build -d` → SD-Flash →
-`picapture`); ein grüner Run landet `30/30 passed` mit 34 Baseline-
-Checkpoints (`0xbbff2` rpi4b / `0x3be45` virt) und 0 `ERROR CAUGHT`
-auf beiden Boards, übergibt dann an
-`/bin/login` → `/bin/fsh`. Mit dem Login-Lifecycle erscheint fshs Homescreen-
-Marker (`type 'help' for commands`) **dreimal** pro Boot —
-zweimal von den gescripteten Sessions von `[TEST] login` und einmal vom echten
-Boot-Login — und der CI-Watchdog (§4) zählt genau das (sein Early-Exit
-feuert beim dritten Homescreen-Marker). (In QEMU ist der
-`fs-roundtrip`-Checkpoint sein Parity-`sys_dump_free` auf dem SKIP-Pfad;
-auf Pi-HW ist es der echte Write/Verify-Branch. Es gibt kein In-Harness-
-`fsh`-Szenario — die Shell wird durch die Übergabe oben plus den
-`[TEST] login`-Capstone ausgeübt.)
+- `fs-roundtrip` prüft FAT32-Persistenz über zwei Pi-Boots. Unter QEMU,
+  wo EMMC2/FAT32 nicht verfügbar ist, meldet es einen bestandenen Skip.
+- `passwd` prüft persistente Passwortänderungen mit beschreibbarem
+  `/mnt/shadow` und sonst den dokumentierten Fehlerpfad.
+- `login` führt zwei geskriptete Sessions durch die echten Login- und
+  Shell-Binaries aus, bevor PID 1 zur interaktiven Session übergibt.
+- Der Pre-PID-1-Smoke-Test `emmc2-block` prüft einen
+  512-Byte-Schreib-/Lesezyklus außerhalb des EL0-Tally.
 
-**Pre-PID-1-EL1-Smoke** (`run_emmc2_smoke` in `src/kernel.flash`).
-Ein einzelnes Szenario `emmc2-block` läuft, bevor PID 1 geforkt wird,
-schreibt ein deterministisches 512-Byte-Pattern zu LBA 2064 durch
-`board.emmc2.write_block`, liest es via `read_block` zurück und
-byte-vergleicht. Emittiert `[TEST] emmc2-block` … `[PASS] emmc2-block`
-oder `[FAIL] emmc2-block (write|read|mismatch)`. Auf QEMU
-übt es das virt-Fake (`src/board/virt/emmc2.flash`); auf Pi 4 übt es
-den echten BCM2711-EMMC2-Treiber (verifiziert auf einer 64-GB-SDXC).
-Der EL0-30/30-Tally ist unbeeinflusst — beide
-Buffer leben auf dem Kernel-Stack und das Szenario läuft im Kernel-
-Kontext.
-
-### Behoben — Real-HW-Tally-Flackern
-
-Auf echtem Pi-4 emittierte die EL0-Harness intermittierend einen `18/19`-Tally
-(gegen die damals-aktuellen 19 Szenarien), nachdem Commit `55b9515` einen
-Per-Tick-Timer-Trace-Print entfernte. Dieser Print hatte die Root-Cause
-maskiert: der Scheduling-Tick wurde mit einem **relativen** `CNTP_TVAL`-
-Write neu-armiert, sodass Interrupt-Latency in die Tick-Periode auf
-echter Hardware akkumulieren konnte. Der Fix schaltete den Timer auf eine
-absolute `CNTP_CVAL`-Deadline mit einem Catch-up-Clamp um; das Flackern hat sich
-seither nicht reproduziert (14 aufeinanderfolgende grüne Pi-4-Boots beim
-Release). QEMU-Runs waren nie betroffen — beide Boards waren durchgehend
-deterministisch. Das Boot-Success-Kriterium (der `type 'help' for commands`-
-Homescreen-Marker, den der Watchdog matcht, siehe §4 PID-1 → fsh-Übergabe) ist
-vom Tally unabhängig, so oder so: ein einzelner später Tick erreicht immer noch
-den interaktiven Prompt, und der no-`[FAIL]`- / Checkpoint-Count-Guard des
-Watchdogs fängt immer noch ein regrediertes Szenario.
-
+Jedes Szenario emittiert `[TEST]` und anschließend `[PASS]` oder
+`[FAIL]`; `run_all` druckt den finalen Tally. Ein grüner Lauf verlangt
+`30/30 passed`, keine `[FAIL]`- oder `ERROR CAUGHT`-Marker,
+unveränderte Page-Checkpoints und drei
+`type 'help' for commands`-Marker.
 ### Free-Page-Invarianten
 
 Die Harness nutzt `sys_dump_free`, um zu verifizieren, dass jedes Szenario
@@ -1522,7 +1311,7 @@ und virt `0x3be45` / `0x3be53`.
 ### Coverage-Matrix
 
 Die Host-Spalte zählt Inline-`test "…"`-Blöcke in jedem Modul (via
-`zig build test` gelaufen). Die Kernel-Harness-Spalte listet die `[TEST]`-
+`flash build test` gelaufen). Die Kernel-Harness-Spalte listet die `[TEST]`-
 Szenarien in `user_space/kernel_tests.flash`, die das Modul End-to-End
 auf QEMU + Pi 4 ausüben.
 
@@ -1536,8 +1325,8 @@ auf QEMU + Pi 4 ausüben.
 | `src/console.flash`                     |          7 | `console-echo`, `fd-redirect`                                                                                                                 | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `src/sched.flash`                       |         13 | jedes fork/kill/wait-Szenario                                                                                                                 | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `src/initramfs.flash`                   |         13 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`, `perm`                                                    | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `src/file.zig`                          |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `fd-redirect`                                                        | fd-Table-Helper leben in `src/fdtable.flash`; die `alloc`/`ref`/`unref`-Lifetime-Tests bleiben hier                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `src/vfs.zig`                           |         19 | `vfs-dispatch`, `fs-roundtrip`, `initramfs-open`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`                                            | die create/unlink/rename-Wrapper- + EROFS-Default-Tests sind host-only (Cross-Superblock-Rename-Ablehnung, Default-Stub-Fail-Closed)                                                                                                                                                                                                                                                                                                                                                                                                |
+| `src/file.flash`                          |          2 | `initramfs-open`, `vfs-dispatch`, `exec-elf`, `stack-overflow`, `flibc`, `fd-redirect`                                                        | fd-Table-Helper leben in `src/fdtable.flash`; die `alloc`/`ref`/`unref`-Lifetime-Tests bleiben hier                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `src/vfs.flash`                           |         19 | `vfs-dispatch`, `fs-roundtrip`, `initramfs-open`, `exec-elf`, `stack-overflow`, `flibc`, `readdir`                                            | die create/unlink/rename-Wrapper- + EROFS-Default-Tests sind host-only (Cross-Superblock-Rename-Ablehnung, Default-Stub-Fail-Closed)                                                                                                                                                                                                                                                                                                                                                                                                |
 | `src/sdhci_cmd.flash`                   |         13 | `emmc2-block` (CMD17/CMD24-Encoding, CSD-v2-Parse, Clock-Divisor)                                                                             | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `src/mailbox.flash`                     |         19 | `emmc2-block` (Clock-Rate-Query für SDHCI-Divider; SD-VDD-Power-on und 3.3-V-I/O-Rail bei init); USB-C-Console (`usb_init`s USB-HCD-Power-on) | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `src/board/virt/dtb.flash`              |          4 | (virt-Boot-Übergabe)                                                                                                                          | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -1552,12 +1341,12 @@ auf QEMU + Pi 4 ausüben.
 | `src/mm_user.flash`                     |         11 | `brk`, `stack-overflow`, `wild-pointer`, `efault-syscall`                                                                                     | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `src/utilc.flash`                       |         11 | jedes (jeder Print-Pfad)                                                                                                                      | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `src/klog_ring.flash`                   |          8 | `klog`                                                                                                                                        | pure Overwrite-Oldest-Ring-Arithmetik (push / snapshot, monotone u64-head/tail); der `main_output`-Tee (`src/utilc.flash`) und der Slot-38-Snapshot (`src/sys.flash`) sind von `[TEST] klog` integration-getestet                                                                                                                                                                                                                                                                                                                  |
-| `src/sha256.flash`                      |         17 | `authenticate` (via `sys_authenticate`)                                                                                                       | pure Compute (SHA-256 / HMAC-SHA256 / PBKDF2-HMAC-SHA256 / `ctEql`); die Host-Vector-Tests (NIST FIPS 180-2, RFC 4231, publiziertes PBKDF2-Set) plus `std.crypto`-Differentials sind das Gate; `sys_authenticate` und das Build-Time-`tools/gen_shadow.zig` sind die Consumer                                                                                                                                                                                                                                                         |
-| `src/shadow.flash`                      |         15 | `authenticate`, `passwd` (via `sys_authenticate` / `sys_passwd`)                                                                              | pure `/etc/shadow`-Zeilen-Parser + Hex-Encode/Decode + das Same-Length-In-Place-Rewrite (`rewriteLineInPlace`); die Host-Tests pinnen das `user:iterations:salt_hex:hash_hex`-Format, geteilt von `sys_authenticate` (verify), `sys_passwd` (rewrite) und `tools/gen_shadow.zig` (generate)                                                                                                                                                                                                                                          |
+| `src/sha256.flash`                      |         17 | `authenticate` (via `sys_authenticate`)                                                                                                       | pure Compute (SHA-256 / HMAC-SHA256 / PBKDF2-HMAC-SHA256 / `ctEql`); die Host-Vector-Tests (NIST FIPS 180-2, RFC 4231, publiziertes PBKDF2-Set) plus `std.crypto`-Differentials sind das Gate; `sys_authenticate` und das Build-Time-`tools/gen_shadow.flash` sind die Consumer                                                                                                                                                                                                                                                         |
+| `src/shadow.flash`                      |         15 | `authenticate`, `passwd` (via `sys_authenticate` / `sys_passwd`)                                                                              | pure `/etc/shadow`-Zeilen-Parser + Hex-Encode/Decode + das Same-Length-In-Place-Rewrite (`rewriteLineInPlace`); die Host-Tests pinnen das `user:iterations:salt_hex:hash_hex`-Format, geteilt von `sys_authenticate` (verify), `sys_passwd` (rewrite) und `tools/gen_shadow.flash` (generate)                                                                                                                                                                                                                                          |
 | `src/perm.flash`                        |          9 | `perm`                                                                                                                                        | pure `checkAccess`-Decision-Funktion; die Host-Truth-Table (owner/group/other × read/write/exec × root-Bypass) ist das Gate für den Permission-Layer; die drei Syscall-Boundary-Enforcement-Sites (`sys_openFile` / `sys_write` / `execve`) sind von `[TEST] perm` integration-getestet                                                                                                                                                                                                                                              |
 | `src/overlay.flash`                     |         14 | `passwd` (via das geseedte `PERMS.TAB`)                                                                                                       | pure FAT32-Permission-Overlay-Parser + Case-Insensitive-Lookup; die Host-Truth-Table (well-formed / Comments / CRLF / malformed-rejects-wholesale / Capacity / Self-Entry) ist das Gate für das Overlay; der Mount-Time-Apply + Open-Time-Lookup leben in `src/fat32_backend.flash` und sind dort host-getestet                                                                                                                                                                                                                       |
 | `src/pwfile.flash`                      |          7 | `login`, `passwd` (und `/bin/login` / `whoami` zur Runtime)                                                                                   | pure `/etc/passwd`-Parser (Name- + uid-Lookups), geteilt vom Kernel (`sys_passwd`-Autorisierung), `/bin/login`, `/bin/passwd` und fshs `whoami`-Builtin; die Host-Tests pinnen das 5-Feld-Format gegen `user_space/etc/passwd`                                                                                                                                                                                                                                                                                                       |
-| `scripts/build_initramfs.zig`           |          2 | `perm` (via die staged initramfs-Modes)                                                                                                       | deterministischer newc-cpio-Encoder (ein Build-Time-Host-Tool, kein Kernel-Code); seine Host-Tests pinnen die Mode/uid/gid-Byte-Offsets, geteilt mit dem Parser von `src/initramfs.flash` — ein Encoder/Parser-Drift wäre ein stiller Permission-Bypass                                                                                                                                                                                                                                                                              |
+| `scripts/build_initramfs.flash`           |          2 | `perm` (via die staged initramfs-Modes)                                                                                                       | deterministischer newc-cpio-Encoder (ein Build-Time-Host-Tool, kein Kernel-Code); seine Host-Tests pinnen die Mode/uid/gid-Byte-Offsets, geteilt mit dem Parser von `src/initramfs.flash` — ein Encoder/Parser-Drift wäre ein stiller Permission-Bypass                                                                                                                                                                                                                                                                              |
 | `src/hwrng.flash`                       |          6 | `rng`                                                                                                                                         | der pure SplitMix64-Mixer ist auf dem Host vector- und differential-getestet; das Kernel-Glue (`fill` / der `hwrng_init`-Announce) ist von `[TEST] rng` durch den klog-Ring integration-getestet                                                                                                                                                                                                                                                                                                                                    |
 | `user_space/lib/flibc/readline.flash`   |         27 | (PID-1-Übergabe)                                                                                                                              | pure byte→buffer Line-Editor-Cores: die Append-only-State-Machine (TAB-Completion-Action), die Cursor-Edit-Ops (insert/backspace/move/replace) und der Command-History-Ring; der SVC-Driver sitzt hinter einem Comptime-`has_driver`-Gate, sodass der Host-Build nie Inline-asm analysiert; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                                                                                                                 |
 | `user_space/lib/flibc/execvp.flash`     |         13 | (PID-1-Übergabe)                                                                                                                              | pure `/bin/<name>`-Path-Build; SVC-Driver gegatet wie `readline`; Runtime-Pfad = die interaktive fsh-Shell nach der Harness                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1567,9 +1356,9 @@ auf QEMU + Pi 4 ausüben.
 | `lib/console_ui/screen.flash`           |          2 | — (Status-Tools)                                                                                                                             | pure ANSI-Line-Helper (Screen `clear`, aligned `kv`-Metric-Rows); `Sink`-geroutet, allocator-free; Consumer sind `/bin/sysinfo` / `/bin/cpuinfo` / `/bin/uptime` (`kv`) und `/bin/clear` (`clear`). Das Full-Screen-Alternate-Screen-Rendering, das Pager und Editor brauchen, lebt jetzt im `tui`-Render-Core der Flash-Standard-Library                                                                                                                                                                                             |
 | `user_space/fsh/tokenize.flash`         |         11 | (PID-1-Übergabe)                                                                                                                              | pure Whitespace-Split + Single-Pipe-Dekomposition; der Shell-Driver (`fsh.flash`) ist integration-only via die PID-1 → fsh-Übergabe (der `type 'help' for commands`-Boot-Success-Marker)                                                                                                                                                                                                                                                                                                                                            |
 | `tools/grep_match.flash`                |          8 | — (Coreutil)                                                                                                                                  | pure Windowed-Substring-Matcher mit optionalem ASCII-Case-Fold für `/bin/grep`; der Open/Read/Line-Assembly-Driver lebt in `tools/grep.flash`                                                                                                                                                                                                                                                                                                                                                                                       |
-| `tests/host_alloc.zig`                  |          0 | —                                                                                                                                             | geteilter Bump-Allocator-Helper, von anderen Test-Roots konsumiert; trägt keine eigenen Inline-Tests                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `tests/host_alloc.flash`                  |          0 | —                                                                                                                                             | geteilter Bump-Allocator-Helper, von anderen Test-Roots konsumiert; trägt keine eigenen Inline-Tests                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `src/trace/*`                           |          0 | `trace`                                                                                                                                       | Runtime-Code-Patching; kein ICache-Sync host-seitig                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `src/trace/fp_walk.zig`                 |          6 | — (pure Host)                                                                                                                                 | AAPCS64-Frame-Record-Decoder für den `-Dtrace`-Sampler; die FP-Walk-Bounds- / Wrap- / Alignment- / Monotonic-Guards sind host-verifiziert (der Live-Sampler feuert nur auf Real-Pi-Async-Timer-Ticks)                                                                                                                                                                                                                                                                                                                               |
+| `src/trace/fp_walk.flash`                 |          6 | — (pure Host)                                                                                                                                 | AAPCS64-Frame-Record-Decoder für den `-Dtrace`-Sampler; die FP-Walk-Bounds- / Wrap- / Alignment- / Monotonic-Guards sind host-verifiziert (der Live-Sampler feuert nur auf Real-Pi-Async-Timer-Ticks)                                                                                                                                                                                                                                                                                                                               |
 | `src/board/*/irq.flash`                 |          0 | Timer-Ticks,`console-echo`-RX                                                                                                                 | pure MMIO; Stubs würden Identity-Read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `src/board/*/uart.flash`                |          0 | jeder Print                                                                                                                                   | pure MMIO                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `src/board/*/emmc2.flash`               |          0 | `emmc2-block`                                                                                                                                 | pure MMIO + board-spezifisch (BCM2711-SDHCI vs. virt-Fake); Verhalten verifiziert auf echter Pi-4-Hardware                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1578,11 +1367,11 @@ auf QEMU + Pi 4 ausüben.
 | `src/usb_tx_ring.flash`                 |          7 | — (USB-C-Console, nur Pi-HW)                                                                                                                  | pure Bulk-IN-TX-Ring-Arithmetik (monotone u64-head/tail, peek-then-advance); der MMIO/FIFO-Consumer in `src/board/rpi4b/usb.flash` bleibt hardware-verifiziert                                                                                                                                                                                                                                                                                                                                                                       |
 | `src/board/rpi4b/usb.flash`             |          0 | — (USB-C-Console, nur Pi-HW)                                                                                                                  | DWC2-MMIO; QEMU `raspi4b` emuliert den Device-Mode-Data-Pfad nicht, sodass Enumeration, der Connection-Manager und die Bulk-Console-Loop (inkl. Replug-Re-Enumeration) auf echter Pi-4-Hardware verifiziert werden; das Descriptor-Set + SETUP-Decode, das es konsumiert, sind in `src/usb_descriptors.flash` host-getestet, der TX-Ring in `src/usb_tx_ring.flash`                                                                                                                                                                    |
 
-Totals: **464 Host-Tests** (`zig build test`, aus dem Build-Graph gezählt von
+Totals: **464 Host-Tests** (`flash build test`, aus dem Build-Graph gezählt von
 `scripts/test_tally.sh`) + **30 In-Kernel-EL0-Szenarien** +
 **1 Pre-PID-1-EL1-Szenario** (`emmc2-block`, `run-virt` / `run`). Die
 Per-Modul-Spalte oben ist ein ungefährer Breakdown — der autoritative
-Total ist, was auch immer `zig build test` druckt; der Test-Root von
+Total ist, was auch immer `flash build test` druckt; der Test-Root von
 `fork.flash` re-läuft auch die Tests von `src/elf.flash` durch einen direkten
 File-Import, sodass die Tests einiger Module ein zweites Mal innerhalb des
 Steps von `fork.flash` ausgeführt werden.
@@ -1594,7 +1383,7 @@ Steps von `fork.flash` ausgeführt werden.
 | `[TEST] <name>`            | Szenario gestartet                                                                                                                                                     |
 | `[PASS] <name>`            | Szenario mit dem erwarteten Free-Page-Count beendet                                                                                                                    |
 | `[FAIL] <name>`            | Szenario mit einem Leak oder falschem Return-Value beendet                                                                                                             |
-| `X/Y passed`               | Finaler Tally;`X == Y` ist die Green-Run-Bedingung                                                                                                                     |
+| `X/Y passed`               | Finaler Tally; `X == Y` ist die Green-Run-Bedingung                                                                                                                    |
 | `type 'help' for commands` | Boot-Success-Marker — fshs Homescreen-Schweif, einmal beim interaktiven REPL-Eintritt gedruckt; der QEMU-Watchdog und der Real-HW-`picapture`-Helper warten beide darauf (3× pro Boot) |
 | `ERROR CAUGHT`             | Kernel-seitiger Fault (Data-Abort, Instruction-Abort, etc.)                                                                                                            |
 | `kill ok`, `exec-elf ok`   | Per-Szenario-Progress-Prints                                                                                                                                           |
@@ -1607,10 +1396,10 @@ Marker (`type 'help' for commands`) 3× pro Boot emittiert.
 
 | File                       | Beschreibung                                            |
 | :------------------------- | :------------------------------------------------------ |
-| `zig-out/kernel8.img`      | Raw-Binary; Firmware lädt es zu physisch `0x80000`      |
-| `zig-out/armstub8.bin`     | EL3-Bootstrap-Shim, von der Firmware geladen            |
-| `zig-out/bin/kernel8.elf`  | Unstripped-ELF, behält Debug-Info für `nm` / `objdump`  |
-| `zig-out/bin/armstub8.elf` | Unstripped-armstub-ELF                                   |
+| `flash-out/kernel8.img`      | Raw-Binary; Firmware lädt es zu physisch `0x80000`      |
+| `flash-out/armstub8.bin`     | EL3-Bootstrap-Shim, von der Firmware geladen            |
+| `flash-out/bin/kernel8.elf`  | Unstripped-ELF, behält Debug-Info für `nm` / `objdump`  |
+| `flash-out/bin/armstub8.elf` | Unstripped-armstub-ELF                                   |
 
 ---
 

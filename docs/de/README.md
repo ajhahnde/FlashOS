@@ -49,18 +49,16 @@
 
 ## About
 
-FlashOS ist ein Bare-Metal-AArch64-Kernel, der auf Raspberry-Pi-4B-
-Hardware und unter QEMU bootet. Der Kernel-Core ist in
-[Flash](https://github.com/ajhahnde/Flash) geschrieben (einer
-Systemsprache, gebaut mit `LLVM IR`), mit dem Boot-Pfad, den
-Exception-Vektoren und dem Context Switch in AArch64-Assembly. Der
-Build wird vollständig von `build.zig` gesteuert, das derzeit die
-`.flash`-Module durch einen gepinnten `flashc` kompiliert. Bald wird
-FlashOS direkt kompiliert.
-Der aktuelle Release liefert einen vollständigen Uniprozessor-Prozess-
-Lebenszyklus (`fork`, `exec`, `exit`, `wait`, `kill`), leckfrei über
-Stress-Zyklen hinweg, geprüft durch ein kernelinternes
-`[TEST]/[PASS]/[FAIL]`-Harness und eine host-seitige Unit-Test-Suite.
+FlashOS ist ein Bare-Metal-AArch64-Kernel für Raspberry-Pi-4B-Hardware
+und QEMU. Der Kernel-Core ist in
+[Flash](https://github.com/ajhahnde/Flash), einer LLVM-basierten
+Systemprogrammiersprache, geschrieben. Boot-Pfad, Exception-Vektoren
+und Context-Switch-Code sind in AArch64-Assembly implementiert.
+
+`build.flash` steuert den gesamten nativen Build. Der aktuelle Release
+bietet einen vollständigen, über Stresszyklen leckfreien
+Uniprozessor-Prozesslebenszyklus mit `fork`, `exec`, `exit`, `wait` und
+`kill`. Ein Kernel-Harness und host-seitige Unit-Tests prüfen ihn.
 
 ## Spezifikationen
 
@@ -168,96 +166,18 @@ Stress-Zyklen hinweg, geprüft durch ein kernelinternes
   (Laufzeit intakt, aber derzeit inert — Zig hat noch kein Äquivalent
   zu `-fpatchable-function-entry=2`).
 - **Kernelinternes Test-Harness** (`[TEST]/[PASS]/[FAIL]` + Bilanz, 30
-  Szenarien) plus eine host-seitige `zig build test`-Suite (464
+  Szenarien) plus eine host-seitige `flash build test`-Suite (464
   Host-Tests über 41 Module).
 
 ## Schnellstart
 
-Die Toolchain installieren:
+Installation, Build-Targets, QEMU-Kommandos, SD-Karten-Deployment und
+Konsolen-Setup stehen vollständig in **[Setup](SETUP.md)**.
 
 ```bash
 brew install zig aarch64-elf-binutils qemu
+flash build -Dboard=rpi4b run
 ```
-
-Die Source-Module von FlashOS sind in
-[Flash](https://github.com/ajhahnde/Flash) geschrieben und werden von
-`flashc` kompiliert — einem nativen LLVM-Compiler, dessen
-Bootstrap-Modus (`--backend=zig`) der FlashOS-Build während der
-nativen Umstellung noch nutzt. Den gepinnten Compiler einmal bauen —
-`build.zig` sucht ihn standardmäßig unter
-`~/Flash/zig-out/bin/flashc` (mit `-Dflashc=<path>`
-überschreiben):
-
-```bash
-git clone https://github.com/ajhahnde/Flash.git ~/Flash
-git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
-( cd ~/Flash && zig build )   # → ~/Flash/zig-out/bin/flashc
-```
-
-Alles für den Pi bauen (`kernel8.img` + `armstub8.bin` landen in
-`zig-out/`):
-
-```bash
-zig build                   # default: -Dboard=rpi4b
-```
-
-Oder für QEMU `-M virt` bauen (kein armstub):
-
-```bash
-zig build -Dboard=virt
-```
-
-Den Kernel unter QEMU ausführen:
-
-```bash
-zig build -Dboard=rpi4b run        # raspi4b machine (Pi 4 model)
-```
-
-```bash
-zig build -Dboard=virt  run-virt   # generic ARMv8 virt machine
-```
-
-Host-seitige Unit-Tests ausführen (Page Allocator + ELF-Parser):
-
-```bash
-zig build test
-```
-
-Für den vollständigen Hardware-Ablauf (zweiphasiger Build mit
-Symboltabellen-Befüllung) die Shell-Helper sourcen und die
-`build`-Funktion ausführen; mit `-d` werden die Artefakte zusätzlich auf
-die SD-Karte deployt:
-
-```bash
-source flashos.zsh
-build        # nur zweiphasiger Build
-build -d     # zweiphasiger Build + Deploy auf die SD-Karte
-```
-
-Siehe [Setup](SETUP.md) für das SD-Karten-Layout, die Firmware-Dateien
-und das Setup der seriellen Konsole.
-
-## Build-Schritte
-
-| Schritt                              | Was er tut                                                     |
-| :----------------------------------- | :------------------------------------------------------------- |
-| `zig build` (oder `-Dboard=rpi4b`)   | Default — Pi:`kernel8.img` + `armstub8.bin`                    |
-| `zig build -Dboard=virt`             | virt:`kernel8.img` only (no armstub)                           |
-| `zig build kernel`                   | Nur Kernel-Image                                               |
-| `zig build armstub` (rpi4b only)     | Nur Armstub                                                    |
-| `zig build populate-syms`            | `src/symbol_area.S` aus der gelinkten ELF neu generieren       |
-| `zig build deploy` (rpi4b only)      | Artefakte + RPi-Firmware nach`$SD_BOOT` kopieren               |
-| `zig build -Dboard=rpi4b run`        | Boot unter`qemu-system-aarch64 -M raspi4b`                     |
-| `zig build -Dboard=virt run-virt`    | Boot unter`qemu-system-aarch64 -M virt`                        |
-| `zig build -Dboard=virt test-virt`   | virt booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht |
-| `zig build -Dboard=rpi4b test-rpi4b` | raspi4b booten, watchdog prüft, dass der Boot den fsh-Prompt erreicht |
-| `zig build -Dboard=virt iso`         | Eine GRUB-EFI-Rescue-ISO bauen (nur virt)                      |
-| `zig build test`                     | Host-seitige Unit-Tests (464 tests, 41 modules)                |
-| `zig build clean`                    | `.zig-cache/` und `zig-out/` entfernen                         |
-
-Der Standard-Optimierungsmodus ist `ReleaseSmall`. Mit
-`-Doptimize=ReleaseSafe` (oder `Debug`, `ReleaseFast`) überschreiben.
-
 ## Repository-Layout
 
 ```text
@@ -273,7 +193,7 @@ armstub/                    EL3 → EL1 bootstrap shim (Pi only)
 scripts/                    symbol-table generation, iso, QEMU test watchdog,
                             Pi-baseline verifier
 assets/                     logo and visual assets
-build.zig                   the only build entry point
+build.flash                   the only build entry point
 flashos.zsh             shell helpers incl. the two-pass `build` orchestrator
 flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration

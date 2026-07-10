@@ -29,179 +29,85 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
-- **Boot status lines are single-sourced and reworded.** Every bracket tag now
-  comes from `lib/console_ui/tags.flash` — the self-test markers (`[TEST]`,
-  `[PASS]`, `[FAIL]`), the `[Debug]` trace prefix, and PID 1's `[ OK ]` line,
-  which previously carried a hand-rolled copy of the tag bytes. The kernel's
-  bring-up lines were levelled to a consistent noun-terse voice: `Enable GIC v3`
-  → `GIC init` (the Pi 4B carries a GIC-400, not a GICv3), `Trace output kernel`
-  → `Kernel trace -> PL011`, `Initramfs init` → `Initramfs mount (/)`,
-  `Mounted /mnt (FAT32)` → `FAT32 mount (/mnt)`. Marker bytes themselves are
-  unchanged, so the boot contract holds.
-- **Subsystems no longer draw their own status lines.** `hwrng_init` returned
-  `void` and announced itself over a private console sink; it now returns
-  `i32` under the same negative-is-failure contract the other bring-up calls
-  use, and `kernel_main` owns the line. PID 1 likewise binds a real
-  `console_ui` logger over `write(2)` instead of emitting a pre-rendered
-  prefix, so the kernel and userspace status lines share one renderer.
-- **The product wordmark is now `.flashOS`** (neutral `.flash`, amber `OS`),
-  replacing the all-amber `FlashOS` mark. Updated at every rendering: the fsh
-  homescreen banner (`console_ui.homescreen`), the README/docs logo assets,
-  and the boot-demo GIF. The boot contract markers (`[ OK ]` lines, the
-  `type 'help' for commands` tail) are unchanged.
+- Replaced the transitional `build.zig` pipeline with the native Flash
+  build definition, `build.flash`. User-facing build commands now use
+  `flash build`, and artifacts are installed under `flash-out/`.
+- Centralized all boot and test status tags in
+  `lib/console_ui/tags.flash` and standardized kernel bring-up messages.
+  Marker bytes used by the boot contract remain unchanged.
+- Moved subsystem status rendering into `kernel_main`; PID 1 now uses
+  the shared `console_ui` logger as well.
+- Updated the product wordmark to `.flashOS` across the shell banner,
+  documentation assets, and boot demo.
 
 ### Fixed
 
-- **`[TEST] rng` failed on every boot.** The entropy source's announce lines
-  were reworded without updating the two consumers that cannot import the
-  emitting module: the in-kernel scenario scans the kernel log ring for the
-  announce, and the QEMU boot watchdog greps it from the serial log. Both
-  tracked the pre-rename wording, so the scenario reported `[FAIL] rng` and
-  the watchdog counted a healthy announce as missing. Both now track the
-  live wording, and each site documents the coupling.
+- Updated the runtime RNG test and QEMU watchdog to recognize the current
+  entropy-source message. Both had retained the previous wording and
+  incorrectly reported healthy boots as failures.
 
 ## [v0.7.3] - 2026-07-04
 
-Toolchain identity flip: FlashOS now consumes Flash **v1.0.1**, where the
-installed `flashc` binary became the live self-hosted compiler itself (a
-native LLVM driver) rather than a separate `flashc-stage1` produced by a
-`zig build stage1` step. The boot contract, the syscall ABI, and the
-`zig build` targets are unchanged.
-
 ### Changed
 
-- **The pinned Flash toolchain is v1.0.1.** `flash-toolchain.lock` names the
-  new commit; every `flashc` invocation across `build.zig`, CI, the Pi
-  baseline script, and the tutorial lab now passes the Zig-emission mode
-  explicitly (`--backend=zig`), since flag-less `flashc` now compiles a
-  native host binary instead of printing lowered Zig. FlashOS's own build
-  still consumes that bootstrap backend — that stays deliberate until the
-  native-object port; only the naming changed.
-- **Setup instructions and the learning tutorial now describe `flashc` as
-  the compiler it is.** `SETUP.md`, `README.md`, both German translations,
-  and the interactive tutorial's chapters and lab UI — previously written
-  around a "Flash transpiles to Zig" narrative — now say "compile", and
-  build the pinned toolchain with plain `zig build` instead of
-  `zig build stage1`.
+- Pinned Flash v1.0.1, where `flashc` is the self-hosted native LLVM
+  compiler rather than a separate `flashc-stage1` artifact.
+- Updated builds, CI, baseline verification, documentation, and tutorials
+  to build the compiler with `zig build` and request its bootstrap
+  Zig backend explicitly with `--backend=zig`. Kernel output and build
+  targets are unchanged.
 
 ## [v0.7.2] - 2026-07-02
 
-Interactive polish: the shell prompt now carries the login identity, the
-current directory, and colour accents, all single-sourced in the shared
-console-UI module so no escape sequence lives in the shell itself. The boot
-contract, the syscall ABI, and the `zig build` targets are unchanged.
-
 ### Changed
 
-- **The `fsh` prompt now shows `<user> @ <cwd> <sigil>`.** Where the prompt
-  was previously a bare `#` / `$` sigil, it now leads with the resolved login
-  name and the current working directory, so the shell states who you are and
-  where you are on every line. The login name is amber (bold for `root`), the
-  `@` separator is dimmed, the directory is bright neutral, and the sigil
-  keeps the amber accent (`#` bold for `root`, `$` otherwise). The prompt is
-  assembled by a single `renderPrompt` helper in the internal `console_ui`
-  module — no ANSI escape lives in the shell — and with colour disabled every
-  escape collapses so the bytes are the plain `<user> @ <cwd> # ` / `$ ` form.
-- **`whoami` and the prompt now resolve the login name one way only.** The
-  name lookup (real uid against `/etc/passwd`, decimal-uid fallback when the
-  file is unreadable or the uid has no entry) is shared through a single
-  `resolveUser` helper instead of living inside the `whoami` built-in, so the
-  prompt and the command can never disagree.
+- The `fsh` prompt now displays `<user> @ <cwd> <sigil>` with shared
+  console-UI styling and a plain-text fallback when color is disabled.
+- The prompt and `whoami` now share one username resolver, including
+  `/etc/passwd` lookup and numeric-UID fallback.
 
 ## [v0.7.1] - 2026-06-30
 
-Internal release: the userland is re-platformed onto the Flash standard
-library's I/O and terminal-UI modules, and every userland console read and
-write is confined to a single adapter. The boot contract, the syscall ABI,
-and the `zig build` targets are unchanged.
-
 ### Changed
 
-- **The pager and editor now render through the Flash standard library's
-  terminal-UI core.** `/bin/less` and `/bin/edit` previously drove the
-  serial console with hand-rolled escape sequences and whole-screen
-  repaints; they now paint a styled cell buffer and emit only the minimal
-  screen diff each frame (incremental repaint), built on the standard
-  library's `io`, `tui`, and `keys` modules (adopted at the library's
-  `v1.0.0`). The pager runs on the library's run loop; the editor keeps its
-  own key loop — the library's key set does not cover the editor's extended
-  chords (Home / End / PgUp / PgDn / Delete and the `ctrl` shortcuts) — over
-  the same render core. Both status bars are now full-width reverse-video;
-  all other behaviour is unchanged.
-- **All userland console I/O is confined to one adapter.** Every console
-  read and write — in the shell, the line editor, the coreutils, the pager,
-  the editor, and the `login` / `passwd` prompts — now crosses the syscall
-  boundary at a single flibc seam (`consoleSink` / `errSink` /
-  `consoleInput`) instead of calling the read / write syscalls directly.
-  Output bytes, password masking, and prompts are byte-for-byte identical.
+- Migrated `less` and `edit` to the Flash standard library's terminal
+  UI, incremental renderer, I/O, and key modules.
+- Routed all userland console I/O through the flibc `consoleSink`,
+  `errSink`, and `consoleInput` adapters.
 
 ### Removed
 
-- **The unused full-screen panel scaffolding in the internal
-  `console_ui.screen` module** — the alternate-screen lifecycle, cursor
-  positioning, and bordered-panel renderers had no callers once the pager
-  and editor moved to the standard library's render core. The screen-clear
-  and aligned key/value line helpers the status tools use remain.
+- Removed unused full-screen panel helpers from `console_ui.screen`;
+  the screen-clear and aligned key/value helpers remain.
 
 ## [v0.7.0] - 2026-06-18
 
 ### Added
 
-- **`/bin/edit` — a full-screen text editor.** `edit <file>` slurps a file
-  into a heap-backed gap buffer, takes over the console with the alternate
-  screen + raw mode, and edits it in place: arrows / Home / End / PgUp / PgDn
-  navigate, printable keys insert, Backspace / Delete remove, Enter splits the
-  line, `ctrl-O` writes, `ctrl-W` searches forward from the cursor, and
-  `ctrl-X` exits (prompting to save a modified buffer). It is the **first real
-  consumer of the userland heap** — the `brk` / `sbrk` syscalls behind flibc's
-  bump `malloc`, which already existed — so it adds **no new syscall**
-  (`NR_SYSCALLS` holds) and **no kernel change**; it is pure userland. Save is
-  **unlink + create + write** rather than in-place, because the FAT32 backend's
-  `write` only grows `file_size` (there is no truncate): recreating the file
-  yields the correct, possibly smaller, size every time. The editing logic is
-  three new pure, host-tested flibc cores — `gapbuf.GapBuf` (storage),
-  `gapbuf.LineIndex` (lines + cursor motions), `gapbuf.Viewport` (scroll) —
-  plus a reused `grep_match.find` for search; the `keys` VT100 decoder gained
-  Delete / Home / End / PgUp / PgDn and the `ctrl-O/W/X` chords. Like
-  `/bin/less` it is interactive, so its edit loop is validated on real Pi
-  hardware and kept out of the CI boot script. Limits (deferred): one
-  logical line per screen row (horizontal scroll, no soft-wrap), no undo, tabs
-  shown as a single space, fixed 24×80 geometry.
+- **`/bin/edit` full-screen editor.** Added cursor navigation, insertion
+  and deletion, search (`Ctrl-W`), save (`Ctrl-O`), and guarded exit
+  (`Ctrl-X`). It uses a heap-backed gap buffer and is the first userland
+  consumer of flibc's `brk`/`sbrk` allocator.
+- Added host-tested gap-buffer, line-index, viewport, and extended-key
+  logic. Saving recreates FAT32 files because the backend cannot truncate
+  an existing file.
+- Current limits are fixed 24×80 geometry, no undo or soft wrapping, and
+  single-space tab rendering. Interactive behavior is validated on Pi
+  hardware.
 
 ## [v0.6.0] - 2026-06-18
 
 ### Added
 
-- **FAT32 file create / unlink / rename and the `cp` / `mv` / `rm`
-  coreutils.** Three new syscalls complete the FAT32 write path:
-  `create` (slot 53) makes a new empty file and returns a writable fd —
-  the create-then-write half the flag-less `open` ABI lacked — `unlink`
-  (54) tombstones a file's directory entry and frees its cluster chain,
-  and `rename` (55) rewrites an 8.3 name in place within the same
-  directory. They are built on five new pure `fat32` primitives
-  (`findFreeDirSlot`, which extends a full directory by a cluster;
-  `writeDirEntry`; `markDeleted`; `freeChain`; `fsInfoOnFree`) and three
-  appended VFS vtable slots with EROFS defaults, so the read-only
-  initramfs and any future mount stay non-destructive. Three new
-  `/bin` coreutils consume them: `cp` (open + create + copy), `rm`
-  (unlink each argument), and `mv` (same-directory `rename`, with a
-  copy+unlink fallback across directories). Files only — `mkdir` /
-  `rmdir`, sub-directory writes, and cross-directory rename are deferred.
-  Created files are caller-owned (the permission metadata is a
-  per-session value that does not persist across reboot). On-device
-  source files use the 8.3-safe `.fl` extension (`.flash` does not fit an
-  8.3 short name); there is no LFN.
-- **`/bin/grep`.** A literal-pattern line search — `grep [-i] PATTERN
-[FILE...]`, reading stdin when given no file — over a pure, host-tested
-  substring matcher with optional ASCII case folding. No regex, no
-  new syscall.
-- **`[TEST] fs-roundtrip` now exercises the full create/unlink/rename
-  lifecycle.** On a mounted (real-Pi) boot the scenario folds in a CRUD
-  leg — create, write, read back, rename, unlink, verify-gone — that
-  leaves the disk unchanged, so it adds no new scenario and the boot
-  contract stays at 30 EL0 scenarios / 34 checkpoints. FAT32 remains
-  Pi-only (QEMU's EMMC2 does not pass CMD8), so the logic is covered by
-  host tests and the lifecycle is validated on real Pi-4 hardware.
+- **FAT32 create, unlink, and rename** through new syscalls 53–55 and
+  matching VFS operations. Added `cp`, `mv`, and `rm` utilities.
+  Operations are limited to files and 8.3 names; directory mutation and
+  long filenames remain unsupported.
+- **`/bin/grep`** with literal matching, optional ASCII case folding
+  (`-i`), file operands, and stdin support.
+- Extended `[TEST] fs-roundtrip` with a create/write/read/rename/unlink
+  cycle. Pure FAT32 logic is host-tested; the integrated write path is
+  validated on Raspberry Pi hardware because QEMU cannot mount EMMC2.
 
 ## [v0.5.0] - 2026-06-17
 
@@ -496,4 +402,3 @@ highlights are below.
 ---
 
 [← Prev: Versioning](VERSIONING.md) · [Next: License →](LICENSE.md)
-</content>
