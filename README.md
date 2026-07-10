@@ -9,9 +9,8 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.7.4-lightgrey?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/flash-v1.2.0-f59e0b?style=flat-square" alt="Flash">
-    <img src="https://img.shields.io/badge/zig-0.16.0-f59e0b?style=flat-square" alt="Zig 0.16.0">
+    <img src="https://img.shields.io/badge/version-v0.8.0-lightgrey?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/flash-v1.4.1-f59e0b?style=flat-square" alt="Flash">
     <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
     <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
   </p>
@@ -44,7 +43,7 @@ hardware and under QEMU. The kernel core is written in
 [Flash](https://github.com/ajhahnde/Flash) (a systems language built with
 `LLVM IR`) with the boot path, exception vectors, and context
 switch in AArch64 assembly. The build is driven entirely by
-`build.zig`, which currently compiles the `.flash` modules through
+`build.flash`, which compiles the `.flash` modules through
 a pinned `flashc`.
 The current release ships with a complete uniprocessor process
 lifecycle (`fork`, `exec`, `exit`, `wait`, `kill`), leak-free across
@@ -153,49 +152,46 @@ harness and a host-side unit test suite.
 Install the toolchain:
 
 ```bash
-brew install zig aarch64-elf-binutils qemu
+brew install aarch64-elf-binutils qemu
 ```
 
 FlashOS's source modules are written in
-[Flash](https://github.com/ajhahnde/Flash) and compiled by `flashc` — a
-native LLVM compiler whose bootstrap `--backend=zig` mode FlashOS's
-build consumes during the native transition. Build the pinned compiler
-once — `build.zig` looks for it at `~/Flash/zig-out/bin/flashc` by
-default (override with `-Dflashc=<path>`):
+[Flash](https://github.com/ajhahnde/Flash) and compiled by `flashc`.
+Build the pinned compiler once — `build.flash` looks for it at `~/Flash/flash-out/bin/flashc`
+bydefault (override with `-Dflashc=<path>`):
 
 ```bash
 git clone https://github.com/ajhahnde/Flash.git ~/Flash
 git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
-( cd ~/Flash && zig build )   # → ~/Flash/zig-out/bin/flashc
+( cd ~/Flash && flash build )
 ```
 
-Build everything for the Pi (`kernel8.img` + `armstub8.bin` land in
-`zig-out/`):
+Build everything for the Pi:
 
 ```bash
-zig build                   # default: -Dboard=rpi4b
+flash build                   # default: -Dboard=rpi4b
 ```
 
 Or build for QEMU `-M virt` (no armstub):
 
 ```bash
-zig build -Dboard=virt
+flash build -Dboard=virt
 ```
 
 Run the kernel under QEMU:
 
 ```bash
-zig build -Dboard=rpi4b run        # raspi4b machine (Pi 4 model)
+flash build -Dboard=rpi4b run        # raspi4b machine (Pi 4 model)
 ```
 
 ```bash
-zig build -Dboard=virt  run-virt   # generic ARMv8 virt machine
+flash build -Dboard=virt  run-virt   # generic ARMv8 virt machine
 ```
 
 Run host-side unit tests (page allocator + ELF parser):
 
 ```bash
-zig build test
+flash build test
 ```
 
 For the full hardware flow (two-pass build with symbol-table population),
@@ -213,21 +209,21 @@ serial-console setup.
 
 ## Build steps
 
-| Build step                           | Explanation                                                    |
-| :----------------------------------- | :------------------------------------------------------------- |
-| `zig build` (or `-Dboard=rpi4b`)     | Default — Pi: `kernel8.img` + `armstub8.bin`                   |
-| `zig build -Dboard=virt`             | virt: `kernel8.img` only (no armstub)                          |
-| `zig build kernel`                   | Kernel image only                                              |
-| `zig build armstub` (rpi4b only)     | Armstub only                                                   |
-| `zig build populate-syms`            | Regenerate `src/symbol_area.S` from the linked ELF             |
-| `zig build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to `$SD_BOOT`                    |
-| `zig build -Dboard=rpi4b run`        | Boot under `qemu-system-aarch64 -M raspi4b`                    |
-| `zig build -Dboard=virt run-virt`    | Boot under `qemu-system-aarch64 -M virt`                       |
-| `zig build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
-| `zig build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
-| `zig build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
-| `zig build test`                     | Host-side unit tests (`464 tests`, `41 modules`)               |
-| `zig build clean`                    | Remove `.zig-cache/` and `zig-out/`                            |
+| Build step                             | Explanation                                                    |
+| :------------------------------------- | :------------------------------------------------------------- |
+| `flash build` (or `-Dboard=rpi4b`)     | Default — Pi: `kernel8.img` + `armstub8.bin`                   |
+| `flash build -Dboard=virt`             | virt: `kernel8.img` only (no armstub)                          |
+| `flash build kernel`                   | Kernel image only                                              |
+| `flash build armstub` (rpi4b only)     | Armstub only                                                   |
+| `flash build populate-syms`            | Regenerate `src/symbol_area.S` from the linked ELF             |
+| `flash build deploy` (rpi4b only)      | Copy artefacts + RPi firmware to `$SD_BOOT`                    |
+| `flash build -Dboard=rpi4b run`        | Boot under `qemu-system-aarch64 -M raspi4b`                    |
+| `flash build -Dboard=virt run-virt`    | Boot under `qemu-system-aarch64 -M virt`                       |
+| `flash build -Dboard=virt test-virt`   | Boot virt, watchdog asserts the boot reaches the fsh prompt    |
+| `flash build -Dboard=rpi4b test-rpi4b` | Boot raspi4b, watchdog asserts the boot reaches the fsh prompt |
+| `flash build -Dboard=virt iso`         | Build a GRUB-EFI rescue ISO (virt only)                        |
+| `flash build test`                     | Host-side unit tests (`464 tests`, `41 modules`)               |
+| `flash build clean`                    | Remove cache and build output                                  |
 
 > The default optimisation mode is `ReleaseSmall`. Override with
 > `-Doptimize=ReleaseSafe` (or `Debug`, `ReleaseFast`).
@@ -236,7 +232,7 @@ serial-console setup.
 
 ```text
 arch/aarch64/               AArch64 ISA core (boot, vectors, context switch)
-src/                        kernel core (Flash modules + Zig drivers)
+src/                        kernel core (modules + drivers)
 src/board/<name>/           per-board driver bag (rpi4b / virt) + linker script
 user_space/                 PID 1 image + in-kernel test harness
 user_space/lib/flibc/       userland mini-libc for ELF demos
@@ -247,8 +243,8 @@ armstub/                    EL3 → EL1 bootstrap shim (Pi only)
 scripts/                    symbol-table generation, iso, QEMU test watchdog,
                             Pi-baseline verifier
 assets/                     logo and visual assets
-build.zig                   the only build entry point
-flashos.zsh             shell helpers incl. the two-pass `build` orchestrator
+build.flash                 the only build entry point
+flashos.zsh                 shell helpers incl. the two-pass `build` orchestrator
 flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration
 ```
