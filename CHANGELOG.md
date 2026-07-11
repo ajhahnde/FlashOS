@@ -25,6 +25,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (see [VERSIONING.md](VERSIONING.md)). Per-tag notes also appear on the
 [releases page](https://github.com/ajhahnde/FlashOS/releases).
 
+The project was founded on April 28th, 2026.
+
 ## [Unreleased]
 
 ### Changed
