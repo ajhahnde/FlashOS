@@ -13,7 +13,7 @@ separate partition, no filesystem mount, needed to boot to a shell.
 `tools/initramfs.S` carries a `.incbin "initramfs.cpio"` between
 `__initramfs_start` / `__initramfs_end` labels, and both board linker
 scripts place that `.initramfs` section between `bss_end` and
-`id_pg_dir`. The archive itself is built by `scripts/build_initramfs.zig`,
+`id_pg_dir`. The archive itself is built by `scripts/build_initramfs.flash`,
 a hand-rolled newc-cpio encoder over a sorted file list — fixed mtime,
 uid, gid, and inode numbers, so the archive is a pure function of file
 contents and names, not of when the build ran.
@@ -42,9 +42,9 @@ pub fn locate(path []u8) ParseError!?Entry {
 *(excerpt from `src/initramfs.flash` — not standalone-compilable)*
 
 The whole archive is read-only and lives in the kernel's own address
-space; a `File` handle allocated by `src/file.zig` carries an offset
+space; a `File` handle allocated by `src/file.flash` carries an offset
 into the section rather than a copy of the bytes. Ordinary syscalls
-reach it through the VFS shim (`src/vfs.zig`) like any other path — the
+reach it through the VFS shim (`src/vfs.flash`) like any other path — the
 one exception is PID 1 itself, which calls `initramfs.locate` directly,
 because it runs before the syscall path exists yet to call through.
 
@@ -115,7 +115,7 @@ collision, not a style preference: `flibc.flash` re-exports the
 graph gets compiled into *every* program that does `use flibc` —
 including programs that already define their own `_start` (the legacy
 `hello`/`stackbomb`/`flibc_demo` payloads). Two `_start` exports in one
-compilation is an "exported symbol collision" that Zig 0.16 rejects
+compilation is an "exported symbol collision" that the compiler rejects
 outright, regardless of linkage — a `weak` export doesn't defer to the
 linker here. Keeping the shim in a separate, opt-in module sidesteps
 the collision entirely: newer programs (the `argv_echo` fixture, and
@@ -213,7 +213,7 @@ export fn main(argc usize, argv argv) noreturn {
 > length has to be tracked or passed separately. `flibc.io`'s format
 > spec comment documents `%s` alongside `%d`/`%u`/`%x`/`%c`/`%%`.
 
-Compile it with the button below: since this Lab reads `argc`/`argv`
+Copy it into the Flash Editor and choose **Check lab**. Since this Lab reads `argc`/`argv`
 at all, that only proves the source compiles cleanly — running
 it with real arguments only happens inside FlashOS itself, where
 `sys_execve` is the one thing that ever puts values in `x0`/`x1` before

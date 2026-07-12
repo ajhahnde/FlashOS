@@ -1,167 +1,127 @@
-# Chapter 14: The Build Pipeline — flashc → Kernel
+# Chapter 14: Native Compilation behind `zig build`
 
-This tour has quoted dozens of `.flash` files as though they compiled
-straight to AArch64 machine code. With `flashc` — a native LLVM compiler —
-that is exactly where they are headed; during the transition, FlashOS's
-build still routes every module through flashc's bootstrap backend
-(`--backend=zig`), and the ordinary Zig toolchain compiles that output as
-it always has. That bootstrap detour is temporary and disappears once the
-native-object port completes. This chapter is about the pipeline as it
-runs today: where the compile step is wired into the build graph, why the
-compiler revision is pinned rather than left floating, and why the kernel
-symbol table needs the build to run twice.
+The command surface and the compiler pipeline are two different layers.
+Developers invoke `zig build`, and `build.zig` still owns targets, options,
+artifact paths, QEMU steps, and deployment. Inside that graph, however,
+shipping Flash source is compiled through `flashc`'s native LLVM path. The
+generated-Zig compatibility backend is reserved for tests and build tooling;
+it is never an input to a kernel, userland, or utility ELF.
 
 ## The toolchain pin
 
-`flash-toolchain.lock`, at the repository root, names the exact
-`flashc` commit the tree compiles against — not just a version
-number, a specific commit hash:
+`flash-toolchain.lock` names the exact Flash compiler revision the tree uses.
+The pin matters because Flash and FlashOS move independently: rebuilding with
+an arbitrary compiler checkout could otherwise change native objects without
+any source change in this repository.
+
+The setup guide shows how to check out and build that revision. Bumping the
+pin is an isolated maintenance operation followed by the full host-test and
+boot-watchdog battery; it is never an incidental part of editing a kernel
+module.
+
+## Native production units
+
+For a production unit, `build.zig` invokes the compiler's unit-oriented LLVM
+emission, lowers that IR to an AArch64 object, and adds the object to the
+existing link graph. In outline:
 
 ```text
-flash-version = 1.0.1
-flash-commit  = 89cb2fc43ccfe3a2f912ac86350bad1c53998e0f
-flashc-binary = zig-out/bin/flashc
+.flash source
+    -> flashc native unit / LLVM emission
+    -> AArch64 object
+    -> build.zig addObjectFile
+    -> kernel, userland, or tool ELF
 ```
 
-*(excerpt from `flash-toolchain.lock`)*
+Named module mappings preserve the same import graph Flash source uses. A unit
+is compiled once for its target and optimization mode, then linked wherever
+that artifact belongs. No generated `.zig` source sits between a product
+module and its machine code.
 
-Pinning exists because Flash and FlashOS are two separate, independently
-moving repositories: without a pin, a `.flash` module's compiled
-output could silently drift every time someone rebuilds `flashc` from
-whatever the Flash repo's HEAD happens to be that day. `build.zig`
-resolves the compiler binary through a `-Dflashc=<path>` option,
-defaulting to `~/Flash/zig-out/bin/flashc` — the pinned commit,
-built locally with `zig build`, is expected to live there.
-Bumping the pin is a deliberate, isolated step: rebuild, then re-run
-both boot watchdogs, never folded into an unrelated change.
+The distinction is observable, not just wording: the build's migration gate
+rejects compatibility-backend invocations outside the explicitly marked test
+helper, and release validation inspects the final ELF inputs.
 
-## `addFlashSource`: one compile step per module
+## Why tests retain a compatibility path
 
-`build.zig` wires each `.flash` module into the build graph through a
-small helper that runs `flashc` as an external command and hands its
-output back as a normal Zig module root:
+Flash source contains host-side `test` blocks, while the native compiler path
+does not yet provide an equivalent test runner. `zig build test` therefore
+lowers test roots and their Flash stubs through the Zig compatibility backend,
+then runs those temporary test executables on the host.
 
-```text
-fn addFlashSource(b: *std.Build, src: []const u8) std.Build.LazyPath {
-    const run = b.addSystemCommand(&.{ flashc_path, "--backend=zig" });
-    run.setName(b.fmt("flashc {s}", .{src}));
-    run.addFileArg(b.path(src));
-    run.addArg("-o");
-    const out = run.addOutputFileArg(b.fmt("{s}.zig", .{std.fs.path.stem(src)}));
-    run.has_side_effects = true;
-    return out;
-}
-```
+That is a narrow exception:
 
-*(excerpt from `build.zig` — not standalone-compilable; this is
-`build.zig` itself, host-side Zig, one of the pieces that deliberately
-stays Zig rather than Flash)*
+- production helpers request native objects;
+- the host-test helper alone may request generated Zig;
+- in-kernel runtime tests execute inside the natively compiled kernel;
+- every maintained product, tool, stub, and generator source remains `.flash`.
 
-The explicit `--backend=zig` argument pins the bootstrap mode by name:
-since Flash v1.0.1 `flashc`'s default output is a native object, so the
-build graph has to ask for the Zig backend explicitly rather than lean
-on a default that no longer means what it used to.
+The tutorial playground follows the same non-shipping compatibility seam so it
+can display readable lowering output in a browser. Passing that check proves a
+lab parses and lowers; it does not claim to reproduce the production link.
 
-Two details matter here. First, the `.flash` file is the only thing
-committed — the `.zig` it lowers to lands in Zig's build cache and is
-never checked in; if you want to see what a module actually compiles
-to, you compile it yourself and read the cache output, the same way
-this tour's Lab "Compile" button does. Second, `has_side_effects =
-true` forces the step to re-run on every build rather than let Zig's
-build cache treat it as a pure function of its declared inputs —
-`flashc` is an external binary the cache cannot fingerprint the way it
-fingerprints ordinary Zig source, so a stale cached compile step could
-otherwise green a boot that no longer matches the `.flash` source it
-was supposed to reflect. A sibling helper, `addFlashSourceAbs`,
-compiles `.flash` files living outside this repository entirely —
-Flash's own `std/` directory (`std/io`, `std/tui`, `std/keys` — the
-`core` import chapter 12's `less` and `edit` build on) is referenced
-straight from the pinned Flash checkout rather than vendored in, so
-that toolchain pin is the one place that surface's source of truth
-lives too.
+## What remains outside Flash source
 
-## What stays Zig, and why
+Only formats that serve a different role stay outside the Flash source census:
 
-Not every source file in the tree carries the `.flash` extension. Boot
-assembly and linker scripts (`arch/`, `.ld` files) are outside Flash's
-domain by construction — the young language's scope doesn't yet cover
-boot-time register and exception-level plumbing, so that stays hand-written AArch64 assembly. The
-kernel's own force-link boot trampoline, `src/start.zig`, hosts the
-build's module wiring and stays Zig for the same structural reason.
-And, as chapter 11 already noted in passing, a couple of low-level
-modules — `src/vfs.zig` among them — lean on a Flash language feature
-(non-exhaustive enums) the pinned compiler doesn't lower yet, so they
-remain plain Zig, consumed as ordinary named modules the rest of the
-build graph is indifferent to. `build.zig` itself, and the host
-tooling under `scripts/`, never run on the target board at all and
-stay Zig as a matter of course.
+- **AArch64 assembly and linker scripts** express early boot, exception
+  vectors, context switching, and section layout directly.
+- **`build.zig` and package metadata** are the host orchestration island. They
+  choose what to compile but are not linked into FlashOS.
 
-## The two-pass build: solving a chicken-and-egg problem
+Kernel modules, userland, host tools, generators, test stubs, and tracing logic
+are authored in Flash. Any Zig visible in a test cache is generated output,
+not a second maintained implementation.
 
-Chapter 7's tracing mention and the debugger-friendly `nm`/`objdump`
-output both depend on the kernel image carrying its own symbol table —
-but a symbol table can't be computed until the kernel is fully linked,
-and the kernel can't be linked with a symbol table that doesn't exist
-yet. The `build` helper in `flashos.zsh` resolves this with a
-two-pass build:
+## The two-pass symbol build
+
+The kernel carries a compact copy of its own symbol table for tracing and
+diagnostics. That creates a chicken-and-egg problem: the table needs final
+linked addresses, but it must also occupy space in the image whose addresses
+are being computed.
+
+The `build` helper from `flashos.zsh` resolves this with two passes:
 
 ```text
-# pass 1: link with a placeholder symbol section (hygiene runs once, up front)
+# pass 1: link against the fixed-size symbol-area placeholder
 zig build -Dboard="$BOARD" -Dskip-hygiene=true
 
-# save first-pass symbols
-"$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v '\$' > "$NM_TMPDIR/nmfirstpass"
-
-# generate the symbol area and overwrite src/symbol_area.S
+# extract addresses and populate src/symbol_area.S
 zig build populate-syms -Dboard="$BOARD" -Dskip-hygiene=true
 
-# pass 2: compile the symbol area and relink kernel8.elf
+# pass 2: relink with the populated table
 zig build -Dboard="$BOARD" -Dskip-hygiene=true
 
-# save second-pass symbols
-"$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v '\$' > "$NM_TMPDIR/nmsecondpass"
-
-# diff the two symbol dumps (should be empty)
-diff "$NM_TMPDIR/nmfirstpass" "$NM_TMPDIR/nmsecondpass"
+# compare first- and second-pass symbol addresses
+diff "$FIRST_PASS" "$SECOND_PASS"
 ```
 
-*(excerpt from the `build` helper — not standalone-compilable)*
+Pass one determines every address while reserving the symbol area's full
+budget. `populate-syms` converts sorted `nm` output into fixed-size assembly
+records. Pass two replaces placeholder bytes with those records without
+changing the section size. If another symbol moves, the final diff is nonempty
+and the helper fails — the layout did not converge.
 
-Pass one links the kernel with a *placeholder* symbol section, sized
-large enough to hold the real table but filled with nothing meaningful.
-`zig build populate-syms` then runs `nm` against that first-pass ELF,
-sorts and filters the output, and feeds it through
-`scripts/generate_syms.zig`, which overwrites `src/symbol_area.S` with
-the real `.quad`/`.string`/`.space` directives — one 64-byte entry per
-symbol. Pass two relinks with that populated table now baked in. The
-diff between the two `nm` dumps is the correctness check: inserting the
-real symbol data must not have perturbed any other symbol's address, or
-something about the placeholder's size assumption was wrong. A clean
-diff (nothing printed) is the pass; any output fails the build.
+The plain `zig build` command is enough for day-to-day compilation. The helper
+is the stronger release-style proof because it rebuilds, populates, rebuilds,
+and verifies in one operation.
 
-The `build` helper also gates on a pinned Zig version — checked against
-`.zigversion` before anything else runs — for the same reproducibility
-reason the Flash toolchain is pinned: a kernel and its build tooling
-should compile identically on any machine that follows the setup
-instructions, not merely on whichever machine happened to build it
-last.
+## Validation follows the artifact boundary
 
-## Validating a port, not just a build
+The pipeline has three useful proof levels:
 
-The Zig-to-Flash migration this pipeline exists to support followed one
-rule throughout: every ported module had to compile cleanly, its
-compiler output reviewed line-for-line against the `.zig` original it
-was replacing, pass the host unit tests, and pass both boot watchdogs —
-all *before* the original `.zig` file was deleted. The free-page
-checkpoints this tour's chapter 13 just covered were the byte-level
-witness that a port never changed behavior: if a module's compiled
-output produced a different checkpoint hex than its hand-written
-predecessor, the lowering had drifted from the original, full stop,
-regardless of how plausible the diff looked by eye.
+1. Compatibility host tests prove pure logic and keep every Flash `test` block
+   active.
+2. Native compilation and link inspection prove product ELFs contain only
+   native Flash objects plus assembly.
+3. The QEMU watchdog boots that linked AArch64 artifact and checks the runtime
+   contract, including page-accounting invariants and the final shell hand-off.
+
+The last level catches errors that valid object files can still contain: an ABI
+mismatch, a bad link address, or a page leak visible only after real
+fork/exec/reap cycles.
 
 ## What's next
 
-The last chapter closes the loop this tour opened at power-on: what
-changes when the same kernel image runs on a real Raspberry Pi 4
-instead of QEMU — the SD card, the serial console, and the USB-C
-gadget console that makes a Pi need no adapter cable at all.
+The final chapter moves the same kernel artifact from QEMU to a Raspberry Pi 4:
+SD-card deployment, physical serial channels, and the USB-C gadget console.

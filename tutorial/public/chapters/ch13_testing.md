@@ -18,6 +18,11 @@ primitives. A page allocator's bitmap math, a tokenizer, a gap buffer's
 insert/delete logic — none of that needs a booted kernel to prove
 correct, so it never pays QEMU's boot time to run.
 
+Flash's native compiler path produces the shipping objects, while the host
+suite deliberately uses the Zig compatibility backend until an equivalent
+native test runner exists. That exception is isolated to test executables;
+the booted kernel exercised by the runtime harness is natively compiled.
+
 **The in-kernel runtime harness** (`user_space/kernel_tests.flash`) is
 the other half: PID 1 itself, on real kernel state, running dozens of
 named `[TEST]` scenarios end to end. This is where fork/reap cycles,
@@ -48,14 +53,13 @@ sync with the source of truth.
 The CI watchdog doesn't wait a fixed number of seconds and hope; it
 tails the serial log and counts a specific string. With the login
 lifecycle chapter 9 walked through, fsh's homescreen banner — the
-stable `type 'help' for commands` tail — appears **three times** in a
-successful boot: twice from the in-harness `login` scenario's two
-scripted sessions, and once from the real PID-1 → login → fsh hand-off
-at the end of boot. The watchdog's early-exit fires on the *third*
-occurrence, with zero `[FAIL]` markers and zero `ERROR CAUGHT` lines
-anywhere in the log. Any drift in the expected scenario tally or
-checkpoint hex fails the run loudly rather than silently passing on a
-count that no longer means what it used to.
+stable `type 'help' for commands` tail — appears once for every scripted
+session and again for the final PID-1 → login → fsh hand-off. The
+watchdog reads the required count from its own live contract and exits
+early only when all sessions arrived, with zero `[FAIL]` markers and
+zero `ERROR CAUGHT` lines anywhere in the log. Any drift in the expected
+scenario tally or checkpoint hex fails loudly rather than silently
+passing on a count that no longer means what it used to.
 
 ## A scenario built to catch a real regression
 
@@ -88,11 +92,12 @@ and "silently passing" is deliberate everywhere this pattern appears.
 
 ## Running it yourself
 
-```text
-zig build test                      # host-side unit tests
-zig build -Dboard=virt run-virt     # in-kernel harness, QEMU virt
-zig build -Dboard=rpi4b run         # in-kernel harness, QEMU rpi4b
-build -d                            # two-pass build; deploy to real HW (via flashos.zsh)
+```bash
+zig build test                       # host-side unit tests
+zig build -Dboard=virt run-virt      # ordinary QEMU virt boot
+zig build -Dboard=rpi4b run          # ordinary QEMU Pi-model boot
+zig build -Dboard=rpi4b test-rpi4b   # full self-validating boot contract
+build -d                             # two-pass build + hardware deploy
 ```
 
 The in-kernel harness runs identically whether the board is emulated or

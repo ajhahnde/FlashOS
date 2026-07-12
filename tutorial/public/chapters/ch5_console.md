@@ -237,6 +237,6 @@ export fn main(_ usize, _ argv) noreturn {
 > spells out the same escapes once and gates all of them behind a
 > single `color` switch — the point this lab is illustrating by hand.
 
-Compile it with the button below and read the compiler's output: a
+Copy it into the Flash Editor, choose **Check lab**, and read the compiler's output: a
 handful of plain `write_fd` calls per log line, in the same
 tag-then-message-then-newline order `console_ui.line` uses.
