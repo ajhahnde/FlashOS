@@ -499,56 +499,6 @@ button {
 .content-body th { color: var(--text-primary); font-weight: 600; }
 .content-body td { color: var(--text-secondary); }
 
-/* Runnable example cards */
-.example-card {
-    background-color: var(--bg-panel);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-m);
-    margin: 28px 0;
-    overflow: hidden;
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow var(--transition-fast);
-}
-.example-card:hover { box-shadow: var(--shadow-md); }
-.example-header {
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--border-subtle);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.example-title {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-}
-.example-card pre {
-    border: none;
-    border-radius: 0;
-    margin: 0;
-    max-width: none;
-    box-shadow: none;
-    background-color: transparent;
-}
-.load-example-btn {
-    font-size: 12px;
-    font-weight: 600;
-    background-color: var(--accent-glow);
-    color: var(--accent);
-    padding: 5px 13px;
-    border-radius: var(--radius-pill);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.load-example-btn:hover {
-    background-color: var(--accent-fill);
-    color: var(--accent-ink);
-}
-
 /* Loading state */
 .content-loading {
     display: flex;

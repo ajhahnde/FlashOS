@@ -248,7 +248,7 @@ export fn main(_ usize, _ argv) noreturn {
 > — matching the same `insert(self *mut GapBuf, b u8)` shape the real
 > `GapBuf` exposes.
 
-Compile it with the button below; it prints `Flash`.
+Copy it into the Flash Editor and choose **Check lab**; it prints `Flash`.
 
 ## What's next
 

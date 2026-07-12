@@ -220,7 +220,7 @@ export fn main(argc usize, argv argv) noreturn {
 > the single already-NUL-terminated `argv[1]` in place — enough to show
 > the whitespace-splitting logic without fsh's buffer bookkeeping.
 
-Compile it with the button below.
+Copy it into the Flash Editor and choose **Check lab**.
 
 ## What's next
 

@@ -9,15 +9,15 @@ kernel and the userland.
 The kernel core, the board drivers, and the userland (including the
 `fsh` shell and its coreutils) are written in
 [Flash](https://github.com/ajhahnde/Flash), a systems language whose
-compiler, `flashc`, is a native LLVM compiler. (Transitional note: FlashOS's
-build still consumes flashc's bootstrap Zig backend while the native-object
-port completes — this tour says so once, here and in Chapter 14, and
-otherwise talks about the compiler as it is.) As
+compiler, `flashc`, targets LLVM. The repository keeps `zig build` as its
+command surface, but product modules are compiled to native objects by
+`flashc`; generated Zig is confined to compatibility tests and tooling. As
 `PORT.md` (in the repository root) documents, FlashOS did not start
 this way — it began as a C kernel, was rewritten in pure Zig and
 AArch64 assembly, and later had its OS-image modules ported from Zig
-to Flash module by module, with the boot assembly, linker scripts, and
-host build tooling staying Zig throughout.
+to Flash module by module. Hand-written AArch64 assembly and linker scripts
+remain where those formats are the right tool; `build.zig` is the host-side
+orchestrator rather than part of the operating-system image.
 
 ## What this tour shows
 
@@ -33,9 +33,10 @@ changes, and the build pipeline that turns `.flash` source into a
 bootable image. The tour closes on real Raspberry Pi 4 hardware, where
 everything covered along the way is running outside of QEMU.
 
-Each chapter pairs a short read with a hands-on lab: a real, runnable
-piece of Flash source you compile and inspect yourself, the same way
-the actual kernel and userland are built.
+Each chapter pairs a short read with a hands-on lab: a real piece of
+Flash source you can load into the editor and check through the readable
+test-compatibility lowering. That view is useful for learning and syntax
+feedback; shipped kernel and userland objects use the native compiler path.
 
 ## Lab: Hello, World!
 
@@ -65,6 +66,6 @@ export fn main(_ usize, _ argv) noreturn {
 > wrapper over the `write` syscall, and `flibc.exit()` wraps `exit` —
 > the same syscalls a shell like `fsh` or a coreutil like `cat` uses.
 
-Compile it with the button below and read the output: a
+Copy it into the Flash Editor, choose **Check lab**, and read the output: a
 `main` with C calling convention, wired to the same `flibc` module the
 rest of FlashOS's userland imports.

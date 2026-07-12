@@ -148,7 +148,7 @@ built, and `kernel_main` is reached only once the MMU is already on.
 
 ## Landing in `kernel_main`
 
-`kernel_main` (`src/kernel.flash`) is the first Flash/Zig code to run.
+`kernel_main` (`src/kernel.flash`) is the first Flash code to run.
 It brings up, in order: the Mini-UART console, the PL011 trace UART,
 the GIC (interrupt controller) driver, the kernel's own symbol table,
 the syscall table, and the generic timer — then forks PID 1 and enters

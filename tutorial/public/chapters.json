@@ -66,7 +66,7 @@
   },
   {
     "id": "build",
-    "title": "14. The Build Pipeline: Flash → Zig → Kernel",
+    "title": "14. Native Compilation behind zig build",
     "file": "chapters/ch14_build.md"
   },
   {

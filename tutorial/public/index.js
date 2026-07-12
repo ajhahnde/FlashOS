@@ -116,7 +116,7 @@ function initThemeAndLayout() {
         setLayout(layoutModes[nextIndex]);
     });
 
-    // Tab buttons for Editor/Zig Output switcher
+    // Tab buttons for Editor/test-lowering switcher
     dom.tabButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const targetTab = btn.getAttribute('data-tab');
@@ -328,9 +328,9 @@ function initMonaco() {
             }
         });
 
-        // 5. Create Zig editor (read-only)
+        // 5. Create lowered-output editor (read-only)
         state.zigEditor = monaco.editor.create(dom.zigEditorContainer, {
-            value: `// Click 'Compile' to see the bootstrap output FlashOS's build consumes`,
+            value: `// Click 'Check lab' to inspect the test-only compatibility lowering`,
             language: 'rust', // Monaco doesn't have Zig built-in by default, Rust/C highlight matches Zig syntax tags fairly closely
             theme: state.theme === 'dark' ? 'atomo-one-dark' : 'atomo-one-light',
             readOnly: true,
@@ -434,9 +434,9 @@ async function selectChapter(index) {
             breaks: true
         });
 
-        // Set custom marked renderer to detect code blocks and output example blocks
+        // Escape code blocks explicitly; chapter content is rendered as reading
+        // material and never injects source text as HTML.
         const renderer = new marked.Renderer();
-        let codeBlockCounter = 0;
         
         renderer.code = function(codeOrToken, language) {
             let codeText = "";
@@ -451,28 +451,13 @@ async function selectChapter(index) {
                 lang = language || "";
             }
 
-            if (lang === 'flash' || lang === 'go') {
-                codeBlockCounter++;
-                const escapedCode = codeText
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;')
-                    .replace(/'/g, '&#039;');
-
-                return `
-                    <div class="example-card">
-                        <div class="example-header">
-                            <span class="example-title">Example ${codeBlockCounter}</span>
-                            <button class="load-example-btn" data-code="${escapedCode}">
-                                <i data-lucide="terminal" style="width:12px; height:12px;"></i> Try in Editor
-                            </button>
-                        </div>
-                        <pre><code class="language-flash">${escapedCode}</code></pre>
-                    </div>
-                `;
-            }
-            return `<pre><code class="language-${lang || 'text'}">${codeText}</code></pre>`;
+            const escapedCode = codeText
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+            return `<pre><code class="language-${lang || 'text'}">${escapedCode}</code></pre>`;
         };
 
         renderer.blockquote = function(token) {
@@ -540,20 +525,6 @@ async function selectChapter(index) {
         // is ready; initMonaco re-runs this for the first-loaded chapter).
         highlightFlashBlocks(dom.chapterContent);
         
-        // Bind load events to the dynamically generated "Try in Editor" buttons
-        dom.chapterContent.querySelectorAll('.load-example-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const code = btn.getAttribute('data-code')
-                    .replace(/&amp;/g, '&')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/&quot;/g, '"')
-                    .replace(/&#039;/g, "'");
-                
-                loadCodeIntoEditor(code);
-            });
-        });
-
         // Scroll reader panel back to top
         dom.contentPanel.querySelector('.content-body').scrollTop = 0;
 
@@ -566,24 +537,6 @@ async function selectChapter(index) {
                 <p style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">Details: ${err.message}</p>
             </div>
         `;
-    }
-}
-
-function loadCodeIntoEditor(code) {
-    if (state.flashEditor) {
-        state.flashEditor.setValue(code.trim());
-        logTerminal("Loaded example code into Flash Editor.", "info");
-
-        if (phoneQuery.matches) {
-            // Phones: a stacked split leaves the editor a sliver — go editor-only.
-            setLayout('editor');
-        } else if (state.layout === 'reader') {
-            // If the layout is 'reader-only', expand to 'split' so the user can see the editor
-            setLayout('split');
-        }
-
-        // Focus on the editor tab
-        switchTab('editor');
     }
 }
 
@@ -618,7 +571,8 @@ function logStaticNotice() {
     logTerminal(
         "Static build — reading chapters and loading examples into the editor work, " +
         "but live compilation needs the local dev server.\n" +
-        "Clone https://github.com/ajhahnde/Flash and run `npm start` in tutorial/.",
+        "Clone https://github.com/ajhahnde/FlashOS and run `npm install && npm start` in tutorial/. " +
+        "Build the pinned Flash compiler first as described in SETUP.md.",
         "warning"
     );
 }
@@ -660,7 +614,7 @@ async function runTranspilation() {
             // Log status
             updateTerminalStatus('success', 'Success');
             
-            let logMsg = "Compiled (bootstrap backend).\n";
+            let logMsg = "Lab passed the Zig compatibility lowering check.\n";
             if (result.error) {
                 logMsg += `\nCompiler Warnings:\n${result.error}`;
                 logTerminal(logMsg, "warning");
@@ -772,4 +726,3 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-

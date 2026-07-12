@@ -1,5 +1,5 @@
 import express from 'express';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promises as fs, watch } from 'fs';
 import path from 'path';
 import { homedir } from 'os';
@@ -10,22 +10,20 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const LIVE_RELOAD = process.env.TUTORIAL_LIVE_RELOAD === '1';
 
 // Path to the flashc compiler built in the Flash workspace. FlashOS itself
-// doesn't vendor a compiler build (it consumes flashc via a pinned commit,
-// see flash-toolchain.lock), so the default points at the sibling Flash repo.
-// Since Flash v1.0.1, the pinned checkout's `zig build` installs the live,
-// self-hosted compiler as `flashc`. The lab pins `--backend=zig` because
-// that is the bootstrap mode FlashOS's own build currently consumes —
-// flag-less flashc now builds a native host binary instead of printing
-// anything to stdout.
+// consumes a pinned compiler revision (see flash-toolchain.lock), so the
+// default points at the sibling Flash checkout. The tutorial requests the Zig
+// compatibility backend as a readable lab/test view. FlashOS production
+// artifacts are compiled through flashc's native LLVM path.
 const COMPILER_PATH = process.env.FLASHC
   || path.join(homedir(), 'Flash', 'zig-out', 'bin', 'flashc');
 const TEMP_DIR = path.join(__dirname, 'temp');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '128kb' }));
 app.use(express.static(PUBLIC_DIR));
 
 // Ensure temp directory exists
@@ -38,7 +36,7 @@ async function ensureTempDir() {
 }
 ensureTempDir();
 
-// API: Transpile Flash code to Zig
+// API: Lower a small Flash lab through the test-only compatibility backend.
 app.post('/api/transpile', async (req, res) => {
   const { code } = req.body;
 
@@ -46,6 +44,13 @@ app.post('/api/transpile', async (req, res) => {
     return res.status(400).json({
       success: false,
       error: 'Code must be a string.',
+    });
+  }
+
+  if (Buffer.byteLength(code, 'utf8') > 64 * 1024) {
+    return res.status(413).json({
+      success: false,
+      error: 'Example is too large (64 KiB maximum).',
     });
   }
 
@@ -57,9 +62,12 @@ app.post('/api/transpile', async (req, res) => {
     // Write temporary Flash source file
     await fs.writeFile(tempFilePath, code, 'utf-8');
 
-    // Run the local flashc compiler
-    // We run it and capture output
-    exec(`"${COMPILER_PATH}" --backend=zig "${tempFilePath}"`, async (error, stdout, stderr) => {
+    // Use execFile rather than a shell: compiler paths and generated temp names
+    // are passed as arguments, never interpreted as commands.
+    execFile(COMPILER_PATH, ['--backend=zig', tempFilePath], {
+      timeout: 15_000,
+      maxBuffer: 2 * 1024 * 1024,
+    }, async (error, stdout, stderr) => {
       // Clean up the temp file
       try {
         await fs.unlink(tempFilePath);
@@ -112,7 +120,13 @@ app.get('/api/chapters', async (req, res) => {
 // ---------------------------------------------------------------------------
 const liveClients = new Set();
 
+app.get('/api/config', (_req, res) => {
+  res.json({ liveReload: LIVE_RELOAD });
+});
+
 app.get('/api/livereload', (req, res) => {
+  if (!LIVE_RELOAD) return res.sendStatus(404);
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -125,13 +139,19 @@ app.get('/api/livereload', (req, res) => {
 
 // Watch public/ recursively (macOS supports recursive fs.watch). Debounce the
 // burst of events an editor emits on a single save, then notify every browser.
-let reloadTimer = null;
-watch(PUBLIC_DIR, { recursive: true }, () => {
-  clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(() => {
-    for (const res of liveClients) res.write('data: reload\n\n');
-  }, 100);
-});
+if (LIVE_RELOAD) {
+  let reloadTimer = null;
+  const publicWatcher = watch(PUBLIC_DIR, { recursive: true }, () => {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      for (const res of liveClients) res.write('data: reload\n\n');
+    }, 100);
+  });
+  publicWatcher.on('error', (err) => {
+    console.warn(`Live reload disabled: ${err.message}`);
+    publicWatcher.close();
+  });
+}
 
 app.listen(PORT, 'localhost', () => {
   console.log(`FlashOS Tutorial running at http://localhost:${PORT}`);

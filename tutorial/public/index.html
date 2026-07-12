@@ -99,12 +99,12 @@
                             <i data-lucide="edit-3"></i> Flash Editor
                         </button>
                         <button class="tab-btn" data-tab="output">
-                            <i data-lucide="file-code"></i> Zig (bootstrap)
+                            <i data-lucide="file-code"></i> Test lowering
                         </button>
                     </div>
                     <div class="playground-actions">
-                        <button id="transpile-btn" class="action-btn primary" title="Compile with flashc's bootstrap backend — the mode FlashOS's build currently consumes">
-                            <i data-lucide="zap"></i> Compile
+                        <button id="transpile-btn" class="action-btn primary" title="Check this lab through the test-only Zig compatibility backend">
+                            <i data-lucide="zap"></i> Check lab
                         </button>
                     </div>
                 </div>
@@ -115,7 +115,7 @@
                         <div id="editor-container"></div>
                     </div>
 
-                    <!-- Compiled (bootstrap) Output Container -->
+                    <!-- Read-only compatibility-backend output -->
                     <div class="tab-content" id="tab-output">
                         <div id="output-container"></div>
                     </div>
@@ -136,7 +136,7 @@
                         </div>
                     </div>
                     <div class="terminal-output" id="terminal-body">
-                        Welcome to the FlashOS tutorial environment. Write Flash code and click "Compile". flashc is a native LLVM compiler; FlashOS still builds through its bootstrap Zig backend during the native transition, so the lab shows that output.
+                        Welcome to the FlashOS tutorial environment. Write Flash code and click "Check lab". This readable Zig lowering mirrors the test-only compatibility path; FlashOS production artifacts are compiled natively.
                     </div>
                 </div>
             </section>
@@ -146,14 +146,14 @@
     <!-- Main Client-Side JS -->
     <script src="index.js"></script>
 
-    <!-- Live reload (dev only): refresh on any change under public/. Probe the
-         backend first so a static build (GitHub Pages) never opens an
-         EventSource against a 404 and loops on reconnect. -->
+    <!-- Live reload (dev only): the normal server and static hosting both
+         report/behave as disabled, so neither opens a reconnecting stream. -->
     <script>
       (function () {
-        fetch('/api/chapters', { method: 'HEAD' })
-          .then((res) => {
-            if (!res.ok) return;
+        fetch('/api/config')
+          .then((res) => res.ok ? res.json() : null)
+          .then((config) => {
+            if (!config || !config.liveReload) return;
             const es = new EventSource('/api/livereload');
             es.onmessage = () => location.reload();
             // onerror fires on transient blips; EventSource auto-reconnects via

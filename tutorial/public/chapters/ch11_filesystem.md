@@ -18,7 +18,7 @@ to everything above it.
 | everything else  |  0   | initramfs — src/initramfs_backend.flash    |
 ```
 
-`src/vfs.zig` owns a fixed two-slot mount table and a single
+`src/vfs.flash` owns a fixed two-slot mount table and a single
 `startsWith("/mnt/")` branch — nothing more elaborate. initramfs is
 mounted at `/`; FAT32 mounts at `/mnt`, and the system still boots if
 the SD card is missing or unreadable, since the root filesystem never
@@ -32,9 +32,7 @@ today.
 ## The `VfsOps` vtable
 
 Each backend exposes the same six-to-nine-entry function-pointer table,
-declared once in `src/vfs.zig` (one of the handful of modules that stay
-plain Zig rather than Flash — the project map calls out boot assembly
-and a few low-level modules as the deliberate exceptions):
+declared once in `src/vfs.flash`:
 
 ```text
 pub const VfsOps = extern struct {
@@ -50,7 +48,7 @@ pub const VfsOps = extern struct {
 }
 ```
 
-*(excerpt from `src/vfs.zig` — not standalone-compilable)*
+*(excerpt from `src/vfs.flash` — not standalone-compilable)*
 
 `create`/`unlink`/`rename` default to an EROFS stub, so a read-only
 backend like initramfs needs to implement nothing to stay safely
@@ -59,7 +57,7 @@ path, dispatches through the matching backend's `open`, and stashes the
 backing `SuperBlock` pointer on the `File` handle; `sys_read` /
 `sys_write` / `sys_seek` / `sys_close` re-cast that pointer and call
 back through the same vtable. The path crosses the boundary as a raw
-`ptr + len` pair rather than a Flash/Zig slice, because `callconv(.c)`
+`ptr + len` pair rather than a language-specific slice, because `callconv(.c)`
 functions have no guaranteed in-memory slice representation to agree
 on across a function-pointer call — the same ABI discipline chapter 7
 required at the syscall boundary applies again one layer up.
