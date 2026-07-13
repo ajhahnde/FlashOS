@@ -148,7 +148,6 @@ user_space/
     readline.flash                          Line editor (history, cursor edit)
     completion.flash                        TAB completion
     keys.flash                              Key decode (escape sequences → keycodes)
-    gapbuf.flash                            Gap buffer (editor backing store)
     pager.flash                             Scroll pager (less core)
 
 crates/user-rt/                             Rust EL0 entry, syscall, panic, and memory runtime
@@ -168,7 +167,6 @@ tools/                                      Hand-rolled ELF programs (coreutils 
   cpuinfo, meminfo, sysinfo, uptime         system-info readers
   stackbomb.flash                           [TEST] stack-overflow fixture
   flibc_demo, argv_echo, forkbomb           flibc / argv / fork [TEST] fixtures
-  grep_match.flash                          grep match engine (host-testable)
   gen_shadow.zig                            Host tool: mint the seed shadow db
   initramfs.S                               Embeds the staged initramfs image
   *_linker.ld                               Per-program PT_LOAD layouts
@@ -1152,7 +1150,7 @@ FlashOS has two complementary test surfaces:
 
 - **Host tests** (`flash build test`) cover pure kernel and userland logic
   with stubs for assembly and MMIO dependencies. The suite currently has
-  **464 tests across 41 modules**.
+  **438 tests across 39 modules**.
 - **Runtime tests** (`user_space/kernel_tests.flash`) run 30 scenarios
   as PID 1 against real kernel state. Each scenario checks its result and
   restores the free-page baseline.
@@ -1223,7 +1221,7 @@ virt `0x3be45` / `0x3be53`.
 
 ### Coverage matrix
 
-The 464 host tests cover 41 modules. Major groups include:
+The 438 host tests cover 39 modules. Major groups include:
 
 | Area                     | Modules                                                                                    |
 | :----------------------- | :----------------------------------------------------------------------------------------- |
@@ -1231,7 +1229,7 @@ The 464 host tests cover 41 modules. Major groups include:
 | Filesystems and I/O      | `vfs`, `initramfs`, `fat32`, `fdtable`, `pipe`, `console`, `klog_ring`                     |
 | Formats and utilities    | `elf`, `path`, `perm`, `overlay`, `pwfile`, `shadow`                                       |
 | Crypto and hardware data | `sha256`, `hwrng`, `mailbox`, `sdhci_cmd`, USB descriptor and TX-ring logic                |
-| Userland                 | `readline`, `completion`, `keys`, `pager`, `gapbuf`, shell tokenization, and grep matching |
+| Userland                 | `readline`, `completion`, `keys`, `pager`, and shell tokenization                          |
 
 Board MMIO drivers and live tracing are primarily runtime- or
 hardware-tested. The authoritative count is the output of

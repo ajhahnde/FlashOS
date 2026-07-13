@@ -80,6 +80,19 @@ The project was founded on April 28th, 2026.
   wrappers these tools need, plus a buffered writer that drains to a descriptor
   rather than truncating.
 
+- **The pager and the editor are now Rust ELFs.** `/bin/less` and `/bin/edit`
+  are built by the Rust pipeline and staged under the same paths; their Flash
+  sources, along with the gap-buffer and substring-matcher modules they were the
+  last consumers of, are retired. Both tools stand on a new terminal render core
+  in the userspace library: a grid of styled cells, the minimal-ANSI diff between
+  two frames, and the run loop that owns the alternate screen and decodes keys.
+  The pager drives that loop whole; the editor paints through the same core but
+  keeps its own loop, because it binds a wider key set and parks a visible cursor.
+  Keymaps, rendering, the save path (unlink + create + write, so a shortened file
+  lands at its correct size), and the boot contract are unchanged. Verified on
+  Raspberry Pi 4B hardware, including editing a file on FAT32 and reading it back
+  after a reboot.
+
 ### Changed
 
 - Re-pinned the Flash toolchain to the currently installed `flashc`

@@ -376,6 +376,21 @@ pub const USER_ELFS: &[UserElf] = &[
         archive: "libflashos_uptime.a",
         linker_script: "tools/coreutil_linker.ld",
     },
+    // The two full-screen tools. Both drive the TUI render core and both take the same
+    // single-PT_LOAD layout as the coreutils -- the interactive half needs no linker
+    // treatment of its own, only a bigger stack, which the layout already grants.
+    UserElf {
+        elf: "less.elf",
+        package: "flashos-less",
+        archive: "libflashos_less.a",
+        linker_script: "tools/coreutil_linker.ld",
+    },
+    UserElf {
+        elf: "edit.elf",
+        package: "flashos-edit",
+        archive: "libflashos_edit.a",
+        linker_script: "tools/coreutil_linker.ld",
+    },
     // The harness payloads. Each keeps the retained script its old counterpart used:
     // argv_echo's own (it carries the over-a-page padding), flibc_demo's folded
     // single-segment layout, and the generic one stackbomb shares with hello.

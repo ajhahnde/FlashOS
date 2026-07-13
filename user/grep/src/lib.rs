@@ -8,8 +8,9 @@
 //! literal substring -- no regex. An empty pattern matches every line, the GNU
 //! convention.
 //!
-//! The matching itself is [`matcher::line_contains`], which is pure and host-tested;
-//! this file is only the driver: flag and argv parsing, open/read, and streaming line
+//! The matching itself is `flibc::grep_match::line_contains`, which is pure and
+//! host-tested -- and shared: the editor's ctrl-W search drives the same core. This
+//! file is only the driver: flag and argv parsing, open/read, and streaming line
 //! assembly. Streaming rather than slurping the whole file is what lets one code path
 //! serve an unseekable pipe and a regular file alike.
 //!
@@ -30,12 +31,10 @@
 #![cfg_attr(target_os = "none", no_std)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-pub mod matcher;
-
 #[cfg(target_os = "none")]
 use flashos_abi::syscall::EACCES;
 #[cfg(target_os = "none")]
-use flashos_flibc::{console_sink, err_sink, sys};
+use flashos_flibc::{console_sink, err_sink, grep_match, sys};
 #[cfg(target_os = "none")]
 use flashos_user_rt::{arg, arg_ptr, entry, Argv};
 
@@ -53,7 +52,7 @@ const PAT_MAX: usize = 256;
 /// Emit `line` to fd 1, plus the newline stripped during scanning, when it matches.
 #[cfg(target_os = "none")]
 fn emit_match(line: &[u8], pat: &[u8], ignore_case: bool) {
-    if matcher::line_contains(line, pat, ignore_case) {
+    if grep_match::line_contains(line, pat, ignore_case) {
         console_sink(line);
         console_sink(b"\n");
     }

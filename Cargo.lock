@@ -75,6 +75,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "flashos-edit"
+version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
 name = "flashos-flibc"
 version = "0.8.0"
 dependencies = [
@@ -124,6 +133,15 @@ dependencies = [
 [[package]]
 name = "flashos-kernel"
 version = "0.8.0"
+
+[[package]]
+name = "flashos-less"
+version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+ "flashos-flibc",
+ "flashos-user-rt",
+]
 
 [[package]]
 name = "flashos-login"

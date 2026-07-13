@@ -105,7 +105,7 @@ unit test suite.
 - **Kernel symbol table.** A two-pass build generates symbols for the
   function-entry tracer.
 - **Test suites.** An in-kernel `[TEST]`/`[PASS]`/`[FAIL]` harness plus
-  464 host tests across 41 modules.
+  438 host tests across 39 modules.
 
 ## Quick start
 

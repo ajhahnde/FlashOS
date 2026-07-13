@@ -89,6 +89,15 @@ impl Decoder {
         }
     }
 
+    /// Whether the decoder sits mid-sequence -- an `ESC` arrived and the bytes that
+    /// resolve it have not. A caller reading a burst uses this to decide whether to
+    /// keep pulling bytes, and to tell a truncated sequence (which conventionally
+    /// resolves to a lone `Escape`) from an unmapped ground byte (which resolves to
+    /// nothing).
+    pub fn pending(&self) -> bool {
+        self.state != State::Ground
+    }
+
     /// Consume one byte and report the key it completed, if any.
     pub fn feed(&mut self, b: u8) -> Event {
         match self.state {

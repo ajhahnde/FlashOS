@@ -119,21 +119,6 @@ fn addFlashSource(b: *std.Build, src: []const u8) std.Build.LazyPath {
     return out;
 }
 
-// Same transpile step as addFlashSource, but for a .flash file outside the
-// build root — the Flash std/ sources live in the pinned Flash checkout
-// (-Dflash-std), not in this tree, so they are referenced by absolute path
-// rather than b.path. `stem` names the generated .zig (the caller composes the
-// sibling set into one directory; see the `core` module below).
-fn addFlashSourceAbs(b: *std.Build, abs_path: []const u8, stem: []const u8) std.Build.LazyPath {
-    const run = b.addSystemCommand(&.{ flashc_path, "--backend=zig" });
-    run.setName(b.fmt("flashc {s}", .{abs_path}));
-    run.addFileArg(.{ .cwd_relative = abs_path });
-    run.addArg("-o");
-    const out = run.addOutputFileArg(b.fmt("{s}.zig", .{stem}));
-    run.has_side_effects = true;
-    return out;
-}
-
 pub fn build(b: *std.Build) void {
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
@@ -282,20 +267,6 @@ pub fn build(b: *std.Build) void {
         break :blk b.pathJoin(&.{ home, "Flash", "zig-out", "bin", "flashc" });
     };
 
-    // Path to the Flash std/ directory whose modules compose the `core` import
-    // (std/io, std/tui, std/keys, …). The sources belong to the pinned Flash
-    // revision in flash-toolchain.lock — they are referenced from that checkout
-    // rather than vendored, so the pin stays the single source of truth. Same
-    // default location as -Dflashc: the ~/Flash checkout.
-    const flash_std_dir = b.option(
-        []const u8,
-        "flash-std",
-        "Path to the Flash std/ directory composing the `core` import (default: ~/Flash/std)",
-    ) orelse blk: {
-        const home = b.graph.environ_map.get("HOME") orelse break :blk "std";
-        break :blk b.pathJoin(&.{ home, "Flash", "std" });
-    };
-
     // ---- hygiene checks (trailing space, hard tabs, lowercase hex) ----
     const skip_hygiene = b.option(bool, "skip-hygiene", "Skip the hygiene check step") orelse false;
     const hygiene_step = b.step("check-hygiene", "Fail on whitespace or hex-literal regressions");
@@ -351,33 +322,6 @@ pub fn build(b: *std.Build) void {
     }
     const console_ui_mod = b.createModule(.{
         .root_source_file = console_ui_root,
-    });
-
-    // ---- the Flash std library (the `core` module) ----
-    // Userland reaches std/io · std/tui · std/keys (and the rest) through the
-    // named `core` import: `use core` lowers to @import("core"), so the build
-    // must supply that module. The std modules import each other by relative
-    // @import("X.zig"), so — exactly like console_ui above and the Flash
-    // toolchain's own std composition — the generated .zig are composed into a
-    // single directory where the siblings resolve, and the module rooted at
-    // that directory's core.zig is attached to consumers as "core". Sources
-    // come from the pinned Flash checkout (-Dflash-std); none are vendored.
-    // The full set is transpiled, but importing `core` only pulls the submodule
-    // closure a consumer actually references — unused ones (json, math, …) are
-    // emitted but never analyzed, so they cost a transpile, not image bytes.
-    const core_std_dir = b.addWriteFiles();
-    const core_std_modules = [_][]const u8{
-        "base", "mem",  "list", "fmt", "math", "arena",
-        "json", "io",   "keys", "tui", "core",
-    };
-    var core_root: std.Build.LazyPath = undefined;
-    for (core_std_modules) |name| {
-        const gen = addFlashSourceAbs(b, b.pathJoin(&.{ flash_std_dir, b.fmt("{s}.flash", .{name}) }), name);
-        const dest = core_std_dir.addCopyFile(gen, b.fmt("{s}.zig", .{name}));
-        if (std.mem.eql(u8, name, "core")) core_root = dest;
-    }
-    const core_mod = b.createModule(.{
-        .root_source_file = core_root,
     });
 
     // User-space virtual address layout (text/data/heap/stack bases +
@@ -1408,7 +1352,13 @@ pub fn build(b: *std.Build) void {
     // login, passwd and sysinfo join them: the identity consumers share the Rust
     // /etc/passwd parser, and sysinfo prints the workspace version, which a host test
     // pins to the .version in build.zig.zon.
-    const rust_coreutils = [_][]const u8{ "echo", "cat", "grep", "cp", "mv", "rm", "ls", "dmesg", "meminfo", "forkbomb", "cpuinfo", "uptime", "login", "passwd", "sysinfo" };
+    //
+    // less and edit are the two full-screen tools. They take the same single-PT_LOAD
+    // script as the one-shot coreutils — the interactive half needs no linker
+    // treatment of its own — and both drive the Rust TUI render core. Both stay out of
+    // the CI FSH_SCRIPT: they are interactive (QEMU has no console RX), so running
+    // them would make the free-page baseline non-deterministic.
+    const rust_coreutils = [_][]const u8{ "echo", "cat", "grep", "cp", "mv", "rm", "ls", "dmesg", "meminfo", "forkbomb", "cpuinfo", "uptime", "login", "passwd", "sysinfo", "less", "edit" };
     var coreutil_elfs = std.StringHashMap(std.Build.LazyPath).init(b.allocator);
     for (rust_coreutils) |name| {
         const cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", name, "--output" });
@@ -1417,92 +1367,6 @@ pub fn build(b: *std.Build) void {
         cmd.has_side_effects = true;
         coreutil_elfs.put(name, elf) catch @panic("OOM");
     }
-
-    // ---- grep_match — the pure Flash substring matcher ----
-    // /bin/grep is Rust and carries its own matcher, but the Flash editor still
-    // imports this one for its ctrl-W search, so the module (and its host test)
-    // stays until the editor ports.
-    const grep_match_gen = addFlashSource(b, "tools/grep_match.flash");
-    const grep_match_mod = b.createModule(.{
-        .root_source_file = grep_match_gen,
-        .target = target,
-        .optimize = .ReleaseSmall,
-    });
-
-    // ---- less.elf — full-screen text pager ----
-    // First interactive consumer of the std TUI run loop: takes over the console
-    // through core.tui.run (the TEA loop — alt-screen, key decode, double-
-    // buffered diff) and scrolls a single named file with the pure flibc.Pager
-    // core, which stays the model's domain state (std tui has no paging of its
-    // own). A proof of the interactive loop the way echo proved the std io seam.
-    // Imports flibc + core (no pwfile / build_options / console_ui). Same recipe
-    // as ls / echo (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip,
-    // shared coreutil_linker.ld). Staged at /bin/less; kept out of the CI
-    // FSH_SCRIPT (interactive; the free-page baseline must stay deterministic).
-    // Source is Flash (tools/less.flash) — flashc transpiles it to Zig at build
-    // time via addFlashSource.
-    const less_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/less.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    less_mod.addImport("flibc", flibc_mod);
-    less_mod.addImport("flibc_start", flibc_start_mod);
-    less_mod.addImport("flibc_mem", flibc_mem_mod);
-    less_mod.addImport("core", core_mod);
-    const less = b.addExecutable(.{
-        .name = "less.elf",
-        .root_module = less_mod,
-    });
-    less.pie = false;
-    less.bundle_compiler_rt = false;
-    less.link_z_max_page_size = 0x80;
-    less.link_z_common_page_size = 0x80;
-    less.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    less.entry = .disabled;
-
-    // ---- edit.elf — full-screen text editor ----
-    // Second interactive consumer of the navigation scaffold and the first
-    // writer: slurps a file into a heap-backed gap buffer (the first real heap
-    // user — brk/sbrk + flibc malloc), edits it via the pure flibc.gapbuf cores,
-    // and writes it back on ctrl-O (unlink + create + write — FAT32 has no
-    // truncate). Reuses grep_match.find for ctrl-W search. Imports flibc +
-    // console_ui (like less) plus the two pure cores. Same recipe as less
-    // (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
-    // coreutil_linker.ld). Staged at /bin/edit; kept out of the CI FSH_SCRIPT
-    // (interactive — no QEMU stdin — so the free-page baseline stays
-    // deterministic). gapbuf is a standalone module like grep_match, not part of
-    // the flibc aggregate, so it adds no footprint to existing boot binaries.
-    // Source is Flash (tools/edit.flash) — flashc transpiles it at build time.
-    const gapbuf_gen = addFlashSource(b, "user_space/lib/flibc/gapbuf.flash");
-    const gapbuf_mod = b.createModule(.{
-        .root_source_file = gapbuf_gen,
-        .target = target,
-        .optimize = .ReleaseSmall,
-    });
-    const edit_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/edit.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    edit_mod.addImport("flibc", flibc_mod);
-    edit_mod.addImport("flibc_start", flibc_start_mod);
-    edit_mod.addImport("flibc_mem", flibc_mem_mod);
-    edit_mod.addImport("core", core_mod);
-    edit_mod.addImport("gapbuf", gapbuf_mod);
-    edit_mod.addImport("grep_match", grep_match_mod);
-    const edit = b.addExecutable(.{
-        .name = "edit.elf",
-        .root_module = edit_mod,
-    });
-    edit.pie = false;
-    edit.bundle_compiler_rt = false;
-    edit.link_z_max_page_size = 0x80;
-    edit.link_z_common_page_size = 0x80;
-    edit.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    edit.entry = .disabled;
 
     // ---- pid1.elf — the ELF-loaded PID 1 ----
     // Replaces the user_init.o blob. Instead of compiling
@@ -1613,11 +1477,11 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("cpuinfo").?, "bin/cpuinfo");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("dmesg").?, "bin/dmesg");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("echo").?, "bin/echo");
-    _ = cpio_stage.addCopyFile(edit.getEmittedBin(), "bin/edit");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("edit").?, "bin/edit");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("forkbomb").?, "bin/forkbomb");
     _ = cpio_stage.addCopyFile(fsh.getEmittedBin(), "bin/fsh");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("grep").?, "bin/grep");
-    _ = cpio_stage.addCopyFile(less.getEmittedBin(), "bin/less");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("less").?, "bin/less");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("ls").?, "bin/ls");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("meminfo").?, "bin/meminfo");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("mv").?, "bin/mv");
@@ -2112,7 +1976,6 @@ pub fn build(b: *std.Build) void {
     // from a line + scratch buffer; no externs, no stubs, no SVC. Compiles
     // the flashc-generated module (tokenize.flash is the source of truth).
     _ = addHostTest(b, test_step, .{ .src = "user_space/fsh/tokenize.flash", .src_lazy = tokenize_gen });
-    _ = addHostTest(b, test_step, .{ .src = "tools/grep_match.flash", .src_lazy = grep_match_gen });
 
     // grep match core — pure windowed substring matcher with ASCII case-fold.
     // No externs, no stubs, no SVC. /bin/grep carries its own matcher now; this one
@@ -2147,7 +2010,6 @@ pub fn build(b: *std.Build) void {
     // adds no footprint to existing boot binaries. The generated source is shared
     // with edit.elf's module (gapbuf_gen, declared at the edit wiring above). No
     // stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/gapbuf.flash", .src_lazy = gapbuf_gen });
 
     // virt DTB parser — pure big-endian FDT decode + bounds guards.
     // The handoff entry (`fromHandoff`) reads the `dtb_pa` extern and the

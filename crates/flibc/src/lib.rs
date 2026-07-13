@@ -13,12 +13,14 @@
 pub mod completion;
 pub mod execvp;
 pub mod gapbuf;
+pub mod grep_match;
 pub mod heap;
 pub mod io;
 pub mod keys;
 pub mod pager;
 pub mod process;
 pub mod readline;
+pub mod tui;
 
 pub use io::{Buf, Part, Sink, Writer};
 
