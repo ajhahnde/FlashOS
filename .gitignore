@@ -6,6 +6,10 @@
 zig-out/
 .build_history/
 
+# Rust build artefacts (Cargo.lock is tracked: the toolchain is pinned)
+target/
+rust-out/
+
 # Private notes and tools
 ajhahnde/
 

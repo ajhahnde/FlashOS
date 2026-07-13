@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "xtask",
+    "crates/abi",
+    "crates/canary",
+    "crates/console-ui",
+    "crates/flibc",
+    "crates/kernel",
+    "crates/user-rt",
+]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2021"
+rust-version = "1.97"
+license = "MIT"
+
+# Bare-metal profile shared by every target-side crate. panic=abort and
+# overflow-checks=off keep the panic path free of core::fmt: the handler emits a
+# fixed marker, so the formatting engine never links and the 128 KiB symbol
+# budget stays intact.
+[profile.release]
+opt-level = 2
+lto = true
+debug = true
+panic = "abort"
+overflow-checks = false
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"

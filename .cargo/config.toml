@@ -1,0 +1,6 @@
+# The workspace deliberately does NOT set a default `build.target`: xtask is a
+# host binary and the target-side crates are built by xtask with an explicit
+# --target. Fixing a global target here would break `cargo run -p xtask`.
+
+[alias]
+xtask = "run --package xtask --release --"

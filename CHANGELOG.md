@@ -29,6 +29,19 @@ The project was founded on April 28th, 2026.
 
 ## [Unreleased]
 
+### Added
+
+- **Rust build skeleton alongside the existing one.** A Cargo workspace
+  (`cargo xtask`) now assembles the retained `.S` files, links them against
+  the real board linker scripts, and boots a bare-metal Rust canary to EL1 on
+  both `rpi4b` and `virt`. It needs no binutils — the linker, `objcopy`, and
+  `nm` all ship with the pinned Rust toolchain — and every canary build asserts
+  that `_start` sits at the image base and that the image carries no undefined
+  symbols, no formatting machinery, and no FP/SIMD instructions. A build guard
+  proves the Rust pipeline invokes neither `zig` nor `flashc`. The Zig build is
+  untouched and remains the production build; nothing about the shipped kernel
+  changes.
+
 ### Changed
 
 - Re-pinned the Flash toolchain to the currently installed `flashc`

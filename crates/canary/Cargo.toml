@@ -1,0 +1,16 @@
+[package]
+name = "flashos-canary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashos_canary"
+crate-type = ["staticlib"]
+
+[features]
+default = []
+# Selects the board's UART. rpi4b (no feature) drives the AUX mini-UART, which
+# is what the bench adapter and QEMU's second raspi4b serial are wired to.
+virt = []

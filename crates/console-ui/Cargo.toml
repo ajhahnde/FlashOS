@@ -1,0 +1,9 @@
+[package]
+name = "flashos-console-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashos_console_ui"

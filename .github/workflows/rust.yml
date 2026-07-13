@@ -1,0 +1,72 @@
+# Rust-side CI for the in-progress port. Deliberately a separate workflow from
+# test.yml: that one is the production gate (zig build + the rpi4b boot
+# contract) and must not change while the Rust tree is still a parallel build.
+#
+# What this job proves per push:
+#   - the workspace formats, lints, and its host tests pass;
+#   - the Rust canary kernel still links against the real boot assembly and the
+#     real board linker scripts, on both boards;
+#   - the clean-room guard holds — the Rust build invokes neither zig nor flashc;
+#   - the canary still reaches EL1, booted in QEMU.
+#
+# The boot is done on `virt`, whose machine type apt's QEMU has. The `raspi4b`
+# machine needs QEMU >= 9.0, which no hosted runner ships and which test.yml
+# therefore builds from source (~10 min, cached); paying that a second time here
+# is not worth it, so rpi4b is covered by build + guard + the artefact checks
+# (_start at the image base, no undefined symbols, no core::fmt, no FP/SIMD),
+# and its boot is proven locally and on real hardware.
+name: rust
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # rustup honours rust-toolchain.toml, so the pinned release, the
+      # aarch64-unknown-none-softfloat target, and llvm-tools install from that
+      # one file. rust-lld, llvm-objcopy, llvm-nm and llvm-objdump come with it —
+      # the Rust build needs no binutils.
+      - name: install the pinned Rust toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+          rustc --print target-spec-json -Z unstable-options \
+            --target aarch64-unknown-none-softfloat 2>/dev/null | grep -E '"features"|"abi"' || true
+
+      # clang is the assembler for the retained .S files: it is the
+      # only host prerequisite outside the Rust toolchain.
+      - name: assembler
+        run: clang --version
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --exclude flashos-canary --all-targets -- -D warnings
+
+      - name: rust host tests
+        run: cargo test --workspace --exclude flashos-canary
+
+      - name: canary link + artefact checks (rpi4b)
+        run: cargo xtask canary --board rpi4b
+
+      - name: clean-room guard (rpi4b)
+        run: cargo xtask guard --board rpi4b
+
+      - name: clean-room guard (virt)
+        run: cargo xtask guard --board virt
+
+      - name: qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm
+
+      - name: canary boot smoke (virt)
+        run: cargo xtask smoke --board virt
