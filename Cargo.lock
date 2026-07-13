@@ -29,3 +29,6 @@ version = "0.8.0"
 [[package]]
 name = "xtask"
 version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+]

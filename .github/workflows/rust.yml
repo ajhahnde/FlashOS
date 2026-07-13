@@ -54,6 +54,11 @@ jobs:
       - name: rust host tests
         run: cargo test --workspace --exclude flashos-canary
 
+      # The .S files hardcode three layout facts (exception-frame size, syscall
+      # dispatch cap, core_context offset). Prove they still match the records.
+      - name: assembly layout facts
+        run: cargo xtask asm-defs --check
+
       - name: canary link + artefact checks (rpi4b)
         run: cargo xtask canary --board rpi4b
 

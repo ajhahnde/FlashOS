@@ -216,3 +216,33 @@ comptime {
         #compileError("KeRegs size changed — update S_FRAME_SIZE in arch/aarch64/asm_defs_common.inc to match")
     }
 }
+
+// These layouts are mirrored by crates/abi, which the .S files' raw offsets and
+// the on-disk records must agree with byte-for-byte. Both sides pin the same
+// numbers, so a field added, widened, or reordered on either side fails a build
+// instead of silently corrupting a context switch or a directory entry. Anything
+// appended must go at the END of its struct — every field after `mm` was placed
+// that way to keep `core_context` at offset 0 for sched.S/entry.S/irq.S.
+comptime {
+    if #sizeOf(CoreContext) != 104 { #compileError("CoreContext size drifted from crates/abi") }
+    if #sizeOf(UserPage) != 24 { #compileError("UserPage size drifted from crates/abi") }
+    if #sizeOf(MmStruct) != 1040 { #compileError("MmStruct size drifted from crates/abi") }
+    if #sizeOf(FdSlot) != 16 { #compileError("FdSlot size drifted from crates/abi") }
+    if #sizeOf(File) != 64 { #compileError("File size drifted from crates/abi") }
+    if #sizeOf(TaskStruct) != 1616 { #compileError("TaskStruct size drifted from crates/abi") }
+
+    if #offsetOf(TaskStruct, "core_context") != 0 {
+        #compileError("core_context must stay at offset 0 — sched.S/entry.S/irq.S key off it")
+    }
+    if #offsetOf(TaskStruct, "mm") != 144 { #compileError("TaskStruct.mm offset drifted from crates/abi") }
+    if #offsetOf(TaskStruct, "parent") != 1184 { #compileError("TaskStruct.parent offset drifted from crates/abi") }
+    if #offsetOf(TaskStruct, "pid") != 1192 { #compileError("TaskStruct.pid offset drifted from crates/abi") }
+    if #offsetOf(TaskStruct, "wq_next") != 1200 { #compileError("TaskStruct.wq_next offset drifted from crates/abi") }
+    if #offsetOf(TaskStruct, "fds") != 1208 { #compileError("TaskStruct.fds offset drifted from crates/abi") }
+    if #offsetOf(TaskStruct, "cwd") != 1336 { #compileError("TaskStruct.cwd offset drifted from crates/abi") }
+    if #offsetOf(TaskStruct, "kstack") != 1608 { #compileError("TaskStruct.kstack offset drifted from crates/abi") }
+
+    if #offsetOf(MmStruct, "brk") != 1032 { #compileError("MmStruct.brk offset drifted from crates/abi") }
+    if #offsetOf(File, "sb") != 32 { #compileError("File.sb offset drifted from crates/abi") }
+    if #offsetOf(File, "dirent_lba") != 52 { #compileError("File.dirent_lba offset drifted from crates/abi") }
+}

@@ -244,3 +244,11 @@ pub const Dirent = extern struct {
     d_type u8 = DT_REG,
     _pad [7]u8 = [_]u8{0} ** 7,
 }
+
+// Mirrored by crates/abi, which pins the same numbers. A Dirent is copied
+// verbatim into the caller's UVA, so its bytes are the ABI: a field moved on
+// either side would leave userland reading the name at the wrong offset.
+comptime {
+    if #sizeOf(Dirent) != 40 { #compileError("Dirent size drifted from crates/abi") }
+    if #offsetOf(Dirent, "d_type") != 32 { #compileError("Dirent.d_type offset drifted from crates/abi") }
+}

@@ -5,6 +5,7 @@
 //! command surface grows toward the one build.zig offers today (kernel, deploy,
 //! populate-syms, iso, …) as the stages that own those artefacts land.
 
+mod asm_defs;
 mod build;
 mod guard;
 mod qemu;
@@ -25,7 +26,9 @@ Commands:
   smoke  --board <rpi4b|virt>   Build the canary, boot it in QEMU, assert the marker
   guard  --board <rpi4b|virt>   Build the canary under the clean-room guard (no zig/flashc)
   nm     --board <rpi4b|virt>   Dump the canary's symbol table
-  test                          Run the Rust host tests (cargo test --workspace)
+  asm-defs [--check]            Generate the assembly-visible layout facts from crates/abi;
+                                --check diffs them against arch/aarch64/asm_defs_common.inc
+  test                          Run the Rust host tests (all crates but the canary)
   check-hygiene                 Run the repo's whitespace and hex-literal gates
   clean                         Remove rust-out/ and the cargo target dir
   help                          This text
@@ -93,6 +96,7 @@ fn dispatch() -> Result<(), String> {
             print!("{out}");
             Ok(())
         }
+        "asm-defs" => asm_defs::run(&root, rest.iter().any(|a| a == "--check")),
         "test" => Cmd::new("cargo", &root.join("rust-out/xtask-trace.log"))
             .cwd(&root)
             .args(["test", "--workspace", "--exclude", "flashos-canary"])
