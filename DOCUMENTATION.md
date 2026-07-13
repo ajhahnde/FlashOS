@@ -1150,7 +1150,7 @@ FlashOS has two complementary test surfaces:
 
 - **Host tests** (`flash build test`) cover pure kernel and userland logic
   with stubs for assembly and MMIO dependencies. The suite currently has
-  **438 tests across 39 modules**.
+  **427 tests across 38 modules**.
 - **Runtime tests** (`user_space/kernel_tests.flash`) run 30 scenarios
   as PID 1 against real kernel state. Each scenario checks its result and
   restores the free-page baseline.
@@ -1221,7 +1221,7 @@ virt `0x3be45` / `0x3be53`.
 
 ### Coverage matrix
 
-The 438 host tests cover 39 modules. Major groups include:
+The 427 host tests cover 38 modules. Major groups include:
 
 | Area                     | Modules                                                                                    |
 | :----------------------- | :----------------------------------------------------------------------------------------- |

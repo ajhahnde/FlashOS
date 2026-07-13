@@ -93,6 +93,18 @@ The project was founded on April 28th, 2026.
   Raspberry Pi 4B hardware, including editing a file on FAT32 and reading it back
   after a reboot.
 
+- **The shell is now a Rust ELF.** `/bin/fsh` is built by the Rust pipeline and
+  staged under the same path, and its Flash source is retired. The line editor,
+  the prompt, the homescreen, TAB completion, the command history, the built-ins,
+  and the single-stage pipe all behave as before; the shell's version banner is
+  still taken from the project manifest rather than spelled in the source. The
+  userspace runtime gained the four kernel calls only a shell needs — the working
+  directory, pipe creation, descriptor duplication, and reboot. Porting the shell
+  also retired the last consumers of the Flash userspace library's entry shim and
+  freestanding memory routines, which are removed with it. Verified on Raspberry
+  Pi 4B hardware across the interactive surface: completion, history recall,
+  interrupt and end-of-input handling, a live pipeline, and reboot.
+
 ### Changed
 
 - Re-pinned the Flash toolchain to the currently installed `flashc`

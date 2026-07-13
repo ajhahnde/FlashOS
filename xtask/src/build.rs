@@ -391,6 +391,14 @@ pub const USER_ELFS: &[UserElf] = &[
         archive: "libflashos_edit.a",
         linker_script: "tools/coreutil_linker.ld",
     },
+    // The shell. It keeps its own script rather than joining the coreutils: fsh needs a
+    // single R+X PT_LOAD with no page-crossing pad, which is what fsh_linker.ld lays out.
+    UserElf {
+        elf: "fsh.elf",
+        package: "flashos-fsh",
+        archive: "libflashos_fsh.a",
+        linker_script: "tools/fsh_linker.ld",
+    },
     // The harness payloads. Each keeps the retained script its old counterpart used:
     // argv_echo's own (it carries the over-a-page padding), flibc_demo's folded
     // single-segment layout, and the generic one stackbomb shares with hello.

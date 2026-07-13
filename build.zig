@@ -1277,71 +1277,19 @@ pub fn build(b: *std.Build) void {
     const argv_echo_elf = rust_argv_echo_cmd.addOutputFileArg("argv_echo.elf");
     rust_argv_echo_cmd.has_side_effects = true;
 
-    // The flibc _start argc/argv shim and the freestanding mem* providers. Both
-    // still serve the Flash payloads that have not ported yet (fsh, less, edit,
-    // login, passwd, sysinfo, PID 1).
-    const flibc_start_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "user_space/lib/flibc/start.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-    });
-    // Freestanding memcpy / memset / strlen for payloads that actually
-    // exercise execvp / the tokenizer / per-arg length scans — LLVM
-    // lowers those loops to libcalls that bundle_compiler_rt=false leaves
-    // unprovided. Opt-in (imported only by fsh / echo / cat), so the
-    // payloads that dodge the idiom (argv_echo, flibc_demo) stay lean.
-    const flibc_mem_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "user_space/lib/flibc/mem.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-    });
     // ---- fsh.elf — the FlashOS shell (/bin/fsh) ----
-    // Same recipe as argv_echo.elf (flibc _start argc/argv shim entry,
-    // pie=false, ReleaseSmall, strip, own single R+X PT_LOAD linker
-    // script — no PAD; fsh need not cross a page). fsh and its pure
-    // tokenizer are both Flash now; fsh.flash imports the tokenizer as a
-    // relative sibling, so the two flashc-generated files are composed into
-    // one WriteFiles directory (the same composition console_ui / flibc use)
-    // for that @import("tokenize.zig") to resolve. The tokenizer is
-    // host-tested separately in the test section below.
+    // A Rust payload now, built by xtask against the retained single R+X PT_LOAD
+    // script (tools/fsh_linker.ld — no PAD; fsh need not cross a page). The pure
+    // tokenizer sits in the same crate and is host-tested by `cargo xtask test`,
+    // so the Zig-side host test for it retires with the Flash source.
     // Staged into the initramfs at /bin/fsh and exec'd by the PID-1
     // hand-off after the harness tally; the boot watchdog keys on fsh's
     // homescreen marker as the success signal. (The in-harness
     // [TEST] fsh scenario is disabled — see user_space/kernel_tests.zig.)
-    const fsh_dir = b.addWriteFiles();
-    const tokenize_gen = addFlashSource(b, "user_space/fsh/tokenize.flash");
-    _ = fsh_dir.addCopyFile(tokenize_gen, "tokenize.zig");
-    const fsh_mod = b.createModule(.{
-        .root_source_file = fsh_dir.addCopyFile(addFlashSource(b, "user_space/fsh/fsh.flash"), "fsh.zig"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    fsh_mod.addImport("flibc", flibc_mod);
-    fsh_mod.addImport("flibc_start", flibc_start_mod);
-    // whoami builtin: uid -> login-name lookup against
-    // /etc/passwd via the same parser the kernel and /bin/login use.
-    fsh_mod.addImport("pwfile", pwfile_mod);
-    // console_ui: shared terminal look for the homescreen/prompt. fsh renders
-    // its homescreen banner through it, fed the build_options version below.
-    fsh_mod.addImport("console_ui", console_ui_mod);
-    // build_options carries the project version (from build.zig.zon) into the
-    // homescreen banner — single source, no hardcoded version in fsh.
-    fsh_mod.addOptions("build_options", build_options);
-    // fsh is the first payload to actually exercise execvp + the
-    // tokenizer's @memcpy, so LLVM lowers those to memcpy / strlen
-    // libcalls; flibc_mem supplies the freestanding providers.
-    fsh_mod.addImport("flibc_mem", flibc_mem_mod);
-    const fsh = b.addExecutable(.{
-        .name = "fsh.elf",
-        .root_module = fsh_mod,
-    });
-    fsh.pie = false;
-    fsh.bundle_compiler_rt = false;
-    fsh.link_z_max_page_size = 0x80;
-    fsh.link_z_common_page_size = 0x80;
-    fsh.setLinkerScript(b.path("tools/fsh_linker.ld"));
-    fsh.entry = .disabled;
+    const rust_fsh_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", "fsh", "--output" });
+    rust_fsh_cmd.setName("cargo xtask user fsh");
+    const fsh_elf = rust_fsh_cmd.addOutputFileArg("fsh.elf");
+    rust_fsh_cmd.has_side_effects = true;
 
     // ---- the Rust coreutils ----
     // echo, cat, grep, cp, mv, rm, ls, dmesg, meminfo and forkbomb are Rust
@@ -1479,7 +1427,7 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("echo").?, "bin/echo");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("edit").?, "bin/edit");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("forkbomb").?, "bin/forkbomb");
-    _ = cpio_stage.addCopyFile(fsh.getEmittedBin(), "bin/fsh");
+    _ = cpio_stage.addCopyFile(fsh_elf, "bin/fsh");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("grep").?, "bin/grep");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("less").?, "bin/less");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("ls").?, "bin/ls");
@@ -1970,12 +1918,6 @@ pub fn build(b: *std.Build) void {
     // coverage. Pure `resolve` path-build; the SVC driver
     // sits behind the same `has_driver` gate as readline.
     _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/execvp.flash", .src_lazy = flibc_srcs.get("execvp").? });
-
-    // fsh tokenize — whitespace splitter + single-`|` split host
-    // coverage. Pure `tokenize`: fills a caller argv array
-    // from a line + scratch buffer; no externs, no stubs, no SVC. Compiles
-    // the flashc-generated module (tokenize.flash is the source of truth).
-    _ = addHostTest(b, test_step, .{ .src = "user_space/fsh/tokenize.flash", .src_lazy = tokenize_gen });
 
     // grep match core — pure windowed substring matcher with ASCII case-fold.
     // No externs, no stubs, no SVC. /bin/grep carries its own matcher now; this one

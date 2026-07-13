@@ -111,7 +111,11 @@ dependencies = [
 name = "flashos-fsh"
 version = "0.8.0"
 dependencies = [
+ "flashos-abi",
+ "flashos-console-ui",
  "flashos-flibc",
+ "flashos-pwfile",
+ "flashos-user-rt",
 ]
 
 [[package]]

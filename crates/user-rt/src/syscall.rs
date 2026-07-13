@@ -9,6 +9,10 @@ use flashos_abi::syscall::{
     SYS_OPEN_FILE, SYS_PASSWD, SYS_READ, SYS_READDIR, SYS_RENAME, SYS_SBRK, SYS_SETGID, SYS_SETUID,
     SYS_SET_CONSOLE_MODE, SYS_UNLINK, SYS_UPTIME, SYS_WAIT, SYS_WRITE,
 };
+// The shell's four: no host test names them, so they are target-only. The block above
+// is also visible to `test` because those numbers are asserted there.
+#[cfg(target_os = "none")]
+use flashos_abi::syscall::{SYS_DUP2, SYS_GETCWD, SYS_PIPE, SYS_REBOOT};
 
 pub const STDIN: i32 = 0;
 pub const STDOUT: i32 = 1;
@@ -101,6 +105,38 @@ pub fn exit(status: i32) -> ! {
     }
 }
 
+/// Restart the machine. The kernel does not come back, so neither does this.
+#[cfg(target_os = "none")]
+pub fn reboot() -> ! {
+    let _ = unsafe { raw(SYS_REBOOT, [0, 0, 0, 0, 0, 0]) };
+    loop {
+        unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+    }
+}
+
+/// Create a pipe and return both of its descriptors packed into one word: the read
+/// end in the low half, the write end in the high half. Negative on failure. The
+/// kernel has one return register and this predates any user-pointer out-parameter,
+/// so the caller unpacks -- see [`pipe_ends`].
+#[cfg(target_os = "none")]
+pub fn pipe() -> i64 {
+    unsafe { raw(SYS_PIPE, [0, 0, 0, 0, 0, 0]) }
+}
+
+/// Split a successful [`pipe`] return into `(read_fd, write_fd)`.
+pub const fn pipe_ends(packed: i64) -> (i32, i32) {
+    let bits = packed as u64;
+    ((bits & 0xffff_ffff) as i32, (bits >> 32) as i32)
+}
+
+/// Point `newfd` at whatever `oldfd` refers to, closing whatever `newfd` held. This
+/// is how a shell wires a pipe end onto stdin or stdout before it execs. Returns
+/// `newfd` on success, `-1` on a bad descriptor.
+#[cfg(target_os = "none")]
+pub fn dup2(oldfd: i32, newfd: i32) -> i32 {
+    unsafe { raw(SYS_DUP2, [oldfd as u64, newfd as u64, 0, 0, 0, 0]) as i32 }
+}
+
 /// Read up to `buf.len()` bytes from a unified file descriptor. Returns the byte
 /// count, `0` on clean end-of-input, or `-1`. A console read blocks until a byte
 /// arrives; there is no timeout.
@@ -158,6 +194,19 @@ pub unsafe fn exec_path(path: *const u8, argv: *const *const u8) -> i32 {
 #[cfg(target_os = "none")]
 pub unsafe fn chdir(path: *const u8) -> i32 {
     unsafe { raw(SYS_CHDIR, [path as u64, 0, 0, 0, 0, 0]) as i32 }
+}
+
+/// Copy the calling task's working directory into `buf` and return its byte length,
+/// or `-1` when the path does not fit. The result is not NUL-terminated: the length
+/// is the terminator, which is why this returns the count rather than the buffer.
+#[cfg(target_os = "none")]
+pub fn getcwd(buf: &mut [u8]) -> i64 {
+    unsafe {
+        raw(
+            SYS_GETCWD,
+            [buf.as_mut_ptr() as u64, buf.len() as u64, 0, 0, 0, 0],
+        )
+    }
 }
 
 /// Move the program break by `delta` bytes and return the *previous* break, or a
@@ -392,6 +441,14 @@ pub fn set_console_mode(mode: u64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipe_return_unpacks_read_end_low_write_end_high() {
+        // The kernel packs the pair into one register; a shell that swapped the halves
+        // would wire the pipe backwards and hang on a read that never sees EOF.
+        let packed = ((4i64) << 32) | 3;
+        assert_eq!(pipe_ends(packed), (3, 4));
+    }
 
     #[test]
     fn syscall_arguments_land_in_x0_through_x5_and_number_in_x8() {
