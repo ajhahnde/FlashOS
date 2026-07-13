@@ -31,9 +31,9 @@ The project was founded on April 28th, 2026.
 
 ### Changed
 
-- Replaced the transitional `build.zig` pipeline with the native Flash
-  build definition, `build.flash`. User-facing build commands now use
-  `flash build`, and artifacts are installed under `flash-out/`.
+- Re-pinned the Flash toolchain to the currently installed `flashc`
+  revision (v1.2.0). The lock file had drifted stale relative to the
+  compiler actually used to build the tree.
 - Centralized all boot and test status tags in
   `lib/console_ui/tags.flash` and standardized kernel bring-up messages.
   Marker bytes used by the boot contract remain unchanged.
@@ -47,6 +47,14 @@ The project was founded on April 28th, 2026.
 - Updated the runtime RNG test and QEMU watchdog to recognize the current
   entropy-source message. Both had retained the previous wording and
   incorrectly reported healthy boots as failures.
+- `pi capture` no longer hangs its full timeout on a clean shipping
+  kernel. The capture wait only recognized the homescreen marker, but a
+  shipping kernel with no seeded login never prints it — it stops at
+  the password-gated `login:` prompt instead. The wait now also accepts
+  `login:` as boot-complete on non-self-test builds, while self-test
+  builds still require the homescreen marker specifically (their
+  scripted login scenario prints `login:` mid-run, which would
+  otherwise truncate the capture early).
 
 ## [v0.7.3] - 2026-07-04
 

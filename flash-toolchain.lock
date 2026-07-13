@@ -9,6 +9,6 @@
 # expects a Flash checkout at ~/Flash built with `zig build` — since Flash v1.0.1 the installed `flashc` IS the live self-hosted
 # compiler (native LLVM driver; Zig emission needs the explicit `--backend=zig`).
 
-flash-version = 1.1.1
-flash-commit  = f81408bf33354351c543801e81dc352dcf2d4a9a
+flash-version = 1.2.0
+flash-commit  = 44ad751b227f81b7e1202cade4024aa3adb95f74
 flashc-binary = zig-out/bin/flashc

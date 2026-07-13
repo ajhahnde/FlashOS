@@ -298,9 +298,11 @@ _flashos_capture_wait_usb() {
   local session=$1 logfile=$2
   local timeout=${PI_PROBE_TIMEOUT:-30} elapsed=0 result=timeout
   # Stuff a CR each second to wake/keep the session (readline submits on CR,
-  # an empty line is a no-op dispatch), and watch for the one-time boot marker
-  # `type 'help' for commands` — the same interactive-REPL signal run_qemu_test.sh
-  # and mu-mode trust. The shell prompt is `# ` / `$ `; it never prints `>>> `.
+  # an empty line is a no-op dispatch), and watch for a boot signal — the
+  # homescreen marker `type 'help' for commands`, or on a clean shipping
+  # kernel the password-gated `login:` prompt (it never auto-logs-in, so the
+  # marker never prints; mu-mode draws the same distinction). The shell
+  # prompt is `# ` / `$ `; it never prints `>>> `.
   # `-p 0` is mandatory: a born-detached (-dmS) session has no current
   # window on macOS screen 4.00.03, so -X stuff silently goes nowhere
   # without an explicit window target.
@@ -315,9 +317,19 @@ _flashos_capture_wait_usb() {
       result=died
       break
     fi
-    if [[ -f "$logfile" ]] && grep -qF "type 'help' for commands" "$logfile"; then
-      result=success
-      break
+    if [[ -f "$logfile" ]]; then
+      if grep -qF "[TEST]" "$logfile"; then
+        # Self-test build: its scripted login scenario prints `login:`
+        # mid-run, so a bare `login:` match would truncate the capture —
+        # only the homescreen marker counts (same trap mu-mode documents).
+        if grep -qF "type 'help' for commands" "$logfile"; then
+          result=success
+          break
+        fi
+      elif grep -qF "type 'help' for commands" "$logfile" || grep -qF "login:" "$logfile"; then
+        result=success
+        break
+      fi
     fi
   done
   print -r -- "$result"
@@ -379,7 +391,8 @@ _flashos_capture_report() {
 # Capture the Pi console until boot success is confirmed, then close the session.
 #   pi capture        usb mode (default): wait for the CDC gadget to enumerate
 #                     on /dev/cu.usbmodem*, then wait for the homescreen marker
-#                     (`type 'help' for commands`)
+#                     (`type 'help' for commands`) — or, on a clean shipping
+#                     kernel, the password-gated `login:` prompt
 #   pi capture mu     mini-UART mode: capture /dev/cu.usbserial-* until the
 #                     harness prints its `N/N passed` tally (green; the shipping
 #                     kernel then waits at the real `login:` prompt) or a
