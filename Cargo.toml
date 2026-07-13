@@ -7,6 +7,7 @@ members = [
     "crates/console-ui",
     "crates/flibc",
     "crates/kernel",
+    "crates/pwfile",
     "crates/user-rt",
     "user/argv-echo",
     "user/cat",
@@ -20,11 +21,14 @@ members = [
     "user/fsh",
     "user/grep",
     "user/hello",
+    "user/login",
     "user/ls",
     "user/meminfo",
     "user/mv",
+    "user/passwd",
     "user/rm",
     "user/stackbomb",
+    "user/sysinfo",
     "user/uptime",
 ]
 

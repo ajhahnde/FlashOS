@@ -1404,7 +1404,11 @@ pub fn build(b: *std.Build) void {
     // payloads, each linked against the retained single-PT_LOAD coreutil script and
     // staged under the same /bin path the shell already resolves. grep's matcher is
     // host-tested inside its own crate; the rest are driver-only.
-    const rust_coreutils = [_][]const u8{ "echo", "cat", "grep", "cp", "mv", "rm", "ls", "dmesg", "meminfo", "forkbomb", "cpuinfo", "uptime" };
+    //
+    // login, passwd and sysinfo join them: the identity consumers share the Rust
+    // /etc/passwd parser, and sysinfo prints the workspace version, which a host test
+    // pins to the .version in build.zig.zon.
+    const rust_coreutils = [_][]const u8{ "echo", "cat", "grep", "cp", "mv", "rm", "ls", "dmesg", "meminfo", "forkbomb", "cpuinfo", "uptime", "login", "passwd", "sysinfo" };
     var coreutil_elfs = std.StringHashMap(std.Build.LazyPath).init(b.allocator);
     for (rust_coreutils) |name| {
         const cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", name, "--output" });
@@ -1413,40 +1417,6 @@ pub fn build(b: *std.Build) void {
         cmd.has_side_effects = true;
         coreutil_elfs.put(name, elf) catch @panic("OOM");
     }
-
-    // ---- sysinfo.elf — one-shot system summary coreutil ----
-    // First consumer of the console_ui screen-layer kv() renderer (the
-    // full-screen-navigation scaffold): prints the FlashOS version, the
-    // logged-in user, and the free-page count as aligned key/value rows, then
-    // exits. Imports console_ui for kv(), pwfile for the uid -> name lookup, and
-    // build_options for the version (single-sourced from build.zig.zon). Same
-    // recipe as ls / meminfo (flibc _start shim, flibc_mem, pie=false,
-    // ReleaseSmall, strip, shared coreutil_linker.ld). Staged at /bin/sysinfo;
-    // kept out of the CI FSH_SCRIPT like meminfo (its free-page value is live).
-    // Source is Flash (tools/sysinfo.flash) — flashc transpiles it to Zig at
-    // build time via addFlashSource.
-    const sysinfo_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/sysinfo.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    sysinfo_mod.addImport("flibc", flibc_mod);
-    sysinfo_mod.addImport("flibc_start", flibc_start_mod);
-    sysinfo_mod.addImport("flibc_mem", flibc_mem_mod);
-    sysinfo_mod.addImport("pwfile", pwfile_mod);
-    sysinfo_mod.addImport("console_ui", console_ui_mod);
-    sysinfo_mod.addOptions("build_options", build_options);
-    const sysinfo = b.addExecutable(.{
-        .name = "sysinfo.elf",
-        .root_module = sysinfo_mod,
-    });
-    sysinfo.pie = false;
-    sysinfo.bundle_compiler_rt = false;
-    sysinfo.link_z_max_page_size = 0x80;
-    sysinfo.link_z_common_page_size = 0x80;
-    sysinfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    sysinfo.entry = .disabled;
 
     // ---- grep_match — the pure Flash substring matcher ----
     // /bin/grep is Rust and carries its own matcher, but the Flash editor still
@@ -1533,68 +1503,6 @@ pub fn build(b: *std.Build) void {
     edit.link_z_common_page_size = 0x80;
     edit.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     edit.entry = .disabled;
-
-    // ---- login.elf — credential gate + session supervisor ----
-    // PID-1 execs /bin/login instead of /bin/fsh: it prompts for a username
-    // (echoed) + password (echo suppressed via SYS_SET_CONSOLE_MODE), has the
-    // kernel verify against the active shadow (sys_authenticate), then runs
-    // the session as a child — the child drops privilege (setgid + setuid)
-    // per /etc/passwd and execs the user's shell while login stays root,
-    // waits, reaps, and re-prompts (the logout lifecycle). Same coreutil
-    // recipe as dmesg / ls; imports syscall_defs for the echo mode bit and
-    // pwfile for the /etc/passwd lookup.
-    // Source is Flash (tools/login.flash) — flashc transpiles it to Zig at
-    // build time via addFlashSource.
-    const login_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/login.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    login_mod.addImport("flibc", flibc_mod);
-    login_mod.addImport("flibc_start", flibc_start_mod);
-    login_mod.addImport("flibc_mem", flibc_mem_mod);
-    login_mod.addImport("syscall_defs", syscall_defs_mod);
-    login_mod.addImport("pwfile", pwfile_mod);
-    const login = b.addExecutable(.{
-        .name = "login.elf",
-        .root_module = login_mod,
-    });
-    login.pie = false;
-    login.bundle_compiler_rt = false;
-    login.link_z_max_page_size = 0x80;
-    login.link_z_common_page_size = 0x80;
-    login.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    login.entry = .disabled;
-
-    // ---- passwd.elf — interactive password change ----
-    // `passwd [user]` collects the current + new password (kernel echo
-    // off) and calls sys_passwd; the KDF + splice-safe shadow rewrite
-    // live in the kernel. Same coreutil recipe as login; imports pwfile
-    // for the uid -> own-login-name default and syscall_defs for EACCES.
-    // Source is Flash (tools/passwd.flash) — flashc transpiles it to Zig at
-    // build time via addFlashSource.
-    const passwd_bin_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/passwd.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    passwd_bin_mod.addImport("flibc", flibc_mod);
-    passwd_bin_mod.addImport("flibc_start", flibc_start_mod);
-    passwd_bin_mod.addImport("flibc_mem", flibc_mem_mod);
-    passwd_bin_mod.addImport("syscall_defs", syscall_defs_mod);
-    passwd_bin_mod.addImport("pwfile", pwfile_mod);
-    const passwd_bin = b.addExecutable(.{
-        .name = "passwd.elf",
-        .root_module = passwd_bin_mod,
-    });
-    passwd_bin.pie = false;
-    passwd_bin.bundle_compiler_rt = false;
-    passwd_bin.link_z_max_page_size = 0x80;
-    passwd_bin.link_z_common_page_size = 0x80;
-    passwd_bin.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    passwd_bin.entry = .disabled;
 
     // ---- pid1.elf — the ELF-loaded PID 1 ----
     // Replaces the user_init.o blob. Instead of compiling
@@ -1714,11 +1622,11 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("meminfo").?, "bin/meminfo");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("mv").?, "bin/mv");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("rm").?, "bin/rm");
-    _ = cpio_stage.addCopyFile(sysinfo.getEmittedBin(), "bin/sysinfo");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("sysinfo").?, "bin/sysinfo");
     _ = cpio_stage.addCopyFile(coreutil_elfs.get("uptime").?, "bin/uptime");
     _ = cpio_stage.addCopyFile(b.path("user_space/fsh/fshrc"), "etc/fshrc");
-    _ = cpio_stage.addCopyFile(login.getEmittedBin(), "bin/login");
-    _ = cpio_stage.addCopyFile(passwd_bin.getEmittedBin(), "bin/passwd");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("login").?, "bin/login");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("passwd").?, "bin/passwd");
     _ = cpio_stage.addCopyFile(b.path("user_space/etc/passwd"), "etc/passwd");
     _ = cpio_stage.addCopyFile(shadow_file, "etc/shadow");
 

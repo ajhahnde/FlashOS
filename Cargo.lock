@@ -126,6 +126,15 @@ name = "flashos-kernel"
 version = "0.8.0"
 
 [[package]]
+name = "flashos-login"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+ "flashos-pwfile",
+ "flashos-user-rt",
+]
+
+[[package]]
 name = "flashos-ls"
 version = "0.8.0"
 dependencies = [
@@ -151,6 +160,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "flashos-passwd"
+version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+ "flashos-flibc",
+ "flashos-pwfile",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-pwfile"
+version = "0.8.0"
+
+[[package]]
 name = "flashos-rm"
 version = "0.8.0"
 dependencies = [
@@ -163,6 +186,16 @@ name = "flashos-stackbomb"
 version = "0.8.0"
 dependencies = [
  "flashos-abi",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-sysinfo"
+version = "0.8.0"
+dependencies = [
+ "flashos-console-ui",
+ "flashos-flibc",
+ "flashos-pwfile",
  "flashos-user-rt",
 ]
 

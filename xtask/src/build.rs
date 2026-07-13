@@ -329,6 +329,12 @@ pub const USER_ELFS: &[UserElf] = &[
         linker_script: "tools/coreutil_linker.ld",
     },
     UserElf {
+        elf: "login.elf",
+        package: "flashos-login",
+        archive: "libflashos_login.a",
+        linker_script: "tools/coreutil_linker.ld",
+    },
+    UserElf {
         elf: "ls.elf",
         package: "flashos-ls",
         archive: "libflashos_ls.a",
@@ -347,9 +353,21 @@ pub const USER_ELFS: &[UserElf] = &[
         linker_script: "tools/coreutil_linker.ld",
     },
     UserElf {
+        elf: "passwd.elf",
+        package: "flashos-passwd",
+        archive: "libflashos_passwd.a",
+        linker_script: "tools/coreutil_linker.ld",
+    },
+    UserElf {
         elf: "rm.elf",
         package: "flashos-rm",
         archive: "libflashos_rm.a",
+        linker_script: "tools/coreutil_linker.ld",
+    },
+    UserElf {
+        elf: "sysinfo.elf",
+        package: "flashos-sysinfo",
+        archive: "libflashos_sysinfo.a",
         linker_script: "tools/coreutil_linker.ld",
     },
     UserElf {

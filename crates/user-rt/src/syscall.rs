@@ -4,9 +4,10 @@
 use flashos_abi::syscall::Dirent;
 #[cfg(any(target_os = "none", test))]
 use flashos_abi::syscall::{
-    SYS_CHDIR, SYS_CLOSE, SYS_CPU_FREQ, SYS_CPU_TEMP, SYS_CREATE, SYS_DUMP_FREE, SYS_EXECVE,
-    SYS_EXIT, SYS_FORK, SYS_KLOG_READ, SYS_MEMTOTAL, SYS_OPEN_FILE, SYS_READ, SYS_READDIR,
-    SYS_RENAME, SYS_SBRK, SYS_UNLINK, SYS_UPTIME, SYS_WAIT, SYS_WRITE,
+    SYS_AUTHENTICATE, SYS_CHDIR, SYS_CLOSE, SYS_CPU_FREQ, SYS_CPU_TEMP, SYS_CREATE, SYS_DUMP_FREE,
+    SYS_EXECVE, SYS_EXIT, SYS_FORK, SYS_GETEUID, SYS_GETUID, SYS_KLOG_READ, SYS_MEMTOTAL,
+    SYS_OPEN_FILE, SYS_PASSWD, SYS_READ, SYS_READDIR, SYS_RENAME, SYS_SBRK, SYS_SETGID, SYS_SETUID,
+    SYS_SET_CONSOLE_MODE, SYS_UNLINK, SYS_UPTIME, SYS_WAIT, SYS_WRITE,
 };
 
 pub const STDIN: i32 = 0;
@@ -286,6 +287,108 @@ pub fn klog_read(buf: &mut [u8]) -> i64 {
     }
 }
 
+// ---- the identity surface ---------------------------------------------------
+//
+// The credential syscalls the session tools stand on. The KDF and the shadow
+// rewrite live in the kernel: a tool only collects the strings and reports the
+// verdict, so a compromised EL0 program never sees a stored hash.
+
+/// The calling task's real uid, or `-1` if the kernel cannot answer.
+#[cfg(target_os = "none")]
+pub fn getuid() -> i64 {
+    unsafe { raw(SYS_GETUID, [0; 6]) }
+}
+
+/// The calling task's effective uid. `0` is root -- the only identity that may
+/// mint a session or reset another account's password.
+#[cfg(target_os = "none")]
+pub fn geteuid() -> i64 {
+    unsafe { raw(SYS_GETEUID, [0; 6]) }
+}
+
+/// Drop to `uid`. One-way for a non-root caller: a task that has given up root
+/// cannot take it back, which is why a session's privilege drop must happen in the
+/// forked child and never in the supervisor.
+#[cfg(target_os = "none")]
+pub fn setuid(uid: u32) -> i64 {
+    unsafe { raw(SYS_SETUID, [uid as u64, 0, 0, 0, 0, 0]) }
+}
+
+/// Drop to `gid`. Ordered before [`setuid`]: after the uid drop the caller is no
+/// longer privileged enough to change its group.
+#[cfg(target_os = "none")]
+pub fn setgid(gid: u32) -> i64 {
+    unsafe { raw(SYS_SETGID, [gid as u64, 0, 0, 0, 0, 0]) }
+}
+
+/// Verify `pass` against the active shadow database for `user`. Returns `0` when the
+/// credentials match and non-zero otherwise; the caller learns nothing else.
+///
+/// # Safety
+///
+/// Both pointers must be readable by the kernel for the given lengths.
+#[cfg(target_os = "none")]
+pub unsafe fn authenticate(
+    user: *const u8,
+    user_len: usize,
+    pass: *const u8,
+    pass_len: usize,
+) -> i64 {
+    unsafe {
+        raw(
+            SYS_AUTHENTICATE,
+            [
+                user as u64,
+                user_len as u64,
+                pass as u64,
+                pass_len as u64,
+                0,
+                0,
+            ],
+        )
+    }
+}
+
+/// Replace `user`'s password. The kernel checks `old` unless the caller is root, and
+/// enforces that a non-root caller may only rewrite its own record. Returns `0` on
+/// success, `-EACCES` on a rejected credential, and `-1` when the shadow database is
+/// missing or read-only.
+///
+/// # Safety
+///
+/// All three pointers must be readable by the kernel for their given lengths.
+#[cfg(target_os = "none")]
+pub unsafe fn passwd(
+    user: *const u8,
+    user_len: usize,
+    old: *const u8,
+    old_len: usize,
+    new: *const u8,
+    new_len: usize,
+) -> i64 {
+    unsafe {
+        raw(
+            SYS_PASSWD,
+            [
+                user as u64,
+                user_len as u64,
+                old as u64,
+                old_len as u64,
+                new as u64,
+                new_len as u64,
+            ],
+        )
+    }
+}
+
+/// Set the console echo mode: `0` turns the kernel's raw echo off so the caller owns
+/// every byte that reaches the serial line. A password prompt runs echo-off and masks
+/// its own input; leaving it on would print the secret.
+#[cfg(target_os = "none")]
+pub fn set_console_mode(mode: u64) -> i64 {
+    unsafe { raw(SYS_SET_CONSOLE_MODE, [mode, 0, 0, 0, 0, 0]) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,6 +482,46 @@ mod tests {
         let regs = place(SYS_KLOG_READ, [0x6000, 16 * 1024, 0, 0, 0, 0]);
         assert_eq!(regs.x8, 38);
         assert_eq!(regs.x[..2], [0x6000, 16 * 1024]);
+    }
+
+    #[test]
+    fn the_identity_readers_pass_nothing() {
+        assert_eq!(place(SYS_GETUID, [0; 6]).x8, 39);
+        assert_eq!(place(SYS_GETEUID, [0; 6]).x8, 40);
+        assert_eq!(place(SYS_GETUID, [0; 6]).x, [0; 6]);
+    }
+
+    #[test]
+    fn the_credential_setters_place_their_id_in_x0() {
+        // setgid must reach slot 44 and setuid slot 43: swapping them would drop the
+        // group to the uid and the uid to the gid, which for root/root still "works".
+        assert_eq!(place(SYS_SETUID, [1000, 0, 0, 0, 0, 0]).x8, 43);
+        assert_eq!(place(SYS_SETGID, [1000, 0, 0, 0, 0, 0]).x8, 44);
+        assert_eq!(place(SYS_SETUID, [1000, 0, 0, 0, 0, 0]).x[0], 1000);
+    }
+
+    #[test]
+    fn authenticate_places_the_user_pair_before_the_password_pair() {
+        let regs = place(SYS_AUTHENTICATE, [0x1000, 4, 0x2000, 8, 0, 0]);
+        assert_eq!(regs.x8, 45);
+        assert_eq!(regs.x[..4], [0x1000, 4, 0x2000, 8]);
+    }
+
+    #[test]
+    fn passwd_places_user_old_and_new_as_three_pointer_length_pairs() {
+        // All six argument registers are in use here -- the one syscall that fills the
+        // ABI. A pair landing out of order would hand the kernel the new password as
+        // the proof of the old one.
+        let regs = place(SYS_PASSWD, [0x1000, 4, 0x2000, 8, 0x3000, 12]);
+        assert_eq!(regs.x8, 46);
+        assert_eq!(regs.x, [0x1000, 4, 0x2000, 8, 0x3000, 12]);
+    }
+
+    #[test]
+    fn set_console_mode_places_the_mode_in_x0() {
+        let regs = place(SYS_SET_CONSOLE_MODE, [0, 0, 0, 0, 0, 0]);
+        assert_eq!(regs.x8, 25);
+        assert_eq!(regs.x[0], 0);
     }
 
     #[test]
