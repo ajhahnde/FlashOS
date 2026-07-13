@@ -44,8 +44,9 @@ hardware and under QEMU. The kernel core is written in
 programming language, while the boot path, exception vectors, and
 context-switching code are implemented in AArch64 assembly.
 
-The entire build is orchestrated by `build.flash`, which compiles the
-`.flash` modules using a pinned version of `flashc`.
+The production build is orchestrated by `build.zig`. Most implementation
+modules are still `.flash` sources transpiled by a pinned `flashc`; Cargo now
+builds the first Rust EL0 payload as the incremental Rust port proceeds.
 
 The current release provides a complete uniprocessor process
 lifecycle—including `fork`, `exec`, `exit`, `wait`, and `kill`—and
@@ -125,13 +126,16 @@ src/board/<name>/           per-board driver bag (rpi4b / virt) + linker script
 user_space/                 PID 1 image + in-kernel test harness
 user_space/lib/flibc/       userland mini-libc for ELF demos
 lib/                        shared kernel↔user constants (syscall IDs)
-tools/                      hand-rolled ELF demos (hello, stackbomb, UNIX utils etc.)
+crates/user-rt/             Rust EL0 entry, syscall, panic, and memory runtime
+user/hello/                 Rust /test/hello.elf exec fixture
+tools/                      hand-rolled ELF programs (stackbomb, UNIX utils etc.)
 tests/                      host-side unit tests
 armstub/                    EL3 → EL1 bootstrap shim (Pi only)
 scripts/                    symbol-table generation, iso, QEMU test watchdog,
                             Pi-baseline verifier
 assets/                     logo and visual assets
-build.flash                 the only build entry point
+build.zig                   production build graph (Flash/Zig/Rust bridge)
+Cargo.toml                  Rust workspace
 flashos.zsh                 shell helpers incl. the two-pass `build` orchestrator
 flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration

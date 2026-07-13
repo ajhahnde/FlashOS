@@ -1248,39 +1248,16 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("generic_timer", generic_timer_mod);
     kernel_mod.addImport("kernel", kernel_kmod);
 
-    // ---- hello.elf — payload for [TEST] exec-elf ----
-    // Built as a standalone aarch64-freestanding ET_EXEC, staged into
-    // the initramfs at /test/hello.elf. The exec-elf scenario opens it
-    // via sys_openFile, reads it into an EL0 buffer, and hands the
-    // bytes to sys_exec. Source is Flash (tools/hello.flash) — flashc
-    // transpiles it to Zig at build time via addFlashSource.
-    const hello_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/hello.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    const hello = b.addExecutable(.{
-        .name = "hello.elf",
-        .root_module = hello_mod,
-    });
-    hello.pie = false; // ET_EXEC, not ET_DYN — the loader rejects PIE.
-    hello.bundle_compiler_rt = false;
-    // Tiny p_align so LLD doesn't pad the file out to a page-sized
-    // offset — the ELF loader caps blob_size at PAGE_SIZE because it
-    // snapshots the blob into one kernel page. p_vaddr is still
-    // 0x1000-aligned via the linker script's `. = 0x100000`, which is
-    // what FlashOS's page-grain mapper actually requires; p_align only
-    // governs the ELF spec's `p_vaddr ≡ p_offset (mod p_align)` rule,
-    // and the kernel loader does not enforce p_align.
-    hello.link_z_max_page_size = 0x80;
-    hello.link_z_common_page_size = 0x80;
-    // Custom linker script: stock LLD output splits .eh_frame_hdr /
-    // .eh_frame into a separate LOAD segment ahead of .text, which
-    // pushes .text to a non-page-aligned VA. The script collapses to
-    // a single R+X PT_LOAD and discards the unwind / dyn metadata.
-    hello.setLinkerScript(b.path("tools/hello_linker.ld"));
-    hello.entry = .disabled; // ENTRY(_start) lives in the linker script
+    // ---- hello.elf — Rust payload for [TEST] exec-elf ----
+    // xtask builds the first production Rust EL0 program as the same
+    // standalone AArch64 ET_EXEC and preserves the initramfs path and output
+    // bytes the unchanged kernel/harness already consume. The declared output
+    // keeps the bridge inside Zig's dependency graph; side effects force Cargo
+    // to re-check its own source graph instead of trusting a stale outer cache.
+    const rust_hello_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user-hello", "--output" });
+    rust_hello_cmd.setName("cargo xtask user-hello");
+    const rust_hello = rust_hello_cmd.addOutputFileArg("hello.elf");
+    rust_hello_cmd.has_side_effects = true;
 
     // ---- stackbomb.elf — payload for [TEST] stack-overflow ----
     // Same recipe as hello.elf, swapping the source for a payload that
@@ -2101,7 +2078,7 @@ pub fn build(b: *std.Build) void {
     // pure function of file contents + name list.
     const cpio_stage = b.addNamedWriteFiles("initramfs_stage");
     _ = cpio_stage.addCopyFile(pid1.getEmittedBin(), "sbin/init");
-    _ = cpio_stage.addCopyFile(hello.getEmittedBin(), "test/hello.elf");
+    _ = cpio_stage.addCopyFile(rust_hello, "test/hello.elf");
     _ = cpio_stage.addCopyFile(stackbomb.getEmittedBin(), "test/stackbomb.elf");
     _ = cpio_stage.addCopyFile(flibc_demo.getEmittedBin(), "test/flibc_demo.elf");
     _ = cpio_stage.addCopyFile(argv_echo.getEmittedBin(), "test/argv_echo.elf");

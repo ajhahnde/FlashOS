@@ -30,6 +30,7 @@
 #         the PID-1 fork delta over the PID-0 boot snapshot)
 #   *  1 × healthy kernel-entropy announce (`HWRNG init`), 0 × failed
 #         self-test announce
+#   *  1 × exact `elf hello` line from the exec-elf payload
 #   *  3 × homescreen marker (`type 'help' for commands`) — two scripted
 #         [TEST] login sessions + the real boot login; each session
 #         authenticated, dropped privilege in its child, and reached the
@@ -219,6 +220,10 @@ fi
 hwrng_ok=$(grep -cF "HWRNG init" "$LOG" || true)
 hwrng_bad=$(grep -cF "HWRNG: self-test failed" "$LOG" || true)
 
+# The exec-elf scenario must run the staged payload, not merely load and reap
+# it. Accept the optional CR inserted by a serial host, but no other byte drift.
+hello_ok=$(LC_ALL=C grep -cE $'^elf hello\r?$' "$LOG" || true)
+
 # Every login session must reach the interactive shell — exactly three per
 # boot: [TEST] login's two scripted sessions (flash, then root, each
 # fork+drop+exec'd by the supervisor) plus the real boot login. Each shell
@@ -227,8 +232,8 @@ hwrng_bad=$(grep -cF "HWRNG: self-test failed" "$LOG" || true)
 fsh_ok=$(grep -cF "type 'help' for commands" "$LOG" || true)
 
 if [ "$errors" -ne 0 ] || [ "$fails" -ne 0 ] || [ "$ok_chk" -ne 34 ] || [ "$ok_base" -ne 1 ] \
-    || [ "$hwrng_ok" -ne 1 ] || [ "$hwrng_bad" -ne 0 ] || [ "$fsh_ok" -ne 3 ]; then
-    echo "FAIL (guard): ERROR_CAUGHT=$errors [FAIL]=$fails ${chk_label}=$ok_chk (want 34) ${base_label}=$ok_base (want 1) hwrng_ok=$hwrng_ok (want 1) hwrng_bad=$hwrng_bad (want 0) fsh_ok=$fsh_ok (want 3)" >&2
+    || [ "$hwrng_ok" -ne 1 ] || [ "$hwrng_bad" -ne 0 ] || [ "$hello_ok" -ne 1 ] || [ "$fsh_ok" -ne 3 ]; then
+    echo "FAIL (guard): ERROR_CAUGHT=$errors [FAIL]=$fails ${chk_label}=$ok_chk (want 34) ${base_label}=$ok_base (want 1) hwrng_ok=$hwrng_ok (want 1) hwrng_bad=$hwrng_bad (want 0) hello_ok=$hello_ok (want 1 exact line) fsh_ok=$fsh_ok (want 3)" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

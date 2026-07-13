@@ -19,12 +19,22 @@ name = "flashos-flibc"
 version = "0.8.0"
 
 [[package]]
+name = "flashos-hello"
+version = "0.8.0"
+dependencies = [
+ "flashos-user-rt",
+]
+
+[[package]]
 name = "flashos-kernel"
 version = "0.8.0"
 
 [[package]]
 name = "flashos-user-rt"
 version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+]
 
 [[package]]
 name = "xtask"

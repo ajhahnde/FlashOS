@@ -37,7 +37,7 @@ Reference:
 
 | Tool                     | Minimum version | Purpose                                 |
 | :----------------------- | :-------------- | :-------------------------------------- |
-| Flash                    | 1.4.1           | Compile Flash and run `build.flash`     |
+| Flash                    | 1.2.0           | Transpile the Flash sources used by `build.zig` |
 | Zig                      | 0.16.0          | Compile remaining Zig host tools        |
 | `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                        |
 | `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`   |
@@ -275,7 +275,7 @@ flash build test
 
 Runs the host-side unit tests against pure-logic kernel modules.
 Each module that has tests is its own test root, linked against
-`tests/host_stubs.flash` (stubs for assembly-only externs). The
+`tests/host_stubs.zig` (stubs for assembly-only externs). The
 current suite covers 41 modules (464 host tests); it
 finishes in well under a second and is the fastest signal that
 core kernel logic still holds.

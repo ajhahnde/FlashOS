@@ -20,6 +20,8 @@ pub struct Toolchain {
     pub objcopy: PathBuf,
     pub nm: PathBuf,
     pub objdump: PathBuf,
+    pub readobj: PathBuf,
+    pub strip: PathBuf,
     /// The assembler for the retained `.S` files. External prerequisite: the
     /// bare-metal target needs a C preprocessor, which the Rust toolchain does
     /// not ship; a pinned LLVM/Clang fills that slot.
@@ -69,6 +71,8 @@ impl Toolchain {
             objcopy: need("llvm-objcopy")?,
             nm: need("llvm-nm")?,
             objdump: need("llvm-objdump")?,
+            readobj: need("llvm-readobj")?,
+            strip: need("llvm-strip")?,
             clang,
         })
     }

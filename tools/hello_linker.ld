@@ -1,5 +1,5 @@
 /*
- * Minimal linker script for tools/hello.flash — produces a single
+ * Minimal linker script for the /test/hello.elf payload — produces a single
  * page-aligned PT_LOAD segment so the FlashOS ELF loader (which
  * rejects non-page-aligned p_vaddrs and does not coalesce overlapping
  * segments) can map it page-grain. The kernel loader copies file-
@@ -10,12 +10,12 @@
  *
  * Layout:
  *   . = 0         — start of the only LOAD segment, page-aligned.
- *   .text         — code (entry point _start lives here).
+ *   .text         — code + read-only bytes (entry point _start lives here).
  *
- * eh_frame/note/comment/dyn* sections are discarded — _start is naked
- * inline asm with no unwind tables, so nothing references them at
- * runtime; keeping them would force a second LOAD segment with
- * different permissions, defeating the layout invariant above.
+ * eh_frame/note/comment/dyn* sections are discarded — the runtime aborts on
+ * panic and never unwinds, so nothing references them at runtime; keeping
+ * them would force a second LOAD segment with different permissions,
+ * defeating the layout invariant above.
  */
 
 ENTRY(_start)
@@ -38,6 +38,7 @@ SECTIONS {
     .text : {
         *(.text._start)
         *(.text .text.*)
+        *(.rodata .rodata.*)
     } :text
 
     /DISCARD/ : {

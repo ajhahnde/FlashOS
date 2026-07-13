@@ -28,6 +28,7 @@ Commands:
   nm     --board <rpi4b|virt>   Dump the canary's symbol table
   asm-defs [--check]            Generate the assembly-visible layout facts from crates/abi;
                                 --check diffs them against arch/aarch64/asm_defs_common.inc
+  user-hello [--output <path>]  Build the Rust /test/hello.elf payload
   test                          Run the Rust host tests (all crates but the canary)
   check-hygiene                 Run the repo's whitespace and hex-literal gates
   clean                         Remove rust-out/ and the cargo target dir
@@ -97,6 +98,13 @@ fn dispatch() -> Result<(), String> {
             Ok(())
         }
         "asm-defs" => asm_defs::run(&root, rest.iter().any(|a| a == "--check")),
+        "user-hello" => {
+            let tc = Toolchain::discover()?;
+            let output = output_of(&rest)?;
+            let elf = build::user_hello(&root, &tc, output.as_deref())?;
+            println!("built {}", elf.display());
+            Ok(())
+        }
         "test" => Cmd::new("cargo", &root.join("rust-out/xtask-trace.log"))
             .cwd(&root)
             .args(["test", "--workspace", "--exclude", "flashos-canary"])
@@ -129,6 +137,21 @@ fn dispatch() -> Result<(), String> {
         }
         other => Err(format!("unknown command `{other}`\n\n{USAGE}")),
     }
+}
+
+fn output_of(args: &[String]) -> Result<Option<PathBuf>, String> {
+    if args.is_empty() {
+        return Ok(None);
+    }
+    if args.len() == 2 && args[0] == "--output" {
+        return Ok(Some(PathBuf::from(&args[1])));
+    }
+    if args.len() == 1 {
+        if let Some(path) = args[0].strip_prefix("--output=") {
+            return Ok(Some(PathBuf::from(path)));
+        }
+    }
+    Err("user-hello accepts only [--output <path>]".into())
 }
 
 fn board_of(args: &[String]) -> Result<Board, String> {

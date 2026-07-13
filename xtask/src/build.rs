@@ -181,6 +181,186 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
     Ok(p)
 }
 
+/// Build the first production Rust EL0 payload and link it with the retained
+/// single-PT_LOAD user linker script. The old kernel consumes this ELF without
+/// knowing or caring which implementation language produced it.
+pub fn user_hello(
+    root: &Path,
+    tc: &Toolchain,
+    requested_output: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let out = root.join("rust-out/user");
+    let trace = out.join("xtask-trace.log");
+    fs::create_dir_all(&out).map_err(|e| format!("mkdir {}: {e}", out.display()))?;
+    let _ = fs::remove_file(&trace);
+
+    Cmd::new("cargo", &trace)
+        .cwd(root)
+        .args([
+            "build",
+            "--release",
+            "-p",
+            "flashos-hello",
+            "--target",
+            TARGET,
+        ])
+        .run()?;
+    let archive = root
+        .join("target")
+        .join(TARGET)
+        .join("release/libflashos_hello.a");
+    if !archive.exists() {
+        return Err(format!("cargo produced no {}", archive.display()));
+    }
+
+    let unstripped = out.join("hello.unstripped.elf");
+    Cmd::new(tc.lld.clone(), &trace)
+        .args([
+            "-flavor".to_string(),
+            "gnu".to_string(),
+            "-T".to_string(),
+            root.join("tools/hello_linker.ld").display().to_string(),
+            "-z".to_string(),
+            "max-page-size=0x80".to_string(),
+            "--no-gc-sections".to_string(),
+            "-o".to_string(),
+            unstripped.display().to_string(),
+            archive.display().to_string(),
+        ])
+        .run()?;
+
+    inspect_user_hello(&unstripped, &trace, tc, true)?;
+
+    let output = requested_output
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| out.join("hello.elf"));
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+    }
+    Cmd::new(tc.strip.clone(), &trace)
+        .args([
+            "--strip-all".to_string(),
+            "-o".to_string(),
+            output.display().to_string(),
+            unstripped.display().to_string(),
+        ])
+        .run()?;
+
+    inspect_user_hello(&output, &trace, tc, false)?;
+    Ok(output)
+}
+
+fn inspect_user_hello(
+    elf: &Path,
+    trace: &Path,
+    tc: &Toolchain,
+    inspect_symbols: bool,
+) -> Result<(), String> {
+    let headers = Cmd::new(tc.readobj.clone(), trace)
+        .args([
+            "--file-headers".to_string(),
+            "--program-headers".to_string(),
+            "--sections".to_string(),
+            elf.display().to_string(),
+        ])
+        .capture()?;
+    for required in [
+        "Format: elf64-littleaarch64",
+        "Type: Executable",
+        "Machine: EM_AARCH64",
+        "Entry: 0x0",
+        "ProgramHeaderCount: 1",
+        "Alignment: 128",
+    ] {
+        if !headers.contains(required) {
+            return Err(format!(
+                "{} lacks ELF invariant `{required}`",
+                elf.display()
+            ));
+        }
+    }
+    if headers.matches("Type: PT_LOAD").count() != 1
+        || !headers.contains("PF_R")
+        || !headers.contains("PF_X")
+        || headers.contains("PF_W")
+    {
+        return Err(format!(
+            "{} must contain exactly one read/execute, non-writable PT_LOAD",
+            elf.display()
+        ));
+    }
+
+    if inspect_symbols {
+        let undefined = Cmd::new(tc.nm.clone(), trace)
+            .args(["-u".to_string(), elf.display().to_string()])
+            .capture()?;
+        if !undefined.trim().is_empty() {
+            return Err(format!(
+                "undefined symbols in {}:\n{}",
+                elf.display(),
+                undefined
+            ));
+        }
+
+        let symbols = Cmd::new(tc.nm.clone(), trace)
+            .args(["-n".to_string(), elf.display().to_string()])
+            .capture()?;
+        for required in ["_start", "memcpy", "memset", "memmove", "memcmp", "strlen"] {
+            let count = symbols
+                .lines()
+                .filter(|line| line.split_whitespace().last() == Some(required))
+                .count();
+            if count != 1 {
+                return Err(format!(
+                    "{} must define `{required}` exactly once, found {count}",
+                    elf.display()
+                ));
+            }
+        }
+        if symbols.contains("core..fmt") || symbols.contains("core::fmt") {
+            return Err("core::fmt linked into the EL0 payload".into());
+        }
+
+        let disassembly = Cmd::new(tc.objdump.clone(), trace)
+            .args([
+                "-d".to_string(),
+                "--no-show-raw-insn".to_string(),
+                elf.display().to_string(),
+            ])
+            .capture()?;
+        let forbidden: Vec<&str> = disassembly
+            .lines()
+            .filter(|line| {
+                let text = line.trim();
+                text.contains(" q0")
+                    || text.contains(" q1")
+                    || text.contains(" v0.")
+                    || text.contains(" v1.")
+                    || text.contains("fmov")
+                    || text.contains("fadd")
+            })
+            .collect();
+        if !forbidden.is_empty() {
+            return Err(format!(
+                "FP/SIMD instructions in {}:\n{}",
+                elf.display(),
+                forbidden
+                    .iter()
+                    .take(10)
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+    }
+
+    let size = fs::metadata(elf)
+        .map_err(|e| format!("stat {}: {e}", elf.display()))?
+        .len();
+    println!("  hello.elf {size} bytes, AArch64 ET_EXEC, entry 0x0, one R+X PT_LOAD, 0 undefined");
+    Ok(())
+}
+
 /// Artefact inspection: the checks that would otherwise only fail on hardware.
 fn inspect(p: &Paths, tc: &Toolchain) -> Result<(), String> {
     let syms = Cmd::new(tc.nm.clone(), &p.trace)

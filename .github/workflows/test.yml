@@ -13,7 +13,7 @@ name: test
 
 on:
   push:
-    branches: [main]
+    branches: [main, v0.8.0]
   pull_request:
   workflow_dispatch:
 
@@ -43,6 +43,13 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+
+      # The production build is mixed-language during the port: Cargo builds
+      # the Rust /test/hello.elf payload that the unchanged Zig kernel embeds.
+      - name: install the pinned Rust toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
 
       - name: hygiene gate
         # Fails on trailing spaces, hard tabs in *.zig, CRLF, or

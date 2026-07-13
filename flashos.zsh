@@ -854,9 +854,9 @@ _flashos_port_check() {
 _flashos_port_diff() {
   local src="$1" orig="${2:-}"
   [[ -n "$src" ]] || { _flashos_err "usage: port diff <module.flash> [original.zig]"; return 1; }
-  # Default original: same directory, same stem, .zig extension. The pilot
-  # already breaks that guess (hello.flash vs hello_elf.zig), so the second
-  # arg stays first-class.
+  # Default original: same directory, same stem, .zig extension. Keep the
+  # explicit second argument for sources whose retained original has another
+  # name or directory.
   [[ -n "$orig" ]] || orig="${src:r}.zig"
   if [[ ! -f "$orig" ]]; then
     _flashos_err "port diff: original not found: $orig (pass it explicitly)"

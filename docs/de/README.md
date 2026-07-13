@@ -55,8 +55,10 @@ und QEMU. Der Kernel-Core ist in
 Systemprogrammiersprache, geschrieben. Boot-Pfad, Exception-Vektoren
 und Context-Switch-Code sind in AArch64-Assembly implementiert.
 
-`build.flash` steuert den gesamten nativen Build. Der aktuelle Release
-bietet einen vollständigen, über Stresszyklen leckfreien
+`build.zig` steuert den produktiven Build. Die meisten Module sind noch
+`.flash`-Quellen, die der gepinnte `flashc` transpiliert; Cargo baut während
+des schrittweisen Rust-Ports bereits das erste Rust-EL0-Programm. Der aktuelle
+Release bietet einen vollständigen, über Stresszyklen leckfreien
 Uniprozessor-Prozesslebenszyklus mit `fork`, `exec`, `exit`, `wait` und
 `kill`. Ein Kernel-Harness und host-seitige Unit-Tests prüfen ihn.
 
@@ -187,13 +189,16 @@ src/board/<name>/           per-board driver bag (rpi4b / virt) + linker script
 user_space/                 PID 1 image + in-kernel test harness
 user_space/lib/flibc/       userland mini-libc for ELF demos
 lib/                        shared kernel↔user constants (syscall IDs)
-tools/                      hand-rolled ELF demos (hello, stackbomb, flibc_demo)
+crates/user-rt/             Rust EL0 entry, syscall, panic, and memory runtime
+user/hello/                 Rust /test/hello.elf exec fixture
+tools/                      hand-rolled ELF programs (stackbomb, coreutils)
 tests/                      host-side unit tests
 armstub/                    EL3 → EL1 bootstrap shim (Pi only)
 scripts/                    symbol-table generation, iso, QEMU test watchdog,
                             Pi-baseline verifier
 assets/                     logo and visual assets
-build.flash                   the only build entry point
+build.zig                   production build graph (Flash/Zig/Rust bridge)
+Cargo.toml                  Rust workspace
 flashos.zsh             shell helpers incl. the two-pass `build` orchestrator
 flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration

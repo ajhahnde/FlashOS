@@ -1,12 +1,13 @@
 [package]
-name = "flashos-user-rt"
+name = "flashos-hello"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [lib]
-name = "flashos_user_rt"
+name = "flashos_hello"
+crate-type = ["staticlib"]
 
 [dependencies]
-flashos-abi = { path = "../abi" }
+flashos-user-rt = { path = "../../crates/user-rt" }

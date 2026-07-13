@@ -19,7 +19,7 @@ name: rust
 
 on:
   push:
-    branches: [main]
+    branches: [main, v0.8.0]
   pull_request:
   workflow_dispatch:
 
@@ -53,6 +53,9 @@ jobs:
 
       - name: rust host tests
         run: cargo test --workspace --exclude flashos-canary
+
+      - name: EL0 payload link + artefact checks
+        run: cargo xtask user-hello
 
       # The .S files hardcode three layout facts (exception-frame size, syscall
       # dispatch cap, core_context offset). Prove they still match the records.

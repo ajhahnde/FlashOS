@@ -8,6 +8,7 @@ members = [
     "crates/flibc",
     "crates/kernel",
     "crates/user-rt",
+    "user/hello",
 ]
 
 [workspace.package]

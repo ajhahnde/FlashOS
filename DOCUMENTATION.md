@@ -151,6 +151,9 @@ user_space/
     gapbuf.flash                            Gap buffer (editor backing store)
     pager.flash                             Scroll pager (less core)
 
+crates/user-rt/                             Rust EL0 entry, syscall, panic, and memory runtime
+user/hello/                                 Rust /test/hello.elf exec fixture
+
 lib/
   syscall_defs.flash                        Shared SYS_* IDs (kernel + user side)
   console_ui/                               Shared console-UI rendering (kernel + user)
@@ -163,10 +166,10 @@ tools/                                      Hand-rolled ELF programs (coreutils 
   ls, cat, cp, mv, rm, grep, echo, clear    coreutils (coreutil_linker.ld)
   edit, less, login, passwd, dmesg          interactive + identity tools
   cpuinfo, meminfo, sysinfo, uptime         system-info readers
-  hello.flash, stackbomb.flash              [TEST] exec-elf / stack-overflow fixtures
+  stackbomb.flash                           [TEST] stack-overflow fixture
   flibc_demo, argv_echo, forkbomb           flibc / argv / fork [TEST] fixtures
   grep_match.flash                          grep match engine (host-testable)
-  gen_shadow.flash                          Host tool: mint the seed shadow db
+  gen_shadow.zig                            Host tool: mint the seed shadow db
   initramfs.S                               Embeds the staged initramfs image
   *_linker.ld                               Per-program PT_LOAD layouts
 
@@ -193,7 +196,7 @@ scripts/
 
 assets/                                     Logo and visual assets
 
-build.flash                                 Native Flash build definition
+build.zig                                   Mixed Flash/Zig/Rust build definition
 flashos.zsh                                 Shell helpers incl. the two-pass `build` orchestrator
 config.txt                                  RPi 4 firmware configuration
 ```
@@ -366,7 +369,7 @@ PID-1 startup reads it directly.
 
 ### Filesystem layout (VFS shim)
 
-`src/vfs.flash` dispatches file syscalls through a fixed two-slot mount
+`src/vfs.zig` dispatches file syscalls through a fixed two-slot mount
 table, selected by path prefix:
 
 | Path prefix     | Slot | Backend                                  |
@@ -733,7 +736,7 @@ mapping rather than chasing into UVA space.
 |  4   | `dump_free`       | (none)                                                                                                                         |                                                                `u64` count of free pages                                                                | **Public introspection ABI.** Prints + returns the free-page count. The in-kernel test harness uses the return value as its leak-detection signal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 |  5   | ~~`exec`~~        | —                                                                                                                              |                                                                            —                                                                            | **RETIRED** — legacy blob/ELF loader removed after slot 31 `execve` replaced it; the slot number stays reserved forever and returns `-1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 |  6   | `kill`            | `x0 = pid`                                                                                                                     |                                                               `i32` 0 on hit, -1 on miss                                                                | Finds the task with matching `pid`, flips it to `TASK_ZOMBIE`, wakes the parent. **Self-kill is rejected** — use `exit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-|  7   | `openFile`        | `x0 = const u8 *` (NUL-terminated path)                                                                                        |                               `i32` fd ≥ 0 on success, -1 on miss / alloc failure, -13 (`-EACCES`) on a permission denial                               | Dispatches the path through the VFS shim (`vfs.vfs_open`, see §3) to the matching backend, runs the permission check (open is read-intent — the caller's effective ids against the file's mode/owner, root bypasses; denial returns `-EACCES` before any `File` page is allocated), allocates a `File` page (`src/file.flash`), stashes the backing `SuperBlock` + the file's mode/uid/gid in the `File`, installs the handle into the per-task `open_files` slot. Path UVA reaches the kernel via `copy_from_user`; a wild UVA returns `-1` via the soft path in `mm_user.check_and_prefault_user_range` — caller does **not** zombify                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|  7   | `openFile`        | `x0 = const u8 *` (NUL-terminated path)                                                                                        |                               `i32` fd ≥ 0 on success, -1 on miss / alloc failure, -13 (`-EACCES`) on a permission denial                               | Dispatches the path through the VFS shim (`vfs.vfs_open`, see §3) to the matching backend, runs the permission check (open is read-intent — the caller's effective ids against the file's mode/owner, root bypasses; denial returns `-EACCES` before any `File` page is allocated), allocates a `File` page (`src/file.zig`), stashes the backing `SuperBlock` + the file's mode/uid/gid in the `File`, installs the handle into the per-task `open_files` slot. Path UVA reaches the kernel via `copy_from_user`; a wild UVA returns `-1` via the soft path in `mm_user.check_and_prefault_user_range` — caller does **not** zombify                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 |  8   | ~~`readFile`~~    | —                                                                                                                              |                                                                            —                                                                            | **RETIRED** — legacy per-kind file read removed after slot 32 `read` replaced it; the slot number stays reserved forever and returns `-1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 |  9   | ~~`writeFile`~~   | —                                                                                                                              |                                                                            —                                                                            |  **RETIRED** — legacy per-kind file write removed after slot 33 `write` replaced it; the slot number stays reserved forever and returns `-1`. FAT32 write-back (`/mnt/…`) now routes through the unified `write`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 |  10  | `seek`            | `x0 = fd`, `x1 = i64 off`, `x2 = whence`                                                                                       |                                                     `i64` new offset, `-1` on bad fd / out-of-range                                                     | `whence = 0` SEEK_SET, `1` SEEK_CUR, `2` SEEK_END. Bounds check `[0, File.size]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -855,11 +858,11 @@ published PBKDF2-HMAC-SHA256 vectors, plus `std.crypto` differential
 checks) and `src/hwrng.flash` (the kernel entropy source) are the crypto
 foundation for the identity work. Both are kernel-internal by
 design: hashing happens inside `sys_authenticate` (slot 45, above), so key
-material never crosses the user/kernel boundary and no getrandom-style
+material never crosses the userspace/kernel boundary and no getrandom-style
 syscall exists. The sha256 module is always built ReleaseSmall — even in
 Debug kernel builds — because the PBKDF2 → HMAC → SHA-256 call chain runs
 on the per-task kernel stack and Debug-mode frames are large enough to
-overflow a single 4 KiB stack page (see the note in `build.flash`). That
+overflow a single 4 KiB stack page (see the note in `build.zig`). That
 stack is its own page, allocated separately from the
 `TaskStruct`, so even an overflow can no longer reach the credential
 fields stored on the task — the failure mode the `[TEST] authenticate`
@@ -869,10 +872,10 @@ canary guards (§8).
 world-readable, a committed file — parsed everywhere by the host-tested
 `src/pwfile.flash`) and `/etc/shadow`
 (`user:iterations:salt_hex:hash_hex`, generated at build time by
-`tools/gen_shadow.flash` running the same `src/sha256.flash` PBKDF2 the kernel
+`tools/gen_shadow.zig` running the same `src/sha256.flash` PBKDF2 the kernel
 verifies with) ship in the initramfs. `/etc/shadow` is mode `0o100600`
 root:root — the cpio encoder stamps per-file modes from the build's policy
-list (`build.flash`), and the VFS permission layer (below) refuses a
+list (`build.zig`), and the VFS permission layer (below) refuses a
 non-root open with `-EACCES`, so the password hashes are unreadable to a
 dropped process.
 
@@ -908,8 +911,8 @@ and enforced at the syscall boundary by the pure, host-test-gated
 
 - **Where the metadata comes from.** initramfs entries carry the newc
   cpio header's mode/uid/gid fields; the deterministic encoder
-  (`scripts/build_initramfs.flash`) stamps them from the per-file policy
-  list in `build.flash` — binaries (`/bin/*`, `/sbin/init`, `/test/*.elf`)
+  (`scripts/build_initramfs.zig`) stamps them from the per-file policy
+  list in `build.zig` — binaries (`/bin/*`, `/sbin/init`, `/test/*.elf`)
   are `0o100755`, config files (`/etc/passwd`, `/etc/fshrc`) `0o100644`,
   and `/etc/shadow` `0o100600`, all root:root. FAT32 has no native
   owner/mode concept, so `/mnt` metadata comes from the **permission
@@ -1099,7 +1102,7 @@ Console flow once enumerated:
 
 Kernel `[Debug]` prints, the OOM trace, and the USB driver's own
 bring-up trace stay on the Mini-UART unconditionally; the USB console
-carries only the user/fsh byte stream. Under QEMU (`raspi4b` models
+carries only the userspace/fsh byte stream. Under QEMU (`raspi4b` models
 the DWC2 registers but not the device-mode data path) `usb_init`
 fails soft with `-1` and the console falls back to the Mini-UART —
 this keeps the CI boot watchdog green and is also the no-cable
@@ -1116,9 +1119,9 @@ part of the linked image, so the build is a two-pass process:
 
 1. **Pass 1.** `flash build` links `kernel8.elf` with a placeholder
    `_symbols` section large enough to hold the populated table
-   (`scripts/generate_syms.flash:pre_allocated_size`).
+   (`scripts/generate_syms.zig:pre_allocated_size`).
 2. **Extraction.** `flash build populate-syms` runs
-   `aarch64-elf-nm -n kernel8.elf | sort | grep -v '\$' | flash run scripts/generate_syms.flash`, which overwrites
+   `aarch64-elf-nm -n kernel8.elf | sort | grep -v '\$' | zig run scripts/generate_syms.zig`, which overwrites
    `src/symbol_area.S` with `.quad` / `.string` / `.space` directives
    — one 64-byte entry per symbol, terminated by a zero-byte sentinel.
 3. **Pass 2.** Another `flash build` relinks with the populated section.
@@ -1135,7 +1138,7 @@ did not perturb addresses).
   intact and ready to be wired up again once the Zig backend grows an
   equivalent flag.
 - When patchable entries exist, `trace_init`
-  (`src/trace/trace_main.flash`) relocates the address table, overwrites
+  (`src/trace/trace_main.zig`) relocates the address table, overwrites
   the first `nop` of every entry with `mov x9, lr`, then patches the
   second `nop` with `bl hook`.
 - `hook` (`src/trace/hook.S`) saves the argument and link registers,
