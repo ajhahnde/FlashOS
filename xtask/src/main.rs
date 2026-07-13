@@ -10,6 +10,7 @@ mod build;
 mod guard;
 mod qemu;
 mod toolchain;
+mod ui_defs;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -28,7 +29,9 @@ Commands:
   nm     --board <rpi4b|virt>   Dump the canary's symbol table
   asm-defs [--check]            Generate the assembly-visible layout facts from crates/abi;
                                 --check diffs them against arch/aarch64/asm_defs_common.inc
-  user-hello [--output <path>]  Build the Rust /test/hello.elf payload
+  ui-defs [--check]             Diff the console look in crates/console-ui against the
+                                Flash copy the kernel still compiles (lib/console_ui/)
+  user <name> [--output <path>] Build a Rust EL0 payload (hello, clear)
   test                          Run the Rust host tests (all crates but the canary)
   check-hygiene                 Run the repo's whitespace and hex-literal gates
   clean                         Remove rust-out/ and the cargo target dir
@@ -98,10 +101,16 @@ fn dispatch() -> Result<(), String> {
             Ok(())
         }
         "asm-defs" => asm_defs::run(&root, rest.iter().any(|a| a == "--check")),
-        "user-hello" => {
+        "ui-defs" => ui_defs::run(&root, rest.iter().any(|a| a == "--check")),
+        "user" => {
+            let name = rest
+                .first()
+                .filter(|a| !a.starts_with("--"))
+                .ok_or("usage: cargo xtask user <name> [--output <path>]")?;
+            let spec = build::user_elf(name)?;
             let tc = Toolchain::discover()?;
-            let output = output_of(&rest)?;
-            let elf = build::user_hello(&root, &tc, output.as_deref())?;
+            let output = output_of(&rest[1..])?;
+            let elf = build::build_user_elf(&root, &tc, spec, output.as_deref())?;
             println!("built {}", elf.display());
             Ok(())
         }
@@ -151,7 +160,7 @@ fn output_of(args: &[String]) -> Result<Option<PathBuf>, String> {
             return Ok(Some(PathBuf::from(path)));
         }
     }
-    Err("user-hello accepts only [--output <path>]".into())
+    Err("user accepts only [--output <path>]".into())
 }
 
 fn board_of(args: &[String]) -> Result<Board, String> {

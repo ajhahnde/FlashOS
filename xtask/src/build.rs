@@ -181,12 +181,60 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
     Ok(p)
 }
 
-/// Build the first production Rust EL0 payload and link it with the retained
-/// single-PT_LOAD user linker script. The old kernel consumes this ELF without
-/// knowing or caring which implementation language produced it.
-pub fn user_hello(
+/// One Rust EL0 payload: the cargo package that builds it, the retained linker
+/// script that lays it out, and the ELF name the initramfs stages it under.
+pub struct UserElf {
+    /// Basename of the produced ELF, e.g. `hello.elf`.
+    pub elf: &'static str,
+    /// Cargo package name, e.g. `flashos-hello`.
+    pub package: &'static str,
+    /// Staticlib cargo emits for that package, e.g. `libflashos_hello.a`.
+    pub archive: &'static str,
+    /// Retained linker script, relative to the repository root.
+    pub linker_script: &'static str,
+}
+
+/// Every EL0 payload the Rust side owns today. A payload joins this table when its
+/// stage ports it; the Zig build reads each one back through `cargo xtask user`.
+pub const USER_ELFS: &[UserElf] = &[
+    UserElf {
+        elf: "hello.elf",
+        package: "flashos-hello",
+        archive: "libflashos_hello.a",
+        linker_script: "tools/hello_linker.ld",
+    },
+    UserElf {
+        elf: "clear.elf",
+        package: "flashos-clear",
+        archive: "libflashos_clear.a",
+        linker_script: "tools/coreutil_linker.ld",
+    },
+];
+
+/// Look a payload up by ELF basename, minus the extension (`hello`, `clear`).
+pub fn user_elf(name: &str) -> Result<&'static UserElf, String> {
+    USER_ELFS
+        .iter()
+        .find(|u| u.elf.trim_end_matches(".elf") == name)
+        .ok_or_else(|| {
+            let known: Vec<&str> = USER_ELFS
+                .iter()
+                .map(|u| u.elf.trim_end_matches(".elf"))
+                .collect();
+            format!(
+                "unknown user payload `{name}` (known: {})",
+                known.join(", ")
+            )
+        })
+}
+
+/// Build one Rust EL0 payload and link it with its retained single-PT_LOAD linker
+/// script. The old kernel consumes the ELF without knowing or caring which
+/// implementation language produced it.
+pub fn build_user_elf(
     root: &Path,
     tc: &Toolchain,
+    spec: &UserElf,
     requested_output: Option<&Path>,
 ) -> Result<PathBuf, String> {
     let out = root.join("rust-out/user");
@@ -196,30 +244,25 @@ pub fn user_hello(
 
     Cmd::new("cargo", &trace)
         .cwd(root)
-        .args([
-            "build",
-            "--release",
-            "-p",
-            "flashos-hello",
-            "--target",
-            TARGET,
-        ])
+        .args(["build", "--release", "-p", spec.package, "--target", TARGET])
         .run()?;
     let archive = root
         .join("target")
         .join(TARGET)
-        .join("release/libflashos_hello.a");
+        .join("release")
+        .join(spec.archive);
     if !archive.exists() {
         return Err(format!("cargo produced no {}", archive.display()));
     }
 
-    let unstripped = out.join("hello.unstripped.elf");
+    let stem = spec.elf.trim_end_matches(".elf");
+    let unstripped = out.join(format!("{stem}.unstripped.elf"));
     Cmd::new(tc.lld.clone(), &trace)
         .args([
             "-flavor".to_string(),
             "gnu".to_string(),
             "-T".to_string(),
-            root.join("tools/hello_linker.ld").display().to_string(),
+            root.join(spec.linker_script).display().to_string(),
             "-z".to_string(),
             "max-page-size=0x80".to_string(),
             "--no-gc-sections".to_string(),
@@ -229,11 +272,11 @@ pub fn user_hello(
         ])
         .run()?;
 
-    inspect_user_hello(&unstripped, &trace, tc, true)?;
+    inspect_user_elf(spec, &unstripped, &trace, tc, true)?;
 
     let output = requested_output
         .map(Path::to_path_buf)
-        .unwrap_or_else(|| out.join("hello.elf"));
+        .unwrap_or_else(|| out.join(spec.elf));
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
     }
@@ -246,11 +289,12 @@ pub fn user_hello(
         ])
         .run()?;
 
-    inspect_user_hello(&output, &trace, tc, false)?;
+    inspect_user_elf(spec, &output, &trace, tc, false)?;
     Ok(output)
 }
 
-fn inspect_user_hello(
+fn inspect_user_elf(
+    spec: &UserElf,
     elf: &Path,
     trace: &Path,
     tc: &Toolchain,
@@ -357,7 +401,10 @@ fn inspect_user_hello(
     let size = fs::metadata(elf)
         .map_err(|e| format!("stat {}: {e}", elf.display()))?
         .len();
-    println!("  hello.elf {size} bytes, AArch64 ET_EXEC, entry 0x0, one R+X PT_LOAD, 0 undefined");
+    println!(
+        "  {} {size} bytes, AArch64 ET_EXEC, entry 0x0, one R+X PT_LOAD, 0 undefined",
+        spec.elf
+    );
     Ok(())
 }
 

@@ -7,3 +7,7 @@ license.workspace = true
 
 [lib]
 name = "flashos_flibc"
+
+[dependencies]
+flashos-abi = { path = "../abi" }
+flashos-user-rt = { path = "../user-rt" }

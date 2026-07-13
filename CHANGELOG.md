@@ -42,6 +42,35 @@ The project was founded on April 28th, 2026.
   untouched and remains the production build; nothing about the shipped kernel
   changes.
 
+- **Canonical ABI and layout crate (`crates/abi`).** Syscall numbers, the user
+  virtual layout, task and register-frame structures, ELF records, and the
+  shared file/descriptor layouts now have one `#[repr(C)]` owner in Rust, with
+  compile-time size, alignment, and offset assertions. A gate compares the
+  generated layout facts against the assembly include files and the existing
+  constants, so a divergence fails the build instead of the boot.
+
+- **Rust EL0 runtime (`crates/user-rt`).** Userspace entry (`_start`), the
+  syscall trap wrapper, the allocation-free panic/exit path, and the
+  strict-aligned `memcpy`/`memset` exports. The unmodified kernel loads and
+  runs a Rust EL0 ELF with byte-identical output and exit status, proving the
+  process ABI end to end before any kernel code is translated.
+
+- **Rust console UI and userspace engine libraries.** The shared rendering
+  layer (`crates/console-ui`: palette, screen, status tags) and the pure
+  `flibc` engines (`crates/flibc`: buffered I/O, process and heap helpers, key
+  decoding, tab completion, `execvp` path resolution, the gap buffer, the
+  pager, and the readline line editor) are ported, along with the shell
+  tokenizer and the `grep` matcher. Every host assertion from the previous
+  implementation is carried over, and the payloads stay free of formatting
+  machinery: output uses an explicit part list rather than a format string, so
+  no `core::fmt` reaches an EL0 binary. Boot marker bytes and all observable
+  output are unchanged.
+
+- **`/bin/clear` is now a Rust ELF.** The first shipped user program built by
+  the Rust pipeline and embedded through the existing build; its Flash source
+  is retired. Program headers, entry point, and emitted bytes match the
+  reference tool.
+
 ### Changed
 
 - Re-pinned the Flash toolchain to the currently installed `flashc`

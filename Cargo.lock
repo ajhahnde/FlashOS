@@ -11,12 +11,39 @@ name = "flashos-canary"
 version = "0.8.0"
 
 [[package]]
+name = "flashos-clear"
+version = "0.8.0"
+dependencies = [
+ "flashos-console-ui",
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
 name = "flashos-console-ui"
 version = "0.8.0"
 
 [[package]]
 name = "flashos-flibc"
 version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-fsh"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+]
+
+[[package]]
+name = "flashos-grep"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+]
 
 [[package]]
 name = "flashos-hello"
@@ -41,4 +68,5 @@ name = "xtask"
 version = "0.8.0"
 dependencies = [
  "flashos-abi",
+ "flashos-console-ui",
 ]

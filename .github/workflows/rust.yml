@@ -55,12 +55,19 @@ jobs:
         run: cargo test --workspace --exclude flashos-canary
 
       - name: EL0 payload link + artefact checks
-        run: cargo xtask user-hello
+        run: |
+          cargo xtask user hello
+          cargo xtask user clear
 
       # The .S files hardcode three layout facts (exception-frame size, syscall
       # dispatch cap, core_context offset). Prove they still match the records.
       - name: assembly layout facts
         run: cargo xtask asm-defs --check
+
+      # The kernel is still Flash and keeps its own copy of the console look, so
+      # the frozen tag/marker bytes live in two languages. Prove they agree.
+      - name: console look facts
+        run: cargo xtask ui-defs --check
 
       - name: canary link + artefact checks (rpi4b)
         run: cargo xtask canary --board rpi4b

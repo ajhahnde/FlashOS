@@ -8,6 +8,9 @@ members = [
     "crates/flibc",
     "crates/kernel",
     "crates/user-rt",
+    "user/clear",
+    "user/fsh",
+    "user/grep",
     "user/hello",
 ]
 

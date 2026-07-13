@@ -1,0 +1,15 @@
+[package]
+name = "flashos-fsh"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# A library for now: the shell's pure engines port ahead of the shell itself, so
+# there is no `_start` to link yet. It becomes a staticlib payload when the shell
+# body lands and joins the EL0 payload table in xtask.
+[lib]
+name = "flashos_fsh"
+
+[dependencies]
+flashos-flibc = { path = "../../crates/flibc" }

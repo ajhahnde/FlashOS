@@ -1254,10 +1254,21 @@ pub fn build(b: *std.Build) void {
     // bytes the unchanged kernel/harness already consume. The declared output
     // keeps the bridge inside Zig's dependency graph; side effects force Cargo
     // to re-check its own source graph instead of trusting a stale outer cache.
-    const rust_hello_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user-hello", "--output" });
-    rust_hello_cmd.setName("cargo xtask user-hello");
+    const rust_hello_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", "hello", "--output" });
+    rust_hello_cmd.setName("cargo xtask user hello");
     const rust_hello = rust_hello_cmd.addOutputFileArg("hello.elf");
     rust_hello_cmd.has_side_effects = true;
+
+    // ---- clear.elf — Rust /bin/clear ----
+    // The first Rust program that renders through the shared console look rather
+    // than writing its own bytes: the screen layer emits the escape, the flibc
+    // console sink turns it into the write syscall. Same standalone ET_EXEC and
+    // the same /bin/clear path the shell already resolves, so the escape bytes on
+    // the wire do not move.
+    const rust_clear_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", "clear", "--output" });
+    rust_clear_cmd.setName("cargo xtask user clear");
+    const clear_elf = rust_clear_cmd.addOutputFileArg("clear.elf");
+    rust_clear_cmd.has_side_effects = true;
 
     // ---- stackbomb.elf — payload for [TEST] stack-overflow ----
     // Same recipe as hello.elf, swapping the source for a payload that
@@ -1887,36 +1898,6 @@ pub fn build(b: *std.Build) void {
     edit.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     edit.entry = .disabled;
 
-    // ---- clear.elf — terminal-clear coreutil ----
-    // Smallest console_ui consumer: emits the shared screen-clear sequence
-    // (console_ui.screen.clear) and exits, so the escape bytes stay
-    // single-sourced. Imports flibc + console_ui only, like less. Same recipe
-    // (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
-    // coreutil_linker.ld). Staged at /bin/clear. Source is Flash
-    // (tools/clear.flash) — flashc transpiles it to Zig at build time via
-    // addFlashSource; the cross-import proves a Flash program can consume the
-    // existing Zig flibc + console_ui modules.
-    const clear_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/clear.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    clear_mod.addImport("flibc", flibc_mod);
-    clear_mod.addImport("flibc_start", flibc_start_mod);
-    clear_mod.addImport("flibc_mem", flibc_mem_mod);
-    clear_mod.addImport("console_ui", console_ui_mod);
-    const clear = b.addExecutable(.{
-        .name = "clear.elf",
-        .root_module = clear_mod,
-    });
-    clear.pie = false;
-    clear.bundle_compiler_rt = false;
-    clear.link_z_max_page_size = 0x80;
-    clear.link_z_common_page_size = 0x80;
-    clear.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    clear.entry = .disabled;
-
     // ---- login.elf — credential gate + session supervisor ----
     // PID-1 execs /bin/login instead of /bin/fsh: it prompts for a username
     // (echoed) + password (echo suppressed via SYS_SET_CONSOLE_MODE), has the
@@ -2083,7 +2064,7 @@ pub fn build(b: *std.Build) void {
     _ = cpio_stage.addCopyFile(flibc_demo.getEmittedBin(), "test/flibc_demo.elf");
     _ = cpio_stage.addCopyFile(argv_echo.getEmittedBin(), "test/argv_echo.elf");
     _ = cpio_stage.addCopyFile(cat.getEmittedBin(), "bin/cat");
-    _ = cpio_stage.addCopyFile(clear.getEmittedBin(), "bin/clear");
+    _ = cpio_stage.addCopyFile(clear_elf, "bin/clear");
     _ = cpio_stage.addCopyFile(cp.getEmittedBin(), "bin/cp");
     _ = cpio_stage.addCopyFile(cpuinfo.getEmittedBin(), "bin/cpuinfo");
     _ = cpio_stage.addCopyFile(dmesg.getEmittedBin(), "bin/dmesg");

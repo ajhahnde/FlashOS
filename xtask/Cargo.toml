@@ -12,3 +12,4 @@ publish = false
 # crate itself, so the numbers it checks cannot be a stale copy.
 [dependencies]
 flashos-abi = { path = "../crates/abi" }
+flashos-console-ui = { path = "../crates/console-ui" }
