@@ -4,7 +4,9 @@
 use flashos_abi::syscall::Dirent;
 #[cfg(any(target_os = "none", test))]
 use flashos_abi::syscall::{
-    SYS_CHDIR, SYS_EXECVE, SYS_EXIT, SYS_FORK, SYS_READ, SYS_READDIR, SYS_SBRK, SYS_WAIT, SYS_WRITE,
+    SYS_CHDIR, SYS_CLOSE, SYS_CPU_FREQ, SYS_CPU_TEMP, SYS_CREATE, SYS_DUMP_FREE, SYS_EXECVE,
+    SYS_EXIT, SYS_FORK, SYS_KLOG_READ, SYS_MEMTOTAL, SYS_OPEN_FILE, SYS_READ, SYS_READDIR,
+    SYS_RENAME, SYS_SBRK, SYS_UNLINK, SYS_UPTIME, SYS_WAIT, SYS_WRITE,
 };
 
 pub const STDIN: i32 = 0;
@@ -176,6 +178,114 @@ pub unsafe fn readdir(path: *const u8, index: u64, out: *mut Dirent) -> i32 {
     unsafe { raw(SYS_READDIR, [path as u64, index, out as u64, 0, 0, 0]) as i32 }
 }
 
+// ---- the file surface -------------------------------------------------------
+//
+// Slot 7 is the lone survivor of the legacy file ABI: there is no unified open,
+// so a path becomes a file fd here and is then read, written, and closed through
+// the same unified slots a console or a pipe fd uses.
+
+/// Resolve `path` through the VFS and install a file descriptor for it. Relative
+/// paths join against the task's working directory. Returns the new fd, or a
+/// negative errno-shaped value: `-EACCES` when the file exists but the caller may
+/// not have it, `-1` on every other failure.
+///
+/// # Safety
+///
+/// `path` must point at a NUL-terminated string readable by the kernel.
+#[cfg(target_os = "none")]
+pub unsafe fn open(path: *const u8) -> i32 {
+    unsafe { raw(SYS_OPEN_FILE, [path as u64, 0, 0, 0, 0, 0]) as i32 }
+}
+
+/// Create an empty file at `path` and return a writable fd for it. Fails closed on
+/// a name collision -- there is no clobber -- and on a name that does not fit 8.3,
+/// a full or read-only volume, or an exhausted fd table.
+///
+/// # Safety
+///
+/// `path` must point at a NUL-terminated string readable by the kernel.
+#[cfg(target_os = "none")]
+pub unsafe fn create(path: *const u8) -> i32 {
+    unsafe { raw(SYS_CREATE, [path as u64, 0, 0, 0, 0, 0]) as i32 }
+}
+
+/// Remove the file at `path`. Returns `0` on success, `-1` on a missing file, a
+/// directory, or a read-only volume.
+///
+/// # Safety
+///
+/// `path` must point at a NUL-terminated string readable by the kernel.
+#[cfg(target_os = "none")]
+pub unsafe fn unlink(path: *const u8) -> i32 {
+    unsafe { raw(SYS_UNLINK, [path as u64, 0, 0, 0, 0, 0]) as i32 }
+}
+
+/// Rename `old` to `new` within one directory -- an in-place name rewrite with no
+/// data move. A cross-directory move is refused (`-1`); that is the caller's
+/// copy-then-unlink job.
+///
+/// # Safety
+///
+/// Both pointers must reference NUL-terminated strings readable by the kernel.
+#[cfg(target_os = "none")]
+pub unsafe fn rename(old: *const u8, new: *const u8) -> i32 {
+    unsafe { raw(SYS_RENAME, [old as u64, new as u64, 0, 0, 0, 0]) as i32 }
+}
+
+/// Release `fd` from the calling task's table, flushing a file backend on the way
+/// out. Returns `0`, or `-1` on a bad descriptor.
+#[cfg(target_os = "none")]
+pub fn close(fd: i32) -> i32 {
+    unsafe { raw(SYS_CLOSE, [fd as u64, 0, 0, 0, 0, 0]) as i32 }
+}
+
+// ---- the reporting surface --------------------------------------------------
+
+/// Pages currently free in the kernel's allocatable pool.
+#[cfg(target_os = "none")]
+pub fn dump_free() -> u64 {
+    unsafe { raw(SYS_DUMP_FREE, [0; 6]) as u64 }
+}
+
+/// The frozen size of that pool, in pages.
+#[cfg(target_os = "none")]
+pub fn mem_total() -> u64 {
+    unsafe { raw(SYS_MEMTOTAL, [0; 6]) as u64 }
+}
+
+/// Seconds since boot, off the architectural counter -- the same reading on
+/// hardware and under QEMU.
+#[cfg(target_os = "none")]
+pub fn uptime() -> u64 {
+    unsafe { raw(SYS_UPTIME, [0; 6]) as u64 }
+}
+
+/// SoC temperature in milli-degrees Celsius, or `0` when the board exposes no
+/// firmware to ask. A caller renders the zero as unknown; it never fabricates one.
+#[cfg(target_os = "none")]
+pub fn cpu_temp() -> u64 {
+    unsafe { raw(SYS_CPU_TEMP, [0; 6]) as u64 }
+}
+
+/// ARM core clock in Hz, `0` when unknown -- see [`cpu_temp`].
+#[cfg(target_os = "none")]
+pub fn cpu_freq() -> u64 {
+    unsafe { raw(SYS_CPU_FREQ, [0; 6]) as u64 }
+}
+
+/// Snapshot the retained kernel log into `buf`, oldest byte first, and return the
+/// byte count. Consume-free: the ring is left intact, so a second read re-sees the
+/// same log plus whatever the kernel has since appended.
+#[cfg(target_os = "none")]
+pub fn klog_read(buf: &mut [u8]) -> i64 {
+    unsafe {
+        raw(
+            SYS_KLOG_READ,
+            [buf.as_mut_ptr() as u64, buf.len() as u64, 0, 0, 0, 0],
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +339,46 @@ mod tests {
         let regs = place(SYS_READDIR, [0x4000, 3, 0x5000, 0, 0, 0]);
         assert_eq!(regs.x8, 37);
         assert_eq!(regs.x[..3], [0x4000, 3, 0x5000]);
+    }
+
+    #[test]
+    fn the_path_taking_file_calls_place_their_path_in_x0() {
+        assert_eq!(place(SYS_OPEN_FILE, [0x1000, 0, 0, 0, 0, 0]).x8, 7);
+        assert_eq!(place(SYS_CREATE, [0x1000, 0, 0, 0, 0, 0]).x8, 53);
+        assert_eq!(place(SYS_UNLINK, [0x1000, 0, 0, 0, 0, 0]).x8, 54);
+        assert_eq!(place(SYS_CLOSE, [4, 0, 0, 0, 0, 0]).x8, 34);
+        assert_eq!(place(SYS_OPEN_FILE, [0x1000, 0, 0, 0, 0, 0]).x[0], 0x1000);
+    }
+
+    #[test]
+    fn rename_places_the_source_before_the_target() {
+        // Swapping these silently renames in the wrong direction -- the kernel
+        // cannot tell the two path pointers apart.
+        let regs = place(SYS_RENAME, [0x1000, 0x2000, 0, 0, 0, 0]);
+        assert_eq!(regs.x8, 55);
+        assert_eq!(regs.x[..2], [0x1000, 0x2000]);
+    }
+
+    #[test]
+    fn the_argument_free_monitors_pass_nothing() {
+        for (nr, slot) in [
+            (SYS_DUMP_FREE, 4),
+            (SYS_MEMTOTAL, 49),
+            (SYS_UPTIME, 50),
+            (SYS_CPU_TEMP, 51),
+            (SYS_CPU_FREQ, 52),
+        ] {
+            let regs = place(nr, [0; 6]);
+            assert_eq!(regs.x8, slot);
+            assert_eq!(regs.x, [0; 6]);
+        }
+    }
+
+    #[test]
+    fn klog_read_places_the_buffer_and_its_length_in_x0_and_x1() {
+        let regs = place(SYS_KLOG_READ, [0x6000, 16 * 1024, 0, 0, 0, 0]);
+        assert_eq!(regs.x8, 38);
+        assert_eq!(regs.x[..2], [0x6000, 16 * 1024]);
     }
 
     #[test]

@@ -5,11 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# A library for now: the matcher ports ahead of the tool that drives it, so there
-# is no `_start` to link yet. It becomes a staticlib payload when the tool body
-# lands and joins the EL0 payload table in xtask.
+# staticlib only. Adding `rlib` alongside it makes the archive carry core's
+# formatting objects into the payload link (321 core::fmt symbols, ~170 KiB of text),
+# which the artefact gate rejects. The matcher's host tests do not need it: cargo
+# compiles its own test target from the same source.
 [lib]
 name = "flashos_grep"
+crate-type = ["staticlib"]
 
 [dependencies]
+flashos-abi = { path = "../../crates/abi" }
 flashos-flibc = { path = "../../crates/flibc" }
+flashos-user-rt = { path = "../../crates/user-rt" }

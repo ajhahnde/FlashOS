@@ -70,6 +70,15 @@ The project was founded on April 28th, 2026.
   the Rust pipeline and embedded through the existing build; its Flash source
   is retired. Program headers, entry point, and emitted bytes match the
   reference tool.
+- **The coreutils and the harness payloads are now Rust ELFs.** `/bin/echo`,
+  `cat`, `ls`, `rm`, `cp`, `mv`, `grep`, `meminfo`, `dmesg`, `uptime`,
+  `cpuinfo`, and `forkbomb`, plus the three payloads the in-kernel scenarios
+  exec (`argv_echo`, `flibc_demo`, `stackbomb`), are built by the Rust pipeline
+  and staged under the same paths. Their Flash sources are retired. Command
+  behaviour, diagnostics, exit status, and the boot contract are unchanged. The
+  userspace library gained the file, hardware-monitor, and kernel-log syscall
+  wrappers these tools need, plus a buffered writer that drains to a descriptor
+  rather than truncating.
 
 ### Changed
 

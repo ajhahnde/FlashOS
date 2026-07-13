@@ -1,0 +1,14 @@
+[package]
+name = "flashos-rm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashos_rm"
+crate-type = ["staticlib"]
+
+[dependencies]
+flashos-flibc = { path = "../../crates/flibc" }
+flashos-user-rt = { path = "../../crates/user-rt" }

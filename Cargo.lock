@@ -7,8 +7,25 @@ name = "flashos-abi"
 version = "0.8.0"
 
 [[package]]
+name = "flashos-argv-echo"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
 name = "flashos-canary"
 version = "0.8.0"
+
+[[package]]
+name = "flashos-cat"
+version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+ "flashos-flibc",
+ "flashos-user-rt",
+]
 
 [[package]]
 name = "flashos-clear"
@@ -24,10 +41,60 @@ name = "flashos-console-ui"
 version = "0.8.0"
 
 [[package]]
+name = "flashos-cp"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-cpuinfo"
+version = "0.8.0"
+dependencies = [
+ "flashos-console-ui",
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-dmesg"
+version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-echo"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
 name = "flashos-flibc"
 version = "0.8.0"
 dependencies = [
  "flashos-abi",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-flibc-demo"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-forkbomb"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
  "flashos-user-rt",
 ]
 
@@ -42,7 +109,9 @@ dependencies = [
 name = "flashos-grep"
 version = "0.8.0"
 dependencies = [
+ "flashos-abi",
  "flashos-flibc",
+ "flashos-user-rt",
 ]
 
 [[package]]
@@ -55,6 +124,56 @@ dependencies = [
 [[package]]
 name = "flashos-kernel"
 version = "0.8.0"
+
+[[package]]
+name = "flashos-ls"
+version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-meminfo"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-mv"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-rm"
+version = "0.8.0"
+dependencies = [
+ "flashos-flibc",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-stackbomb"
+version = "0.8.0"
+dependencies = [
+ "flashos-abi",
+ "flashos-user-rt",
+]
+
+[[package]]
+name = "flashos-uptime"
+version = "0.8.0"
+dependencies = [
+ "flashos-console-ui",
+ "flashos-flibc",
+ "flashos-user-rt",
+]
 
 [[package]]
 name = "flashos-user-rt"

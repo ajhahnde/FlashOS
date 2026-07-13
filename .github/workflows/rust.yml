@@ -54,10 +54,15 @@ jobs:
       - name: rust host tests
         run: cargo test --workspace --exclude flashos-canary
 
+      # Every shipped payload, not a sample: the artefact checks behind each link
+      # (no undefined symbols, no core::fmt, no FP/SIMD, one mem* provider each) are
+      # what keep a payload from failing on hardware instead of here.
       - name: EL0 payload link + artefact checks
         run: |
-          cargo xtask user hello
-          cargo xtask user clear
+          for payload in hello clear echo cat ls rm cp mv grep meminfo dmesg \
+                         uptime cpuinfo forkbomb argv_echo flibc_demo stackbomb; do
+            cargo xtask user "$payload"
+          done
 
       # The .S files hardcode three layout facts (exception-frame size, syscall
       # dispatch cap, core_context offset). Prove they still match the records.

@@ -1271,33 +1271,13 @@ pub fn build(b: *std.Build) void {
     rust_clear_cmd.has_side_effects = true;
 
     // ---- stackbomb.elf — payload for [TEST] stack-overflow ----
-    // Same recipe as hello.elf, swapping the source for a payload that
-    // recurses without termination. The kernel's do_data_abort detects
-    // the guard-zone fault, prints a kernel-side diagnostic and zombies
-    // the task; the parent's sys_wait reaps it so the per-process page
-    // balance returns to baseline (which is what the harness verifies).
-    // Source is Flash (tools/stackbomb.flash) — flashc transpiles it to
-    // Zig at build time via addFlashSource.
-    const stackbomb_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/stackbomb.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    stackbomb_mod.addImport("user_layout", user_layout_mod);
-    const stackbomb = b.addExecutable(.{
-        .name = "stackbomb.elf",
-        .root_module = stackbomb_mod,
-    });
-    stackbomb.pie = false;
-    stackbomb.bundle_compiler_rt = false;
-    stackbomb.link_z_max_page_size = 0x80;
-    stackbomb.link_z_common_page_size = 0x80;
-    // The hello linker script is a generic single-PT_LOAD layout —
-    // reuse it verbatim. If the two payloads ever need different
-    // section discards or VA bases, fork into tools/stackbomb_linker.ld.
-    stackbomb.setLinkerScript(b.path("tools/hello_linker.ld"));
-    stackbomb.entry = .disabled;
+    // A Rust payload now: the recursion that walks the stack into its guard page,
+    // so the kernel's data-abort handler has something to catch. Same standalone
+    // ET_EXEC and the same generic single-PT_LOAD script hello uses.
+    const rust_stackbomb_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", "stackbomb", "--output" });
+    rust_stackbomb_cmd.setName("cargo xtask user stackbomb");
+    const stackbomb_elf = rust_stackbomb_cmd.addOutputFileArg("stackbomb.elf");
+    rust_stackbomb_cmd.has_side_effects = true;
 
     // ---- flibc — userland mini-libc, ELF-demo dependency ----
     // Userland mini-libc: SVC wrappers, printf/puts on sys_writeConsole,
@@ -1338,45 +1318,24 @@ pub fn build(b: *std.Build) void {
     });
     flibc_mod.addImport("syscall_defs", syscall_defs_mod);
 
-    // ---- flibc_demo.elf — payload for [TEST] flibc ----
-    // Same recipe as hello.elf / stackbomb.elf, swapping the source for
-    // a flibc-driven body: printf("flibc hello %d\n", 42), malloc 32 B,
-    // pattern write+verify, exit. The forked linker script
-    // (tools/flibc_demo_linker.ld) folds .rodata / .data / .bss into the
-    // single R+X PT_LOAD so flibc's state-free heap design carries
-    // through to a one-segment ELF that once fit inside the retired
-    // loader's PAGE_SIZE snapshot cap. Source is Flash
-    // (tools/flibc_demo.flash) — flashc transpiles it to Zig at build time
-    // via addFlashSource.
-    const flibc_demo_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/flibc_demo.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    flibc_demo_mod.addImport("flibc", flibc_mod);
-    const flibc_demo = b.addExecutable(.{
-        .name = "flibc_demo.elf",
-        .root_module = flibc_demo_mod,
-    });
-    flibc_demo.pie = false;
-    flibc_demo.bundle_compiler_rt = false;
-    flibc_demo.link_z_max_page_size = 0x80;
-    flibc_demo.link_z_common_page_size = 0x80;
-    flibc_demo.setLinkerScript(b.path("tools/flibc_demo_linker.ld"));
-    flibc_demo.entry = .disabled;
+    // ---- flibc_demo.elf / argv_echo.elf — harness payloads ----
+    // Both are Rust now. flibc_demo drives the userland library end to end
+    // (formatted output, a bump allocation, exit) behind its own folded
+    // single-segment script; argv_echo proves argv delivery and, through its
+    // over-a-page padding, the loader's segment streaming.
+    const rust_flibc_demo_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", "flibc_demo", "--output" });
+    rust_flibc_demo_cmd.setName("cargo xtask user flibc_demo");
+    const flibc_demo_elf = rust_flibc_demo_cmd.addOutputFileArg("flibc_demo.elf");
+    rust_flibc_demo_cmd.has_side_effects = true;
 
-    // ---- argv_echo.elf — payload for [TEST] execve ----
-    // Same recipe as flibc_demo.elf, but its entry is the flibc _start
-    // argc/argv shim (user_space/lib/flibc/start.flash) rather than a bespoke
-    // _start, and it carries a 4 KiB .rodata PAD so the linked ELF crosses
-    // one page — proving sys_execve's PT_LOAD streaming path loads payloads
-    // the long-retired PAGE_SIZE snapshot cap could not. The shim lives
-    // in its own module (not flibc/process.zig) because flibc.zig re-exports
-    // process into every flibc program, and Zig 0.16 rejects two _start
-    // exports in one compilation; argv_echo opts in via addImport below plus
-    // the `link "flibc_start"` in argv_echo.flash. Source is Flash —
-    // flashc transpiles it to Zig at build time via addFlashSource.
+    const rust_argv_echo_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", "argv_echo", "--output" });
+    rust_argv_echo_cmd.setName("cargo xtask user argv_echo");
+    const argv_echo_elf = rust_argv_echo_cmd.addOutputFileArg("argv_echo.elf");
+    rust_argv_echo_cmd.has_side_effects = true;
+
+    // The flibc _start argc/argv shim and the freestanding mem* providers. Both
+    // still serve the Flash payloads that have not ported yet (fsh, less, edit,
+    // login, passwd, sysinfo, PID 1).
     const flibc_start_mod = b.createModule(.{
         .root_source_file = addFlashSource(b, "user_space/lib/flibc/start.flash"),
         .target = target,
@@ -1392,25 +1351,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
     });
-    const argv_echo_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/argv_echo.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    argv_echo_mod.addImport("flibc", flibc_mod);
-    argv_echo_mod.addImport("flibc_start", flibc_start_mod);
-    const argv_echo = b.addExecutable(.{
-        .name = "argv_echo.elf",
-        .root_module = argv_echo_mod,
-    });
-    argv_echo.pie = false;
-    argv_echo.bundle_compiler_rt = false;
-    argv_echo.link_z_max_page_size = 0x80;
-    argv_echo.link_z_common_page_size = 0x80;
-    argv_echo.setLinkerScript(b.path("tools/argv_echo_linker.ld"));
-    argv_echo.entry = .disabled;
-
     // ---- fsh.elf — the FlashOS shell (/bin/fsh) ----
     // Same recipe as argv_echo.elf (flibc _start argc/argv shim entry,
     // pie=false, ReleaseSmall, strip, own single R+X PT_LOAD linker
@@ -1459,273 +1399,20 @@ pub fn build(b: *std.Build) void {
     fsh.setLinkerScript(b.path("tools/fsh_linker.ld"));
     fsh.entry = .disabled;
 
-    // ---- echo.elf / cat.elf — minimal coreutils ----
-    // Same recipe as fsh.elf (flibc _start shim,
-    // flibc_mem, pie=false, ReleaseSmall, strip) over a shared
-    // single-PT_LOAD linker script. Staged at /bin/echo and /bin/cat;
-    // exercised interactively via fsh (the `echo hi | cat` acceptance).
-    // The coreutil set also carries ls / meminfo / forkbomb. echo / cat /
-    // ls source from Flash (tools/{echo,cat,ls}.flash) — flashc transpiles
-    // them to Zig at build time via addFlashSource.
-    const echo_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/echo.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    echo_mod.addImport("flibc", flibc_mod);
-    echo_mod.addImport("flibc_start", flibc_start_mod);
-    echo_mod.addImport("flibc_mem", flibc_mem_mod);
-    // echo is the first userland to route its output through the std io seam
-    // (core.io.Writer over a syscall-backed Sink) instead of a direct write_fd.
-    echo_mod.addImport("core", core_mod);
-    const echo = b.addExecutable(.{
-        .name = "echo.elf",
-        .root_module = echo_mod,
-    });
-    echo.pie = false;
-    echo.bundle_compiler_rt = false;
-    echo.link_z_max_page_size = 0x80;
-    echo.link_z_common_page_size = 0x80;
-    echo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    echo.entry = .disabled;
-
-    const cat_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/cat.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    cat_mod.addImport("flibc", flibc_mod);
-    cat_mod.addImport("flibc_start", flibc_start_mod);
-    cat_mod.addImport("flibc_mem", flibc_mem_mod);
-    // EACCES-aware diagnostic: cat names the permission denial.
-    cat_mod.addImport("syscall_defs", syscall_defs_mod);
-    const cat = b.addExecutable(.{
-        .name = "cat.elf",
-        .root_module = cat_mod,
-    });
-    cat.pie = false;
-    cat.bundle_compiler_rt = false;
-    cat.link_z_max_page_size = 0x80;
-    cat.link_z_common_page_size = 0x80;
-    cat.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    cat.entry = .disabled;
-
-    // ---- grep.elf — line-pattern search coreutil ----
-    // grep [-i] PATTERN [FILE...]: streams each input (a FILE, or fd 0 with
-    // none) line by line and writes the lines containing PATTERN to fd 1. The
-    // matcher is the pure tools/grep_match.flash (host-tested below); this ELF
-    // is only the driver (flag/argv parsing, open/read, line assembly). Same
-    // recipe as cat (flibc _start shim, flibc_mem, pie=false, ReleaseSmall,
-    // strip, shared coreutil_linker.ld). Staged at /bin/grep; kept out of the
-    // CI FSH_SCRIPT so the free-page baseline stays deterministic.
-    const grep_match_gen = addFlashSource(b, "tools/grep_match.flash");
-    const grep_match_mod = b.createModule(.{
-        .root_source_file = grep_match_gen,
-        .target = target,
-        .optimize = .ReleaseSmall,
-    });
-    const grep_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/grep.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    grep_mod.addImport("flibc", flibc_mod);
-    grep_mod.addImport("flibc_start", flibc_start_mod);
-    grep_mod.addImport("flibc_mem", flibc_mem_mod);
-    // EACCES-aware diagnostic: grep names the permission denial, like cat.
-    grep_mod.addImport("syscall_defs", syscall_defs_mod);
-    // Pure, host-tested substring matcher.
-    grep_mod.addImport("grep_match", grep_match_mod);
-    const grep = b.addExecutable(.{
-        .name = "grep.elf",
-        .root_module = grep_mod,
-    });
-    grep.pie = false;
-    grep.bundle_compiler_rt = false;
-    grep.link_z_max_page_size = 0x80;
-    grep.link_z_common_page_size = 0x80;
-    grep.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    grep.entry = .disabled;
-
-    // ---- cp.elf / mv.elf / rm.elf — file-management coreutils ----
-    // The consumers of the FAT32 write ABI: cp creates + copies (SYS_CREATE),
-    // rm removes (SYS_UNLINK), mv renames same-dir (SYS_RENAME) with a
-    // cp+unlink fallback for cross-dir. Same recipe as cat (flibc _start shim,
-    // flibc_mem, pie=false, ReleaseSmall, strip, shared coreutil_linker.ld).
-    // Staged at /bin/{cp,mv,rm}; kept out of the CI FSH_SCRIPT (they mutate the
-    // FAT32 card, which only exists on real hardware) so the free-page baseline
-    // stays deterministic.
-    const cp_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/cp.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    cp_mod.addImport("flibc", flibc_mod);
-    cp_mod.addImport("flibc_start", flibc_start_mod);
-    cp_mod.addImport("flibc_mem", flibc_mem_mod);
-    const cp = b.addExecutable(.{
-        .name = "cp.elf",
-        .root_module = cp_mod,
-    });
-    cp.pie = false;
-    cp.bundle_compiler_rt = false;
-    cp.link_z_max_page_size = 0x80;
-    cp.link_z_common_page_size = 0x80;
-    cp.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    cp.entry = .disabled;
-
-    const mv_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/mv.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    mv_mod.addImport("flibc", flibc_mod);
-    mv_mod.addImport("flibc_start", flibc_start_mod);
-    mv_mod.addImport("flibc_mem", flibc_mem_mod);
-    const mv = b.addExecutable(.{
-        .name = "mv.elf",
-        .root_module = mv_mod,
-    });
-    mv.pie = false;
-    mv.bundle_compiler_rt = false;
-    mv.link_z_max_page_size = 0x80;
-    mv.link_z_common_page_size = 0x80;
-    mv.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    mv.entry = .disabled;
-
-    const rm_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/rm.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    rm_mod.addImport("flibc", flibc_mod);
-    rm_mod.addImport("flibc_start", flibc_start_mod);
-    rm_mod.addImport("flibc_mem", flibc_mem_mod);
-    const rm = b.addExecutable(.{
-        .name = "rm.elf",
-        .root_module = rm_mod,
-    });
-    rm.pie = false;
-    rm.bundle_compiler_rt = false;
-    rm.link_z_max_page_size = 0x80;
-    rm.link_z_common_page_size = 0x80;
-    rm.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    rm.entry = .disabled;
-
-    // ---- ls.elf — directory-listing coreutil ----
-    // The first consumer of sys_readdir (slot 37): loops readdir(path, i)
-    // 0.. and writes each basename (a trailing '/' for DT_DIR) to fd 1.
-    // Same recipe as echo / cat (flibc _start shim, flibc_mem, pie=false,
-    // ReleaseSmall, strip, shared coreutil_linker.ld). Staged at /bin/ls;
-    // exercised by `ls /bin` in FSH_SCRIPT + [TEST] readdir in the stage-
-    // closing commit.
-    const ls_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/ls.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    ls_mod.addImport("flibc", flibc_mod);
-    ls_mod.addImport("flibc_start", flibc_start_mod);
-    ls_mod.addImport("flibc_mem", flibc_mem_mod);
-    const ls = b.addExecutable(.{
-        .name = "ls.elf",
-        .root_module = ls_mod,
-    });
-    ls.pie = false;
-    ls.bundle_compiler_rt = false;
-    ls.link_z_max_page_size = 0x80;
-    ls.link_z_common_page_size = 0x80;
-    ls.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    ls.entry = .disabled;
-
-    // ---- dmesg.elf — kernel-log dumper coreutil ----
-    // The consumer of sys_klog_read (slot 38): one snapshot of the kernel
-    // log ring (src/klog_ring.zig) written to fd 1, so the boot log is
-    // readable over the USB-C console without the Mini-UART adapter. Same
-    // recipe as ls / cat / echo (flibc _start shim, flibc_mem, pie=false,
-    // ReleaseSmall, strip, shared coreutil_linker.ld). Staged at /bin/dmesg;
-    // Pi-interactive surface — the CI harness asserts the ring + syscall
-    // directly via [TEST] klog, the way meminfo / forkbomb stay out of the
-    // FSH_SCRIPT. Source is Flash (tools/dmesg.flash) — flashc transpiles it
-    // to Zig at build time via addFlashSource.
-    const dmesg_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/dmesg.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    dmesg_mod.addImport("flibc", flibc_mod);
-    dmesg_mod.addImport("flibc_start", flibc_start_mod);
-    dmesg_mod.addImport("flibc_mem", flibc_mem_mod);
-    const dmesg = b.addExecutable(.{
-        .name = "dmesg.elf",
-        .root_module = dmesg_mod,
-    });
-    dmesg.pie = false;
-    dmesg.bundle_compiler_rt = false;
-    dmesg.link_z_max_page_size = 0x80;
-    dmesg.link_z_common_page_size = 0x80;
-    dmesg.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    dmesg.entry = .disabled;
-
-    // ---- meminfo.elf / forkbomb.elf — demo coreutils ----
-    // meminfo is the standalone /bin form of fsh's `free` built-in (one
-    // sys_dump_free line); forkbomb is a capped (N=16) fork/reap leak
-    // detector that never approaches OOM. Both print via the legacy slot-0
-    // console write and are Pi-interactive only — kept out of the CI
-    // FSH_SCRIPT (meminfo's live value breaks the baseline count; forkbomb
-    // must not approach exhaustion while OOM still panics today). Same
-    // recipe as echo / cat / ls. meminfo's source is Flash
-    // (tools/meminfo.flash) — flashc transpiles it to Zig at build time via
-    // addFlashSource.
-    const meminfo_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/meminfo.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    meminfo_mod.addImport("flibc", flibc_mod);
-    meminfo_mod.addImport("flibc_start", flibc_start_mod);
-    meminfo_mod.addImport("flibc_mem", flibc_mem_mod);
-    const meminfo = b.addExecutable(.{
-        .name = "meminfo.elf",
-        .root_module = meminfo_mod,
-    });
-    meminfo.pie = false;
-    meminfo.bundle_compiler_rt = false;
-    meminfo.link_z_max_page_size = 0x80;
-    meminfo.link_z_common_page_size = 0x80;
-    meminfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    meminfo.entry = .disabled;
-
-    // forkbomb's source is Flash (tools/forkbomb.flash) — flashc
-    // transpiles it to Zig at build time via addFlashSource.
-    const forkbomb_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/forkbomb.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    forkbomb_mod.addImport("flibc", flibc_mod);
-    forkbomb_mod.addImport("flibc_start", flibc_start_mod);
-    forkbomb_mod.addImport("flibc_mem", flibc_mem_mod);
-    const forkbomb = b.addExecutable(.{
-        .name = "forkbomb.elf",
-        .root_module = forkbomb_mod,
-    });
-    forkbomb.pie = false;
-    forkbomb.bundle_compiler_rt = false;
-    forkbomb.link_z_max_page_size = 0x80;
-    forkbomb.link_z_common_page_size = 0x80;
-    forkbomb.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    forkbomb.entry = .disabled;
+    // ---- the Rust coreutils ----
+    // echo, cat, grep, cp, mv, rm, ls, dmesg, meminfo and forkbomb are Rust
+    // payloads, each linked against the retained single-PT_LOAD coreutil script and
+    // staged under the same /bin path the shell already resolves. grep's matcher is
+    // host-tested inside its own crate; the rest are driver-only.
+    const rust_coreutils = [_][]const u8{ "echo", "cat", "grep", "cp", "mv", "rm", "ls", "dmesg", "meminfo", "forkbomb", "cpuinfo", "uptime" };
+    var coreutil_elfs = std.StringHashMap(std.Build.LazyPath).init(b.allocator);
+    for (rust_coreutils) |name| {
+        const cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", name, "--output" });
+        cmd.setName(b.fmt("cargo xtask user {s}", .{name}));
+        const elf = cmd.addOutputFileArg(b.fmt("{s}.elf", .{name}));
+        cmd.has_side_effects = true;
+        coreutil_elfs.put(name, elf) catch @panic("OOM");
+    }
 
     // ---- sysinfo.elf — one-shot system summary coreutil ----
     // First consumer of the console_ui screen-layer kv() renderer (the
@@ -1761,67 +1448,16 @@ pub fn build(b: *std.Build) void {
     sysinfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
     sysinfo.entry = .disabled;
 
-    // ---- cpuinfo.elf — one-shot CPU monitor coreutil ----
-    // Prints the SoC temperature and ARM clock (sys_cpu_temp / sys_cpu_freq
-    // over the VideoCore mailbox) as aligned kv rows, then exits — the
-    // focused sibling of sysinfo's broader summary. Imports flibc + console_ui
-    // only (no pwfile / build_options). Same recipe as ls / sysinfo (flibc
-    // _start shim, flibc_mem, pie=false, ReleaseSmall, strip, shared
-    // coreutil_linker.ld). Staged at /bin/cpuinfo; kept out of the CI
-    // FSH_SCRIPT like sysinfo (live readings would break the baseline count).
-    // Source is Flash (tools/cpuinfo.flash) — flashc transpiles it to Zig at
-    // build time via addFlashSource.
-    const cpuinfo_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/cpuinfo.flash"),
+    // ---- grep_match — the pure Flash substring matcher ----
+    // /bin/grep is Rust and carries its own matcher, but the Flash editor still
+    // imports this one for its ctrl-W search, so the module (and its host test)
+    // stays until the editor ports.
+    const grep_match_gen = addFlashSource(b, "tools/grep_match.flash");
+    const grep_match_mod = b.createModule(.{
+        .root_source_file = grep_match_gen,
         .target = target,
         .optimize = .ReleaseSmall,
-        .strip = true,
     });
-    cpuinfo_mod.addImport("flibc", flibc_mod);
-    cpuinfo_mod.addImport("flibc_start", flibc_start_mod);
-    cpuinfo_mod.addImport("flibc_mem", flibc_mem_mod);
-    cpuinfo_mod.addImport("console_ui", console_ui_mod);
-    const cpuinfo = b.addExecutable(.{
-        .name = "cpuinfo.elf",
-        .root_module = cpuinfo_mod,
-    });
-    cpuinfo.pie = false;
-    cpuinfo.bundle_compiler_rt = false;
-    cpuinfo.link_z_max_page_size = 0x80;
-    cpuinfo.link_z_common_page_size = 0x80;
-    cpuinfo.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    cpuinfo.entry = .disabled;
-
-    // ---- uptime.elf — one-shot uptime monitor coreutil ----
-    // Prints the humanised seconds-since-boot (sys_uptime, the architectural
-    // counter) as one kv row, then exits — the focused sibling of sysinfo's
-    // uptime row, the way cpuinfo focuses temperature + clock. Imports flibc +
-    // console_ui only (no pwfile / build_options). Same recipe as cpuinfo /
-    // sysinfo (flibc _start shim, flibc_mem, pie=false, ReleaseSmall, strip,
-    // shared coreutil_linker.ld). Staged at /bin/uptime; kept out of the CI
-    // FSH_SCRIPT like sysinfo (a live reading would break the baseline count).
-    // Source is Flash (tools/uptime.flash) — flashc transpiles it to Zig at
-    // build time via addFlashSource.
-    const uptime_mod = b.createModule(.{
-        .root_source_file = addFlashSource(b, "tools/uptime.flash"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    uptime_mod.addImport("flibc", flibc_mod);
-    uptime_mod.addImport("flibc_start", flibc_start_mod);
-    uptime_mod.addImport("flibc_mem", flibc_mem_mod);
-    uptime_mod.addImport("console_ui", console_ui_mod);
-    const uptime = b.addExecutable(.{
-        .name = "uptime.elf",
-        .root_module = uptime_mod,
-    });
-    uptime.pie = false;
-    uptime.bundle_compiler_rt = false;
-    uptime.link_z_max_page_size = 0x80;
-    uptime.link_z_common_page_size = 0x80;
-    uptime.setLinkerScript(b.path("tools/coreutil_linker.ld"));
-    uptime.entry = .disabled;
 
     // ---- less.elf — full-screen text pager ----
     // First interactive consumer of the std TUI run loop: takes over the console
@@ -2060,26 +1696,26 @@ pub fn build(b: *std.Build) void {
     const cpio_stage = b.addNamedWriteFiles("initramfs_stage");
     _ = cpio_stage.addCopyFile(pid1.getEmittedBin(), "sbin/init");
     _ = cpio_stage.addCopyFile(rust_hello, "test/hello.elf");
-    _ = cpio_stage.addCopyFile(stackbomb.getEmittedBin(), "test/stackbomb.elf");
-    _ = cpio_stage.addCopyFile(flibc_demo.getEmittedBin(), "test/flibc_demo.elf");
-    _ = cpio_stage.addCopyFile(argv_echo.getEmittedBin(), "test/argv_echo.elf");
-    _ = cpio_stage.addCopyFile(cat.getEmittedBin(), "bin/cat");
+    _ = cpio_stage.addCopyFile(stackbomb_elf, "test/stackbomb.elf");
+    _ = cpio_stage.addCopyFile(flibc_demo_elf, "test/flibc_demo.elf");
+    _ = cpio_stage.addCopyFile(argv_echo_elf, "test/argv_echo.elf");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("cat").?, "bin/cat");
     _ = cpio_stage.addCopyFile(clear_elf, "bin/clear");
-    _ = cpio_stage.addCopyFile(cp.getEmittedBin(), "bin/cp");
-    _ = cpio_stage.addCopyFile(cpuinfo.getEmittedBin(), "bin/cpuinfo");
-    _ = cpio_stage.addCopyFile(dmesg.getEmittedBin(), "bin/dmesg");
-    _ = cpio_stage.addCopyFile(echo.getEmittedBin(), "bin/echo");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("cp").?, "bin/cp");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("cpuinfo").?, "bin/cpuinfo");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("dmesg").?, "bin/dmesg");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("echo").?, "bin/echo");
     _ = cpio_stage.addCopyFile(edit.getEmittedBin(), "bin/edit");
-    _ = cpio_stage.addCopyFile(forkbomb.getEmittedBin(), "bin/forkbomb");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("forkbomb").?, "bin/forkbomb");
     _ = cpio_stage.addCopyFile(fsh.getEmittedBin(), "bin/fsh");
-    _ = cpio_stage.addCopyFile(grep.getEmittedBin(), "bin/grep");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("grep").?, "bin/grep");
     _ = cpio_stage.addCopyFile(less.getEmittedBin(), "bin/less");
-    _ = cpio_stage.addCopyFile(ls.getEmittedBin(), "bin/ls");
-    _ = cpio_stage.addCopyFile(meminfo.getEmittedBin(), "bin/meminfo");
-    _ = cpio_stage.addCopyFile(mv.getEmittedBin(), "bin/mv");
-    _ = cpio_stage.addCopyFile(rm.getEmittedBin(), "bin/rm");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("ls").?, "bin/ls");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("meminfo").?, "bin/meminfo");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("mv").?, "bin/mv");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("rm").?, "bin/rm");
     _ = cpio_stage.addCopyFile(sysinfo.getEmittedBin(), "bin/sysinfo");
-    _ = cpio_stage.addCopyFile(uptime.getEmittedBin(), "bin/uptime");
+    _ = cpio_stage.addCopyFile(coreutil_elfs.get("uptime").?, "bin/uptime");
     _ = cpio_stage.addCopyFile(b.path("user_space/fsh/fshrc"), "etc/fshrc");
     _ = cpio_stage.addCopyFile(login.getEmittedBin(), "bin/login");
     _ = cpio_stage.addCopyFile(passwd_bin.getEmittedBin(), "bin/passwd");
@@ -2568,12 +2204,12 @@ pub fn build(b: *std.Build) void {
     // from a line + scratch buffer; no externs, no stubs, no SVC. Compiles
     // the flashc-generated module (tokenize.flash is the source of truth).
     _ = addHostTest(b, test_step, .{ .src = "user_space/fsh/tokenize.flash", .src_lazy = tokenize_gen });
+    _ = addHostTest(b, test_step, .{ .src = "tools/grep_match.flash", .src_lazy = grep_match_gen });
 
     // grep match core — pure windowed substring matcher with ASCII case-fold.
-    // No externs, no stubs, no SVC; the open/read/line-assembly driver sits in
-    // tools/grep.flash. Compiles the flashc-generated module (the .flash is the
-    // source of truth).
-    _ = addHostTest(b, test_step, .{ .src = "tools/grep_match.flash", .src_lazy = grep_match_gen });
+    // No externs, no stubs, no SVC. /bin/grep carries its own matcher now; this one
+    // survives for the editor's ctrl-W search and keeps its host coverage until the
+    // editor ports.
 
     // flibc keys.zig — VT100 input Decoder host coverage (arrows / ctrl / tab).
     // Pure `Decoder.feed`; the SVC readKey driver sits behind the same

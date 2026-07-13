@@ -164,6 +164,53 @@ pub fn render(parts: &[Part<'_>]) -> Buf {
     buf
 }
 
+/// The output seam: hand it a slice, it consumes the whole slice. Infallible by
+/// contract -- backpressure and write errors are the backing's concern, dealt with
+/// behind the pointer the caller binds ([`console_sink`], [`err_sink`], or a test's
+/// collector).
+pub type Sink = fn(&[u8]);
+
+/// A buffered writer over a [`Sink`]. Bytes accumulate in the caller's buffer and
+/// drain when it fills or on [`flush`](Writer::flush) -- so a long line is written
+/// in several syscalls rather than truncated, which is what separates this from the
+/// fixed-capacity [`Buf`] that [`printf`] renders into. Nothing is allocated: the
+/// buffer belongs to the caller's frame.
+pub struct Writer<'a> {
+    sink: Sink,
+    buf: &'a mut [u8],
+    end: usize,
+}
+
+impl<'a> Writer<'a> {
+    /// Bind a writer that batches into `buf` and drains through `sink`. `buf` must
+    /// be non-empty, or a write could never make progress.
+    pub fn new(sink: Sink, buf: &'a mut [u8]) -> Self {
+        debug_assert!(!buf.is_empty());
+        Self { sink, buf, end: 0 }
+    }
+
+    /// Drain whatever is buffered. A no-op when empty, so it is always safe to call
+    /// at the end of a write.
+    pub fn flush(&mut self) {
+        if self.end > 0 {
+            (self.sink)(&self.buf[..self.end]);
+            self.end = 0;
+        }
+    }
+
+    /// Write every byte, draining to the sink whenever the buffer fills. The bytes
+    /// are not seen by the sink until a flush or the next fill.
+    pub fn write_all(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            if self.end == self.buf.len() {
+                self.flush();
+            }
+            self.buf[self.end] = b;
+            self.end += 1;
+        }
+    }
+}
+
 // ---- the syscall-facing half -----------------------------------------------
 
 /// The OS side of the console seam: hand a finished byte slice to fd 1. This is
@@ -303,6 +350,64 @@ mod tests {
         let out = render(&[Str(&head), Str(b"TAIL")]);
         assert_eq!(out.as_slice().len(), BUF_LEN - 1);
         assert!(!out.as_slice().ends_with(b"TAIL"));
+    }
+
+    // The writer's sink is a bare `fn` pointer (no captured environment, so no
+    // allocation), which leaves a static as the only place a test can collect what
+    // was written. Both writer tests share it, so each resets it first.
+    static mut WRITTEN: [u8; 64] = [0; 64];
+    static mut WRITTEN_LEN: usize = 0;
+    static mut DRAINS: usize = 0;
+
+    fn collect(bytes: &[u8]) {
+        unsafe {
+            let len = WRITTEN_LEN;
+            WRITTEN[len..len + bytes.len()].copy_from_slice(bytes);
+            WRITTEN_LEN = len + bytes.len();
+            DRAINS += 1;
+        }
+    }
+
+    fn reset_collector() {
+        unsafe {
+            WRITTEN_LEN = 0;
+            DRAINS = 0;
+        }
+    }
+
+    #[test]
+    fn a_writer_holds_its_bytes_back_until_it_is_flushed() {
+        reset_collector();
+        let mut buf = [0u8; 16];
+        let mut w = Writer::new(collect, &mut buf);
+        w.write_all(b"hi");
+        assert_eq!(unsafe { DRAINS }, 0, "an unflushed writer must not emit");
+        w.flush();
+        assert_eq!(unsafe { &WRITTEN[..WRITTEN_LEN] }, b"hi");
+        assert_eq!(unsafe { DRAINS }, 1);
+        w.flush();
+        assert_eq!(
+            unsafe { DRAINS },
+            1,
+            "flushing an empty writer must be a no-op"
+        );
+    }
+
+    #[test]
+    fn output_past_the_writer_buffer_drains_rather_than_truncating() {
+        // The distinction from `Buf`, which drops the tail: a line longer than the
+        // buffer must still reach the sink whole, split across drains.
+        reset_collector();
+        let mut buf = [0u8; 4];
+        let mut w = Writer::new(collect, &mut buf);
+        w.write_all(b"abcdefghij");
+        w.flush();
+        assert_eq!(unsafe { &WRITTEN[..WRITTEN_LEN] }, b"abcdefghij");
+        assert_eq!(
+            unsafe { DRAINS },
+            3,
+            "10 bytes through a 4-byte buffer: 4 + 4 + 2"
+        );
     }
 
     #[test]

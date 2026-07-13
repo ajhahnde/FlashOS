@@ -20,7 +20,13 @@ pub mod pager;
 pub mod process;
 pub mod readline;
 
-pub use io::{Buf, Part};
+pub use io::{Buf, Part, Sink, Writer};
+
+/// The raw kernel ABI, one level down. A tool that needs a call this library does
+/// not wrap (the file surface, the hardware monitors, the kernel log) reaches it
+/// here rather than re-deriving the trap.
+#[cfg(target_os = "none")]
+pub use flashos_user_rt::syscall as sys;
 
 #[cfg(target_os = "none")]
 pub use heap::{free, malloc};

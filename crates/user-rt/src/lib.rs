@@ -20,6 +20,37 @@ pub type Argv = *const *const u8;
 /// Signature implemented by every ordinary Rust EL0 program.
 pub type Main = fn(argc: usize, argv: Argv) -> i32;
 
+/// The `i`-th argument as the kernel left it: a pointer to a NUL-terminated string.
+/// `None` at the vector's NULL terminator. This is the form the path-taking syscalls
+/// want, which is why it is not folded into [`arg`] -- rebuilding a terminated
+/// string from a slice would mean copying one.
+///
+/// # Safety
+///
+/// `argv` must be the vector the kernel laid on the stack, and `i` must be below its
+/// `argc`.
+#[cfg(target_os = "none")]
+pub unsafe fn arg_ptr(argv: Argv, i: usize) -> Option<*const u8> {
+    let ptr = unsafe { *argv.add(i) };
+    if ptr.is_null() {
+        None
+    } else {
+        Some(ptr)
+    }
+}
+
+/// The `i`-th argument's bytes, without its terminator. A program walks `argv`
+/// against `argc` but must still stop at a NULL: the two disagreeing is a kernel
+/// bug, and reading past the terminator would fault rather than report it.
+///
+/// # Safety
+///
+/// As [`arg_ptr`].
+#[cfg(target_os = "none")]
+pub unsafe fn arg<'a>(argv: Argv, i: usize) -> Option<&'a [u8]> {
+    unsafe { arg_ptr(argv, i).map(|p| cstr_bytes(p)) }
+}
+
 /// Invoke an EL0 program body and terminate the process with its result.
 #[doc(hidden)]
 #[cfg(target_os = "none")]

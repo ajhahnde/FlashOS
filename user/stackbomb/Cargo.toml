@@ -1,0 +1,15 @@
+[package]
+name = "flashos-stackbomb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashos_stackbomb"
+crate-type = ["staticlib"]
+
+[dependencies]
+flashos-abi = { path = "../../crates/abi" }
+# Not called -- linked for the EL0 panic handler every no_std payload must supply.
+flashos-user-rt = { path = "../../crates/user-rt" }
