@@ -52,10 +52,10 @@
 #              the 64 MiB `.sdscratch` buffer; reserve_above caps the
 #              pool at virt's 1 GiB RAM end (0x80000000), well below
 #              MALLOC_END's RPi-derived 0xFC000000. Boot baseline =
-#              0x3be44, per-scenario checkpoint = 0x3be35.
+#              0x3be5f, per-scenario checkpoint = 0x3be50.
 #
 # The script accepts either pattern; the active board's pair must
-# match exactly. Net: 34 × {bbff1, 3be35} + 1 × {bc000, 3be44}.
+# match exactly. Net: 34 × {bbff1, 3be50} + 1 × {bc000, 3be5f}.
 #
 # FROZEN (2026-06-17): the virt board is deprioritized — rpi4b + real
 # HW are the live gates and CI now boots rpi4b (test-rpi4b), not virt.
@@ -66,6 +66,17 @@
 # eventual revive — at which point re-validate and refresh these values.
 #
 # Drift history (legitimate free-page baseline shifts, newest first):
+#   * v0.8.0 — virt 0x3be35→0x3be50 (per-scenario), 0x3be44→0x3be5f (boot
+#              baseline): the first Rust staticlib entering the kernel link
+#              stops Zig from force-including its compiler_rt, and the image
+#              loses all 564 of those symbols — ~108 KiB of float/atomic runtime
+#              nothing ever called (the link has no undefined symbols with or
+#              without it). The image shrinks by exactly 27 pages, so virt's
+#              reserve_below covers 27 pages FEWER and the pool grows by the
+#              same 27 (0x1b). A one-time shift: it happens when the first Rust
+#              archive enters the link, not once per ported module. rpi4b
+#              unaffected (reserve calls are no-ops — kernel sits below
+#              MALLOC_START, so a smaller image does not move the count).
 #   * v0.8.0 — rpi4b 0xbbff2→0xbbff1, virt 0x3be45→0x3be35 (per-scenario) and
 #              virt 0x3be53→0x3be44 (boot baseline). NO tally bump: 30 EL0
 #              scenarios and 34 checkpoints, unchanged. PID 1 and the [TEST]
@@ -205,11 +216,11 @@ errors=$(grep -cF "ERROR CAUGHT" "$LOG" || true)
 fails=$(grep -cF "[FAIL]" "$LOG" || true)
 
 # Board-specific baseline pair (see header). rpi4b: bbff1 / bc000;
-# virt: 3be35 / 3be44. Pick the board whose checkpoint pattern is
+# virt: 3be50 / 3be5f. Pick the board whose checkpoint pattern is
 # present, then require its exact pair (32 checkpoints + 1 boot
 # baseline). Detecting by content keeps this script board-arg-free.
 rpi_chk=$(grep -cF "free_pages: 00000000000bbff1" "$LOG" || true)
-virt_chk=$(grep -cF "free_pages: 000000000003be35" "$LOG" || true)
+virt_chk=$(grep -cF "free_pages: 000000000003be50" "$LOG" || true)
 
 if [ "$rpi_chk" -gt 0 ]; then
     ok_chk=$rpi_chk
@@ -217,10 +228,10 @@ if [ "$rpi_chk" -gt 0 ]; then
     chk_label="0xbbff1"; base_label="0xbc000"
 elif [ "$virt_chk" -gt 0 ]; then
     ok_chk=$virt_chk
-    ok_base=$(grep -cF "free_pages: 000000000003be44" "$LOG" || true)
-    chk_label="0x3be35"; base_label="0x3be44"
+    ok_base=$(grep -cF "free_pages: 000000000003be5f" "$LOG" || true)
+    chk_label="0x3be50"; base_label="0x3be5f"
 else
-    echo "FAIL (no known checkpoint pattern): neither 0xbbff1 (rpi4b) nor 0x3be35 (virt) found" >&2
+    echo "FAIL (no known checkpoint pattern): neither 0xbbff1 (rpi4b) nor 0x3be50 (virt) found" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

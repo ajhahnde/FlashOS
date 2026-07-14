@@ -1,7 +1,13 @@
 //! The `no_std` kernel and its board modules.
 //!
-//! Placeholder: the crate exists so the workspace, build pipeline, and CI are in
-//! place before any product code is translated.
+//! This crate is the Rust-owned half of the kernel's logic, and it is a plain
+//! `no_std` library: it links nothing, exports no C ABI, and carries no panic
+//! handler, so it compiles for the host and its tests run in the ordinary host
+//! suite. `crates/klib` wraps it in the staticlib the Zig-linked `kernel8.elf`
+//! swallows during the mixed-language bridge, and owns the C-ABI seam and the
+//! panic path — both of which disappear once the last Flash module is gone.
 
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
+
+pub mod sha256;

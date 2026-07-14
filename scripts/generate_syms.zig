@@ -12,6 +12,91 @@ const symbol_area_file = "src/symbol_area.S";
 const entry_size = 64;
 const max_sym_name_len = entry_size - 8 - 1;
 
+/// Turn a Rust v0 mangled symbol into the readable path the trace symbolizer
+/// wants, e.g.
+///
+///   _RNvMs_NtCs1VexIXjCVNi_14flashos_kernel6sha256NtB4_10HmacSha2566finish
+///   -> flashos_kernel::sha256::HmacSha256::finish
+///
+/// Returns null for anything that is not a v0 symbol (the kernel's Flash and
+/// assembly names, and every `#[no_mangle]` seam export, pass through untouched).
+///
+/// Only the path segments are recovered, not generics or signatures — the symbol
+/// area is a 55-byte-per-name address→name table for backtraces, not a debugger.
+/// v0 encodes each segment as a decimal length followed by that many bytes, so
+/// the whole job is: skip the control characters, keep the length-prefixed names.
+/// Two of those control forms swallow text and must be skipped explicitly, or
+/// their payload would be misread as a segment:
+///
+///   * `Cs<base62>_`  the crate-root disambiguator (its base62 hash can start
+///                    with a digit — `Cs1VexIXjCVNi_` would otherwise read as a
+///                    1-byte segment "V")
+///   * `B<base62>_`   a backreference to an earlier segment
+///
+/// If the joined path still exceeds the entry's name budget, leading segments are
+/// dropped: the tail (the function) identifies a frame, the crate prefix merely
+/// qualifies it.
+fn demangleRustV0(sym: []const u8, buf: []u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, sym, "_R")) return null;
+
+    // Collect the path segments in order.
+    var segs: [16][]const u8 = undefined;
+    var n_segs: usize = 0;
+    var i: usize = 2;
+    while (i < sym.len and n_segs < segs.len) {
+        const c = sym[i];
+
+        if (c == 'C' and i + 1 < sym.len and sym[i + 1] == 's') {
+            i += 2;
+            while (i < sym.len and sym[i] != '_') : (i += 1) {}
+            if (i < sym.len) i += 1;
+            continue;
+        }
+        if (c == 'B') {
+            i += 1;
+            while (i < sym.len and sym[i] != '_') : (i += 1) {}
+            if (i < sym.len) i += 1;
+            continue;
+        }
+        if (!std.ascii.isDigit(c)) {
+            // A namespace/impl/disambiguator control byte — nothing to keep.
+            i += 1;
+            continue;
+        }
+
+        var len: usize = 0;
+        while (i < sym.len and std.ascii.isDigit(sym[i])) : (i += 1) {
+            len = len * 10 + (sym[i] - '0');
+        }
+        if (len == 0) continue; // an `s0_`-style disambiguator, not a segment
+        if (i + len > sym.len) return null; // malformed — leave the raw name alone
+        segs[n_segs] = sym[i .. i + len];
+        n_segs += 1;
+        i += len;
+    }
+    if (n_segs == 0) return null;
+
+    // Join with "::", dropping leading segments until the result fits.
+    var first: usize = 0;
+    while (first < n_segs) : (first += 1) {
+        var need: usize = 0;
+        for (segs[first..n_segs], 0..) |s, k| need += s.len + (if (k == 0) @as(usize, 0) else 2);
+        if (need <= max_sym_name_len and need <= buf.len) break;
+    }
+    if (first == n_segs) return null;
+
+    var w: usize = 0;
+    for (segs[first..n_segs], 0..) |s, k| {
+        if (k != 0) {
+            @memcpy(buf[w..][0..2], "::");
+            w += 2;
+        }
+        @memcpy(buf[w..][0..s.len], s);
+        w += s.len;
+    }
+    return buf[0..w];
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
@@ -49,7 +134,10 @@ pub fn main(init: std.process.Init) !void {
         const addr = it.next() orelse continue;
         _ = it.next() orelse continue;
         // ignore the symbol type field
-        const name = it.next() orelse continue;
+        const raw = it.next() orelse continue;
+
+        var demangle_buf: [512]u8 = undefined;
+        const name = demangleRustV0(raw, &demangle_buf) orelse raw;
 
         if (name.len > max_sym_name_len) {
             std.debug.panic("{s} is too long!\n", .{name});

@@ -1,0 +1,18 @@
+[package]
+name = "flashos-klib"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashos_klib"
+# The archive the Zig-linked kernel8.elf swallows during the mixed-language
+# bridge. Kept separate from `flashos-kernel` (a plain rlib) because a staticlib
+# must carry a panic handler and cannot be built for the host, which would put
+# the kernel's logic out of reach of the host test suite. This crate holds no
+# logic — only the C-ABI seam and the panic path — so nothing testable is lost.
+crate-type = ["staticlib"]
+
+[dependencies]
+flashos-kernel = { path = "../kernel" }

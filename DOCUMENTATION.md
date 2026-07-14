@@ -1207,8 +1207,8 @@ Any deviation indicates a leak in the scenario above the deviating
 checkpoint.
 
 The example above shows the rpi4b values. On virt the same structure
-holds with the board's own pair — boot baseline `0x3be44`,
-per-scenario checkpoint `0x3be35` — smaller because virt has 1 GiB of
+holds with the board's own pair — boot baseline `0x3be5f`,
+per-scenario checkpoint `0x3be50` — smaller because virt has 1 GiB of
 RAM and its kernel is loaded _inside_ the page-pool window, so
 `mem_map_reserve_below` subtracts the kernel image (including the
 128 KiB `_symbols` section and the 16 KiB klog ring) and the 64 MiB
@@ -1217,7 +1217,7 @@ RAM and its kernel is loaded _inside_ the page-pool window, so
 can never overflow into its `TaskStruct` credentials (see "Security
 model" in §5) — widens the boot-to-scenario delta to `0xf` on both
 boards, landing the documented pairs: rpi4b `0xbbff1` / `0xbc000` and
-virt `0x3be35` / `0x3be44`.
+virt `0x3be50` / `0x3be5f`.
 
 ### Coverage matrix
 

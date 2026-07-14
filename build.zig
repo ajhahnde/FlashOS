@@ -640,27 +640,20 @@ pub fn build(b: *std.Build) void {
     utilc_mod.addImport("task_layout", task_layout_mod);
     utilc_mod.addImport("klog_ring", klog_ring_mod);
 
-    // sha256 — SHA-256 / HMAC / PBKDF2 / constant-time compare.
-    // Target-agnostic (no .target) so both the freestanding kernel and the
-    // host-side gen_shadow tool import the one source. Pure, no imports.
+    // sha256 — the call-site adapter over the Rust crypto unit (crates/kernel).
+    // The primitives themselves are Rust; this module only unpacks Flash slices
+    // into the C ABI the staticlib exports, so it holds no arithmetic and no
+    // tests. Both live on the Rust side now.
     //
-    // Always ReleaseSmall, even in Debug kernel builds: sys_authenticate
-    // runs the PBKDF2 → HMAC → SHA-256 chain on the per-task kernel stack
-    // (the 4 KiB TaskStruct page, ~2.4 KiB usable), and Debug-mode frames
-    // (no register allocation, 256-byte compress W-array + value-copied
-    // hasher states per level) overflow that budget — the overflow lands in
-    // the TaskStruct tail and silently corrupts the credential fields.
-    // ReleaseSmall keeps the deepest chain comfortably inside the page (and
-    // makes the boot-path KDF an order of magnitude faster under QEMU TCG).
-    // The module is pure wrapping arithmetic (+%), so no Debug safety
-    // checks are lost that the host-test target (its own Debug module)
-    // doesn't still run. Ported to Flash; flashc transpiles it via
-    // addFlashSource and the one transpile is shared with the host-test
-    // build below (src_lazy). The .ReleaseSmall pin stays on this module.
+    // The frame budget that used to pin this module to ReleaseSmall did not go
+    // away, it moved: sys_authenticate still runs the PBKDF2 → HMAC → SHA-256
+    // chain on the per-task kernel stack (the 4 KiB TaskStruct page, ~2.4 KiB
+    // usable), so it is now the Rust release profile that has to keep the chain
+    // inside the page. The pin here would no longer do anything — the code it
+    // applied to is gone — and the stack-frame gate is what proves the budget.
     const sha256_src = addFlashSource(b, "src/sha256.flash");
     const sha256_mod = b.createModule(.{
         .root_source_file = sha256_src,
-        .optimize = .ReleaseSmall,
     });
     // shadow — /etc/shadow line parser + hex decoder. Pure. Ported to
     // Flash; the one transpile is shared with the host-test build below.
@@ -1102,6 +1095,31 @@ pub fn build(b: *std.Build) void {
     for (board_asm_files) |path| {
         kernel_mod.addAssemblyFile(b.path(b.fmt("src/board/{s}/{s}", .{ @tagName(board), path })));
     }
+    // ---- the Rust kernel staticlib ----
+    // The Rust-owned half of the kernel, linked in as an archive. Zig stays the
+    // linker while both languages share the image; the seam is the C ABI in
+    // crates/klib (see src/sha256.flash for the Flash side of one). The archive
+    // carries compiler_builtins, but the linker pulls only what it needs, and
+    // src/utilc.flash's strong memcpy/memset outrank the weak copies in there.
+    //
+    // Built through addSystemCommand (like the Rust EL0 payloads below) so Cargo
+    // re-checks its own source graph on every build instead of handing back a
+    // stale archive.
+    //
+    // Linking it has one side effect worth knowing about: with a foreign object in
+    // the link, Zig stops force-including its compiler_rt, and the image loses all
+    // 564 of those symbols — ~88 KiB of float/atomic runtime nothing ever called
+    // (the link has no undefined symbols with or without it). That shrank the image
+    // and moved .bss, _kernel_pa_end and the initramfs, so the free-page contract in
+    // scripts/run_qemu_test.sh was recaptured against it. It is a one-time shift: it
+    // happens when the FIRST Rust archive enters the link, not once per ported
+    // module.
+    const rust_klib_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "klib", "--output" });
+    rust_klib_cmd.setName("cargo xtask klib");
+    const klib_a = rust_klib_cmd.addOutputFileArg("libflashos_klib.a");
+    rust_klib_cmd.has_side_effects = true;
+    kernel_mod.addObjectFile(klib_a);
+
     // The kernel .S files use `#include "asm_defs.inc"`, which now lives
     // alongside them under arch/aarch64/. That bridge header in turn pulls in
     // `board_asm_defs.inc` from the active board's directory — both search
@@ -1298,24 +1316,16 @@ pub fn build(b: *std.Build) void {
     rust_pid1_cmd.has_side_effects = true;
 
     // ---- /etc/shadow generator ----
-    // Host tool: runs the kernel's PBKDF2 (src/sha256.zig) over fixed test
+    // Runs the kernel's PBKDF2 (crates/kernel, through xtask) over fixed test
     // credentials to emit a deterministic /etc/shadow, staged into the
     // initramfs below. Reusing the kernel KDF guarantees the baked verifier
     // matches what sys_authenticate recomputes at login. Output is a pure
-    // function of the in-tool constants, so the kernel image stays byte-
+    // function of the generator's constants, so the kernel image stays byte-
     // reproducible (Pi hash baseline).
-    const gen_shadow_mod = b.createModule(.{
-        .root_source_file = b.path("tools/gen_shadow.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    gen_shadow_mod.addImport("sha256", sha256_mod);
-    const gen_shadow = b.addExecutable(.{
-        .name = "gen_shadow",
-        .root_module = gen_shadow_mod,
-    });
-    const gen_shadow_cmd = b.addRunArtifact(gen_shadow);
+    const gen_shadow_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "gen-shadow", "--output" });
+    gen_shadow_cmd.setName("cargo xtask gen-shadow");
     const shadow_file = gen_shadow_cmd.addOutputFileArg("shadow");
+    gen_shadow_cmd.has_side_effects = true;
     // Install a copy at zig-out/shadow so the deploy step (a literal-path
     // shell script, like its kernel8.img reference) can seed the real SD
     // card with the same bytes the initramfs and the QEMU image carry.
@@ -1612,7 +1622,7 @@ pub fn build(b: *std.Build) void {
         // initramfs /etc/shadow) lands at ::/SHADOW, the permission
         // overlay at ::/PERMS.TAB — so the rpi4b QEMU target exercises
         // the writable-shadow + overlay path end to end. LazyPath args
-        // also give this step its dependency on gen_shadow.
+        // also give this step its dependency on the shadow generator.
         make_test_disk_cmd.addFileArg(shadow_file);
         make_test_disk_cmd.addFileArg(b.path("user_space/etc/perms.tab"));
 
@@ -2231,15 +2241,8 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    // sha256.zig — SHA-256 / HMAC-SHA256 / PBKDF2-HMAC-SHA256 host coverage.
-    // Pure compute, no externs, no imports, no allocation. The
-    // vector tests (NIST FIPS 180-2, RFC 4231, the published PBKDF2 set,
-    // plus std.crypto differentials) are the gate for the authentication
-    // work: no kernel consumer of these primitives ships until they pass.
-    _ = addHostTest(b, test_step, .{ .src = "src/sha256.flash", .src_lazy = sha256_src });
-
     // shadow.zig — /etc/shadow line parser + hex decoder. Pure,
-    // no imports; pins the format shared by sys_authenticate + gen_shadow.
+    // no imports; pins the format shared by sys_authenticate + the shadow generator.
     _ = addHostTest(b, test_step, .{ .src = "src/shadow.flash", .src_lazy = shadow_src });
 
     // perm.zig — VFS permission check host coverage. Pure

@@ -4,7 +4,7 @@
 # as a prerequisite of the rpi4b `run` and `test-rpi4b` steps.
 #
 # Args (both optional, passed by build.zig):
-#   $1 — generated shadow file (gen_shadow output) → seeded as ::/SHADOW
+#   $1 — generated shadow file (the shadow generator output) → seeded as ::/SHADOW
 #   $2 — permission-overlay seed (user_space/etc/perms.tab) → ::/PERMS.TAB
 # Without them the identity seeds are skipped and the kernel runs the
 # initramfs-fallback path (auth works, [TEST] passwd SKIPs).
@@ -45,8 +45,8 @@
 # Reproducibility: a fresh build is byte-deterministic
 # — pinned volume serial (-N 12345678), pinned label (-v SCRATCH),
 # SOURCE_DATE_EPOCH=0 and fixed seed-file mtimes so mtools writes
-# stable directory timestamps (the gen_shadow output is itself a pure
-# function of its in-tool constants). Verify with:
+# stable directory timestamps (the shadow generator output is itself a
+# pure function of its constants). Verify with:
 #   rm -f zig-out/test_sd.img && scripts/make_test_disk.sh && \
 #     shasum zig-out/test_sd.img && rm -f zig-out/test_sd.img && \
 #     scripts/make_test_disk.sh && shasum zig-out/test_sd.img
@@ -137,7 +137,7 @@ mcopy -i "$IMG@@1M" "$TMP_MAG" ::/ROUNDTR.MAG
 mcopy -i "$IMG@@1M" "$TMP_EMP" ::/EMPTY.TXT
 
 # ---- identity seeds: SHADOW + PERMS.TAB ----
-# The shadow file is the gen_shadow build artifact (same content as the
+# The shadow file is the shadow-generator build artifact (same content as the
 # initramfs /etc/shadow seed); the overlay is the repo seed file. Both
 # get the pinned mtime so the image stays byte-deterministic.
 if [ -n "$SHADOW_SRC" ] && [ -n "$PERMS_SRC" ]; then

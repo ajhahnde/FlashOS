@@ -7,3 +7,12 @@ license.workspace = true
 
 [lib]
 name = "flashos_kernel"
+
+# Host-test oracles ONLY. Dev-dependencies never reach the kernel image, so it
+# keeps its no-third-party-runtime posture; the symbol gate proves no RustCrypto
+# symbol lands in the archive. They stand in for the std.crypto differentials the
+# Flash module carried, one for one.
+[dev-dependencies]
+sha2 = "=0.10.9"
+hmac = "=0.12.1"
+pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }

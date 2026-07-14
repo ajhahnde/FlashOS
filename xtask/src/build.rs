@@ -81,6 +81,51 @@ impl Paths {
     }
 }
 
+/// Build the Rust kernel staticlib — the archive `kernel8.elf` links during the
+/// mixed-language bridge — and optionally copy it to `output`.
+///
+/// Board-independent for now: every module Rust owns at this stage is pure compute.
+/// The first board-gated kernel module gives this a `--board` flag, exactly as the
+/// canary has one.
+///
+/// The archive carries all of `compiler_builtins`, but an archive is not a link: the
+/// linker pulls only the members it needs, and the kernel's own strong `memcpy`/
+/// `memset` (`src/utilc.flash`) outrank the weak ones here. What actually lands in
+/// the image is what the symbol budget and image-size gates measure.
+pub fn klib(root: &Path, output: Option<&Path>) -> Result<PathBuf, String> {
+    let trace = root.join("rust-out").join("xtask-trace.log");
+    fs::create_dir_all(root.join("rust-out")).map_err(|e| format!("mkdir rust-out: {e}"))?;
+    Cmd::new("cargo", &trace)
+        .cwd(root)
+        .args([
+            "build",
+            "--release",
+            "-p",
+            "flashos-klib",
+            "--target",
+            TARGET,
+        ])
+        .run()?;
+
+    let built = root
+        .join("target")
+        .join(TARGET)
+        .join("release")
+        .join("libflashos_klib.a");
+    if !built.exists() {
+        return Err(format!("cargo produced no {}", built.display()));
+    }
+
+    match output {
+        None => Ok(built),
+        Some(dest) => {
+            fs::copy(&built, dest)
+                .map_err(|e| format!("copy {} -> {}: {e}", built.display(), dest.display()))?;
+            Ok(dest.to_path_buf())
+        }
+    }
+}
+
 /// Build the canary kernel image for `board`. Returns the paths it produced.
 pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String> {
     let p = Paths::new(root, board);

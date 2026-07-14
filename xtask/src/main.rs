@@ -9,6 +9,7 @@ mod asm_defs;
 mod build;
 mod guard;
 mod qemu;
+mod shadow;
 mod toolchain;
 mod ui_defs;
 
@@ -33,7 +34,9 @@ Commands:
                                 Flash copy the kernel still compiles (lib/console_ui/)
   user <name> [--output <path>] [--feature <name>]...
                                Build a Rust EL0 payload (hello, clear, pid1, ...)
-  test                          Run the Rust host tests (all crates but the canary)
+  klib [--output <path>]        Build the Rust kernel staticlib the Zig kernel links
+  gen-shadow --output <path>    Bake /etc/shadow with the kernel's own PBKDF2
+  test                          Run the Rust host tests (all crates but the bare-metal ones)
   check-hygiene                 Run the repo's whitespace and hex-literal gates
   clean                         Remove rust-out/ and the cargo target dir
   help                          This text
@@ -115,9 +118,33 @@ fn dispatch() -> Result<(), String> {
             println!("built {}", elf.display());
             Ok(())
         }
+        "klib" => {
+            let (output, _) = user_args_of(&rest)?;
+            let a = build::klib(&root, output.as_deref())?;
+            println!("built {}", a.display());
+            Ok(())
+        }
+        "gen-shadow" => {
+            let (output, _) = user_args_of(&rest)?;
+            let out = output.ok_or("usage: cargo xtask gen-shadow --output <path>")?;
+            shadow::run(&out)?;
+            println!("wrote {}", out.display());
+            Ok(())
+        }
+        // The bare-metal staticlibs are excluded: they carry a #[panic_handler] and
+        // cannot link for the host at all. Neither holds testable logic — the
+        // canary is a boot marker, and flashos-klib is the C-ABI seam over
+        // flashos-kernel, whose tests DO run here.
         "test" => Cmd::new("cargo", &root.join("rust-out/xtask-trace.log"))
             .cwd(&root)
-            .args(["test", "--workspace", "--exclude", "flashos-canary"])
+            .args([
+                "test",
+                "--workspace",
+                "--exclude",
+                "flashos-canary",
+                "--exclude",
+                "flashos-klib",
+            ])
             .run(),
         "check-hygiene" => {
             let trace = root.join("rust-out/xtask-trace.log");

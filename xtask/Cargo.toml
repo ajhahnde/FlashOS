@@ -13,3 +13,6 @@ publish = false
 [dependencies]
 flashos-abi = { path = "../crates/abi" }
 flashos-console-ui = { path = "../crates/console-ui" }
+# `gen-shadow` runs the kernel's own PBKDF2 to bake /etc/shadow, so the verifier
+# in the image is produced by the exact code that later checks it at login.
+flashos-kernel = { path = "../crates/kernel" }

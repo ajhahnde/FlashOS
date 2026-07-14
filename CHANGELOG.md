@@ -105,7 +105,32 @@ The project was founded on April 28th, 2026.
   Pi 4B hardware across the interactive surface: completion, history recall,
   interrupt and end-of-input handling, a live pipeline, and reboot.
 
+- **The kernel crypto unit is Rust, and with it the first Rust code inside the
+  kernel image.** SHA-256, HMAC-SHA256, PBKDF2-HMAC-SHA256, and the constant-time
+  secret compare now live in `crates/kernel`, linked into the kernel as a static
+  archive; the kernel calls them through a two-function C interface. The build-time
+  `/etc/shadow` generator moved with them, so the verifier baked into the image is
+  produced by the very code that checks it at login — the file it emits is
+  byte-identical to the one the previous generator produced. The published test
+  vectors (NIST FIPS 180-2, RFC 4231, the standard PBKDF2 set) came along
+  unchanged, and the differential tests now check every digest against a reference
+  implementation used at test time only. Verified on Raspberry Pi 4B hardware:
+  typed login, a rejected password and its re-prompt, a password change written to
+  the filesystem, and that the changed password still authenticates after a power
+  cycle. The authentication chain also grew shallower on the kernel stack than the
+  implementation it replaces.
+
 ### Changed
+
+- The kernel image no longer carries the compiler runtime library it never
+  called — roughly 108 KiB of floating-point and atomic helpers that no kernel
+  code references. They were linked in unconditionally; introducing the Rust
+  archive into the link stopped that, and the image lost 27 pages. The kernel
+  links with no undefined symbols before and after, so nothing was using them.
+  On Raspberry Pi the free-page count is unaffected (its pool sits below the
+  kernel and never depended on image size); on the emulated board, where the
+  kernel sits inside the pool, the boot checkpoints shift by the same 27 pages
+  and the boot contract was re-measured accordingly.
 
 - Re-pinned the Flash toolchain to the currently installed `flashc`
   revision (v1.2.0). The lock file had drifted stale relative to the
