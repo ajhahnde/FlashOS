@@ -10,4 +10,7 @@
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod path;
+pub mod perm;
 pub mod sha256;
+pub mod shadow;

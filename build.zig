@@ -655,15 +655,16 @@ pub fn build(b: *std.Build) void {
     const sha256_mod = b.createModule(.{
         .root_source_file = sha256_src,
     });
-    // shadow — /etc/shadow line parser + hex decoder. Pure. Ported to
-    // Flash; the one transpile is shared with the host-test build below.
+    // shadow — call-site adapter over the Rust /etc/shadow unit. The parser,
+    // hex codec, lookup, rewrite logic, and tests live in crates/kernel; this
+    // module only preserves the Flash slice API until sys.flash ports.
     const shadow_src = addFlashSource(b, "src/shadow.flash");
     const shadow_mod = b.createModule(.{
         .root_source_file = shadow_src,
     });
-    // perm — Unix discretionary access check. Pure decision
-    // function (checkAccess) shared by the syscall-layer enforcement
-    // sites; the truth-table host test below is the gate.
+    // perm — call-site adapter over the Rust Unix permission check. The pure
+    // decision and truth-table tests live in crates/kernel; this module keeps
+    // the enum-shaped Flash API until sys.flash and execve.flash port.
     const perm_src = addFlashSource(b, "src/perm.flash");
     const perm_mod = b.createModule(.{
         .root_source_file = perm_src,
@@ -775,13 +776,9 @@ pub fn build(b: *std.Build) void {
     sched_mod.addImport("task_layout", task_layout_mod);
     sched_mod.addImport("fdtable", fdtable_mod);
 
-    // Pure cwd-aware path-resolution helper. Hosts
-    // joinResolve, the single non-recursive `.` / `..` collapse shared
-    // by sys_chdir, sys_openFile, and execveKernel. Pure — no imports,
-    // no externs — so the freestanding kernel module and the host-test
-    // module reach the same source through this single named module.
-    // Ported to Flash; the one transpile feeds the kernel module, the
-    // execve host-test "path" alias, and path's own host test below.
+    // Cwd-aware path-resolution adapter. The pure joinResolve implementation
+    // and its tests live in crates/kernel; this module preserves the Flash
+    // slice API shared by sys_chdir, sys_openFile, and execveKernel.
     const path_src = addFlashSource(b, "src/path.flash");
     const path_mod = b.createModule(.{
         .root_source_file = path_src,
@@ -1791,10 +1788,9 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     });
 
-    // Host-target alias of the pure path module so execve.zig's host
-    // build can satisfy its `@import("path")`. The pure
-    // joinResolve helper itself is host-tested via the standalone
-    // src/path.zig target wired below.
+    // Host-target alias of the path shim so execve's host build can satisfy
+    // its unconditional `@import("path")`; the kernel-only call site remains
+    // dead on the host, and the resolver tests run in crates/kernel.
     const path_test_mod = b.createModule(.{
         .root_source_file = path_src,
         .target = b.graph.host,
@@ -1836,12 +1832,6 @@ pub fn build(b: *std.Build) void {
         .src_lazy = execve_src,
         .imports = &.{.{ .name = "path", .mod = path_test_mod }},
     });
-
-    // path.zig — cwd-aware path-resolution host coverage.
-    // Pure joinResolve: no externs, no stubs. The freestanding kernel
-    // and the host test exercise the same source through the `path`
-    // module wired above.
-    _ = addHostTest(b, test_step, .{ .src = "src/path.flash", .src_lazy = path_src });
 
     // trace/fp_walk.zig — the -Dtrace sampler's AAPCS64 frame-pointer
     // chain decoder. Pure `walkChain` over a flat stack-page view (no
@@ -2240,16 +2230,6 @@ pub fn build(b: *std.Build) void {
             .{ .name = "klog_ring", .mod = klog_ring_test_mod },
         },
     });
-
-    // shadow.zig — /etc/shadow line parser + hex decoder. Pure,
-    // no imports; pins the format shared by sys_authenticate + the shadow generator.
-    _ = addHostTest(b, test_step, .{ .src = "src/shadow.flash", .src_lazy = shadow_src });
-
-    // perm.zig — VFS permission check host coverage. Pure
-    // checkAccess truth table (owner/group/other × read/write/exec ×
-    // root bypass) — the gate for the permission layer: no enforcement
-    // site ships until every row passes.
-    _ = addHostTest(b, test_step, .{ .src = "src/perm.flash", .src_lazy = perm_src });
 
     // pwfile.zig — /etc/passwd parser host coverage. Pure
     // name/uid lookups shared by sys_passwd (kernel), /bin/login, and

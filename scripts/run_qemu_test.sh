@@ -52,10 +52,10 @@
 #              the 64 MiB `.sdscratch` buffer; reserve_above caps the
 #              pool at virt's 1 GiB RAM end (0x80000000), well below
 #              MALLOC_END's RPi-derived 0xFC000000. Boot baseline =
-#              0x3be5f, per-scenario checkpoint = 0x3be50.
+#              0x3be5e, per-scenario checkpoint = 0x3be4f.
 #
 # The script accepts either pattern; the active board's pair must
-# match exactly. Net: 34 × {bbff1, 3be50} + 1 × {bc000, 3be5f}.
+# match exactly. Net: 34 × {bbff1, 3be4f} + 1 × {bc000, 3be5e}.
 #
 # FROZEN (2026-06-17): the virt board is deprioritized — rpi4b + real
 # HW are the live gates and CI now boots rpi4b (test-rpi4b), not virt.
@@ -66,6 +66,13 @@
 # eventual revive — at which point re-validate and refresh these values.
 #
 # Drift history (legitimate free-page baseline shifts, newest first):
+#   * v0.8.0 — virt 0x3be50→0x3be4f (per-scenario), 0x3be5f→0x3be5e
+#              (boot baseline): porting the shadow parser, permission check,
+#              and path resolver to Rust adds 1,520 bytes of .text and 28 bytes
+#              of .rodata. That 1,548-byte growth crosses the next page-table
+#              alignment boundary, growing kernel8.img exactly one 4 KiB page.
+#              virt's reserve_below therefore reserves one more page. rpi4b is
+#              unchanged because its kernel remains below MALLOC_START.
 #   * v0.8.0 — virt 0x3be35→0x3be50 (per-scenario), 0x3be44→0x3be5f (boot
 #              baseline): the first Rust staticlib entering the kernel link
 #              stops Zig from force-including its compiler_rt, and the image
@@ -216,11 +223,11 @@ errors=$(grep -cF "ERROR CAUGHT" "$LOG" || true)
 fails=$(grep -cF "[FAIL]" "$LOG" || true)
 
 # Board-specific baseline pair (see header). rpi4b: bbff1 / bc000;
-# virt: 3be50 / 3be5f. Pick the board whose checkpoint pattern is
+# virt: 3be4f / 3be5e. Pick the board whose checkpoint pattern is
 # present, then require its exact pair (32 checkpoints + 1 boot
 # baseline). Detecting by content keeps this script board-arg-free.
 rpi_chk=$(grep -cF "free_pages: 00000000000bbff1" "$LOG" || true)
-virt_chk=$(grep -cF "free_pages: 000000000003be50" "$LOG" || true)
+virt_chk=$(grep -cF "free_pages: 000000000003be4f" "$LOG" || true)
 
 if [ "$rpi_chk" -gt 0 ]; then
     ok_chk=$rpi_chk
@@ -228,10 +235,10 @@ if [ "$rpi_chk" -gt 0 ]; then
     chk_label="0xbbff1"; base_label="0xbc000"
 elif [ "$virt_chk" -gt 0 ]; then
     ok_chk=$virt_chk
-    ok_base=$(grep -cF "free_pages: 000000000003be5f" "$LOG" || true)
-    chk_label="0x3be50"; base_label="0x3be5f"
+    ok_base=$(grep -cF "free_pages: 000000000003be5e" "$LOG" || true)
+    chk_label="0x3be4f"; base_label="0x3be5e"
 else
-    echo "FAIL (no known checkpoint pattern): neither 0xbbff1 (rpi4b) nor 0x3be50 (virt) found" >&2
+    echo "FAIL (no known checkpoint pattern): neither 0xbbff1 (rpi4b) nor 0x3be4f (virt) found" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi
