@@ -9,9 +9,87 @@
 //! Rules for anything added here: `extern "C"`, `#[no_mangle]`, no panic may
 //! cross the boundary, and no Rust type without a fixed representation.
 
-use flashos_kernel::{elf, klog_ring, mailbox, path, perm, sdhci_cmd, sha256, shadow};
+use flashos_kernel::{
+    elf, klog_ring, mailbox, path, perm, sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring,
+};
 
 const NONE: usize = usize::MAX;
+
+/// Resolve a USB descriptor. A null pointer means the endpoint should stall.
+///
+/// # Safety
+/// `length` points to a writable `usize`.
+#[no_mangle]
+pub unsafe extern "C" fn fos_usb_get_descriptor(
+    descriptor_type: u8,
+    index: u8,
+    length: *mut usize,
+) -> *const u8 {
+    match usb_descriptors::get_descriptor(descriptor_type, index) {
+        Some(descriptor) => {
+            unsafe { length.write(descriptor.len()) };
+            descriptor.as_ptr()
+        }
+        None => {
+            unsafe { length.write(0) };
+            core::ptr::null()
+        }
+    }
+}
+
+/// Decode one eight-byte USB SETUP packet into the fixed output record.
+///
+/// # Safety
+/// `raw` points to eight readable bytes and `output` to one writable, aligned
+/// `Setup` record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_usb_decode_setup(raw: *const u8, output: *mut usb_descriptors::Setup) {
+    let mut bytes = [0; 8];
+    unsafe { core::ptr::copy_nonoverlapping(raw, bytes.as_mut_ptr(), bytes.len()) };
+    unsafe { output.write(usb_descriptors::decode_setup(bytes)) };
+}
+
+/// Enqueue one byte in the shared USB TX ring.
+///
+/// # Safety
+/// `ring` points to the live, exclusively accessed 528-byte ring record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_usb_tx_ring_push(ring: *mut usb_tx_ring::UsbTxRing, byte: u8) -> u8 {
+    u8::from(unsafe { &mut *ring }.push(byte))
+}
+
+/// Copy queued bytes without consuming them.
+///
+/// # Safety
+/// `ring` points to a live ring and `destination` to `destination_len`
+/// writable bytes. The two regions do not overlap.
+#[no_mangle]
+pub unsafe extern "C" fn fos_usb_tx_ring_peek(
+    ring: *const usb_tx_ring::UsbTxRing,
+    destination: *mut u8,
+    destination_len: usize,
+) -> usize {
+    let destination = unsafe { core::slice::from_raw_parts_mut(destination, destination_len) };
+    unsafe { &*ring }.peek(destination)
+}
+
+/// Consume bytes already accepted by the hardware FIFO.
+///
+/// # Safety
+/// `ring` satisfies [`fos_usb_tx_ring_push`]'s contract.
+#[no_mangle]
+pub unsafe extern "C" fn fos_usb_tx_ring_advance(ring: *mut usb_tx_ring::UsbTxRing, count: u64) {
+    unsafe { &mut *ring }.advance(count);
+}
+
+/// Drop all queued bytes after reset or deconfiguration.
+///
+/// # Safety
+/// `ring` satisfies [`fos_usb_tx_ring_push`]'s contract.
+#[no_mangle]
+pub unsafe extern "C" fn fos_usb_tx_ring_clear(ring: *mut usb_tx_ring::UsbTxRing) {
+    unsafe { &mut *ring }.clear();
+}
 
 fn elf_error_code(error: elf::ParseError) -> u32 {
     match error {

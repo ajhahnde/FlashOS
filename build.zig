@@ -513,11 +513,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // USB descriptor set + SETUP decode (DWC2 gadget). Pure data; the
-    // rpi4b board side (src/board/rpi4b/usb.zig) imports it as
-    // "usb_descriptors". Ported to Flash; flashc transpiles it via
-    // addFlashSource and the one transpile is shared with the host-test
-    // build below (src_lazy).
+    // USB descriptor adapter. Rust owns the byte-exact descriptor set and
+    // SETUP decode; the named module preserves the DWC2 driver's API.
     const usb_descriptors_src = addFlashSource(b, "src/usb_descriptors.flash");
     const usb_descriptors_mod = b.createModule(.{
         .root_source_file = usb_descriptors_src,
@@ -525,11 +522,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Bulk-IN TX byte-ring for the DWC2 CDC-ACM gadget. Pure
-    // data + logic; src/board/rpi4b/usb.zig imports it as "usb_tx_ring"
-    // and keeps only the MMIO FIFO push. Ported to Flash; flashc transpiles
-    // it via addFlashSource and the one transpile is shared with the
-    // host-test build below (src_lazy).
+    // Bulk-IN TX ring adapter. Rust owns the bounded ring arithmetic while
+    // the DWC2 driver retains preemption policy and MMIO FIFO writes.
     const usb_tx_ring_src = addFlashSource(b, "src/usb_tx_ring.flash");
     const usb_tx_ring_mod = b.createModule(.{
         .root_source_file = usb_tx_ring_src,
@@ -2080,14 +2074,6 @@ pub fn build(b: *std.Build) void {
             .{ .name = "syscall_defs", .mod = syscall_defs_test_mod },
         },
     });
-
-    // usb_descriptors.flash — byte-exact USB descriptor set + SETUP decode
-    // (DWC2 gadget). No externs; pure data + pure functions.
-    _ = addHostTest(b, test_step, .{ .src = "src/usb_descriptors.flash", .src_lazy = usb_descriptors_src });
-
-    // usb_tx_ring.flash — bulk-IN TX byte-ring (DWC2 gadget).
-    // No externs; pure ring arithmetic (push/peek/advance/clear).
-    _ = addHostTest(b, test_step, .{ .src = "src/usb_tx_ring.flash", .src_lazy = usb_tx_ring_src });
 
     // utilc's host tests exercise UART formatting, not the Rust-owned ring.
     // Give that test target a no-op named-module stand-in for its tee call.
