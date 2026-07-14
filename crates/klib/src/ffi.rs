@@ -9,7 +9,7 @@
 //! Rules for anything added here: `extern "C"`, `#[no_mangle]`, no panic may
 //! cross the boundary, and no Rust type without a fixed representation.
 
-use flashos_kernel::{path, perm, sha256, shadow};
+use flashos_kernel::{klog_ring, mailbox, path, perm, sha256, shadow};
 
 const NONE: usize = usize::MAX;
 
@@ -30,6 +30,181 @@ pub struct FosShadowEntry {
 unsafe extern "C" {
     /// The kernel's panic (`src/utilc.flash`): prints the message and halts.
     pub unsafe fn panic(msg: *const u8) -> !;
+}
+
+/// Return the number of bytes retained by a shared-layout kernel log ring.
+///
+/// # Safety
+/// `ring` points to a live `KlogRing` with the fixed layout asserted by Rust
+/// and declared as an `extern struct` by the Flash adapter.
+#[no_mangle]
+pub unsafe extern "C" fn fos_klog_available(ring: *const klog_ring::KlogRing) -> u64 {
+    unsafe { klog_ring::available(ring) }
+}
+
+/// Read one absolute monotone position from the shared kernel log ring.
+///
+/// # Safety
+/// `ring` satisfies [`fos_klog_available`]'s contract.
+#[no_mangle]
+pub unsafe extern "C" fn fos_klog_byte_at(ring: *const klog_ring::KlogRing, position: u64) -> u8 {
+    unsafe { klog_ring::byte_at(ring, position) }
+}
+
+/// Append one byte to the shared kernel log ring.
+///
+/// # Safety
+/// `ring` points to a live writable `KlogRing`.
+#[no_mangle]
+pub unsafe extern "C" fn fos_klog_push(ring: *mut klog_ring::KlogRing, byte: u8) {
+    unsafe { klog_ring::push(ring, byte) }
+}
+
+/// Append a NUL-terminated string to the shared kernel log ring.
+///
+/// # Safety
+/// `ring` points to a live writable `KlogRing`; `string` points to a readable,
+/// NUL-terminated byte sequence.
+#[no_mangle]
+pub unsafe extern "C" fn fos_klog_push_str(ring: *mut klog_ring::KlogRing, string: *const u8) {
+    unsafe { klog_ring::push_c_str(ring, string) }
+}
+
+/// Snapshot the newest retained bytes into caller-owned storage.
+///
+/// # Safety
+/// `ring` points to a live `KlogRing`; `dst` points to `dst_len` writable
+/// bytes and does not overlap the ring.
+#[no_mangle]
+pub unsafe extern "C" fn fos_klog_snapshot(
+    ring: *const klog_ring::KlogRing,
+    dst: *mut u8,
+    dst_len: usize,
+) -> usize {
+    unsafe { klog_ring::snapshot(ring, dst, dst_len) }
+}
+
+/// Build a get-clock-rate property message.
+///
+/// # Safety
+/// `message` points to eight writable, suitably aligned `u32` words.
+#[no_mangle]
+pub unsafe extern "C" fn fos_mailbox_build_get_clock_rate(message: *mut u32, clock_id: u32) {
+    unsafe { store_mailbox_message(message, mailbox::build_get_clock_rate(clock_id)) }
+}
+
+/// Build a set-GPIO-state property message.
+///
+/// # Safety
+/// `message` points to eight writable, suitably aligned `u32` words.
+#[no_mangle]
+pub unsafe extern "C" fn fos_mailbox_build_set_gpio_state(
+    message: *mut u32,
+    gpio: u32,
+    state: u32,
+) {
+    unsafe { store_mailbox_message(message, mailbox::build_set_gpio_state(gpio, state)) }
+}
+
+/// Build a set-power-state property message.
+///
+/// # Safety
+/// `message` points to eight writable, suitably aligned `u32` words.
+#[no_mangle]
+pub unsafe extern "C" fn fos_mailbox_build_set_power_state(
+    message: *mut u32,
+    device_id: u32,
+    state: u32,
+) {
+    unsafe { store_mailbox_message(message, mailbox::build_set_power_state(device_id, state)) }
+}
+
+/// Build a get-temperature property message.
+///
+/// # Safety
+/// `message` points to eight writable, suitably aligned `u32` words.
+#[no_mangle]
+pub unsafe extern "C" fn fos_mailbox_build_get_temperature(message: *mut u32, temp_id: u32) {
+    unsafe { store_mailbox_message(message, mailbox::build_get_temperature(temp_id)) }
+}
+
+/// Check the overall property response code.
+///
+/// # Safety
+/// `message` points to eight readable, suitably aligned `u32` words.
+#[no_mangle]
+pub unsafe extern "C" fn fos_mailbox_check_response(message: *const u32) -> u8 {
+    let message = unsafe { load_mailbox_message(message) };
+    u8::from(mailbox::check_response(&message))
+}
+
+/// Parse a clock-rate response, returning 0 on malformed input.
+///
+/// # Safety
+/// `message` points to eight readable, suitably aligned `u32` words.
+#[no_mangle]
+pub unsafe extern "C" fn fos_mailbox_parse_clock_rate(message: *const u32, clock_id: u32) -> u32 {
+    let message = unsafe { load_mailbox_message(message) };
+    mailbox::parse_clock_rate(&message, clock_id).unwrap_or(0)
+}
+
+/// Parse a temperature response, returning 0 on malformed input.
+///
+/// # Safety
+/// `message` points to eight readable, suitably aligned `u32` words.
+#[no_mangle]
+pub unsafe extern "C" fn fos_mailbox_parse_temperature(message: *const u32, temp_id: u32) -> u32 {
+    let message = unsafe { load_mailbox_message(message) };
+    mailbox::parse_temperature(&message, temp_id).unwrap_or(0)
+}
+
+/// Parse a power-state response. Plain integer booleans cross the ABI.
+///
+/// # Safety
+/// `message` points to eight readable, suitably aligned `u32` words.
+#[no_mangle]
+pub unsafe extern "C" fn fos_mailbox_parse_power_state(
+    message: *const u32,
+    device_id: u32,
+    want_on: u8,
+) -> u8 {
+    let message = unsafe { load_mailbox_message(message) };
+    u8::from(mailbox::parse_power_state(
+        &message,
+        device_id,
+        want_on != 0,
+    ))
+}
+
+#[no_mangle]
+pub extern "C" fn fos_mailbox_doorbell(buffer_address: u32, channel: u32) -> u32 {
+    mailbox::doorbell(buffer_address, channel)
+}
+
+/// Copy a local message to firmware-visible storage with volatile word writes.
+///
+/// # Safety
+/// `destination` points to eight writable, suitably aligned `u32` words.
+unsafe fn store_mailbox_message(destination: *mut u32, message: mailbox::Msg) {
+    let mut index = 0usize;
+    while index < message.len() {
+        unsafe { destination.add(index).write_volatile(message[index]) };
+        index += 1;
+    }
+}
+
+/// Snapshot firmware-visible storage with volatile word reads.
+///
+/// # Safety
+/// `source` points to eight readable, suitably aligned `u32` words.
+unsafe fn load_mailbox_message(source: *const u32) -> mailbox::Msg {
+    let mut message = [0; 8];
+    let mut index = 0usize;
+    while index < message.len() {
+        message[index] = unsafe { source.add(index).read_volatile() };
+        index += 1;
+    }
+    message
 }
 
 /// PBKDF2-HMAC-SHA256 over caller-owned buffers.

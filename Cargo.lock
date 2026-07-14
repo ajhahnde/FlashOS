@@ -183,6 +183,7 @@ dependencies = [
 name = "flashos-kernel"
 version = "0.8.0"
 dependencies = [
+ "flashos-abi",
  "hmac",
  "pbkdf2",
  "sha2",

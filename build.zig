@@ -511,13 +511,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // VideoCore mailbox — property-tag message construction + parsing.
-    // Pure data; the rpi4b board side
-    // (src/board/rpi4b/mailbox.zig) wraps it with the MMIO doorbell so
-    // the EMMC2 driver can read the firmware-set base clock and derive
-    // a safe SDHCI divider. Ported to Flash; flashc transpiles it via
-    // addFlashSource and the one transpile is shared with the host-test
-    // build below (src_lazy).
+    // VideoCore mailbox protocol adapter. Rust owns property-tag construction
+    // and parsing; the rpi4b module still owns the aligned buffer and MMIO
+    // doorbell while its board driver remains Flash.
     const mailbox_src = addFlashSource(b, "src/mailbox.flash");
     const mailbox_mod = b.createModule(.{
         .root_source_file = mailbox_src,
@@ -609,13 +605,9 @@ pub fn build(b: *std.Build) void {
     });
     virt_uart_mod.addImport("virt_dtb", virt_dtb_mod);
 
-    // Kernel-log byte-ring (overwrite-oldest) backing dmesg. Pure
-    // data + logic; src/utilc.zig tees main_output into it and src/sys.zig
-    // snapshots it for sys_klog_read — both reach the one `klog` global
-    // through this single named module. Imports syscall_defs for KLOG_SIZE
-    // (the ring capacity is ABI-shared with userland dmesg). Ported to Flash;
-    // flashc transpiles it via addFlashSource and the one transpile is shared
-    // with the host-test build below (src_lazy).
+    // Kernel-log adapter. Rust owns the ring arithmetic; this named Flash
+    // module retains the shared BSS instance and its fixed C layout until the
+    // utilc/sys consumers port. Imports syscall_defs for the ABI-shared size.
     const klog_ring_src = addFlashSource(b, "src/klog_ring.flash");
     const klog_ring_mod = b.createModule(.{
         .root_source_file = klog_ring_src,
@@ -2110,11 +2102,6 @@ pub fn build(b: *std.Build) void {
     // No externs, no fixture state.
     _ = addHostTest(b, test_step, .{ .src = "src/sdhci_cmd.flash", .src_lazy = sdhci_cmd_src });
 
-    // mailbox.flash — pure-data VideoCore property-tag builder + parser.
-    // No externs; the MMIO doorbell lives in
-    // src/board/rpi4b/mailbox.zig.
-    _ = addHostTest(b, test_step, .{ .src = "src/mailbox.flash", .src_lazy = mailbox_src });
-
     // usb_descriptors.flash — byte-exact USB descriptor set + SETUP decode
     // (DWC2 gadget). No externs; pure data + pure functions.
     _ = addHostTest(b, test_step, .{ .src = "src/usb_descriptors.flash", .src_lazy = usb_descriptors_src });
@@ -2123,16 +2110,12 @@ pub fn build(b: *std.Build) void {
     // No externs; pure ring arithmetic (push/peek/advance/clear).
     _ = addHostTest(b, test_step, .{ .src = "src/usb_tx_ring.flash", .src_lazy = usb_tx_ring_src });
 
-    // klog_ring.zig — kernel-log byte-ring (overwrite-oldest) host coverage.
-    // Pure ring arithmetic (push / overwrite-oldest / snapshot);
-    // imports syscall_defs only for KLOG_SIZE. The returned Module is reused
-    // as the utilc.zig test target's "klog_ring" import (utilc tees
-    // main_output into the ring), mirroring how wait_queue's test module
-    // doubles as pipe's import.
-    const klog_ring_test_mod = addHostTest(b, test_step, .{
-        .src = "src/klog_ring.flash",
-        .src_lazy = klog_ring_src,
-        .imports = &.{.{ .name = "syscall_defs", .mod = syscall_defs_test_mod }},
+    // utilc's host tests exercise UART formatting, not the Rust-owned ring.
+    // Give that test target a no-op named-module stand-in for its tee call.
+    const klog_ring_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/host_stubs_klog_ring.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
     });
 
     // fat32.flash — FAT32 on-disk layout decode.
