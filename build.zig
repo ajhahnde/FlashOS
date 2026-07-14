@@ -1223,45 +1223,6 @@ pub fn build(b: *std.Build) void {
     const stackbomb_elf = rust_stackbomb_cmd.addOutputFileArg("stackbomb.elf");
     rust_stackbomb_cmd.has_side_effects = true;
 
-    // ---- flibc — userland mini-libc, ELF-demo dependency ----
-    // Userland mini-libc: SVC wrappers, printf/puts on sys_writeConsole,
-    // bump allocator over sys_brk/sbrk, fork/wait/exit/execve. Exposed
-    // as a named module so ELF demos (and future fsh / coreutils
-    // payloads) can `addImport("flibc", flibc_mod)` and stay one
-    // `@import` deep. Pulls in syscall_defs for the SVC IDs — the same
-    // module the kernel consumes.
-    // flibc is a multi-file module: flibc.zig pulls its siblings in by relative
-    // import. As the port advances each module flips from a copied-verbatim .zig
-    // to a flashc-generated one; both land in a single composed WriteFiles
-    // directory so every `@import("sibling.zig")` resolves there (the same
-    // composition console_ui uses above). Until a module is ported it is copied
-    // straight from the source tree; ported modules are transpiled from .flash.
-    const flibc_dir = b.addWriteFiles();
-    const flibc_flash = [_][]const u8{ "heap", "io", "keys", "completion", "pager", "readline", "syscalls", "process", "execvp", "flibc" };
-    const flibc_zig = [_][]const u8{};
-    // Every composed sibling's in-dir LazyPath, keyed by module name. A flibc
-    // host test compiles the in-dir copy (where each `@import("sibling.zig")`
-    // resolves) rather than the on-disk file, which breaks the moment a sibling
-    // flips from a copied .zig to a flashc-generated one.
-    var flibc_srcs = std.StringHashMap(std.Build.LazyPath).init(b.allocator);
-    for (flibc_flash) |name| {
-        const gen = addFlashSource(b, b.fmt("user_space/lib/flibc/{s}.flash", .{name}));
-        flibc_srcs.put(name, flibc_dir.addCopyFile(gen, b.fmt("{s}.zig", .{name}))) catch @panic("OOM");
-    }
-    for (flibc_zig) |name| {
-        const dest = flibc_dir.addCopyFile(
-            b.path(b.fmt("user_space/lib/flibc/{s}.zig", .{name})),
-            b.fmt("{s}.zig", .{name}),
-        );
-        flibc_srcs.put(name, dest) catch @panic("OOM");
-    }
-    const flibc_mod = b.createModule(.{
-        .root_source_file = flibc_srcs.get("flibc").?,
-        .target = target,
-        .optimize = .ReleaseSmall,
-    });
-    flibc_mod.addImport("syscall_defs", syscall_defs_mod);
-
     // ---- flibc_demo.elf / argv_echo.elf — harness payloads ----
     // Both are Rust now. flibc_demo drives the userland library end to end
     // (formatted output, a bump allocation, exit) behind its own folded
@@ -1880,41 +1841,15 @@ pub fn build(b: *std.Build) void {
     // decode-correctness gate; no stubs, no imports.
     _ = addHostTest(b, test_step, .{ .src = "src/trace/fp_walk.zig" });
 
-    // flibc readline.zig — line-editor state-machine host coverage.
-    // Pure `step` transition + `State` buffer; the SVC
-    // driver sits behind a comptime `has_driver` gate so the host
-    // build never analyses inline asm. No stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/readline.flash", .src_lazy = flibc_srcs.get("readline").? });
-
-    // flibc execvp.flash — bare-name → `/bin/<name>` resolver host
-    // coverage. Pure `resolve` path-build; the SVC driver
-    // sits behind the same `has_driver` gate as readline.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/execvp.flash", .src_lazy = flibc_srcs.get("execvp").? });
-
     // grep match core — pure windowed substring matcher with ASCII case-fold.
     // No externs, no stubs, no SVC. /bin/grep carries its own matcher now; this one
     // survives for the editor's ctrl-W search and keeps its host coverage until the
     // editor ports.
 
-    // flibc keys.zig — VT100 input Decoder host coverage (arrows / ctrl / tab).
-    // Pure `Decoder.feed`; the SVC readKey driver sits behind the same
-    // has_driver gate as readline. No stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/keys.flash", .src_lazy = flibc_srcs.get("keys").? });
-
-    // flibc completion.zig — tab-completion core host coverage (parse,
-    // hasPrefix, commonPrefixLen). Pure; the readdir-driven gathering lives in
-    // readline's driver. No stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/completion.flash", .src_lazy = flibc_srcs.get("completion").? });
-
     // console_ui screen — panel / kv / cursor renderer host coverage. The
     // test blocks live in the Flash source; compile the generated screen.zig
     // from the composed console_ui directory so its sibling import resolves.
     _ = addHostTest(b, test_step, .{ .src = "lib/console_ui/screen.flash", .src_lazy = console_ui_screen_src });
-
-    // flibc pager.zig — pure scroll / line-index core host coverage (init line
-    // indexing, line slicing, scroll clamping). The screen.enter + readKey
-    // driver lives in tools/less_elf.zig. No stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "user_space/lib/flibc/pager.flash", .src_lazy = flibc_srcs.get("pager").? });
 
     // flibc gapbuf.zig — pure editing core host coverage (gap insert/delete/
     // moveGap/grow, segment line index, cursor motions, viewport scroll). The
