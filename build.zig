@@ -389,19 +389,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // ELF64 header + program-header parser. The loader in src/fork.zig
-    // imports it as the named module "elf". Ported to Flash and promoted
-    // to a named module: the generated .zig lives in the flashc cache, so
-    // fork.zig's former file-relative @import("elf.zig") could no longer
-    // resolve. Imports user_layout for the TEXT_BASE / DATA_BASE /
-    // STACK_LOW bounds the validators pin against.
+    // ELF64 parser adapter. Rust owns byte decoding and validation; this named
+    // module preserves the records and iterator API consumed by fork.flash.
     const elf_src = addFlashSource(b, "src/elf.flash");
     const elf_mod = b.createModule(.{
         .root_source_file = elf_src,
         .target = target,
         .optimize = optimize,
     });
-    elf_mod.addImport("user_layout", user_layout_mod);
 
     // Physical page allocator (bitmap over the MALLOC pool). A leaf
     // module — its only dependencies are assembly-side externs
@@ -1856,15 +1851,13 @@ pub fn build(b: *std.Build) void {
     // plus the corrupt-length guard. Imports only std → no stubs.
     _ = addHostTest(b, test_step, .{ .src = "src/board/virt/dtb.flash", .src_lazy = virt_dtb_src });
 
-    // Host-target build of the Flash-sourced elf module for fork.zig's
-    // @import("elf"). Shares the one flashc transpile (elf_src); the kernel
-    // build's elf_mod is aarch64-freestanding, so the test needs its own.
+    // Host-target build of the adapter for fork.flash's named import. Its ELF
+    // calls remain lazy in fork's unrelated host tests, so no FFI stub is linked.
     const elf_for_fork_mod = b.createModule(.{
         .root_source_file = elf_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
-    elf_for_fork_mod.addImport("user_layout", user_layout_test_mod);
 
     const fork_test_mod = addHostTest(b, test_step, .{
         .src = "src/fork.flash",
@@ -1907,13 +1900,6 @@ pub fn build(b: *std.Build) void {
 
     // vanilla single-module test targets — shared stubs, no named imports.
     _ = addHostTest(b, test_step, .{ .src = "src/page_alloc.flash", .src_lazy = page_alloc_src, .stubs = stubs_obj });
-    _ = addHostTest(b, test_step, .{
-        .src = "src/elf.flash",
-        .src_lazy = elf_src,
-        .stubs = stubs_obj,
-        .imports = &.{.{ .name = "user_layout", .mod = user_layout_test_mod }},
-    });
-
     // wait_queue is its own test target AND the named module pipe.zig
     // imports — capture the helper's returned Module so the pipe call
     // below can plug it back in as the "wait_queue" import.

@@ -9,9 +9,72 @@
 //! Rules for anything added here: `extern "C"`, `#[no_mangle]`, no panic may
 //! cross the boundary, and no Rust type without a fixed representation.
 
-use flashos_kernel::{klog_ring, mailbox, path, perm, sdhci_cmd, sha256, shadow};
+use flashos_kernel::{elf, klog_ring, mailbox, path, perm, sdhci_cmd, sha256, shadow};
 
 const NONE: usize = usize::MAX;
+
+fn elf_error_code(error: elf::ParseError) -> u32 {
+    match error {
+        elf::ParseError::BadMagic => 1,
+        elf::ParseError::NotElf64 => 2,
+        elf::ParseError::NotLittleEndian => 3,
+        elf::ParseError::NotExecutable => 4,
+        elf::ParseError::NotAarch64 => 5,
+        elf::ParseError::BadVersion => 6,
+        elf::ParseError::BadEntry => 7,
+        elf::ParseError::EntryOutOfBounds => 8,
+        elf::ParseError::PhoffOutOfBounds => 9,
+        elf::ParseError::TooManyPhdrs => 10,
+        elf::ParseError::MemszOverflow => 11,
+        elf::ParseError::VaddrOutOfBounds => 12,
+    }
+}
+
+/// Parse an ELF header into the ABI-owned output record. Zero means success.
+///
+/// # Safety
+/// `blob` points to `blob_len` readable bytes and `output` points to one
+/// writable, aligned `Ehdr` record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_elf_parse_ehdr(
+    blob: *const u8,
+    blob_len: usize,
+    output: *mut elf::Ehdr,
+) -> u32 {
+    if blob_len < core::mem::size_of::<elf::Ehdr>() {
+        return elf_error_code(elf::ParseError::BadMagic);
+    }
+    let blob = unsafe { core::slice::from_raw_parts(blob, blob_len) };
+    match elf::parse_ehdr(blob) {
+        Ok(header) => {
+            unsafe { output.write(header) };
+            0
+        }
+        Err(error) => elf_error_code(error),
+    }
+}
+
+/// Parse one ELF program header at `cursor`. Zero means success.
+///
+/// # Safety
+/// `blob` points to `blob_len` readable bytes and `output` points to one
+/// writable, aligned `Phdr` record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_elf_parse_phdr(
+    blob: *const u8,
+    blob_len: usize,
+    cursor: u64,
+    output: *mut elf::Phdr,
+) -> u32 {
+    let blob = unsafe { core::slice::from_raw_parts(blob, blob_len) };
+    match elf::parse_phdr_at(blob, cursor) {
+        Ok(header) => {
+            unsafe { output.write(header) };
+            0
+        }
+        Err(error) => elf_error_code(error),
+    }
+}
 
 /// Offset-based representation of a parsed shadow entry. The slices all point
 /// into the input line, so only their offsets and lengths cross the ABI.

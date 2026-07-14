@@ -10,6 +10,7 @@
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod elf;
 pub mod klog_ring;
 pub mod mailbox;
 pub mod path;

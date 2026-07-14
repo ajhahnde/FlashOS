@@ -70,6 +70,16 @@ export fn main_output(_: i32, _: [*:0]const u8) void {}
 export fn main_output_u64(_: i32, _: u64) void {}
 export fn main_output_char(_: i32, _: u8) void {}
 
+// fork's five host tests exercise process cloning, not the ELF loader, but the
+// imported adapter still needs its production FFI symbols at link time. Parser
+// behavior is covered one-for-one by flashos-kernel's host tests.
+export fn fos_elf_parse_ehdr(_: [*]const u8, _: usize, _: *anyopaque) u32 {
+    return 1;
+}
+export fn fos_elf_parse_phdr(_: [*]const u8, _: usize, _: u64, _: *anyopaque) u32 {
+    return 1;
+}
+
 // Mock for pipe_mod and file_mod
 pub const pipe_mod = struct {
     pub export fn dupAll(_: *TaskStruct, _: *TaskStruct) void {}
