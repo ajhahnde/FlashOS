@@ -9,7 +9,7 @@
 //! Rules for anything added here: `extern "C"`, `#[no_mangle]`, no panic may
 //! cross the boundary, and no Rust type without a fixed representation.
 
-use flashos_kernel::{klog_ring, mailbox, path, perm, sha256, shadow};
+use flashos_kernel::{klog_ring, mailbox, path, perm, sdhci_cmd, sha256, shadow};
 
 const NONE: usize = usize::MAX;
 
@@ -179,6 +179,28 @@ pub unsafe extern "C" fn fos_mailbox_parse_power_state(
 #[no_mangle]
 pub extern "C" fn fos_mailbox_doorbell(buffer_address: u32, channel: u32) -> u32 {
     mailbox::doorbell(buffer_address, channel)
+}
+
+#[no_mangle]
+pub extern "C" fn fos_sdhci_clock_divisor(base_hz: u32, target_hz: u32) -> u32 {
+    sdhci_cmd::clock_divisor(base_hz, target_hz)
+}
+
+#[no_mangle]
+pub extern "C" fn fos_sdhci_control1_clock_bits(divisor: u32) -> u32 {
+    sdhci_cmd::control1_clock_bits(divisor)
+}
+
+/// Parse four controller response words, returning zero for an unsupported CSD.
+#[no_mangle]
+pub extern "C" fn fos_sdhci_parse_csd_v2(
+    response0: u32,
+    response1: u32,
+    response2: u32,
+    response3: u32,
+) -> u64 {
+    sdhci_cmd::parse_csd_v2([response0, response1, response2, response3])
+        .map_or(0, |csd| csd.capacity_blocks)
 }
 
 /// Copy a local message to firmware-visible storage with volatile word writes.

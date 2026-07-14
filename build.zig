@@ -498,12 +498,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // SDHCI command encoder + CSD parser.
-    // Named module so the rpi4b BCM2711 EMMC2 driver
-    // (src/board/rpi4b/emmc2.zig) can `@import("sdhci_cmd")`
-    // for the CMD0..ACMD41 encodings and parseCsdV2. Ported to Flash;
-    // flashc transpiles it via addFlashSource and the one transpile is
-    // shared with the host-test build below (src_lazy).
+    // SDHCI command adapter. Rust owns the pure command codec, CSD parser,
+    // and clock arithmetic; this named module preserves the API imported by
+    // the rpi4b BCM2711 EMMC2 driver during the mixed-language bridge.
     const sdhci_cmd_src = addFlashSource(b, "src/sdhci_cmd.flash");
     const sdhci_cmd_mod = b.createModule(.{
         .root_source_file = sdhci_cmd_src,
@@ -2097,10 +2094,6 @@ pub fn build(b: *std.Build) void {
             .{ .name = "syscall_defs", .mod = syscall_defs_test_mod },
         },
     });
-
-    // sdhci_cmd.flash — pure-data SDHCI command encoder + CSD parser.
-    // No externs, no fixture state.
-    _ = addHostTest(b, test_step, .{ .src = "src/sdhci_cmd.flash", .src_lazy = sdhci_cmd_src });
 
     // usb_descriptors.flash — byte-exact USB descriptor set + SETUP decode
     // (DWC2 gadget). No externs; pure data + pure functions.

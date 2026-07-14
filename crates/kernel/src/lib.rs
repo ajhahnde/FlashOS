@@ -14,5 +14,6 @@ pub mod klog_ring;
 pub mod mailbox;
 pub mod path;
 pub mod perm;
+pub mod sdhci_cmd;
 pub mod sha256;
 pub mod shadow;
