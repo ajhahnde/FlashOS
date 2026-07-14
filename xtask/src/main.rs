@@ -31,7 +31,8 @@ Commands:
                                 --check diffs them against arch/aarch64/asm_defs_common.inc
   ui-defs [--check]             Diff the console look in crates/console-ui against the
                                 Flash copy the kernel still compiles (lib/console_ui/)
-  user <name> [--output <path>] Build a Rust EL0 payload (hello, clear)
+  user <name> [--output <path>] [--feature <name>]...
+                               Build a Rust EL0 payload (hello, clear, pid1, ...)
   test                          Run the Rust host tests (all crates but the canary)
   check-hygiene                 Run the repo's whitespace and hex-literal gates
   clean                         Remove rust-out/ and the cargo target dir
@@ -106,11 +107,11 @@ fn dispatch() -> Result<(), String> {
             let name = rest
                 .first()
                 .filter(|a| !a.starts_with("--"))
-                .ok_or("usage: cargo xtask user <name> [--output <path>]")?;
+                .ok_or("usage: cargo xtask user <name> [--output <path>] [--feature <name>]...")?;
             let spec = build::user_elf(name)?;
             let tc = Toolchain::discover()?;
-            let output = output_of(&rest[1..])?;
-            let elf = build::build_user_elf(&root, &tc, spec, output.as_deref())?;
+            let (output, features) = user_args_of(&rest[1..])?;
+            let elf = build::build_user_elf(&root, &tc, spec, output.as_deref(), &features)?;
             println!("built {}", elf.display());
             Ok(())
         }
@@ -148,19 +149,31 @@ fn dispatch() -> Result<(), String> {
     }
 }
 
-fn output_of(args: &[String]) -> Result<Option<PathBuf>, String> {
-    if args.is_empty() {
-        return Ok(None);
-    }
-    if args.len() == 2 && args[0] == "--output" {
-        return Ok(Some(PathBuf::from(&args[1])));
-    }
-    if args.len() == 1 {
-        if let Some(path) = args[0].strip_prefix("--output=") {
-            return Ok(Some(PathBuf::from(path)));
+/// The tail of a `user` invocation: where to put the ELF, and which cargo features to
+/// build it with. Unknown flags are rejected rather than ignored -- a misspelt
+/// `--feature boot-seltest` that silently produced a payload without the harness would
+/// hand the watchdog a boot with no scenarios in it and no error to explain why.
+fn user_args_of(args: &[String]) -> Result<(Option<PathBuf>, Vec<String>), String> {
+    let mut output = None;
+    let mut features = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if let Some(path) = a.strip_prefix("--output=") {
+            output = Some(PathBuf::from(path));
+        } else if a == "--output" {
+            let path = it.next().ok_or("--output needs a path")?;
+            output = Some(PathBuf::from(path));
+        } else if let Some(name) = a.strip_prefix("--feature=") {
+            features.push(name.to_string());
+        } else if a == "--feature" {
+            features.push(it.next().ok_or("--feature needs a name")?.clone());
+        } else {
+            return Err(format!(
+                "user accepts only [--output <path>] [--feature <name>]..., got `{a}`"
+            ));
         }
     }
-    Err("user accepts only [--output <path>]".into())
+    Ok((output, features))
 }
 
 fn board_of(args: &[String]) -> Result<Board, String> {

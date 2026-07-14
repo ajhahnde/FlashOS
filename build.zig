@@ -29,7 +29,7 @@ comptime {
 //   * arch/aarch64/*.S, *.inc         — CPU-ISA core: boot/entry/sched/timer/etc.
 //   * src/*.S                         — machine-independent asm (symbol table, trace)
 //   * src/board/<board>/*             — per-board driver bag + linker script
-//   * user_space/init_main.flash      — pid1.elf root, staged into the initramfs
+//   * user/pid1/                      — pid1.elf root, staged into the initramfs
 //   * src/board/<board>/linker.ld     — per-board link script (.initramfs section)
 //
 // The build produces:
@@ -280,8 +280,8 @@ pub fn build(b: *std.Build) void {
     }
 
     // Shared syscall ID constants — single source of truth for the
-    // kernel-side dispatch table (src/sys.zig) and the user-side
-    // wrappers (user_space/kernel_tests.zig). Exposed as a named module
+    // kernel-side dispatch table (src/sys.zig); the EL0 side now takes them
+    // from crates/abi, which pins the same numbers. Exposed as a named module
     // because Zig 0.16 forbids `@import` reaching outside the importing
     // module's root directory.
     // lib/syscall_defs.flash is the source of truth; flashc transpiles it to
@@ -1228,8 +1228,8 @@ pub fn build(b: *std.Build) void {
     // bump allocator over sys_brk/sbrk, fork/wait/exit/execve. Exposed
     // as a named module so ELF demos (and future fsh / coreutils
     // payloads) can `addImport("flibc", flibc_mod)` and stay one
-    // `@import` deep. Pulls in syscall_defs for the SVC IDs — same
-    // module the kernel and the kernel_tests user-side wrappers consume.
+    // `@import` deep. Pulls in syscall_defs for the SVC IDs — the same
+    // module the kernel consumes.
     // flibc is a multi-file module: flibc.zig pulls its siblings in by relative
     // import. As the port advances each module flips from a copied-verbatim .zig
     // to a flashc-generated one; both land in a single composed WriteFiles
@@ -1284,8 +1284,8 @@ pub fn build(b: *std.Build) void {
     // so the Zig-side host test for it retires with the Flash source.
     // Staged into the initramfs at /bin/fsh and exec'd by the PID-1
     // hand-off after the harness tally; the boot watchdog keys on fsh's
-    // homescreen marker as the success signal. (The in-harness
-    // [TEST] fsh scenario is disabled — see user_space/kernel_tests.zig.)
+    // homescreen marker as the success signal. (There is no in-harness fsh
+    // scenario: the hand-off plus that marker already prove the shell came up.)
     const rust_fsh_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", "fsh", "--output" });
     rust_fsh_cmd.setName("cargo xtask user fsh");
     const fsh_elf = rust_fsh_cmd.addOutputFileArg("fsh.elf");
@@ -1317,52 +1317,24 @@ pub fn build(b: *std.Build) void {
     }
 
     // ---- pid1.elf — the ELF-loaded PID 1 ----
-    // Replaces the user_init.o blob. Instead of compiling
-    // user_space/init.zig into the kernel object and wrapping it in
-    // linker.ld's user_start / user_end, PID 1 is now a standalone
-    // aarch64-freestanding ET_EXEC staged into the initramfs at
-    // /sbin/init. kernel_process locates that entry and hands its
-    // bytes to prepare_move_to_user_elf — the same ELF loader the
-    // exec-elf / stackbomb / flibc test payloads travel.
+    // A Rust payload now, built by xtask against the retained tools/pid1_linker.ld
+    // (one R+X PT_LOAD with .rodata / .data / .bss folded in). It carries the whole
+    // in-kernel test harness, so it is the largest of the staged ELFs — and unlike
+    // the test payloads it is loaded by kernel_process directly at boot rather than
+    // through sys_execve, so no snapshot cap applies to its size.
     //
-    // Recipe mirrors hello.elf (pie=false, strip, ReleaseSmall, tiny
-    // p_align so LLD doesn't page-pad the file). The forked linker
-    // script tools/pid1_linker.ld folds .rodata / .data / .bss into
-    // the single R+X PT_LOAD. Unlike the test payloads pid1.elf is
-    // loaded by kernel_process directly at boot, so there is no
-    // snapshot cap on its size — prepare_move_to_user_elf walks the
-    // PT_LOAD page by page.
-    // init_main (PID 1) is Flash; it imports the in-kernel test harness
-    // (kernel_tests.flash) as a relative sibling. flashc transpiles the
-    // harness at build time, and the generated init_main.zig + the transpiled
-    // kernel_tests.zig are composed into one WriteFiles directory so the
-    // relative @import("kernel_tests.zig") resolves.
-    const pid1_dir = b.addWriteFiles();
-    _ = pid1_dir.addCopyFile(addFlashSource(b, "user_space/kernel_tests.flash"), "kernel_tests.zig");
-    const pid1_mod = b.createModule(.{
-        .root_source_file = pid1_dir.addCopyFile(addFlashSource(b, "user_space/init_main.flash"), "init_main.zig"),
-        .target = target,
-        .optimize = .ReleaseSmall,
-        .strip = true,
-    });
-    pid1_mod.addImport("syscall_defs", syscall_defs_mod);
-    // console_ui supplies the shared status-tag and self-test marker bytes
-    // (PID 1's `[ OK ]` line, kernel_tests' [TEST]/[PASS]/[FAIL] markers).
-    pid1_mod.addImport("console_ui", console_ui_mod);
-    // pid1 reads build_options for the CI auto-login seed gate (see the
-    // ci-login-seed option above). Off by default → the shipped boot stops
-    // at `login:`; the watchdog builds with the flag for unattended auth.
-    pid1_mod.addOptions("build_options", build_options);
-    const pid1 = b.addExecutable(.{
-        .name = "pid1.elf",
-        .root_module = pid1_mod,
-    });
-    pid1.pie = false;
-    pid1.bundle_compiler_rt = false;
-    pid1.link_z_max_page_size = 0x80;
-    pid1.link_z_common_page_size = 0x80;
-    pid1.setLinkerScript(b.path("tools/pid1_linker.ld"));
-    pid1.entry = .disabled;
+    // The two build gates reach it as cargo features rather than build_options: a
+    // feature is part of cargo's fingerprint, so flipping one rebuilds the archive.
+    // Passing them through an environment variable would leave a stale payload — a
+    // kernel image that silently carries no harness, or a boot that seeds credentials
+    // it was never meant to.
+    const rust_pid1_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "user", "pid1" });
+    if (boot_selftest) rust_pid1_cmd.addArgs(&.{ "--feature", "boot-selftest" });
+    if (ci_login_seed) rust_pid1_cmd.addArgs(&.{ "--feature", "ci-login-seed" });
+    rust_pid1_cmd.addArg("--output");
+    rust_pid1_cmd.setName("cargo xtask user pid1");
+    const pid1_elf = rust_pid1_cmd.addOutputFileArg("pid1.elf");
+    rust_pid1_cmd.has_side_effects = true;
 
     // ---- /etc/shadow generator ----
     // Host tool: runs the kernel's PBKDF2 (src/sha256.zig) over fixed test
@@ -1414,7 +1386,7 @@ pub fn build(b: *std.Build) void {
     // nlink / mode and assigns monotonic ino, making the archive a
     // pure function of file contents + name list.
     const cpio_stage = b.addNamedWriteFiles("initramfs_stage");
-    _ = cpio_stage.addCopyFile(pid1.getEmittedBin(), "sbin/init");
+    _ = cpio_stage.addCopyFile(pid1_elf, "sbin/init");
     _ = cpio_stage.addCopyFile(rust_hello, "test/hello.elf");
     _ = cpio_stage.addCopyFile(stackbomb_elf, "test/stackbomb.elf");
     _ = cpio_stage.addCopyFile(flibc_demo_elf, "test/flibc_demo.elf");

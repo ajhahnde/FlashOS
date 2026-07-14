@@ -26,7 +26,7 @@
 # Expected success picture:
 #   * 30 EL0 scenarios, all `[PASS]` (no `[FAIL]`)
 #   * 34 × per-scenario checkpoint at the board's PID-1 baseline
-#   *  1 × initial boot-baseline checkpoint (baseline + 0xe = 14 pages,
+#   *  1 × initial boot-baseline checkpoint (baseline + 0xf = 15 pages,
 #         the PID-1 fork delta over the PID-0 boot snapshot)
 #   *  1 × healthy kernel-entropy announce (`HWRNG init`), 0 × failed
 #         self-test announce
@@ -46,26 +46,40 @@
 #              (0x40000000), and Pi has 4 GiB of RAM up to MALLOC_END
 #              (0xFC000000), so both reserve calls are no-ops. Boot
 #              baseline = 0xbc000 (the full MALLOC_PAGES count),
-#              per-scenario checkpoint = 0xbbff2 (boot − 0xe).
+#              per-scenario checkpoint = 0xbbff1 (boot − 0xf).
 #   * virt   — kernel is loaded at PA 0x40080000 (inside the pool
 #              window), so reserve_below covers the kernel image plus
 #              the 64 MiB `.sdscratch` buffer; reserve_above caps the
 #              pool at virt's 1 GiB RAM end (0x80000000), well below
 #              MALLOC_END's RPi-derived 0xFC000000. Boot baseline =
-#              0x3be53, per-scenario checkpoint = 0x3be45.
+#              0x3be44, per-scenario checkpoint = 0x3be35.
 #
 # The script accepts either pattern; the active board's pair must
-# match exactly. Net: 34 × {bbff2, 3be45} + 1 × {bc000, 3be53}.
+# match exactly. Net: 34 × {bbff1, 3be35} + 1 × {bc000, 3be44}.
 #
 # FROZEN (2026-06-17): the virt board is deprioritized — rpi4b + real
 # HW are the live gates and CI now boots rpi4b (test-rpi4b), not virt.
-# The virt values above (0x3be45 / 0x3be53 + the drift history) were
-# refreshed at the v0.5.0 /bin/uptime change (see drift history) and are
+# The virt values above (0x3be35 / 0x3be44 + the drift history) were
+# refreshed at the v0.8.0 Rust PID-1 change (see drift history) and are
 # otherwise NOT re-checked while virt is on ice. Detection of the virt
 # pattern is kept so `-Dboard=virt test-virt` still works for the
 # eventual revive — at which point re-validate and refresh these values.
 #
 # Drift history (legitimate free-page baseline shifts, newest first):
+#   * v0.8.0 — rpi4b 0xbbff2→0xbbff1, virt 0x3be45→0x3be35 (per-scenario) and
+#              virt 0x3be53→0x3be44 (boot baseline). NO tally bump: 30 EL0
+#              scenarios and 34 checkpoints, unchanged. PID 1 and the [TEST]
+#              harness are now Rust, and the PID-1 image needs 4 pages where the
+#              old one needed 3 — the freestanding Rust build keeps its bounds
+#              checks and their panic locations, which the old ReleaseSmall build
+#              compiled out. So the PID-1 fork delta over the boot snapshot goes
+#              0xe→0xf on BOTH boards, and rpi4b's boot baseline is untouched
+#              (reserve calls are no-ops there — a larger image cannot move it).
+#              virt's boot baseline additionally absorbs the initramfs growth of
+#              the whole userland port (its kernel sits inside the pool window,
+#              so reserve_below tracks the image); that had gone unrecaptured
+#              while virt was on ice, and this measurement is now the truth of
+#              record for both of its values.
 #   * v0.7.4 — marker WORDING only, no hex shift, no tally bump: the boot-log
 #              restyle renamed hwrng's announce lines ("Initialized hwrng" →
 #              "HWRNG init", "hwrng: self-test failed" → "HWRNG: self-test
@@ -190,23 +204,23 @@ fi
 errors=$(grep -cF "ERROR CAUGHT" "$LOG" || true)
 fails=$(grep -cF "[FAIL]" "$LOG" || true)
 
-# Board-specific baseline pair (see header). rpi4b: bbff2 / bc000;
-# virt: 3be45 / 3be53. Pick the board whose checkpoint pattern is
+# Board-specific baseline pair (see header). rpi4b: bbff1 / bc000;
+# virt: 3be35 / 3be44. Pick the board whose checkpoint pattern is
 # present, then require its exact pair (32 checkpoints + 1 boot
 # baseline). Detecting by content keeps this script board-arg-free.
-rpi_chk=$(grep -cF "free_pages: 00000000000bbff2" "$LOG" || true)
-virt_chk=$(grep -cF "free_pages: 000000000003be45" "$LOG" || true)
+rpi_chk=$(grep -cF "free_pages: 00000000000bbff1" "$LOG" || true)
+virt_chk=$(grep -cF "free_pages: 000000000003be35" "$LOG" || true)
 
 if [ "$rpi_chk" -gt 0 ]; then
     ok_chk=$rpi_chk
     ok_base=$(grep -cF "free_pages: 00000000000bc000" "$LOG" || true)
-    chk_label="0xbbff2"; base_label="0xbc000"
+    chk_label="0xbbff1"; base_label="0xbc000"
 elif [ "$virt_chk" -gt 0 ]; then
     ok_chk=$virt_chk
-    ok_base=$(grep -cF "free_pages: 000000000003be53" "$LOG" || true)
-    chk_label="0x3be45"; base_label="0x3be53"
+    ok_base=$(grep -cF "free_pages: 000000000003be44" "$LOG" || true)
+    chk_label="0x3be35"; base_label="0x3be44"
 else
-    echo "FAIL (no known checkpoint pattern): neither 0xbbff2 (rpi4b) nor 0x3be45 (virt) found" >&2
+    echo "FAIL (no known checkpoint pattern): neither 0xbbff1 (rpi4b) nor 0x3be35 (virt) found" >&2
     tail -n 50 "$LOG" >&2
     exit 1
 fi

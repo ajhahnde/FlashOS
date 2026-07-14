@@ -1,0 +1,24 @@
+[package]
+name = "flashos-pid1"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashos_pid1"
+crate-type = ["staticlib"]
+
+[features]
+# The two build-time gates the boot contract keys off. Both default OFF: a
+# hardware deploy boots clean to the real `login:` prompt, and the harness runs
+# only where a watchdog is watching. `cargo xtask user pid1 --feature ...` turns
+# them on; build.zig passes them through from -Dboot-selftest / -Dci-login-seed.
+boot-selftest = []
+ci-login-seed = []
+
+[dependencies]
+flashos-abi = { path = "../../crates/abi" }
+flashos-console-ui = { path = "../../crates/console-ui" }
+flashos-flibc = { path = "../../crates/flibc" }
+flashos-user-rt = { path = "../../crates/user-rt" }

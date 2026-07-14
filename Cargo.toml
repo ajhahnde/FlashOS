@@ -28,6 +28,7 @@ members = [
     "user/meminfo",
     "user/mv",
     "user/passwd",
+    "user/pid1",
     "user/rm",
     "user/stackbomb",
     "user/sysinfo",
@@ -44,6 +45,9 @@ license = "MIT"
 # overflow-checks=off keep the panic path free of core::fmt: the handler emits a
 # fixed marker, so the formatting engine never links and the 128 KiB symbol
 # budget stays intact.
+[profile.release.package.flashos-pid1]
+opt-level = "z"
+
 [profile.release]
 opt-level = 2
 lto = true

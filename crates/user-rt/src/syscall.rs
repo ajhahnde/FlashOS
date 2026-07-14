@@ -4,15 +4,17 @@
 use flashos_abi::syscall::Dirent;
 #[cfg(any(target_os = "none", test))]
 use flashos_abi::syscall::{
-    SYS_AUTHENTICATE, SYS_CHDIR, SYS_CLOSE, SYS_CPU_FREQ, SYS_CPU_TEMP, SYS_CREATE, SYS_DUMP_FREE,
-    SYS_EXECVE, SYS_EXIT, SYS_FORK, SYS_GETEUID, SYS_GETUID, SYS_KLOG_READ, SYS_MEMTOTAL,
-    SYS_OPEN_FILE, SYS_PASSWD, SYS_READ, SYS_READDIR, SYS_RENAME, SYS_SBRK, SYS_SETGID, SYS_SETUID,
-    SYS_SET_CONSOLE_MODE, SYS_UNLINK, SYS_UPTIME, SYS_WAIT, SYS_WRITE,
+    SYS_AUTHENTICATE, SYS_BRK, SYS_CHDIR, SYS_CLOSE, SYS_CONSOLE_INJECT, SYS_CPU_FREQ,
+    SYS_CPU_TEMP, SYS_CREATE, SYS_DUMP_FREE, SYS_EXECVE, SYS_EXIT, SYS_FORK, SYS_GETEUID,
+    SYS_GETUID, SYS_KILL, SYS_KLOG_READ, SYS_MEMTOTAL, SYS_OPEN_FILE, SYS_PASSWD, SYS_READ,
+    SYS_READDIR, SYS_RENAME, SYS_SBRK, SYS_SETGID, SYS_SETUID, SYS_SET_CONSOLE_MODE, SYS_UNLINK,
+    SYS_UPTIME, SYS_WAIT, SYS_WRITE,
 };
-// The shell's four: no host test names them, so they are target-only. The block above
-// is also visible to `test` because those numbers are asserted there.
+// The shell's four plus the two gid getters: no host test names them, so they are
+// target-only. The block above is also visible to `test` because those numbers are
+// asserted there.
 #[cfg(target_os = "none")]
-use flashos_abi::syscall::{SYS_DUP2, SYS_GETCWD, SYS_PIPE, SYS_REBOOT};
+use flashos_abi::syscall::{SYS_DUP2, SYS_GETCWD, SYS_GETEGID, SYS_GETGID, SYS_PIPE, SYS_REBOOT};
 
 pub const STDIN: i32 = 0;
 pub const STDOUT: i32 = 1;
@@ -216,6 +218,32 @@ pub fn sbrk(delta: i64) -> i64 {
     unsafe { raw(SYS_SBRK, [delta as u64, 0, 0, 0, 0, 0]) }
 }
 
+/// Set the program break to an absolute address, page-rounded up, and return the new
+/// break -- or the current one when `addr` is `0`. Negative on a break outside
+/// `[HEAP_BASE, STACK_TOP - budget)`. The address form is what a heap grower needs
+/// when it computes a target rather than a delta; [`sbrk`] is the relative sibling.
+#[cfg(target_os = "none")]
+pub fn brk(addr: u64) -> i64 {
+    unsafe { raw(SYS_BRK, [addr, 0, 0, 0, 0, 0]) }
+}
+
+/// Terminate `pid`. There is no signal number: the task is zombified outright and its
+/// parent reaps it through [`wait`].
+#[cfg(target_os = "none")]
+pub fn kill(pid: i32) -> i32 {
+    unsafe { raw(SYS_KILL, [pid as u64, 0, 0, 0, 0, 0]) as i32 }
+}
+
+/// Push one byte into the kernel's console RX ring, as though it had arrived on the
+/// serial line. The unattended QEMU boot has no typist, so this is how a scripted
+/// login or an RX-path test feeds the reader that is blocked on fd 0.
+#[cfg(target_os = "none")]
+pub fn console_inject(byte: u8) {
+    unsafe {
+        raw(SYS_CONSOLE_INJECT, [byte as u64, 0, 0, 0, 0, 0]);
+    }
+}
+
 /// Read the `index`-th entry of the directory at `path` into `out`. Returns `0` when
 /// an entry was filled and non-zero once the directory is exhausted, so a caller
 /// walks it by counting up until it stops returning `0`.
@@ -355,6 +383,18 @@ pub fn geteuid() -> i64 {
     unsafe { raw(SYS_GETEUID, [0; 6]) }
 }
 
+/// The calling task's real gid.
+#[cfg(target_os = "none")]
+pub fn getgid() -> i64 {
+    unsafe { raw(SYS_GETGID, [0; 6]) }
+}
+
+/// The calling task's effective gid.
+#[cfg(target_os = "none")]
+pub fn getegid() -> i64 {
+    unsafe { raw(SYS_GETEGID, [0; 6]) }
+}
+
 /// Drop to `uid`. One-way for a non-root caller: a task that has given up root
 /// cannot take it back, which is why a session's privilege drop must happen in the
 /// forked child and never in the supervisor.
@@ -476,6 +516,34 @@ mod tests {
         let regs = place(SYS_READ, [STDIN as u64, 0xdead, 64, 0, 0, 0]);
         assert_eq!(regs.x8, 32);
         assert_eq!(regs.x[..3], [0, 0xdead, 64]);
+    }
+
+    #[test]
+    fn brk_passes_an_absolute_address_where_sbrk_passes_a_delta() {
+        // Two slots, two meanings, one register: handing the kernel a delta on the
+        // brk slot would set the break to a few pages above zero and unmap the heap.
+        let grow = place(SYS_BRK, [0x4000_0000, 0, 0, 0, 0, 0]);
+        assert_eq!(grow.x8, 12);
+        assert_eq!(grow.x[0], 0x4000_0000);
+        assert_eq!(place(SYS_SBRK, [4096, 0, 0, 0, 0, 0]).x8, 13);
+        // brk(0) is the read: the kernel must see a zero, not an uninitialised x0.
+        assert_eq!(place(SYS_BRK, [0; 6]).x, [0; 6]);
+    }
+
+    #[test]
+    fn kill_places_the_pid_in_x0() {
+        let regs = place(SYS_KILL, [7, 0, 0, 0, 0, 0]);
+        assert_eq!(regs.x8, 6);
+        assert_eq!(regs.x[0], 7);
+    }
+
+    #[test]
+    fn console_inject_places_one_byte_in_x0() {
+        // The byte is zero-extended into the register: a sign-extended 0x80..0xff
+        // would reach the ring as a different value than the caller pushed.
+        let regs = place(SYS_CONSOLE_INJECT, [0xc0u8 as u64, 0, 0, 0, 0, 0]);
+        assert_eq!(regs.x8, 30);
+        assert_eq!(regs.x[0], 0xc0);
     }
 
     #[test]

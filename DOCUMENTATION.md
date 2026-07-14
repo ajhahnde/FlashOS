@@ -561,7 +561,7 @@ pub const FdSlot = extern struct {        // 16 B; 8 slots = 128 B
 - **fd 0/1/2 pre-installed.** PID 1 bring-up (`kernel_process` in
   `src/kernel.flash`) installs three `console` slots before entering
   user space. No page is allocated, so the PID-1 baseline
-  `0xbbff2` is unchanged.
+  `0xbbff1` is unchanged.
 - **fork inherits, execve preserves.** `copy_process`
   (`src/fork.flash`) calls `fdtable.dupAll`, bumping the pipe/file ref of
   every non-console slot; `do_wait` (`src/sched.flash`) calls
@@ -1190,34 +1190,34 @@ leak-free:
 - **Kernel boot baseline:** `0xbc000` — emitted once by `kernel_main`
   (`src/kernel.flash`) before PID 1 is created. Equals 4 GiB Pi minus
   VC reservation, kernel image, and the identity + high page tables.
-- **User-space baseline:** `0xbbff2` — emitted by PID 1 on entry to
-  `run_all`. Equals the boot baseline minus 14 pages claimed by PID 1
+- **User-space baseline:** `0xbbff1` — emitted by PID 1 on entry to
+  `run_all`. Equals the boot baseline minus 15 pages claimed by PID 1
   setup (ELF text + page-table chain + eager top-stack page +
   `run_all`'s stack-warm-up + its own kernel-stack page + bookkeeping).
-  Every leak-free scenario must end at this same value. The 14th page is
-  PID 1's own kernel-stack page — every task gets its own, the fix that
-  keeps a deep-syscall stack overflow out of the credential fields (see
-  "Security model" in §5).
+  Every leak-free scenario must end at this same value. One of those
+  pages is PID 1's own kernel-stack page — every task gets its own, the
+  fix that keeps a deep-syscall stack overflow out of the credential
+  fields (see "Security model" in §5).
 
 A full run prints one kernel baseline and 34 user-space checkpoints.
-Every user-space checkpoint must remain at `0xbbff2`; any deviation
+Every user-space checkpoint must remain at `0xbbff1`; any deviation
 indicates a leak or an unexpected allocation.
 
 Any deviation indicates a leak in the scenario above the deviating
 checkpoint.
 
 The example above shows the rpi4b values. On virt the same structure
-holds with the board's own pair — boot baseline `0x3be53`,
-per-scenario checkpoint `0x3be45` — smaller because virt has 1 GiB of
+holds with the board's own pair — boot baseline `0x3be44`,
+per-scenario checkpoint `0x3be35` — smaller because virt has 1 GiB of
 RAM and its kernel is loaded _inside_ the page-pool window, so
 `mem_map_reserve_below` subtracts the kernel image (including the
 128 KiB `_symbols` section and the 16 KiB klog ring) and the 64 MiB
 `.sdscratch` buffer from the pool. The per-task kernel-stack-page fix
 — each live task gets a second kernel page so a deep syscall's stack
 can never overflow into its `TaskStruct` credentials (see "Security
-model" in §5) — widens the boot-to-scenario delta to `0xe` on both
-boards, landing the documented pairs: rpi4b `0xbbff2` / `0xbc000` and
-virt `0x3be45` / `0x3be53`.
+model" in §5) — widens the boot-to-scenario delta to `0xf` on both
+boards, landing the documented pairs: rpi4b `0xbbff1` / `0xbc000` and
+virt `0x3be35` / `0x3be44`.
 
 ### Coverage matrix
 

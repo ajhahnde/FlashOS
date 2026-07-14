@@ -399,6 +399,16 @@ pub const USER_ELFS: &[UserElf] = &[
         archive: "libflashos_fsh.a",
         linker_script: "tools/fsh_linker.ld",
     },
+    // PID 1. The largest staged ELF, because it carries the whole boot self-test harness,
+    // and the only one the kernel loads directly rather than through an exec -- so it is
+    // not subject to the exec path's snapshot cap. It keeps its own script for the same
+    // reason the shell does: one R+X segment, everything folded in.
+    UserElf {
+        elf: "pid1.elf",
+        package: "flashos-pid1",
+        archive: "libflashos_pid1.a",
+        linker_script: "tools/pid1_linker.ld",
+    },
     // The harness payloads. Each keeps the retained script its old counterpart used:
     // argv_echo's own (it carries the over-a-page padding), flibc_demo's folded
     // single-segment layout, and the generic one stackbomb shares with hello.
@@ -442,21 +452,34 @@ pub fn user_elf(name: &str) -> Result<&'static UserElf, String> {
 /// Build one Rust EL0 payload and link it with its retained single-PT_LOAD linker
 /// script. The old kernel consumes the ELF without knowing or caring which
 /// implementation language produced it.
+/// `features` are cargo features on the payload's own package. PID 1 is the only payload
+/// that takes any: the boot self-test and the scripted login are build-time gates, and a
+/// feature is what makes cargo rebuild the archive when one of them flips -- an
+/// environment variable read at compile time would leave a stale artefact behind.
 pub fn build_user_elf(
     root: &Path,
     tc: &Toolchain,
     spec: &UserElf,
     requested_output: Option<&Path>,
+    features: &[String],
 ) -> Result<PathBuf, String> {
     let out = root.join("rust-out/user");
     let trace = out.join("xtask-trace.log");
     fs::create_dir_all(&out).map_err(|e| format!("mkdir {}: {e}", out.display()))?;
     let _ = fs::remove_file(&trace);
 
-    Cmd::new("cargo", &trace)
-        .cwd(root)
-        .args(["build", "--release", "-p", spec.package, "--target", TARGET])
-        .run()?;
+    let mut cargo = Cmd::new("cargo", &trace).cwd(root).args([
+        "build",
+        "--release",
+        "-p",
+        spec.package,
+        "--target",
+        TARGET,
+    ]);
+    if !features.is_empty() {
+        cargo = cargo.args(["--features".to_string(), features.join(",")]);
+    }
+    cargo.run()?;
     let archive = root
         .join("target")
         .join(TARGET)
