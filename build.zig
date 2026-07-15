@@ -400,20 +400,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Physical page allocator (bitmap over the MALLOC pool). A leaf
-    // module — its only dependencies are assembly-side externs
-    // (memzero / main_output*). Ported to Flash and promoted to a named
-    // module: the generated .zig lives in the flashc cache, so
-    // start.zig's former file-relative @import("page_alloc.zig") could
-    // no longer resolve. The one transpile is shared with the host-test
-    // build below (src_lazy).
-    const page_alloc_src = addFlashSource(b, "src/page_alloc.flash");
-    const page_alloc_mod = b.createModule(.{
-        .root_source_file = page_alloc_src,
-        .target = target,
-        .optimize = optimize,
-    });
-
     // User-page mapping + page-table walk + the EL0 fault handlers.
     // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
     // pulls the export fns into the ELF with `_ = @import("mm_user")`;
@@ -1099,7 +1085,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("initramfs_backend", initramfs_backend_mod);
     kernel_mod.addImport("fat32_backend", fat32_backend_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
-    kernel_mod.addImport("page_alloc", page_alloc_mod);
     kernel_mod.addImport("mm_user", mm_user_mod);
     kernel_mod.addImport("fork", fork_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
@@ -1852,7 +1837,6 @@ pub fn build(b: *std.Build) void {
     });
 
     // vanilla single-module test targets — shared stubs, no named imports.
-    _ = addHostTest(b, test_step, .{ .src = "src/page_alloc.flash", .src_lazy = page_alloc_src, .stubs = stubs_obj });
     // wait_queue is its own test target AND the named module pipe.zig
     // imports — capture the helper's returned Module so the pipe call
     // below can plug it back in as the "wait_queue" import.

@@ -23,6 +23,7 @@ pub mod initramfs_backend;
 pub mod klog_ring;
 pub mod mailbox;
 pub mod overlay;
+pub mod page_alloc;
 pub mod path;
 pub mod perm;
 pub mod sdhci_cmd;

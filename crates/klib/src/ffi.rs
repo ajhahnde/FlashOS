@@ -10,8 +10,8 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    block_dev, elf, fat32_backend, file, initramfs_backend, klog_ring, mailbox, path, perm,
-    sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring, vfs,
+    block_dev, elf, fat32_backend, file, initramfs_backend, klog_ring, mailbox, page_alloc, path,
+    perm, sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -172,10 +172,110 @@ pub struct FosShadowEntry {
 unsafe extern "C" {
     /// The kernel's panic (`src/utilc.flash`): prints the message and halts.
     pub unsafe fn panic(msg: *const u8) -> !;
-    fn get_free_page() -> u64;
-    fn free_page(page: u64);
+    fn memzero(start: u64, size: u64);
+    fn main_output(interface: i32, string: *const u8);
+    fn main_output_u64(interface: i32, value: u64);
     fn preempt_disable();
     fn preempt_enable();
+}
+
+/// Reset the physical-page bitmap during single-core bring-up.
+///
+/// # Safety
+/// Must run on core 0 before any allocator consumer becomes reachable.
+#[no_mangle]
+pub unsafe extern "C" fn mem_map_init() {
+    // SAFETY: kernel bring-up calls this before any allocator consumer.
+    unsafe { page_alloc::mem_map_init() };
+}
+
+/// Reserve allocator PAs occupied by the linked kernel image.
+///
+/// # Safety
+/// Must follow bitmap initialization and precede runtime allocation.
+#[no_mangle]
+pub unsafe extern "C" fn mem_map_reserve_below(end_pa: u64) {
+    // SAFETY: kernel bring-up calls this immediately after bitmap initialization.
+    unsafe { page_alloc::mem_map_reserve_below(end_pa) };
+}
+
+/// Reserve allocator PAs outside the active board's RAM window.
+///
+/// # Safety
+/// Must run during single-core bring-up before runtime allocation.
+#[no_mangle]
+pub unsafe extern "C" fn mem_map_reserve_above(start_pa: u64) {
+    // SAFETY: kernel bring-up calls this before runtime allocation begins.
+    unsafe { page_alloc::mem_map_reserve_above(start_pa) };
+}
+
+/// Allocate and zero one physical page, returning PA 0 on exhaustion.
+///
+/// # Safety
+/// The caller must satisfy the kernel's single-core allocator exclusion.
+#[no_mangle]
+pub unsafe extern "C" fn get_free_page() -> u64 {
+    // SAFETY: kernel callers serialize allocator access; assembly memzero accepts
+    // the mapped exclusive page and does not retain it.
+    unsafe { page_alloc::get_free_page(memzero) }
+}
+
+/// Return one physical page to the allocator.
+///
+/// # Safety
+/// The caller relinquishes an allocator-owned PA and retains no live alias.
+#[no_mangle]
+pub unsafe extern "C" fn free_page(page: u64) {
+    // SAFETY: the C ABI contract requires callers to relinquish the page here.
+    unsafe { page_alloc::free_page(page) };
+}
+
+/// Allocate one page and return its high-half alias, or zero on exhaustion.
+///
+/// # Safety
+/// The caller must satisfy the kernel's single-core allocator exclusion.
+#[no_mangle]
+pub unsafe extern "C" fn get_kernel_page() -> u64 {
+    // SAFETY: same serialized allocation and memzero contract as get_free_page.
+    unsafe { page_alloc::get_kernel_page(memzero) }
+}
+
+/// Return a high-half allocator page.
+///
+/// # Safety
+/// The caller relinquishes a live allocator KVA and retains no live alias.
+#[no_mangle]
+pub unsafe extern "C" fn free_kernel_page(page: u64) {
+    // SAFETY: the C ABI contract requires a live allocator KVA.
+    unsafe { page_alloc::free_kernel_page(page) };
+}
+
+/// Print and return the current free-page count at a boot/test checkpoint.
+///
+/// # Safety
+/// The caller must serialize the bitmap scan against allocator mutation.
+#[no_mangle]
+pub unsafe extern "C" fn dump_free_count() -> u64 {
+    // SAFETY: checkpoint callers serialize the bitmap scan.
+    let count = unsafe { page_alloc::free_count() };
+    // SAFETY: fixed strings are NUL-terminated and the output functions do not
+    // retain them or re-enter the allocator.
+    unsafe {
+        main_output(0, c"free_pages: ".as_ptr().cast());
+        main_output_u64(0, count);
+        main_output(0, c"\n".as_ptr().cast());
+    }
+    count
+}
+
+/// Return the post-reservation allocator pool size.
+///
+/// # Safety
+/// Bring-up initialization and all reservations must already be complete.
+#[no_mangle]
+pub unsafe extern "C" fn mem_total_count() -> u64 {
+    // SAFETY: runtime reads occur after boot reservations have completed.
+    unsafe { page_alloc::mem_total_count() }
 }
 
 /// Allocate and zero one ABI-owned `File` record.
