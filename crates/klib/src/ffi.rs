@@ -10,8 +10,8 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    block_dev, elf, klog_ring, mailbox, path, perm, sdhci_cmd, sha256, shadow, usb_descriptors,
-    usb_tx_ring,
+    block_dev, elf, file, initramfs_backend, klog_ring, mailbox, path, perm, sdhci_cmd, sha256,
+    shadow, usb_descriptors, usb_tx_ring, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -172,6 +172,219 @@ pub struct FosShadowEntry {
 unsafe extern "C" {
     /// The kernel's panic (`src/utilc.flash`): prints the message and halts.
     pub unsafe fn panic(msg: *const u8) -> !;
+    fn get_free_page() -> u64;
+    fn free_page(page: u64);
+    fn preempt_disable();
+    fn preempt_enable();
+}
+
+/// Allocate and zero one ABI-owned `File` record.
+#[no_mangle]
+pub extern "C" fn fos_file_alloc() -> *mut file::File {
+    // SAFETY: the kernel allocator exports this leaf primitive and returns zero
+    // or one page exclusively owned by the caller.
+    let page_pa = unsafe { get_free_page() };
+    if page_pa == 0 {
+        return core::ptr::null_mut();
+    }
+    let file = file::page_kva(page_pa, true) as *mut file::File;
+    // SAFETY: the fresh page is aligned, writable, and exclusively owned.
+    unsafe { file::initialize(file) };
+    file
+}
+
+/// Drop a file reference and free the page on the last one.
+///
+/// # Safety
+/// `value` points to a live allocated `File` with at least one reference.
+#[no_mangle]
+pub unsafe extern "C" fn fos_file_unref(value: *mut file::File) {
+    unsafe { preempt_disable() };
+    let last = unsafe { file::drop_ref(value) };
+    unsafe { preempt_enable() };
+    if last {
+        let page_pa = file::page_pa(value as u64, true);
+        unsafe { free_page(page_pa) };
+    }
+}
+
+/// Add a file reference under the existing preemption exclusion.
+///
+/// # Safety
+/// `value` points to a live allocated `File`.
+#[no_mangle]
+pub unsafe extern "C" fn fos_file_ref(value: *mut file::File) {
+    unsafe { preempt_disable() };
+    unsafe { file::add_ref(value) };
+    unsafe { preempt_enable() };
+}
+
+/// Offset/length-only view of one parsed initramfs entry. No archive pointer is
+/// embedded: the Flash root adapter derives the same high-half archive base and
+/// reconstructs its borrowed slices from these integer spans.
+#[repr(C)]
+pub struct FosInitramfsEntry {
+    name_offset: usize,
+    name_len: usize,
+    data_offset: usize,
+    data_len: usize,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+}
+
+/// Locate one embedded CPIO entry: 1 = hit, 0 = miss, -1 = malformed archive.
+///
+/// # Safety
+/// `path` is readable for `path_len`; `out` points to writable aligned storage.
+#[no_mangle]
+pub unsafe extern "C" fn fos_initramfs_locate(
+    path: *const u8,
+    path_len: usize,
+    out: *mut FosInitramfsEntry,
+) -> i32 {
+    let path = unsafe { slice_from_raw(path, path_len) };
+    let entry = match initramfs_backend::locate_production(path) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return 0,
+        Err(_) => return -1,
+    };
+    let base = initramfs_backend::production_archive_base() as usize;
+    unsafe {
+        out.write(FosInitramfsEntry {
+            name_offset: entry.name.as_ptr() as usize - base,
+            name_len: entry.name.len(),
+            data_offset: entry.data.as_ptr() as usize - base,
+            data_len: entry.data.len(),
+            mode: entry.mode,
+            uid: entry.uid,
+            gid: entry.gid,
+        })
+    };
+    1
+}
+
+/// Wire the Rust-owned initramfs root backend during kernel bring-up.
+#[no_mangle]
+pub extern "C" fn fos_initramfs_backend_init() {
+    // SAFETY: kernel.flash calls this exactly once during single-core bring-up.
+    unsafe { initramfs_backend::init() };
+}
+
+/// # Safety
+/// `ops` points to a live writable VFS vtable.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_relocate_ops(ops: *mut vfs::VfsOps) {
+    unsafe { vfs::relocate_ops(ops) };
+}
+
+/// # Safety
+/// `sb` lives for the kernel lifetime and registration occurs during bring-up.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_register_fat32(sb: *mut vfs::SuperBlock) {
+    unsafe { vfs::register_fat32(sb) };
+}
+
+/// # Safety
+/// Input/output pointers are valid for their declared spans.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_open(
+    path: *const u8,
+    path_len: usize,
+    out: *mut vfs::OpenResult,
+) -> *mut vfs::SuperBlock {
+    let path = unsafe { slice_from_raw(path, path_len) };
+    unsafe { vfs::open(path, out) }
+}
+
+/// # Safety
+/// The superblock, file, and buffer satisfy the registered callback contract.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_read(
+    sb: *mut vfs::SuperBlock,
+    value: *mut file::File,
+    buffer: *mut u8,
+    len: u64,
+) -> i64 {
+    unsafe { vfs::read(sb, value, buffer, len) }
+}
+
+/// # Safety
+/// `sb` and `value` are live registered records.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_seek(
+    sb: *mut vfs::SuperBlock,
+    value: *mut file::File,
+    off: i64,
+    whence: i32,
+) -> i64 {
+    unsafe { vfs::seek(sb, value, off, whence) }
+}
+
+/// # Safety
+/// `sb` and `value` are live registered records.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_close(sb: *mut vfs::SuperBlock, value: *mut file::File) {
+    unsafe { vfs::close(sb, value) };
+}
+
+/// # Safety
+/// The superblock, file, and buffer satisfy the registered callback contract.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_write(
+    sb: *mut vfs::SuperBlock,
+    value: *mut file::File,
+    buffer: *const u8,
+    len: u64,
+) -> i64 {
+    unsafe { vfs::write(sb, value, buffer, len) }
+}
+
+/// # Safety
+/// Input/output pointers are valid for their declared spans.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_readdir(
+    path: *const u8,
+    path_len: usize,
+    index: u64,
+    out: *mut vfs::Dirent,
+) -> i32 {
+    let path = unsafe { slice_from_raw(path, path_len) };
+    unsafe { vfs::readdir(path, index, out) }
+}
+
+/// # Safety
+/// Input/output pointers are valid for their declared spans.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_create(
+    path: *const u8,
+    path_len: usize,
+    out: *mut vfs::OpenResult,
+) -> *mut vfs::SuperBlock {
+    let path = unsafe { slice_from_raw(path, path_len) };
+    unsafe { vfs::create(path, out) }
+}
+
+/// # Safety
+/// `path` is readable for `path_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_unlink(path: *const u8, path_len: usize) -> i32 {
+    let path = unsafe { slice_from_raw(path, path_len) };
+    unsafe { vfs::unlink(path) }
+}
+
+/// # Safety
+/// Both input paths are readable for their declared lengths.
+#[no_mangle]
+pub unsafe extern "C" fn fos_vfs_rename(
+    old: *const u8,
+    old_len: usize,
+    new: *const u8,
+    new_len: usize,
+) -> i32 {
+    let old = unsafe { slice_from_raw(old, old_len) };
+    let new = unsafe { slice_from_raw(new, new_len) };
+    unsafe { vfs::rename(old, new) }
 }
 
 /// Return the number of bytes retained by a shared-layout kernel log ring.

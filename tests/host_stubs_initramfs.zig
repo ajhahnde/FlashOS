@@ -16,11 +16,31 @@
 
 const layout = @import("task_layout");
 
+extern fn get_free_page() u64;
+extern fn free_page(page: u64) void;
+
 pub var current_storage: layout.TaskStruct = .{};
 export var current: ?*layout.TaskStruct = &current_storage;
 
 export fn preempt_disable() void {}
 export fn preempt_enable() void {}
+
+export fn fos_file_alloc() ?*layout.File {
+    const page = get_free_page();
+    if (page == 0) return null;
+    const file: *layout.File = @ptrFromInt(page);
+    file.* = .{};
+    return file;
+}
+
+export fn fos_file_unref(file: *layout.File) void {
+    file.refs -= 1;
+    if (file.refs == 0) free_page(@intFromPtr(file));
+}
+
+export fn fos_file_ref(file: *layout.File) void {
+    file.refs += 1;
+}
 
 export fn mem_eql_bytes(a: [*]const u8, b: [*]const u8, n: u64) bool {
     var i: u64 = 0;

@@ -41,3 +41,12 @@ export fn _schedule() void {}
 export fn get_free_page() u64 {
     return 0;
 }
+
+// The scheduler's fd-table reap path reaches the transitional File adapter.
+// Rust owns the real refcount implementation; these tests only need inert
+// link-time stand-ins because no scheduler helper under test allocates a File.
+export fn fos_file_alloc() ?*anyopaque {
+    return null;
+}
+export fn fos_file_unref(_: *anyopaque) void {}
+export fn fos_file_ref(_: *anyopaque) void {}

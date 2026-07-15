@@ -477,9 +477,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    initramfs_backend_mod.addImport("initramfs", initramfs_mod);
-    initramfs_backend_mod.addImport("vfs", vfs_mod);
-    initramfs_backend_mod.addImport("file", file_mod);
 
     // Block-device abstraction. Single global
     // `sd_dev` vtable that the FAT32 backend reads + writes
@@ -1994,28 +1991,8 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    // initramfs.zig — newc cpio parser. Pure data parser with no externs
-    // in host builds — the shared stubs_obj is
-    // linked for parity with the other test targets, not because the
-    // module needs it.
-    _ = addHostTest(b, test_step, .{
-        .src = "src/initramfs.flash",
-        .src_lazy = initramfs_src,
-        .stubs = stubs_obj,
-    });
-
-    // file.zig — File handle helpers. Same shape as pipe.zig: dedicated
-    // per-target stub so the bump
-    // allocator's get_free_page / free_page don't clash with the
-    // page_alloc test target's real allocator. The stub additionally
-    // ships a typed `current: ?*TaskStruct` (instead of the shared
-    // host_stubs.zig's `?*anyopaque`) so future initramfs/file tests
-    // can reach into `current.open_files` directly — see
-    // the post-mortem doc for why this is a new per-target stub
-    // file rather than a widening of
-    // host_stubs.zig. Both this stub's module and the file.zig test
-    // module share `task_layout_test_mod` so the `?*TaskStruct` type
-    // matches at link time.
+    // File-adapter host stubs for the remaining fdtable/scheduler tests.
+    // The File lifecycle's own oracle now lives in crates/kernel.
     const file_stubs_mod = b.createModule(.{
         .root_source_file = b.path("tests/host_stubs_initramfs.zig"),
         .target = b.graph.host,
@@ -2026,19 +2003,7 @@ pub fn build(b: *std.Build) void {
         .name = "host_stubs_initramfs",
         .root_module = file_stubs_mod,
     });
-    _ = addHostTest(b, test_step, .{
-        .src = "src/file.zig",
-        .stubs = file_stubs_obj,
-        .extra_stubs = &.{host_alloc_obj},
-        .imports = &.{.{ .name = "task_layout", .mod = task_layout_test_mod }},
-    });
-
-    // vfs.zig — VFS dispatch layer. vfs.zig imports the
-    // `file` named module for the `File` type its vtable signatures
-    // reference; a dedicated stub-free file module (same pattern as
-    // file_sched_mod above) shares task_layout_test_mod so the File
-    // type matches at link, and vfs_stubs_obj plugs file.zig's
-    // get_free_page / free_page / preempt_* externs.
+    // Host-target adapter module shared by fdtable/fat32 backend tests.
     const file_test_mod = b.createModule(.{
         .root_source_file = b.path("src/file.zig"),
         .target = b.graph.host,
@@ -2065,16 +2030,6 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
-    _ = addHostTest(b, test_step, .{
-        .src = "src/vfs.zig",
-        .stubs = vfs_stubs_obj,
-        .extra_stubs = &.{host_alloc_obj},
-        .imports = &.{
-            .{ .name = "file", .mod = file_test_mod },
-            .{ .name = "syscall_defs", .mod = syscall_defs_test_mod },
-        },
-    });
-
     // utilc's host tests exercise UART formatting, not the Rust-owned ring.
     // Give that test target a no-op named-module stand-in for its tee call.
     const klog_ring_test_mod = b.createModule(.{
@@ -2139,21 +2094,6 @@ pub fn build(b: *std.Build) void {
             .{ .name = "vfs", .mod = vfs_for_backend_mod },
             .{ .name = "file", .mod = file_test_mod },
             .{ .name = "overlay", .mod = overlay_test_mod },
-        },
-    });
-
-    _ = addHostTest(b, test_step, .{
-        .src = "src/initramfs_backend.flash",
-        .src_lazy = initramfs_backend_src,
-        .stubs = stubs_obj,
-        .imports = &.{
-            .{ .name = "initramfs", .mod = b.createModule(.{
-                .root_source_file = initramfs_src,
-                .target = b.graph.host,
-                .optimize = .Debug,
-            }) },
-            .{ .name = "vfs", .mod = vfs_for_backend_mod },
-            .{ .name = "file", .mod = file_test_mod },
         },
     });
 

@@ -10,8 +10,14 @@
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+#[cfg(test)]
+extern crate std;
+
 pub mod block_dev;
 pub mod elf;
+pub mod file;
+pub mod initramfs;
+pub mod initramfs_backend;
 pub mod klog_ring;
 pub mod mailbox;
 pub mod path;
@@ -21,3 +27,4 @@ pub mod sha256;
 pub mod shadow;
 pub mod usb_descriptors;
 pub mod usb_tx_ring;
+pub mod vfs;

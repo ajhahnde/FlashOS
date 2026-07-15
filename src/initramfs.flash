@@ -1,401 +1,56 @@
-// initramfs: embedded newc cpio parser.
-//
-// Pure parser + host tests. Kernel-side integration lives in
-// src/sys.zig (sys_openFile / sys_read) and src/kernel.zig
-// (PID-1 ELF flip); the `.initramfs` linker section + `.incbin`
-// build glue lives in src/board/<board>/linker.ld + build.zig.
-//
-// newc cpio reference: `man 5 cpio` "New ASCII Format". All numeric
-// header fields are 8-byte ASCII hex (uppercase, no `0x` prefix). The
-// 110-byte header is followed by the name (length = namesize, including
-// the NUL terminator), padded so the next file-data byte sits on a
-// 4-byte boundary. File data follows, also padded to 4. The archive
-// ends with an entry named `TRAILER!!!` whose filesize is 0.
+// Transitional PID-1 locate adapter for the Rust-owned initramfs parser.
 
-const std = #import("std")
 const builtin = #import("builtin")
 
-// Linker-provided section bounds. Defined by `.initramfs : { … }` in
-// src/board/<board>/linker.ld. Host builds never reference
-// these — the comptime branch in baseKva()/baseSize() reads the
-// per-test fixture globals below instead.
 extern var __initramfs_start u8
-extern var __initramfs_end u8
 
 const LINEAR_MAP_BASE u64 = 0xFFFF000000000000
 
 inline fn baseKva() [*]u8 {
-    if builtin.target.os.tag == .freestanding {
-        return #ptrFromInt(#intFromPtr(&__initramfs_start) | LINEAR_MAP_BASE)
-    } else {
-        return host_fixture_base
-    }
+    const low = #intFromPtr(&__initramfs_start)
+    return #ptrFromInt(if (builtin.target.os.tag == .freestanding) low | LINEAR_MAP_BASE else low)
 }
-
-inline fn baseSize() usize {
-    if builtin.target.os.tag == .freestanding {
-        return #intFromPtr(&__initramfs_end) - #intFromPtr(&__initramfs_start)
-    } else {
-        return host_fixture_size
-    }
-}
-
-// Host-test injection points. Tests set these before driving the public
-// API. The freestanding branches above never read them; the symbols
-// live in BSS for the few bytes they cost.
-pub var host_fixture_base [*]u8 = undefined
-pub var host_fixture_size usize = 0
 
 pub const Entry = struct {
-    // Borrows into the archive bytes — lifetime = archive.
     name []u8,
     data []u8,
     mode u32,
-    // Owner ids from the newc header. The build encoder stamps
-    // them (root today); the initramfs VFS backend forwards them into
-    // OpenResult so the permission layer can gate non-root access.
     uid u32,
     gid u32,
 }
 
 pub const ParseError = error{ InvalidHex, BadMagic, ShortArchive }
 
-const HEADER_SIZE usize = 110
-const HEADER_MAGIC = "070701"
-const TRAILER = "TRAILER!!!"
-
-// Byte offsets of the five header fields the parser reads. The other
-// eight 8-byte fields (ino/nlink/mtime/dev*/check) are ignored.
-const OFF_MAGIC usize = 0
-const OFF_MODE usize = 6 + 8 * 1
-const OFF_UID usize = 6 + 8 * 2
-const OFF_GID usize = 6 + 8 * 3
-const OFF_FILESIZE usize = 6 + 8 * 6
-const OFF_NAMESIZE usize = 6 + 8 * 11
-
-fn parseHex8(buf *[8]u8) ParseError!u32 {
-    var v u32 = 0
-    for c in buf {
-        v <<= 4
-        v |= switch c {
-            '0'...'9' => #as(u32, c - '0'),
-            'A'...'F' => #as(u32, c - 'A' + 10),
-            'a'...'f' => #as(u32, c - 'a' + 10),
-            else => return error.InvalidHex,
-        }
-    }
-    return v
+const FosInitramfsEntry = extern struct {
+    name_offset usize,
+    name_len usize,
+    data_offset usize,
+    data_len usize,
+    mode u32,
+    uid u32,
+    gid u32,
 }
 
-inline fn align4(x usize) usize {
-    return (x + 3) & ~#as(usize, 3)
+comptime {
+    if #offsetOf(FosInitramfsEntry, "name_offset") != 0 { #compileError("initramfs name span drifted from Rust") }
+    if #offsetOf(FosInitramfsEntry, "data_offset") != 16 { #compileError("initramfs data span drifted from Rust") }
+    if #offsetOf(FosInitramfsEntry, "mode") != 32 { #compileError("initramfs metadata drifted from Rust") }
+    if #sizeOf(FosInitramfsEntry) != 48 { #compileError("initramfs entry ABI drifted from Rust") }
 }
 
-// Byte-wise slice compare. Forwards to utilc.mem_eql_bytes; see that
-// helper for the strict-alignment rationale.
-extern fn mem_eql_bytes(a [*]u8, b [*]u8, n u64) bool
-
-fn bytesEql(a []u8, b []u8) bool {
-    if a.len != b.len { return false }
-    return mem_eql_bytes(a.ptr, b.ptr, a.len)
-}
-
-pub const Iterator = struct {
-    archive []u8,
-    cursor usize = 0,
-
-    pub fn next(self *mut Iterator) ParseError!?Entry {
-        if self.cursor + HEADER_SIZE > self.archive.len { return error.ShortArchive }
-        const hdr = self.archive[self.cursor..][0..HEADER_SIZE]
-
-        if !bytesEql(hdr[OFF_MAGIC..][0..6], HEADER_MAGIC) { return error.BadMagic }
-
-        const mode = try parseHex8(hdr[OFF_MODE..][0..8])
-        const uid = try parseHex8(hdr[OFF_UID..][0..8])
-        const gid = try parseHex8(hdr[OFF_GID..][0..8])
-        const filesize = try parseHex8(hdr[OFF_FILESIZE..][0..8])
-        const namesize = try parseHex8(hdr[OFF_NAMESIZE..][0..8])
-        // namesize counts the trailing NUL, so it can never legitimately
-        // be zero. Catch it explicitly so the name_end subtraction below
-        // can't underflow.
-        if namesize == 0 { return error.ShortArchive }
-
-        const name_start = self.cursor + HEADER_SIZE
-        const name_end = name_start + namesize - 1
-        if name_end > self.archive.len { return error.ShortArchive }
-        const raw_name = self.archive[name_start..name_end]
-        // cpio(1) reading `find . -type f` output stores entries as
-        // `./sbin/init`; the kernel API and plan tests use the leading-
-        // slash form `/sbin/init`. Slice off the `.` so all consumers see
-        // canonical absolute paths. TRAILER!!! has no `./` prefix so the
-        // check is safe before the trailer terminator below.
-        const name = if (raw_name.len >= 2 && raw_name[0] == '.' && raw_name[1] == '/') raw_name[1..] else raw_name
-
-        const data_start = align4(name_start + namesize)
-        const data_end = data_start + filesize
-        if data_end > self.archive.len { return error.ShortArchive }
-        const data = self.archive[data_start..data_end]
-
-        self.cursor = align4(data_end)
-
-        if bytesEql(name, TRAILER) { return null }
-        return Entry{ .name = name, .data = data, .mode = mode, .uid = uid, .gid = gid }
-    }
-}
-
-pub fn iterator() Iterator {
-    const base = baseKva()
-    return .{ .archive = base[0..baseSize()], .cursor = 0 }
-}
+extern fn fos_initramfs_locate(path [*]u8, path_len usize, out *mut FosInitramfsEntry) i32
 
 pub fn locate(path []u8) ParseError!?Entry {
-    var it = iterator()
-    while try it.next() |e| {
-        if bytesEql(e.name, path) { return e }
+    var out FosInitramfsEntry = undefined
+    const status = fos_initramfs_locate(path.ptr, path.len, &out)
+    if status < 0 { return error.BadMagic }
+    if status == 0 { return null }
+    const base = baseKva()
+    return Entry{
+        .name = base[out.name_offset..][0..out.name_len],
+        .data = base[out.data_offset..][0..out.data_len],
+        .mode = out.mode,
+        .uid = out.uid,
+        .gid = out.gid,
     }
-    return null
-}
-
-// Directory-synthesis helper for readdir. initramfs is a flat cpio: it
-// stores files (`/bin/cat`, `/sbin/init`) and never directory entries —
-// directories exist only as path prefixes. directEntry decides what (if
-// anything) a stored `name` contributes to a listing of `prefix`:
-//
-//   * null when `name` does not live under `prefix`;
-//   * the direct child segment otherwise, flagged is_dir=true when
-//     `name` nests further below that child (so the child is a synthetic
-//     subdirectory) and is_dir=false when the child IS `name`'s leaf.
-//
-// `prefix` must carry a trailing slash ("/bin/", or "/" for the root).
-// The backend feeds stored names through this in cpio (sorted) order and
-// collapses adjacent equal children, so the synthetic subdirs de-dup.
-//
-//   directEntry("/bin/cat",  "/bin/") -> { "cat", is_dir=false }
-//   directEntry("/bin/cat",  "/")     -> { "bin", is_dir=true  }
-//   directEntry("/sbin/init","/bin/") -> null
-//
-// Flash cannot spell an anonymous struct inline in a return type, so the
-// result shape is named here (the inline `?struct { … }` of the Zig
-// original).
-const DirectChild = struct { child []u8, is_dir bool }
-
-pub fn directEntry(name []u8, prefix []u8) ?DirectChild {
-    if name.len <= prefix.len { return null }
-    if !bytesEql(name[0..prefix.len], prefix) { return null }
-    const rest = name[prefix.len..]
-    // A slash inside the remainder means the direct child is a synthetic
-    // subdirectory; its first segment is the listed name.
-    if std.mem.indexOfScalar(u8, rest, '/') |s| {
-        return .{ .child = rest[0..s], .is_dir = true }
-    }
-    return .{ .child = rest, .is_dir = false }
-}
-
-// ---- Host tests ----
-//
-// buildFixture() is a comptime newc encoder used solely by the tests
-// below. It mirrors the runtime encoder under scripts/build_initramfs.zig
-// (only used if cpio(1) is proven non-deterministic), so any
-// drift between encoder and decoder shows up here first.
-
-// pub so initramfs_backend.zig's readdir host tests can build the same
-// comptime cpio fixtures (comptime-only encoder; dead-code-eliminated
-// from the freestanding build).
-pub const FixtureEntry = struct {
-    name []u8,
-    data []u8,
-    mode u32,
-    // Owner ids. Defaulted so pre-existing fixtures (which all
-    // model root-owned files) stay unchanged; permission tests override.
-    uid u32 = 0,
-    gid u32 = 0,
-}
-
-fn comptimeHex8(comptime v u32) []u8 {
-    return std.fmt.comptimePrint("{X:0>8}", .{v})
-}
-
-fn padBytes(comptime n usize) []u8 {
-    return switch n & 3 {
-        0 => "",
-        1 => "\x00\x00\x00",
-        2 => "\x00\x00",
-        3 => "\x00",
-        else => unreachable,
-    }
-}
-
-fn emitEntry(comptime e FixtureEntry) []u8 {
-    const hdr = HEADER_MAGIC ++ comptimeHex8(1) ++ // ino
-        comptimeHex8(e.mode) ++ // mode
-        comptimeHex8(e.uid) ++ // uid
-        comptimeHex8(e.gid) ++ // gid
-        "00000001" ++ // nlink
-        "00000000" ++ // mtime
-        comptimeHex8(#intCast(e.data.len)) ++ // filesize
-        "00000000" ++ // devmajor
-        "00000000" ++ // devminor
-        "00000000" ++ // rdevmajor
-        "00000000" ++ // rdevminor
-        comptimeHex8(#intCast(e.name.len + 1)) ++ // namesize incl. NUL
-        "00000000" // check
-    const name = e.name ++ "\x00"
-    const name_pad = padBytes(hdr.len + name.len)
-    const data_pad = padBytes(e.data.len)
-    return hdr ++ name ++ name_pad ++ e.data ++ data_pad
-}
-
-fn emitTrailer() []u8 {
-    const hdr = HEADER_MAGIC ++ ("00000000" ** 4) ++ // ino, mode, uid, gid
-        "00000001" ++ // nlink — GNU cpio writes 1 on the trailer too
-        ("00000000" ** 6) ++ // mtime, filesize, dev*4
-        comptimeHex8(#intCast(TRAILER.len + 1)) ++ // namesize
-        "00000000" // check
-    const name = TRAILER ++ "\x00"
-    const pad = padBytes(hdr.len + name.len)
-    return hdr ++ name ++ pad
-}
-
-pub fn buildFixture(comptime entries []FixtureEntry) []u8 {
-    comptime var out []u8 = ""
-    inline for e in entries { out = out ++ emitEntry(e) }
-    out = out ++ emitTrailer()
-    return out
-}
-
-test "locate hit returns name + data + mode" {
-    comptime const fixture = buildFixture(&.{
-        .{ .name = "hi", .data = "OK", .mode = 0o100644 },
-    })
-    host_fixture_base = fixture.ptr
-    host_fixture_size = fixture.len
-
-    const e = (try locate("hi")) orelse return error.NotFound
-    try std.testing.expectEqualStrings("hi", e.name)
-    try std.testing.expectEqualStrings("OK", e.data)
-    try std.testing.expectEqual(#as(u32, 0o100644), e.mode)
-    // Un-annotated fixtures default to root ownership.
-    try std.testing.expectEqual(#as(u32, 0), e.uid)
-    try std.testing.expectEqual(#as(u32, 0), e.gid)
-}
-
-test "locate parses uid/gid from the newc header" {
-    comptime const fixture = buildFixture(&.{
-        .{ .name = "home", .data = "X", .mode = 0o100600, .uid = 1000, .gid = 1000 },
-    })
-    host_fixture_base = fixture.ptr
-    host_fixture_size = fixture.len
-
-    const e = (try locate("home")) orelse return error.NotFound
-    try std.testing.expectEqual(#as(u32, 0o100600), e.mode)
-    try std.testing.expectEqual(#as(u32, 1000), e.uid)
-    try std.testing.expectEqual(#as(u32, 1000), e.gid)
-}
-
-test "locate miss returns null" {
-    comptime const fixture = buildFixture(&.{
-        .{ .name = "/sbin/init", .data = "X", .mode = 0o100755 },
-    })
-    host_fixture_base = fixture.ptr
-    host_fixture_size = fixture.len
-
-    try std.testing.expectEqual(#as(?Entry, null), try locate("/nope"))
-}
-
-test "empty archive: trailer alone terminates iteration" {
-    comptime const fixture = buildFixture(&.{})
-    host_fixture_base = fixture.ptr
-    host_fixture_size = fixture.len
-
-    var it = iterator()
-    try std.testing.expectEqual(#as(?Entry, null), try it.next())
-}
-
-test "multi-entry walk preserves order and pads correctly" {
-    comptime const fixture = buildFixture(&.{
-        .{ .name = "a", .data = "AAA", .mode = 0o100644 },
-        .{ .name = "bb", .data = "BB", .mode = 0o100644 },
-        .{ .name = "ccc", .data = "C", .mode = 0o100644 },
-    })
-    host_fixture_base = fixture.ptr
-    host_fixture_size = fixture.len
-
-    var it = iterator()
-    const e1 = (try it.next()) orelse return error.MissingEntry
-    try std.testing.expectEqualStrings("a", e1.name)
-    try std.testing.expectEqualStrings("AAA", e1.data)
-
-    const e2 = (try it.next()) orelse return error.MissingEntry
-    try std.testing.expectEqualStrings("bb", e2.name)
-    try std.testing.expectEqualStrings("BB", e2.data)
-
-    const e3 = (try it.next()) orelse return error.MissingEntry
-    try std.testing.expectEqualStrings("ccc", e3.name)
-    try std.testing.expectEqualStrings("C", e3.data)
-
-    try std.testing.expectEqual(#as(?Entry, null), try it.next())
-}
-
-test "bad magic returns BadMagic" {
-    var hdr [HEADER_SIZE]u8 = [_]u8{0} ** HEADER_SIZE
-    #memcpy(hdr[0..6], "999999")
-    host_fixture_base = &hdr
-    host_fixture_size = hdr.len
-
-    var it = iterator()
-    try std.testing.expectError(error.BadMagic, it.next())
-}
-
-test "leading ./ in archive name canonicalises to /" {
-    // Mirrors the on-disk shape `cd $stage; find . -type f | cpio -o`
-    // emits: entry names carry a `./` prefix. The parser strips the
-    // dot so locate("/sbin/init") matches.
-    comptime const fixture = buildFixture(&.{
-        .{ .name = "./sbin/init", .data = "\x7fELF", .mode = 0o100755 },
-    })
-    host_fixture_base = fixture.ptr
-    host_fixture_size = fixture.len
-
-    const e = (try locate("/sbin/init")) orelse return error.NotFound
-    try std.testing.expectEqualStrings("/sbin/init", e.name)
-    try std.testing.expectEqualStrings("\x7fELF", e.data)
-}
-
-test "header truncated below 110 bytes returns ShortArchive" {
-    var buf [50]u8 = [_]u8{0} ** 50
-    #memcpy(buf[0..6], HEADER_MAGIC)
-    host_fixture_base = &buf
-    host_fixture_size = buf.len
-
-    var it = iterator()
-    try std.testing.expectError(error.ShortArchive, it.next())
-}
-
-test "directEntry: leaf file under its directory" {
-    const de = directEntry("/bin/cat", "/bin/") orelse return error.NoEntry
-    try std.testing.expectEqualStrings("cat", de.child)
-    try std.testing.expectEqual(false, de.is_dir)
-}
-
-test "directEntry: nested file contributes its first segment as a synthetic dir" {
-    const de = directEntry("/bin/cat", "/") orelse return error.NoEntry
-    try std.testing.expectEqualStrings("bin", de.child)
-    try std.testing.expectEqual(true, de.is_dir)
-}
-
-test "directEntry: name outside the prefix returns null" {
-    try std.testing.expect(directEntry("/sbin/init", "/bin/") == null)
-}
-
-test "directEntry: the directory itself contributes nothing" {
-    // name == prefix-without-slash, and name == prefix both yield null:
-    // a directory does not list itself.
-    try std.testing.expect(directEntry("/bin", "/bin/") == null)
-    try std.testing.expect(directEntry("/bin/", "/bin/") == null)
-}
-
-test "directEntry: deeper nesting still lists only the first segment" {
-    const de = directEntry("/usr/local/bin/x", "/usr/") orelse return error.NoEntry
-    try std.testing.expectEqualStrings("local", de.child)
-    try std.testing.expectEqual(true, de.is_dir)
 }
