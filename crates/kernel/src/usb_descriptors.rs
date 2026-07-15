@@ -118,70 +118,41 @@ pub static CONFIG_DESCRIPTOR: [u8; 67] = [
     0x00,
 ];
 
-pub static STR_LANGID: [u8; 4] = [0x04, DESC_STRING, 0x09, 0x04];
-pub static STR_MANUFACTURER: [u8; 16] = [
-    16,
-    DESC_STRING,
-    b'F',
-    0,
-    b'l',
-    0,
-    b'a',
-    0,
-    b's',
-    0,
-    b'h',
-    0,
-    b'O',
-    0,
-    b'S',
-    0,
+// The four string descriptors live in ONE concatenated static, and the
+// resolver hands back sub-slices of it. This is deliberate, not cosmetic:
+// the kernel is linked at a low VMA (0x80000) but executes from the high-VA
+// TTBR1 linear map, so all address materialisation must be PC-relative. A
+// per-index `match` returning `&STR_*` lowered to a jump table of *absolute*
+// pointers (link-time low-half addresses); once TTBR0 holds a user pgd those
+// low addresses are unmapped and the EP0 send faulted (kernel data abort,
+// translation-fault L3). Sub-slicing one blob keeps the base PC-relative
+// (`adr STRINGS`) and stores only integer offsets — never a pointer table.
+pub static STRINGS: [u8; 60] = [
+    // [0..4) LANGID
+    0x04, DESC_STRING, 0x09, 0x04,
+    // [4..20) MANUFACTURER — "FlashOS" UTF-16LE
+    16, DESC_STRING, b'F', 0, b'l', 0, b'a', 0, b's', 0, b'h', 0, b'O', 0, b'S', 0,
+    // [20..50) PRODUCT — "FlashOS Serial" UTF-16LE
+    30, DESC_STRING, b'F', 0, b'l', 0, b'a', 0, b's', 0, b'h', 0, b'O', 0, b'S', 0, b' ', 0,
+    b'S', 0, b'e', 0, b'r', 0, b'i', 0, b'a', 0, b'l', 0,
+    // [50..60) SERIAL — "0001" UTF-16LE
+    10, DESC_STRING, b'0', 0, b'0', 0, b'0', 0, b'1', 0,
 ];
-pub static STR_PRODUCT: [u8; 30] = [
-    30,
-    DESC_STRING,
-    b'F',
-    0,
-    b'l',
-    0,
-    b'a',
-    0,
-    b's',
-    0,
-    b'h',
-    0,
-    b'O',
-    0,
-    b'S',
-    0,
-    b' ',
-    0,
-    b'S',
-    0,
-    b'e',
-    0,
-    b'r',
-    0,
-    b'i',
-    0,
-    b'a',
-    0,
-    b'l',
-    0,
-];
-pub static STR_SERIAL: [u8; 10] = [10, DESC_STRING, b'0', 0, b'0', 0, b'0', 0, b'1', 0];
+
+// (start, len) spans into STRINGS, indexed by the USB string-descriptor index.
+// Integer data — position-independent, unlike a table of `&STR_*` pointers.
+const STRING_SPANS: [(usize, usize); 4] = [(0, 4), (4, 16), (20, 30), (50, 10)];
+
+fn string_descriptor(index: u8) -> Option<&'static [u8]> {
+    let (start, len) = *STRING_SPANS.get(index as usize)?;
+    STRINGS.get(start..start + len)
+}
 
 pub fn get_descriptor(descriptor_type: u8, index: u8) -> Option<&'static [u8]> {
     match descriptor_type {
         DESC_DEVICE => Some(&DEVICE_DESCRIPTOR),
         DESC_CONFIG => Some(&CONFIG_DESCRIPTOR),
-        DESC_STRING => match index {
-            0 => Some(&STR_LANGID),
-            1 => Some(&STR_MANUFACTURER),
-            2 => Some(&STR_PRODUCT),
-            3 => Some(&STR_SERIAL),
-            _ => None,
-        },
+        DESC_STRING => string_descriptor(index),
         _ => None,
     }
 }
@@ -255,7 +226,7 @@ mod tests {
 
     #[test]
     fn langid_descriptor_is_exact() {
-        assert_eq!(STR_LANGID, [4, 3, 9, 4]);
+        assert_eq!(get_descriptor(DESC_STRING, 0).unwrap(), &[4, 3, 9, 4]);
     }
 
     #[test]
@@ -271,8 +242,18 @@ mod tests {
 
     #[test]
     fn string_descriptors_are_utf16le_with_correct_lengths() {
-        assert_eq!(&STR_MANUFACTURER[..5], &[16, DESC_STRING, b'F', 0, b'l']);
-        assert_eq!(STR_SERIAL[0], 10);
+        let manufacturer = get_descriptor(DESC_STRING, 1).unwrap();
+        assert_eq!(&manufacturer[..5], &[16, DESC_STRING, b'F', 0, b'l']);
+        assert_eq!(manufacturer.len(), 16);
+        let product = get_descriptor(DESC_STRING, 2).unwrap();
+        assert_eq!(product[0], 30);
+        assert_eq!(product.len(), 30);
+        let serial = get_descriptor(DESC_STRING, 3).unwrap();
+        assert_eq!(serial[0], 10);
+        assert_eq!(serial.len(), 10);
+        // Every string arm is now a sub-slice of one blob — the resolver must
+        // still refuse out-of-range indices.
+        assert!(get_descriptor(DESC_STRING, 4).is_none());
     }
 
     #[test]
