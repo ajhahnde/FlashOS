@@ -14,9 +14,11 @@
 extern crate std;
 
 pub mod block_dev;
+pub mod console;
 pub mod elf;
 pub mod fat32;
 pub mod fat32_backend;
+pub mod fdtable;
 pub mod file;
 pub mod initramfs;
 pub mod initramfs_backend;
@@ -26,6 +28,7 @@ pub mod mm_user;
 pub mod overlay;
 pub mod page_alloc;
 pub mod path;
+pub mod pipe;
 pub mod perm;
 pub mod sdhci_cmd;
 pub mod sha256;
@@ -33,3 +36,4 @@ pub mod shadow;
 pub mod usb_descriptors;
 pub mod usb_tx_ring;
 pub mod vfs;
+pub mod wait_queue;

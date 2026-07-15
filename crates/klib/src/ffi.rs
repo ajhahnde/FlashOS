@@ -10,8 +10,9 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    block_dev, elf, fat32_backend, file, initramfs_backend, klog_ring, mailbox, mm_user,
-    page_alloc, path, perm, sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring, vfs,
+    block_dev, console, elf, fat32_backend, fdtable, file, initramfs_backend, klog_ring, mailbox,
+    mm_user, page_alloc, path, perm, pipe, sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring,
+    vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -1074,4 +1075,186 @@ unsafe fn mut_slice_from_raw<'a>(ptr: *mut u8, len: usize) -> &'a mut [u8] {
     }
     // SAFETY: the caller guarantees `len` writable bytes at `ptr`.
     unsafe { core::slice::from_raw_parts_mut(ptr, len) }
+}
+
+// ---- console RX ring, anonymous pipe, fd table ----
+//
+// Each group below is the C-ABI seam for one Rust module whose Flash callers
+// (sys, fork, sched, kernel, board IRQ/UART) have not yet ported. When they do,
+// these go with them.
+
+/// Enqueue one console byte from a board IRQ handler.
+///
+/// # Safety
+/// Called from the exception entry path on the single kernel core.
+#[no_mangle]
+pub unsafe extern "C" fn fos_console_push(byte: u8) {
+    // SAFETY: forwarded IRQ-context contract.
+    unsafe { console::console_push(byte) }
+}
+
+/// Drain up to `len` console bytes into `buf`, blocking for the first.
+///
+/// # Safety
+/// `buf` points to `len` writable bytes; EL1 syscall context.
+#[no_mangle]
+pub unsafe extern "C" fn fos_console_read(buf: *mut u8, len: u64) -> i64 {
+    // SAFETY: forwarded buffer contract.
+    unsafe { console::console_read(buf, len) }
+}
+
+/// Inject one console byte from EL1 (deterministic QEMU echo coverage).
+///
+/// # Safety
+/// EL1 syscall context on the single kernel core.
+#[no_mangle]
+pub unsafe extern "C" fn fos_console_test_push(byte: u8) {
+    // SAFETY: forwarded EL1-context contract.
+    unsafe { console::console_test_push(byte) }
+}
+
+/// Allocate a zeroed pipe page. Null on allocator failure.
+///
+/// # Safety
+/// Single kernel core.
+#[no_mangle]
+pub unsafe extern "C" fn fos_pipe_alloc() -> *mut pipe::Pipe {
+    // SAFETY: the allocator seam yields a fresh page or null.
+    unsafe { pipe::alloc() }
+}
+
+/// Take one pipe reference.
+///
+/// # Safety
+/// `p` points to a live pipe.
+#[no_mangle]
+pub unsafe extern "C" fn fos_pipe_ref(p: *mut pipe::Pipe) {
+    // SAFETY: forwarded pipe contract.
+    unsafe { pipe::pipe_ref(p) }
+}
+
+/// Drop one pipe reference, freeing the page on the last.
+///
+/// # Safety
+/// `p` points to a live pipe with at least one reference.
+#[no_mangle]
+pub unsafe extern "C" fn fos_pipe_unref(p: *mut pipe::Pipe) {
+    // SAFETY: forwarded pipe contract.
+    unsafe { pipe::unref(p) }
+}
+
+/// Blocking pipe read of up to `len` bytes.
+///
+/// # Safety
+/// `p` is live and `buf` points to `len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fos_pipe_read(p: *mut pipe::Pipe, buf: *mut u8, len: u64) -> i64 {
+    // SAFETY: forwarded pipe/buffer contract.
+    unsafe { pipe::read(p, buf, len) }
+}
+
+/// Blocking pipe write of up to `len` bytes.
+///
+/// # Safety
+/// `p` is live and `buf` points to `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fos_pipe_write(p: *mut pipe::Pipe, buf: *const u8, len: u64) -> i64 {
+    // SAFETY: forwarded pipe/buffer contract.
+    unsafe { pipe::write(p, buf, len) }
+}
+
+/// Install `ptr` under `kind` in the task's first free fd slot; -1 if full.
+///
+/// # Safety
+/// `task` points to a live task owned by the caller.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fdtable_install(
+    task: *mut fdtable::TaskStruct,
+    kind: u8,
+    ptr: *mut core::ffi::c_void,
+) -> i32 {
+    // SAFETY: forwarded task contract; the tag byte is validated by `from_u8`.
+    unsafe { fdtable::install(task, fdtable::Kind::from_u8(kind), ptr) }
+}
+
+/// Write the occupied slot for `fd` into `out`; returns 1 if found, 0 otherwise.
+///
+/// # Safety
+/// `task` is live and `out` points to a writable `FdSlot`.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fdtable_get(
+    task: *mut fdtable::TaskStruct,
+    fd: i32,
+    out: *mut fdtable::FdSlot,
+) -> i32 {
+    // SAFETY: forwarded task/out contract.
+    unsafe {
+        match fdtable::get(task, fd) {
+            Some(slot) => {
+                out.write(slot);
+                1
+            }
+            None => 0,
+        }
+    }
+}
+
+/// Resolve `fd` to an open file, or null.
+///
+/// # Safety
+/// `task` points to a live task owned by the caller.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fdtable_get_file(
+    task: *mut fdtable::TaskStruct,
+    fd: i32,
+) -> *mut file::File {
+    // SAFETY: forwarded task contract.
+    unsafe { fdtable::get_file(task, fd) }
+}
+
+/// Duplicate `oldfd` onto `newfd`; returns `newfd` or -1.
+///
+/// # Safety
+/// `task` points to a live task owned by the caller.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fdtable_dup2(
+    task: *mut fdtable::TaskStruct,
+    oldfd: i32,
+    newfd: i32,
+) -> i32 {
+    // SAFETY: forwarded task contract.
+    unsafe { fdtable::dup2(task, oldfd, newfd) }
+}
+
+/// Close `fd`, dropping its backend reference; -1 for an already-free fd.
+///
+/// # Safety
+/// `task` points to a live task owned by the caller.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fdtable_close(task: *mut fdtable::TaskStruct, fd: i32) -> i32 {
+    // SAFETY: forwarded task contract.
+    unsafe { fdtable::close(task, fd) }
+}
+
+/// Close every occupied slot in `task`.
+///
+/// # Safety
+/// `task` points to a live task owned by the caller.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fdtable_close_all(task: *mut fdtable::TaskStruct) {
+    // SAFETY: forwarded task contract.
+    unsafe { fdtable::close_all(task) }
+}
+
+/// Copy every occupied slot from `src` into the unpublished child `dst`.
+///
+/// # Safety
+/// Both pointers are live, distinct tasks owned by the caller.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fdtable_dup_all(
+    src: *mut fdtable::TaskStruct,
+    dst: *mut fdtable::TaskStruct,
+) {
+    // SAFETY: forwarded task contract.
+    unsafe { fdtable::dup_all(src, dst) }
 }

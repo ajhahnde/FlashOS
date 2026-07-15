@@ -351,32 +351,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // WaitQueue API. Named module so both kernel and
-    // host-test builds reach it via `@import("wait_queue")` — the host
-    // test wiring at the bottom of this file mirrors this for the
-    // pipe.zig test root. The one flashc transpile (wait_queue_src) is
-    // shared across the kernel root and both test roots below.
-    const wait_queue_src = addFlashSource(b, "src/wait_queue.flash");
-    const wait_queue_mod = b.createModule(.{
-        .root_source_file = wait_queue_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    wait_queue_mod.addImport("task_layout", task_layout_mod);
-
-    // Anonymous-pipe module. Pulls in wait_queue for
-    // the blocking read/write paths; kernel-only for now (future work
-    // generalises to a tagged ?*File once the FS lands). The one flashc
-    // transpile (pipe_src) is shared across the kernel root and both
-    // test roots below.
-    const pipe_src = addFlashSource(b, "src/pipe.flash");
+    // Anonymous-pipe adapter (src/pipe.zig): a thin shim over the Rust-owned
+    // pipe in crates/kernel. The page layout, wait queue, ref-counted lifetime,
+    // and blocking read/write are Rust; the shim mirrors only the header fields
+    // a Flash caller still touches directly. wait_queue is fully Rust-owned now,
+    // so it no longer has a Flash-visible named module.
     const pipe_mod = b.createModule(.{
-        .root_source_file = pipe_src,
+        .root_source_file = b.path("src/pipe.zig"),
         .target = target,
         .optimize = optimize,
     });
-    pipe_mod.addImport("wait_queue", wait_queue_mod);
-    pipe_mod.addImport("task_layout", task_layout_mod);
 
     // Initramfs parser module. Pure-data newc cpio
     // walker with linker-provided section bounds; no external imports
@@ -412,17 +396,16 @@ pub fn build(b: *std.Build) void {
     });
     file_mod.addImport("task_layout", task_layout_mod);
 
-    // The one flashc transpile (fdtable_src) is shared across the kernel
-    // root and both test roots below.
-    const fdtable_src = addFlashSource(b, "src/fdtable.flash");
+    // File-descriptor table adapter (src/fdtable.zig): a thin shim over the
+    // Rust-owned fd table in crates/kernel. Slot dispatch and ref-count
+    // discipline are Rust; the shim preserves the Kind tag and the
+    // install/get/dup2/close/dupAll/closeAll API its Flash callers still use.
     const fdtable_mod = b.createModule(.{
-        .root_source_file = fdtable_src,
+        .root_source_file = b.path("src/fdtable.zig"),
         .target = target,
         .optimize = optimize,
     });
     fdtable_mod.addImport("task_layout", task_layout_mod);
-    fdtable_mod.addImport("pipe", pipe_mod);
-    fdtable_mod.addImport("file", file_mod);
 
     // VFS dispatch layer. 1-bit superblock tag +
     // two-slot mount table; imports `file` for the File type its
@@ -662,20 +645,15 @@ pub fn build(b: *std.Build) void {
     });
     fat32_backend_mod.addImport("block_dev", block_dev_mod);
 
-    // Console RX layer. 256-byte ring + WaitQueue
-    // backing the unified console read. Same named-module wiring as wait_queue
-    // / pipe so the kernel build and the host-test build share one
-    // task_layout Module instance.
-    // The one flashc transpile (console_src) is shared across the kernel
-    // root and the host-test root below.
-    const console_src = addFlashSource(b, "src/console.flash");
+    // Console RX adapter (src/console.zig): a thin shim over the Rust-owned
+    // console ring in crates/kernel. The 256-byte ring, its WaitQueue, and the
+    // blocking read discipline are Rust; the shim only forwards push/read/
+    // test_push, so it needs no named imports.
     const console_mod = b.createModule(.{
-        .root_source_file = console_src,
+        .root_source_file = b.path("src/console.zig"),
         .target = target,
         .optimize = optimize,
     });
-    console_mod.addImport("wait_queue", wait_queue_mod);
-    console_mod.addImport("task_layout", task_layout_mod);
 
     // Scheduler module. Promoted from a relative-path
     // import to a named module so sys.zig can `@import("sched")` and call
@@ -1055,7 +1033,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("syscall_defs", syscall_defs_mod);
     kernel_mod.addImport("user_layout", user_layout_mod);
     kernel_mod.addImport("task_layout", task_layout_mod);
-    kernel_mod.addImport("wait_queue", wait_queue_mod);
     kernel_mod.addImport("pipe", pipe_mod);
     kernel_mod.addImport("fdtable", fdtable_mod);
     kernel_mod.addImport("console", console_mod);
@@ -1668,15 +1645,6 @@ pub fn build(b: *std.Build) void {
     // `start.zig` transitively pulls in assembly-only externs
     // (`set_pgd`, `ret_from_fork`, `ksyms_init`, …) that no host stub
     // can satisfy.
-    const host_alloc_obj = b.addObject(.{
-        .name = "host_alloc",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/host_alloc.zig"),
-            .target = b.graph.host,
-            .optimize = .Debug,
-        }),
-    });
-
     const stubs_obj = b.addObject(.{
         .name = "host_stubs",
         .root_module = b.createModule(.{
@@ -1802,43 +1770,10 @@ pub fn build(b: *std.Build) void {
     fork_test_mod.addOptions("build_options", build_options);
 
     // vanilla single-module test targets — shared stubs, no named imports.
-    // wait_queue is its own test target AND the named module pipe.zig
-    // imports — capture the helper's returned Module so the pipe call
-    // below can plug it back in as the "wait_queue" import.
-    const wq_test_mod = addHostTest(b, test_step, .{
-        .src = "src/wait_queue.flash",
-        .src_lazy = wait_queue_src,
-        .stubs = stubs_obj,
-        .imports = &.{.{ .name = "task_layout", .mod = task_layout_test_mod }},
-    });
-
-    // pipe.zig pulls in wait_queue + task_layout as named modules + its
-    // own page-allocator stub so it doesn't double-define get_free_page
-    // / free_page against the page_alloc test target. stubs_obj is
-    // already pulled in transitively via wq_test_mod, so omitting it
-    // from `stubs` here keeps the host stubs single-defined.
-    _ = addHostTest(b, test_step, .{
-        .src = "src/pipe.flash",
-        .src_lazy = pipe_src,
-        .extra_stubs = &.{host_alloc_obj},
-        .imports = &.{
-            .{ .name = "wait_queue", .mod = wq_test_mod },
-            .{ .name = "task_layout", .mod = task_layout_test_mod },
-        },
-    });
-
-    // console.zig — ring + WaitQueue host coverage.
-    // Same wiring as pipe.zig minus the page allocator (ring is BSS,
-    // shared stubs_obj alone suffices). stubs_obj arrives transitively
-    // via wq_test_mod, so the helper's `stubs` field stays unset.
-    _ = addHostTest(b, test_step, .{
-        .src = "src/console.flash",
-        .src_lazy = console_src,
-        .imports = &.{
-            .{ .name = "wait_queue", .mod = wq_test_mod },
-            .{ .name = "task_layout", .mod = task_layout_test_mod },
-        },
-    });
+    // wait_queue, pipe, console, and fdtable are Rust-owned now; their
+    // host coverage moved to the crates/kernel unit suites. Only the Flash
+    // modules that still consume them through the thin .zig shims keep host
+    // targets here.
 
     // sched.zig — pure-helper host coverage. sched.zig
     // itself exports current / preempt_disable / preempt_enable /
@@ -1854,83 +1789,17 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
-    // Dedicated wait_queue / pipe Modules for the sched test target —
-    // can't reuse the helper-built wq_test_mod (which carries stubs_obj)
-    // or a pipe equivalent (which would carry pipe_stubs_obj) because
-    // either path re-introduces same-symbol collisions against
-    // sched_stubs_obj. Hand-build a stub-free chain instead.
-    const wq_sched_mod = b.createModule(.{
-        .root_source_file = wait_queue_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    wq_sched_mod.addImport("task_layout", task_layout_test_mod);
-    const pipe_sched_mod = b.createModule(.{
-        .root_source_file = pipe_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    pipe_sched_mod.addImport("wait_queue", wq_sched_mod);
-    pipe_sched_mod.addImport("task_layout", task_layout_test_mod);
-    // file_sched_mod — same stub-free pattern as pipe_sched_mod above.
-    // sched.zig imports `file` for the do_wait_impl reap plumbing;
-    // sched_stubs_obj already provides the
-    // get_free_page / free_page / preempt_* externs file.zig needs.
-    const file_sched_mod = b.createModule(.{
-        .root_source_file = b.path("src/file.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    file_sched_mod.addImport("task_layout", task_layout_test_mod);
-
-    const fdtable_sched_mod = b.createModule(.{
-        .root_source_file = fdtable_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    fdtable_sched_mod.addImport("task_layout", task_layout_test_mod);
-    fdtable_sched_mod.addImport("pipe", pipe_sched_mod);
-    fdtable_sched_mod.addImport("file", file_sched_mod);
-
+    // fdtable is Rust-owned now (host coverage in crates/kernel). sched
+    // only calls its closeAll, so the shared fork/sched fdtable stub — a no-op
+    // dupAll/closeAll over task_layout — stands in, and the whole real-fdtable
+    // chain the old sched target hand-built is gone.
     _ = addHostTest(b, test_step, .{
         .src = "src/sched.flash",
         .src_lazy = sched_src,
         .stubs = sched_stubs_obj,
         .imports = &.{
             .{ .name = "task_layout", .mod = task_layout_test_mod },
-            .{ .name = "fdtable", .mod = fdtable_sched_mod },
-        },
-    });
-
-    // File-adapter host stubs for the remaining fdtable/scheduler tests.
-    // The File lifecycle's own oracle now lives in crates/kernel.
-    const file_stubs_mod = b.createModule(.{
-        .root_source_file = b.path("tests/host_stubs_initramfs.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    file_stubs_mod.addImport("task_layout", task_layout_test_mod);
-    const file_stubs_obj = b.addObject(.{
-        .name = "host_stubs_initramfs",
-        .root_module = file_stubs_mod,
-    });
-    // Host-target adapter module shared by fdtable/fat32 backend tests.
-    const file_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/file.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    file_test_mod.addImport("task_layout", task_layout_test_mod);
-
-    _ = addHostTest(b, test_step, .{
-        .src = "src/fdtable.flash",
-        .src_lazy = fdtable_src,
-        .stubs = file_stubs_obj,
-        .extra_stubs = &.{host_alloc_obj},
-        .imports = &.{
-            .{ .name = "task_layout", .mod = task_layout_test_mod },
-            .{ .name = "pipe", .mod = pipe_sched_mod },
-            .{ .name = "file", .mod = file_test_mod },
+            .{ .name = "fdtable", .mod = fork_stubs_mod },
         },
     });
     // utilc's host tests exercise UART formatting, not the Rust-owned ring.
