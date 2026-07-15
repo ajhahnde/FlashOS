@@ -10,7 +10,8 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    elf, klog_ring, mailbox, path, perm, sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring,
+    block_dev, elf, klog_ring, mailbox, path, perm, sdhci_cmd, sha256, shadow, usb_descriptors,
+    usb_tx_ring,
 };
 
 const NONE: usize = usize::MAX;
@@ -342,6 +343,15 @@ pub extern "C" fn fos_sdhci_parse_csd_v2(
 ) -> u64 {
     sdhci_cmd::parse_csd_v2([response0, response1, response2, response3])
         .map_or(0, |csd| csd.capacity_blocks)
+}
+
+/// Re-point a block device's callbacks to their high-half (TTBR1) aliases.
+///
+/// # Safety
+/// `dev` points to a live, writable `BlockDev`.
+#[no_mangle]
+pub unsafe extern "C" fn fos_block_dev_relocate(dev: *mut block_dev::BlockDev) {
+    unsafe { block_dev::relocate(dev) }
 }
 
 /// Copy a local message to firmware-visible storage with volatile word writes.
