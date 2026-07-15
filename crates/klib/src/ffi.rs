@@ -10,8 +10,8 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    block_dev, elf, file, initramfs_backend, klog_ring, mailbox, path, perm, sdhci_cmd, sha256,
-    shadow, usb_descriptors, usb_tx_ring, vfs,
+    block_dev, elf, fat32, file, initramfs_backend, klog_ring, mailbox, overlay, path, perm,
+    sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -565,6 +565,398 @@ pub extern "C" fn fos_sdhci_parse_csd_v2(
 #[no_mangle]
 pub unsafe extern "C" fn fos_block_dev_relocate(dev: *mut block_dev::BlockDev) {
     unsafe { block_dev::relocate(dev) }
+}
+
+fn fat_error_code(error: fat32::FatError) -> i32 {
+    match error {
+        fat32::FatError::BlockReadFailed => 1,
+        fat32::FatError::BlockWriteFailed => 2,
+        fat32::FatError::InvalidCluster => 3,
+    }
+}
+
+fn alloc_error_code(error: fat32::AllocError) -> i32 {
+    match error {
+        fat32::AllocError::BlockReadFailed => 1,
+        fat32::AllocError::BlockWriteFailed => 2,
+        fat32::AllocError::InvalidCluster => 3,
+        fat32::AllocError::NoSpace => 4,
+    }
+}
+
+fn lookup_error_code(error: fat32::LookupError) -> i32 {
+    match error {
+        fat32::LookupError::BlockReadFailed => 1,
+        fat32::LookupError::InvalidCluster => 3,
+        fat32::LookupError::NotFound => 5,
+    }
+}
+
+fn path_error_code(error: fat32::PathError) -> i32 {
+    match error {
+        fat32::PathError::BlockReadFailed => 1,
+        fat32::PathError::InvalidCluster => 3,
+        fat32::PathError::NotFound => 5,
+        fat32::PathError::NotADirectory => 6,
+    }
+}
+
+fn dir_slot_error_code(error: fat32::DirSlotError) -> i32 {
+    match error {
+        fat32::DirSlotError::BlockReadFailed => 1,
+        fat32::DirSlotError::BlockWriteFailed => 2,
+        fat32::DirSlotError::InvalidCluster => 3,
+        fat32::DirSlotError::NoSpace => 4,
+    }
+}
+
+/// Decode and validate a FAT32 BPB. Zero means success.
+///
+/// # Safety
+/// `dev` points to a live block vtable and `out` to writable aligned storage.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_mount(
+    dev: *mut block_dev::BlockDev,
+    partition_lba: u32,
+    out: *mut fat32::Mount,
+) -> i32 {
+    match fat32::mount(dev, partition_lba) {
+        Ok(mount) => {
+            unsafe { out.write(mount) };
+            0
+        }
+        Err(fat32::MountError::BadBpb) => 1,
+        Err(fat32::MountError::NotFat32) => 2,
+        Err(fat32::MountError::BlockReadFailed) => 3,
+    }
+}
+
+/// # Safety
+/// `mount` and `out` point to live records of their declared type.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_cluster_lba(
+    mount: *const fat32::Mount,
+    cluster: u32,
+    out: *mut u32,
+) -> i32 {
+    match fat32::cluster_lba(unsafe { &*mount }, cluster) {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(error) => fat_error_code(error),
+    }
+}
+
+/// # Safety
+/// `mount` and `out` point to live records of their declared type.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_read_fat_entry(
+    mount: *const fat32::Mount,
+    cluster: u32,
+    out: *mut u32,
+) -> i32 {
+    match fat32::read_fat_entry(unsafe { &*mount }, cluster) {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(error) => fat_error_code(error),
+    }
+}
+
+/// # Safety
+/// `mount` points to a live exclusively accessed mount.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_write_fat_entry(
+    mount: *mut fat32::Mount,
+    cluster: u32,
+    value: u32,
+) -> i32 {
+    unsafe { fat32::write_fat_entry(&mut *mount, cluster, value) }
+        .map_or_else(fat_error_code, |()| 0)
+}
+
+/// # Safety
+/// `mount` and `out` point to live records of their declared type.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_alloc_cluster(mount: *mut fat32::Mount, out: *mut u32) -> i32 {
+    match unsafe { fat32::alloc_cluster(&mut *mount) } {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(error) => alloc_error_code(error),
+    }
+}
+
+/// # Safety
+/// `mount` points to a live exclusively accessed mount.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_fs_info_on_alloc(mount: *mut fat32::Mount, cluster: u32) -> i32 {
+    unsafe { fat32::fs_info_on_alloc(&mut *mount, cluster) }.map_or_else(fat_error_code, |()| 0)
+}
+
+/// # Safety
+/// All pointers name live fixed-layout records.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_lookup_in_dir(
+    mount: *const fat32::Mount,
+    start_cluster: u32,
+    name: *const [u8; 11],
+    out: *mut fat32::FoundEntry,
+) -> i32 {
+    match fat32::lookup_in_dir(unsafe { &*mount }, start_cluster, unsafe { *name }) {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(error) => lookup_error_code(error),
+    }
+}
+
+/// # Safety
+/// All pointers name live fixed-layout records.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_lookup_in_root(
+    mount: *const fat32::Mount,
+    name: *const [u8; 11],
+    out: *mut fat32::FoundEntry,
+) -> i32 {
+    match fat32::lookup_in_root(unsafe { &*mount }, unsafe { *name }) {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(error) => lookup_error_code(error),
+    }
+}
+
+/// # Safety
+/// `entry` points to a readable fixed-layout directory entry.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_first_cluster(entry: *const fat32::DirEntry) -> u32 {
+    fat32::first_cluster(unsafe { *entry })
+}
+
+/// # Safety
+/// `bpb` points to a readable byte-exact BPB record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_bpb_root_cluster(bpb: *const fat32::Bpb) -> u32 {
+    unsafe { &*bpb }.root_cluster()
+}
+
+/// # Safety
+/// `bpb` points to a writable byte-exact BPB record used exclusively here.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_bpb_set_root_cluster(bpb: *mut fat32::Bpb, value: u32) {
+    unsafe { &mut *bpb }.set_root_cluster(value);
+}
+
+/// # Safety
+/// `bpb` points to a writable byte-exact BPB record used exclusively here.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_bpb_set_num_fats(bpb: *mut fat32::Bpb, value: u8) {
+    unsafe { &mut *bpb }.set_number_of_fats(value);
+}
+
+/// # Safety
+/// `entry` points to a readable byte-exact directory record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_dir_entry_attr(entry: *const fat32::DirEntry) -> u8 {
+    unsafe { &*entry }.attr()
+}
+
+/// # Safety
+/// `entry` points to a readable byte-exact directory record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_dir_entry_file_size(entry: *const fat32::DirEntry) -> u32 {
+    unsafe { &*entry }.file_size()
+}
+
+/// # Safety
+/// Input/output pointers are valid for their declared spans and records.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_lookup_path(
+    mount: *const fat32::Mount,
+    path: *const u8,
+    path_len: usize,
+    out: *mut fat32::FoundEntry,
+) -> i32 {
+    let path = unsafe { slice_from_raw(path, path_len) };
+    match fat32::lookup_path(unsafe { &*mount }, path) {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(error) => path_error_code(error),
+    }
+}
+
+/// # Safety
+/// `mount` is live and exclusive; `found` points to a readable record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_update_dir_entry_size(
+    mount: *mut fat32::Mount,
+    found: *const fat32::FoundEntry,
+    new_size: u32,
+) -> i32 {
+    unsafe { fat32::update_dir_entry_size(&mut *mount, *found, new_size) }
+        .map_or_else(fat_error_code, |()| 0)
+}
+
+/// # Safety
+/// `mount` is live and exclusive; `found` points to a readable record.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_update_dir_entry_first_cluster(
+    mount: *mut fat32::Mount,
+    found: *const fat32::FoundEntry,
+    cluster: u32,
+) -> i32 {
+    unsafe { fat32::update_dir_entry_first_cluster(&mut *mount, *found, cluster) }
+        .map_or_else(fat_error_code, |()| 0)
+}
+
+/// # Safety
+/// `mount` and `out` point to live records of their declared type.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_find_free_dir_slot(
+    mount: *mut fat32::Mount,
+    directory_cluster: u32,
+    out: *mut fat32::DirSlot,
+) -> i32 {
+    match unsafe { fat32::find_free_dir_slot(&mut *mount, directory_cluster) } {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(error) => dir_slot_error_code(error),
+    }
+}
+
+/// # Safety
+/// `mount` is live and exclusive; `name` points to eleven readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_write_dir_entry(
+    mount: *mut fat32::Mount,
+    lba: u32,
+    byte_offset: u16,
+    name: *const [u8; 11],
+    attr: u8,
+    first_cluster: u32,
+    size: u32,
+) -> i32 {
+    unsafe {
+        fat32::write_dir_entry(
+            &mut *mount,
+            lba,
+            byte_offset,
+            *name,
+            attr,
+            first_cluster,
+            size,
+        )
+    }
+    .map_or_else(fat_error_code, |()| 0)
+}
+
+/// # Safety
+/// `mount` points to a live exclusively accessed mount.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_mark_deleted(
+    mount: *mut fat32::Mount,
+    lba: u32,
+    byte_offset: u16,
+) -> i32 {
+    unsafe { fat32::mark_deleted(&mut *mount, lba, byte_offset) }
+        .map_or_else(fat_error_code, |()| 0)
+}
+
+/// # Safety
+/// `mount` points to a live exclusively accessed mount.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_free_chain(mount: *mut fat32::Mount, first_cluster: u32) -> i32 {
+    unsafe { fat32::free_chain(&mut *mount, first_cluster) }.map_or_else(fat_error_code, |()| 0)
+}
+
+/// # Safety
+/// `mount` points to a live exclusively accessed mount.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_fs_info_on_free(mount: *mut fat32::Mount, cluster: u32) -> i32 {
+    unsafe { fat32::fs_info_on_free(&mut *mount, cluster) }.map_or_else(fat_error_code, |()| 0)
+}
+
+/// # Safety
+/// `name` is readable for `name_len` and `out` points to eleven writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_encode_8_3(
+    name: *const u8,
+    name_len: usize,
+    out: *mut [u8; 11],
+) -> u8 {
+    let name = unsafe { slice_from_raw(name, name_len) };
+    let Some(encoded) = fat32::encode_8_3(name) else {
+        return 0;
+    };
+    unsafe { out.write(encoded) };
+    1
+}
+
+/// # Safety
+/// `raw` and `out` point to readable/writable fixed-layout records.
+#[no_mangle]
+pub unsafe extern "C" fn fos_fat32_decode_8_3(raw: *const [u8; 11], out: *mut fat32::Rendered8_3) {
+    unsafe { out.write(fat32::decode_8_3(*raw)) };
+}
+
+/// Parse a permission overlay, returning `usize::MAX` on malformed input.
+///
+/// # Safety
+/// The input and output spans are live and do not overlap.
+#[no_mangle]
+pub unsafe extern "C" fn fos_overlay_parse(
+    content: *const u8,
+    content_len: usize,
+    out: *mut overlay::Entry,
+    out_len: usize,
+) -> usize {
+    let content = unsafe { slice_from_raw(content, content_len) };
+    let out = unsafe { core::slice::from_raw_parts_mut(out, out_len) };
+    overlay::parse(content, out).unwrap_or(NONE)
+}
+
+/// # Safety
+/// All input/output spans and records are live for the call.
+#[no_mangle]
+pub unsafe extern "C" fn fos_overlay_lookup(
+    entries: *const overlay::Entry,
+    entries_len: usize,
+    name: *const u8,
+    name_len: usize,
+    out: *mut overlay::Entry,
+) -> u8 {
+    let entries = unsafe { core::slice::from_raw_parts(entries, entries_len) };
+    let name = unsafe { slice_from_raw(name, name_len) };
+    let Some(entry) = overlay::lookup(entries, name) else {
+        return 0;
+    };
+    unsafe { out.write(entry) };
+    1
+}
+
+/// # Safety
+/// Both names are readable for their declared lengths.
+#[no_mangle]
+pub unsafe extern "C" fn fos_overlay_name_eql(
+    a: *const u8,
+    a_len: usize,
+    b: *const u8,
+    b_len: usize,
+) -> u8 {
+    u8::from(overlay::name_eql(
+        unsafe { slice_from_raw(a, a_len) },
+        unsafe { slice_from_raw(b, b_len) },
+    ))
 }
 
 /// Copy a local message to firmware-visible storage with volatile word writes.

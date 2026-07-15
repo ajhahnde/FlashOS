@@ -15,11 +15,13 @@ extern crate std;
 
 pub mod block_dev;
 pub mod elf;
+pub mod fat32;
 pub mod file;
 pub mod initramfs;
 pub mod initramfs_backend;
 pub mod klog_ring;
 pub mod mailbox;
+pub mod overlay;
 pub mod path;
 pub mod perm;
 pub mod sdhci_cmd;

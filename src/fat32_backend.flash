@@ -101,15 +101,16 @@ fn applyOverlay() void {
 
     const name = fat32.encode8_3(OVERLAY_NAME) orelse return
     const found = fat32.lookupInRoot(&mount_info, name) catch return
-    if (found.entry.file_size == 0 || found.entry.file_size > overlay_buf.len) { return }
+    const overlay_size = fat32.dirEntryFileSize(found.entry)
+    if (overlay_size == 0 || overlay_size > overlay_buf.len) { return }
 
-    const first_clus = (#as(u32, found.entry.fst_clus_hi) << 16) | found.entry.fst_clus_lo
+    const first_clus = fat32.firstCluster(found.entry)
     var f File = .{
         .ftype = 0,
         .refs = 1,
         .offset = 0,
         .private = first_clus,
-        .size = found.entry.file_size,
+        .size = overlay_size,
         .sb = &sb,
     }
     var got u64 = 0
@@ -169,7 +170,7 @@ fn open(_ *mut vfs.SuperBlock, path_ptr [*]u8, path_len usize, out *mut vfs.Open
     const found = fat32.lookupPath(&mount_info, rel) catch return -1
     const first_clus = fat32.firstCluster(found.entry)
     out.private = first_clus
-    out.size = found.entry.file_size
+    out.size = fat32.dirEntryFileSize(found.entry)
     // Stash the on-disk directory-entry location so write() can rewrite
     // the entry's first-cluster (empty-file first write) and file_size
     // without an ambiguous re-walk by first cluster.
@@ -408,7 +409,7 @@ fn readdir(_ *mut vfs.SuperBlock, path_ptr [*]u8, path_len usize, index u64, out
     const path = path_ptr[0..path_len]
     if (!(path.len == 1 && path[0] == '/')) { return -1 } // root-only
 
-    var cluster u32 = mount_info.bpb.root_clus
+    var cluster u32 = fat32.bpbRootCluster(&mount_info.bpb)
     const sector_buf = &io_sector_scratch
     var emitted u64 = 0
     // Cycle guard: a valid chain visits at most total_clusters links;
@@ -489,9 +490,9 @@ fn splitBasename(rel []u8) PathSplit {
 // the mount root. Returns null when the path is missing or names a
 // non-directory (so a create/rename into it fails closed).
 fn resolveParentCluster(parent []u8) ?u32 {
-    if (parent.len == 0) { return mount_info.bpb.root_clus }
+    if (parent.len == 0) { return fat32.bpbRootCluster(&mount_info.bpb) }
     const pf = fat32.lookupPath(&mount_info, parent) catch return null
-    if ((pf.entry.attr & fat32.ATTR_DIRECTORY) == 0) { return null }
+    if ((fat32.dirEntryAttr(pf.entry) & fat32.ATTR_DIRECTORY) == 0) { return null }
     return fat32.firstCluster(pf.entry)
 }
 
@@ -550,7 +551,7 @@ fn unlink(_ *mut vfs.SuperBlock, path_ptr [*]u8, path_len usize) callconv(.c) c_
     const path = path_ptr[0..path_len]
     const rel = if (path.len > 0 && path[0] == '/') path[1..] else path
     const found = fat32.lookupPath(&mount_info, rel) catch return -1
-    if ((found.entry.attr & fat32.ATTR_DIRECTORY) != 0) { return -1 } // files only
+    if ((fat32.dirEntryAttr(found.entry) & fat32.ATTR_DIRECTORY) != 0) { return -1 } // files only
     const first_clus = fat32.firstCluster(found.entry)
     fat32.markDeleted(&mount_info, found.lba, found.byte_offset) catch return -1
     fat32.freeChain(&mount_info, first_clus) catch return -1
@@ -580,7 +581,7 @@ fn rename(_ *mut vfs.SuperBlock, old_ptr [*]u8, old_len usize, new_ptr [*]u8, ne
     if (!std.mem.eql(u8, &old_name, &new_name)) {
         if (probeExists(parent_cluster, new_name) != 0) { return -1 }
     }
-    fat32.writeDirEntry(&mount_info, found.lba, found.byte_offset, new_name, found.entry.attr, fat32.firstCluster(found.entry), found.entry.file_size) catch return -1
+    fat32.writeDirEntry(&mount_info, found.lba, found.byte_offset, new_name, fat32.dirEntryAttr(found.entry), fat32.firstCluster(found.entry), fat32.dirEntryFileSize(found.entry)) catch return -1
     return 0
 }
 
@@ -729,6 +730,50 @@ test "splice contract: whole-file same-length rewrite from offset 0 (shadow rewr
     try testing.expectEqual(#as(u64, content.len), f.size)
 }
 
+test "read splice contract: 1-byte sub-sector read follows the hostile callback" {
+    installAntagonist()
+    installMountInfo()
+
+    var f File = .{
+        .ftype = 0,
+        .refs = 1,
+        .offset = 100,
+        .private = 3,
+        .size = 512,
+        .sb = &sb,
+    }
+    var out [3]u8 = .{ 0xCC, 0xCC, 0xCC }
+
+    const n = ops_vtable.read(&sb, &f, out[1..].ptr, 1)
+
+    try testing.expectEqual(#as(i64, 1), n)
+    try testing.expectEqual(#as(u32, 1), antagonist_read_calls)
+    try testing.expectEqualSlices(u8, &.{ 0xCC, 0x00, 0xCC }, &out)
+    try testing.expectEqual(#as(u64, 101), f.offset)
+}
+
+test "read splice contract: runtime-length copy has no destination bleed" {
+    installAntagonist()
+    installMountInfo()
+
+    var f File = .{
+        .ftype = 0,
+        .refs = 1,
+        .offset = 200,
+        .private = 3,
+        .size = 512,
+        .sb = &sb,
+    }
+    var out [6]u8 = .{0xCC} ** 6
+
+    const n = ops_vtable.read(&sb, &f, out[1..].ptr, 4)
+
+    try testing.expectEqual(#as(i64, 4), n)
+    try testing.expectEqual(#as(u32, 1), antagonist_read_calls)
+    try testing.expectEqualSlices(u8, &.{ 0xCC, 0, 0, 0, 0, 0xCC }, &out)
+    try testing.expectEqual(#as(u64, 204), f.offset)
+}
+
 // readdir fixture — a real root-dir cluster for the enumeration walk
 // (the splice tests above use an antagonist with no directory). LBA 0..7
 // of an in-memory disk: FAT @ LBA 2 terminates the root chain (cluster 2
@@ -764,7 +809,7 @@ fn setupReaddirFixture() void {
 fn installReaddirMount() void {
     block_dev.sd_dev = .{ .read_fn = rdRead, .write_fn = null }
     var bpb = std.mem.zeroes(fat32.Bpb)
-    bpb.root_clus = 2
+    fat32.bpbSetRootCluster(&bpb, 2)
     mount_info = .{
         .bpb = bpb,
         .partition_lba = 0,
@@ -965,8 +1010,8 @@ fn setupEmptyFileFixture() void {
 fn installRwMount() void {
     block_dev.sd_dev = .{ .read_fn = rwRead, .write_fn = rwWrite }
     var bpb = std.mem.zeroes(fat32.Bpb)
-    bpb.root_clus = 2
-    bpb.num_fats = 1 // single FAT in this fixture (no mirror)
+    fat32.bpbSetRootCluster(&bpb, 2)
+    fat32.bpbSetNumFats(&bpb, 1) // single FAT in this fixture (no mirror)
     mount_info = .{
         .bpb = bpb,
         .partition_lba = 0,

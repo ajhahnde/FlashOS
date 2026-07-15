@@ -35,6 +35,8 @@ Commands:
   user <name> [--output <path>] [--feature <name>]...
                                Build a Rust EL0 payload (hello, clear, pid1, ...)
   klib [--output <path>]        Build the Rust kernel staticlib the Zig kernel links
+  host-storage-bridge [--output <path>]
+                                Build the native storage ABI for Flash backend tests
   gen-shadow --output <path>    Bake /etc/shadow with the kernel's own PBKDF2
   test                          Run the Rust host tests (all crates but the bare-metal ones)
   check-hygiene                 Run the repo's whitespace and hex-literal gates
@@ -124,6 +126,12 @@ fn dispatch() -> Result<(), String> {
             println!("built {}", a.display());
             Ok(())
         }
+        "host-storage-bridge" => {
+            let (output, _) = user_args_of(&rest)?;
+            let archive = build::host_storage_bridge(&root, output.as_deref())?;
+            println!("built {}", archive.display());
+            Ok(())
+        }
         "gen-shadow" => {
             let (output, _) = user_args_of(&rest)?;
             let out = output.ok_or("usage: cargo xtask gen-shadow --output <path>")?;
@@ -144,6 +152,8 @@ fn dispatch() -> Result<(), String> {
                 "flashos-canary",
                 "--exclude",
                 "flashos-klib",
+                "--exclude",
+                "flashos-kernel-host-bridge",
             ])
             .run(),
         "check-hygiene" => {

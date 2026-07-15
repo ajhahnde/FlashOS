@@ -56,6 +56,7 @@ const HostTest = struct {
     src_lazy: ?std.Build.LazyPath = null,
     stubs: ?*std.Build.Step.Compile = null,
     extra_stubs: []const *std.Build.Step.Compile = &.{},
+    object_files: []const std.Build.LazyPath = &.{},
     imports: []const struct {
         name: []const u8,
         mod: *std.Build.Module,
@@ -85,6 +86,7 @@ fn addHostTest(b: *std.Build, step: *std.Build.Step, cfg: HostTest) *std.Build.M
     });
     if (cfg.stubs) |s| m.addObject(s);
     for (cfg.extra_stubs) |s| m.addObject(s);
+    for (cfg.object_files) |object| m.addObjectFile(object);
     for (cfg.imports) |imp| m.addImport(imp.name, imp.mod);
     const t = b.addTest(.{
         .root_module = m,
@@ -2038,28 +2040,17 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     });
 
-    // fat32.flash — FAT32 on-disk layout decode.
-    // Pure data module: imports only the host-only block_dev Module
-    // (BlockDev type), uses an in-memory 64 KiB fake disk built by the
-    // inline test fixture. No page-alloc or task-layout externs needed.
+    // Host-side block-device mirror consumed by the remaining FAT32 backend
+    // regression suite.
     const block_dev_test_mod = b.createModule(.{
         .root_source_file = block_dev_src,
         .target = b.graph.host,
         .optimize = .Debug,
     });
-    _ = addHostTest(b, test_step, .{
-        .src = "src/fat32.flash",
-        .src_lazy = fat32_src,
-        .imports = &.{.{ .name = "block_dev", .mod = block_dev_test_mod }},
-    });
 
-    // fat32_backend.zig — FAT32 VFS backend host-test. Asserts the
-    // sub-sector splice contract that write():203-208 fulfills. See
-    // the comment block at the end of
-    // src/fat32_backend.zig for the bug-class link and the
-    // ReleaseSmall reproducibility note. Created modules for fat32
-    // and vfs because the kernel-side fat32_mod / vfs_mod are wired
-    // for aarch64 freestanding, not host.
+    // The pure FAT32 + overlay tests now live in crates/kernel. Their adapter
+    // modules remain imports of fat32_backend's 19 host regressions, linked to
+    // a native storage-only Rust archive for this one bridge task.
     const fat32_for_backend_mod = b.createModule(.{
         .root_source_file = fat32_src,
         .target = b.graph.host,
@@ -2075,25 +2066,27 @@ pub fn build(b: *std.Build) void {
     vfs_for_backend_mod.addImport("file", file_test_mod);
     vfs_for_backend_mod.addImport("syscall_defs", syscall_defs_test_mod);
 
-    // overlay.zig — FAT32 permission-overlay parser host coverage.
-    // Pure parse/lookup truth table — the gate for the /mnt overlay: the
-    // fat32_backend wiring (applyOverlay + open lookup) does not ship until
-    // every row passes. The returned Module doubles as fat32_backend's
-    // "overlay" import below (mirroring the klog_ring/utilc pattern). Pins
-    // the format shared with the seed file (user_space/etc/perms.tab) and
-    // the deploy / make_test_disk seeding.
-    const overlay_test_mod = addHostTest(b, test_step, .{ .src = "src/overlay.flash", .src_lazy = overlay_src });
+    const overlay_for_backend_mod = b.createModule(.{
+        .root_source_file = overlay_src,
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    const host_storage_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "host-storage-bridge", "--output" });
+    host_storage_cmd.setName("cargo xtask host-storage-bridge");
+    const host_storage_a = host_storage_cmd.addOutputFileArg("libflashos_kernel_host_bridge.a");
+    host_storage_cmd.has_side_effects = true;
 
     _ = addHostTest(b, test_step, .{
         .src = "src/fat32_backend.flash",
         .src_lazy = fat32_backend_src,
         .stubs = vfs_stubs_obj,
+        .object_files = &.{host_storage_a},
         .imports = &.{
             .{ .name = "block_dev", .mod = block_dev_test_mod },
             .{ .name = "fat32", .mod = fat32_for_backend_mod },
             .{ .name = "vfs", .mod = vfs_for_backend_mod },
             .{ .name = "file", .mod = file_test_mod },
-            .{ .name = "overlay", .mod = overlay_test_mod },
+            .{ .name = "overlay", .mod = overlay_for_backend_mod },
         },
     });
 

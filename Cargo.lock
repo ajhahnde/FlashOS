@@ -190,6 +190,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "flashos-kernel-host-bridge"
+version = "0.8.0"
+dependencies = [
+ "flashos-kernel",
+]
+
+[[package]]
 name = "flashos-klib"
 version = "0.8.0"
 dependencies = [
