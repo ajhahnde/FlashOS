@@ -400,21 +400,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // User-page mapping + page-table walk + the EL0 fault handlers.
-    // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
-    // pulls the export fns into the ELF with `_ = @import("mm_user")`;
-    // sys.zig / fork.zig reach copy_from_user / map_page / do_data_abort
-    // through C-ABI `extern fn`. The one transpile is shared with the
-    // host-test build below (src_lazy).
-    const mm_user_src = addFlashSource(b, "src/mm_user.flash");
-    const mm_user_mod = b.createModule(.{
-        .root_source_file = mm_user_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    mm_user_mod.addImport("task_layout", task_layout_mod);
-    mm_user_mod.addImport("user_layout", user_layout_mod);
-
     // File handle module. Owns the open_files
     // lifetime helpers (alloc / unref / fdAlloc / fdGet / fdClose /
     // dupAll / closeAll). Imports task_layout for TaskStruct + File
@@ -1085,7 +1070,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("initramfs_backend", initramfs_backend_mod);
     kernel_mod.addImport("fat32_backend", fat32_backend_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
-    kernel_mod.addImport("mm_user", mm_user_mod);
     kernel_mod.addImport("fork", fork_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
     kernel_mod.addImport("mailbox", mailbox_mod);
@@ -1816,25 +1800,6 @@ pub fn build(b: *std.Build) void {
     // the kernel build gets it via kernel_mod, the host test needs it wired
     // explicitly since this module is built standalone.
     fork_test_mod.addOptions("build_options", build_options);
-
-    const mm_user_stubs_mod = b.createModule(.{
-        .root_source_file = b.path("tests/host_stubs_mm_user.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    mm_user_stubs_mod.addImport("task_layout", task_layout_test_mod);
-    _ = addHostTest(b, test_step, .{
-        .src = "src/mm_user.flash",
-        .src_lazy = mm_user_src,
-        .stubs = b.addObject(.{
-            .name = "host_stubs_mm_user",
-            .root_module = mm_user_stubs_mod,
-        }),
-        .imports = &.{
-            .{ .name = "task_layout", .mod = task_layout_test_mod },
-            .{ .name = "user_layout", .mod = user_layout_test_mod },
-        },
-    });
 
     // vanilla single-module test targets — shared stubs, no named imports.
     // wait_queue is its own test target AND the named module pipe.zig

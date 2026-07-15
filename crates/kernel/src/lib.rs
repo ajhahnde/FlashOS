@@ -22,6 +22,7 @@ pub mod initramfs;
 pub mod initramfs_backend;
 pub mod klog_ring;
 pub mod mailbox;
+pub mod mm_user;
 pub mod overlay;
 pub mod page_alloc;
 pub mod path;

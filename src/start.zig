@@ -66,7 +66,6 @@ comptime {
     _ = @import("fork");
     _ = @import("execve");
     _ = @import("sys");
-    _ = @import("mm_user");
     _ = @import("utilc");
     _ = @import("hwrng");
 

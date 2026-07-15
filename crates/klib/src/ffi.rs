@@ -10,8 +10,8 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    block_dev, elf, fat32_backend, file, initramfs_backend, klog_ring, mailbox, page_alloc, path,
-    perm, sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring, vfs,
+    block_dev, elf, fat32_backend, file, initramfs_backend, klog_ring, mailbox, mm_user,
+    page_alloc, path, perm, sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -177,6 +177,153 @@ unsafe extern "C" {
     fn main_output_u64(interface: i32, value: u64);
     fn preempt_disable();
     fn preempt_enable();
+    fn memcpy(
+        destination: *mut core::ffi::c_void,
+        source: *const core::ffi::c_void,
+        bytes: u64,
+    ) -> *mut core::ffi::c_void;
+    fn exit_process();
+    static mut current: *mut mm_user::TaskStruct;
+}
+
+const MM_USER_SERVICES: mm_user::Services = mm_user::Services {
+    get_free_page,
+    free_page,
+    copy_memory: memcpy,
+    output: main_output,
+    output_u64: main_output_u64,
+    exit_process,
+};
+
+/// Physical load address of the kernel, filled by `boot.S` before TTBR setup.
+#[no_mangle]
+pub static mut KERNEL_PA_BASE: u64 = 0;
+
+/// # Safety
+/// `task` points to a live task whose mm is not concurrently mutated.
+#[no_mangle]
+pub unsafe extern "C" fn task_kp_count(task: *mut mm_user::TaskStruct) -> i32 {
+    unsafe { mm_user::task_kp_count(task) }
+}
+
+/// # Safety
+/// Same contract as [`task_kp_count`].
+#[no_mangle]
+pub unsafe extern "C" fn task_up_count(task: *mut mm_user::TaskStruct) -> i32 {
+    unsafe { mm_user::task_up_count(task) }
+}
+
+/// # Safety
+/// `table` points to 512 live entries and `new_table` is writable.
+#[no_mangle]
+pub unsafe extern "C" fn map_table(
+    table: *mut u64,
+    shift: u64,
+    uva: u64,
+    new_table: *mut i32,
+) -> u64 {
+    unsafe { mm_user::map_table(table, shift, uva, new_table, &MM_USER_SERVICES) }
+}
+
+/// # Safety
+/// `pte` points to a writable 512-entry table owned by the active task.
+#[no_mangle]
+pub unsafe extern "C" fn map_table_entry(pte: *mut u64, uva: u64, phys_page: u64, flags: u64) {
+    unsafe { mm_user::map_table_entry(pte, uva, phys_page, flags) };
+}
+
+/// # Safety
+/// `task` owns its mm and `phys_page` is exclusively owned by the caller until
+/// the map succeeds.
+#[no_mangle]
+pub unsafe extern "C" fn map_page(
+    task: *mut mm_user::TaskStruct,
+    uva: u64,
+    phys_page: u64,
+    flags: u64,
+) -> i32 {
+    unsafe { mm_user::map_page(task, uva, phys_page, flags, &MM_USER_SERVICES) }
+}
+
+/// # Safety
+/// `task` owns its mm and allocator access is serialized by kernel control flow.
+#[no_mangle]
+pub unsafe extern "C" fn allocate_user_page(
+    task: *mut mm_user::TaskStruct,
+    uva: u64,
+    flags: u64,
+) -> u64 {
+    unsafe { mm_user::allocate_user_page(task, uva, flags, &MM_USER_SERVICES) }
+}
+
+/// # Safety
+/// `dst` is an unpublished child and `current` remains the active parent.
+#[no_mangle]
+pub unsafe extern "C" fn copy_virt_memory(dst: *mut mm_user::TaskStruct) -> i32 {
+    unsafe { mm_user::copy_virt_memory(dst, current, &MM_USER_SERVICES) }
+}
+
+/// # Safety
+/// `task` owns its mm; the caller flushes its TLB before returning to EL0.
+#[no_mangle]
+pub unsafe extern "C" fn unmap_user_range(
+    task: *mut mm_user::TaskStruct,
+    start_uva: u64,
+    end_uva: u64,
+) {
+    unsafe { mm_user::unmap_user_range(task, start_uva, end_uva, &MM_USER_SERVICES) };
+}
+
+/// Entry.S data-abort target. Fatal paths do not return in production.
+///
+/// # Safety
+/// `current` must identify the active live task and exception entry must
+/// serialize its mm and allocator access.
+#[no_mangle]
+pub unsafe extern "C" fn do_data_abort(far: u64, esr: u64) -> i32 {
+    unsafe { mm_user::do_data_abort(current, far, esr, &MM_USER_SERVICES) }
+}
+
+/// Entry.S instruction-abort target. This does not return in production.
+///
+/// # Safety
+/// Must be called only from the serialized EL0 exception path.
+#[no_mangle]
+pub unsafe extern "C" fn do_instruction_abort(far: u64, esr: u64) -> i32 {
+    unsafe { mm_user::do_instruction_abort(far, esr, &MM_USER_SERVICES) }
+}
+
+/// Entry.S catch-all synchronous-fault target. This does not return in production.
+///
+/// # Safety
+/// Must be called only from the serialized EL0 exception path.
+#[no_mangle]
+pub unsafe extern "C" fn do_el0_sync_fault(esr: u64, elr: u64) -> i32 {
+    unsafe { mm_user::do_el0_sync_fault(esr, elr, &MM_USER_SERVICES) }
+}
+
+/// Soft-prefault a current-task user range without zombifying on failure.
+///
+/// # Safety
+/// `current` must identify the active live task and the caller must serialize
+/// its mm and allocator access.
+#[no_mangle]
+pub unsafe extern "C" fn check_and_prefault_user_range(uva: u64, len: u64) -> i32 {
+    unsafe { mm_user::check_and_prefault_user_range(current, uva, len, &MM_USER_SERVICES) }
+}
+
+/// # Safety
+/// `kernel_buffer` is writable for `len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn copy_from_user(kernel_buffer: *mut u8, uva: u64, len: u64) -> i32 {
+    unsafe { mm_user::copy_from_user(current, kernel_buffer, uva, len, &MM_USER_SERVICES) }
+}
+
+/// # Safety
+/// `kernel_buffer` is readable for `len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn copy_to_user(uva: u64, kernel_buffer: *mut u8, len: u64) -> i32 {
+    unsafe { mm_user::copy_to_user(current, uva, kernel_buffer, len, &MM_USER_SERVICES) }
 }
 
 /// Reset the physical-page bitmap during single-core bring-up.
