@@ -16,6 +16,7 @@ extern crate std;
 pub mod block_dev;
 pub mod elf;
 pub mod fat32;
+pub mod fat32_backend;
 pub mod file;
 pub mod initramfs;
 pub mod initramfs_backend;

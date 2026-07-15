@@ -7,7 +7,6 @@ members = [
     "crates/console-ui",
     "crates/flibc",
     "crates/kernel",
-    "crates/kernel-host-bridge",
     "crates/klib",
     "crates/pwfile",
     "crates/user-rt",

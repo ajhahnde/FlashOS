@@ -646,12 +646,6 @@ pub fn build(b: *std.Build) void {
     const perm_mod = b.createModule(.{
         .root_source_file = perm_src,
     });
-    // overlay — FAT32 permission-overlay parser. Pure parse +
-    // lookup consumed by fat32_backend (PERMS.TAB -> per-file mode/uid/gid).
-    const overlay_src = addFlashSource(b, "src/overlay.flash");
-    const overlay_mod = b.createModule(.{
-        .root_source_file = overlay_src,
-    });
     // pwfile — /etc/passwd parser. Pure name/uid lookups shared
     // by the kernel (sys_passwd authorization), /bin/login, and fsh's
     // whoami builtin.
@@ -687,39 +681,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // FAT32 on-disk layout decode + cluster/FAT/dir helpers.
-    // Pure data-shape module — no VFS / file / page
-    // imports; takes the BlockDev vtable by runtime pointer so the
-    // host tests can swap in an in-memory fake.
-    // fat32_backend.zig consumes this module to wire the real VfsOps.
-    // Ported to Flash; the one flashc transpile is shared with the
-    // host-test builds below (src_lazy), including fat32_backend's test
-    // module.
-    const fat32_src = addFlashSource(b, "src/fat32.flash");
-    const fat32_mod = b.createModule(.{
-        .root_source_file = fat32_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    fat32_mod.addImport("block_dev", block_dev_mod);
-
-    // FAT32 VFS backend. Wraps fat32.zig's
-    // on-disk decode in the real VfsOps vtable; replaces the earlier
-    // fat32_stub.
-    // Ported to Flash; the one flashc transpile is shared with the
-    // host-test build below (src_lazy).
+    // Boot adapter for the Rust-owned FAT32 VFS backend. The board-owned
+    // `sd_dev` callback record remains in the block_dev module until R9.
     const fat32_backend_src = addFlashSource(b, "src/fat32_backend.flash");
     const fat32_backend_mod = b.createModule(.{
         .root_source_file = fat32_backend_src,
         .target = target,
         .optimize = optimize,
     });
-    fat32_backend_mod.addImport("fat32", fat32_mod);
-    fat32_backend_mod.addImport("vfs", vfs_mod);
-    fat32_backend_mod.addImport("file", file_mod);
     fat32_backend_mod.addImport("block_dev", block_dev_mod);
-    // Permission overlay: PERMS.TAB parse + lookup.
-    fat32_backend_mod.addImport("overlay", overlay_mod);
 
     // Console RX layer. 256-byte ring + WaitQueue
     // backing the unified console read. Same named-module wiring as wait_queue
@@ -1128,7 +1098,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("vfs", vfs_mod);
     kernel_mod.addImport("initramfs_backend", initramfs_backend_mod);
     kernel_mod.addImport("fat32_backend", fat32_backend_mod);
-    kernel_mod.addImport("fat32", fat32_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
     kernel_mod.addImport("page_alloc", page_alloc_mod);
     kernel_mod.addImport("mm_user", mm_user_mod);
@@ -1774,15 +1743,6 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     });
 
-    // Host-target alias of the shared ABI file so vfs.zig's host build
-    // can satisfy its `@import("syscall_defs")` for the Dirent type
-    // Pure comptime constants — no externs, no stubs.
-    const syscall_defs_test_mod = b.createModule(.{
-        .root_source_file = syscall_defs_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
     const fork_stubs_mod = b.createModule(.{
         .root_source_file = b.path("tests/fork_stubs.zig"),
         .target = b.graph.host,
@@ -2024,70 +1984,12 @@ pub fn build(b: *std.Build) void {
             .{ .name = "file", .mod = file_test_mod },
         },
     });
-    const vfs_stubs_obj = b.addObject(.{
-        .name = "host_stubs_vfs",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/host_stubs_vfs.zig"),
-            .target = b.graph.host,
-            .optimize = .Debug,
-        }),
-    });
     // utilc's host tests exercise UART formatting, not the Rust-owned ring.
     // Give that test target a no-op named-module stand-in for its tee call.
     const klog_ring_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/host_stubs_klog_ring.zig"),
         .target = b.graph.host,
         .optimize = .Debug,
-    });
-
-    // Host-side block-device mirror consumed by the remaining FAT32 backend
-    // regression suite.
-    const block_dev_test_mod = b.createModule(.{
-        .root_source_file = block_dev_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
-    // The pure FAT32 + overlay tests now live in crates/kernel. Their adapter
-    // modules remain imports of fat32_backend's 19 host regressions, linked to
-    // a native storage-only Rust archive for this one bridge task.
-    const fat32_for_backend_mod = b.createModule(.{
-        .root_source_file = fat32_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    fat32_for_backend_mod.addImport("block_dev", block_dev_test_mod);
-
-    const vfs_for_backend_mod = b.createModule(.{
-        .root_source_file = b.path("src/vfs.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    vfs_for_backend_mod.addImport("file", file_test_mod);
-    vfs_for_backend_mod.addImport("syscall_defs", syscall_defs_test_mod);
-
-    const overlay_for_backend_mod = b.createModule(.{
-        .root_source_file = overlay_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    const host_storage_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "host-storage-bridge", "--output" });
-    host_storage_cmd.setName("cargo xtask host-storage-bridge");
-    const host_storage_a = host_storage_cmd.addOutputFileArg("libflashos_kernel_host_bridge.a");
-    host_storage_cmd.has_side_effects = true;
-
-    _ = addHostTest(b, test_step, .{
-        .src = "src/fat32_backend.flash",
-        .src_lazy = fat32_backend_src,
-        .stubs = vfs_stubs_obj,
-        .object_files = &.{host_storage_a},
-        .imports = &.{
-            .{ .name = "block_dev", .mod = block_dev_test_mod },
-            .{ .name = "fat32", .mod = fat32_for_backend_mod },
-            .{ .name = "vfs", .mod = vfs_for_backend_mod },
-            .{ .name = "file", .mod = file_test_mod },
-            .{ .name = "overlay", .mod = overlay_for_backend_mod },
-        },
     });
 
     // utilc.zig — kernel utility host coverage.

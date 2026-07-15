@@ -94,7 +94,7 @@ const _: () = assert!(core::mem::size_of::<DirEntry>() == 32);
 const _: () = assert!(core::mem::align_of::<DirEntry>() == 1);
 const _: () = assert!(core::mem::offset_of!(DirEntry, raw) == 0);
 
-/// Mounted volume geometry shared temporarily with the Flash VFS backend.
+/// Mounted volume geometry retained by the native FAT32 backend.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Mount {
@@ -230,6 +230,16 @@ unsafe impl Sync for SectorScratch {}
 
 static DIR_SECTOR_SCRATCH: SectorScratch = SectorScratch(UnsafeCell::new([0; 512]));
 static FAT_SECTOR_SCRATCH: SectorScratch = SectorScratch(UnsafeCell::new([0; 512]));
+
+#[cfg(test)]
+static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
 
 fn dir_scratch() -> &'static mut SectorBuf {
     // SAFETY: guarded by the single-operation invariant documented above.
@@ -739,7 +749,7 @@ fn write_u32(bytes: &mut [u8], offset: usize, value: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
     const FIXTURE_LEN: usize = 128 * 512;
 
@@ -749,12 +759,8 @@ mod tests {
     unsafe impl Sync for TestDisk {}
 
     static HOST_DISK: TestDisk = TestDisk(UnsafeCell::new([0; FIXTURE_LEN]));
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
     fn lock() -> MutexGuard<'static, ()> {
-        TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
+        super::test_lock()
     }
 
     fn disk() -> &'static mut [u8; FIXTURE_LEN] {

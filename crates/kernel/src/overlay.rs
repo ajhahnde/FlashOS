@@ -9,8 +9,7 @@
 pub const MAX_ENTRIES: usize = 16;
 pub const MAX_NAME: usize = 12;
 
-/// One parsed `NAME MODE UID GID` row. The C layout is temporary bridge ABI for
-/// the still-Flash FAT32 backend until that backend moves to Rust.
+/// One parsed `NAME MODE UID GID` row retained in the backend's fixed table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct Entry {
