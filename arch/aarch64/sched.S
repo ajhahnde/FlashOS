@@ -28,6 +28,18 @@ core_switch_to:
 .globl set_pgd
 set_pgd:
     msr ttbr0_el1, x0
+    /* Synchronise the TTBR0 switch before the TLB flush. Without this
+     * ISB the write to TTBR0_EL1 is not yet in effect, so a speculative
+     * table walk of the low user VA range can still use the *old* base —
+     * the boot id_pg_dir, which maps VA 0..16 MiB as UXN kernel 2 MiB
+     * blocks that shadow the entire low user address space — and re-cache
+     * a stale block into the TLB *after* the TLBI below clears it. The
+     * eret to EL0 then fetches VA 0 through that kernel block and takes an
+     * EL0 instruction permission fault (ESR IFSC 0x0e, level 2). The
+     * failure is layout-sensitive: whether the speculative walk lands in
+     * the unsynchronised window depends on surrounding code timing, so it
+     * surfaced only after an unrelated image-size shift. */
+    isb
     /* tlb invalidate, vm all el1 inner sharable */
     tlbi vmalle1is
     /* data sync inner sharable */
