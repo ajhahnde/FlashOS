@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/flashos_logo_dark.png">
-    <img src="assets/flashos_logo_light.png" alt=".flashOS" width="280">
+    <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
   </picture>
 
 <h1>Changelog</h1>
@@ -140,8 +140,8 @@ The project was founded on April 28th, 2026.
   Marker bytes used by the boot contract remain unchanged.
 - Moved subsystem status rendering into `kernel_main`; PID 1 now uses
   the shared `console_ui` logger as well.
-- Updated the product wordmark to `.flashOS` across the shell banner,
-  documentation assets, and boot demo.
+- Updated the product wordmark to `.flashOS` across the shell banner
+  and boot demo.
 
 ### Fixed
 
