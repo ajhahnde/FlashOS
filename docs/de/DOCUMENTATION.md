@@ -12,8 +12,6 @@
     <a href="README.md"><b>README</b></a> ·
     <b>Dokumentation</b> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="../../PORT.md"><b>Port</b></a> ·
-    <a href="../../VERSIONING.md"><b>Versionierung</b></a> ·
     <a href="../../CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="../../LICENSE.md"><b>Lizenz</b></a>
   </p>

@@ -10,8 +10,6 @@
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <b>Setup</b> ·
-    <a href="PORT.md"><b>Port</b></a> ·
-    <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
@@ -35,14 +33,14 @@ Reference:
 
 ## 1. Host toolchain
 
-| Tool                     | Minimum version | Purpose                                 |
-| :----------------------- | :-------------- | :-------------------------------------- |
+| Tool                     | Minimum version | Purpose                                         |
+| :----------------------- | :-------------- | :---------------------------------------------- |
 | Flash                    | 1.2.0           | Transpile the Flash sources used by `build.zig` |
-| Zig                      | 0.16.0          | Compile remaining Zig host tools        |
-| `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                        |
-| `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`   |
-| `qemu-system-aarch64`    | 11.0.0+         | Run the kernel under QEMU               |
-| `screen` (or equivalent) | –               | Serial console for the Pi               |
+| Zig                      | 0.16.0          | Compile remaining Zig host tools                |
+| `aarch64-elf-objcopy`    | 2.40+           | ELF → raw binary                                |
+| `aarch64-elf-nm`         | 2.40+           | Symbol extraction for `populate-syms`           |
+| `qemu-system-aarch64`    | 11.0.0+         | Run the kernel under QEMU                       |
+| `screen` (or equivalent) | –               | Serial console for the Pi                       |
 
 On macOS:
 
@@ -84,21 +82,21 @@ the `-d` flag is the deploy consent.
 
 ### Build steps
 
-| Command                                  | Result                                      |
-| :--------------------------------------- | :------------------------------------------ |
-| `flash build`                            | Pi kernel and armstub                       |
-| `flash build -Dboard=virt`               | `virt` kernel without armstub               |
-| `flash build kernel`                     | Kernel image only                           |
-| `flash build armstub`                    | Pi armstub only                             |
-| `flash build populate-syms`              | Regenerate `src/symbol_area.S`              |
-| `flash build deploy`                     | Copy the Pi build and firmware to `$SD_BOOT`|
-| `flash build -Dboard=rpi4b run`          | Run QEMU `-M raspi4b`                       |
-| `flash build -Dboard=virt run-virt`      | Run QEMU `-M virt`                          |
-| `flash build -Dboard=rpi4b test-rpi4b`   | Validate a `raspi4b` boot                   |
-| `flash build -Dboard=virt test-virt`     | Validate a `virt` boot                      |
-| `flash build -Dboard=virt iso`           | Build the `virt` GRUB-EFI rescue ISO        |
-| `flash build test`                       | Run host tests                              |
-| `flash build clean`                      | Remove caches and build output              |
+| Command                                | Result                                       |
+| :------------------------------------- | :------------------------------------------- |
+| `flash build`                          | Pi kernel and armstub                        |
+| `flash build -Dboard=virt`             | `virt` kernel without armstub                |
+| `flash build kernel`                   | Kernel image only                            |
+| `flash build armstub`                  | Pi armstub only                              |
+| `flash build populate-syms`            | Regenerate `src/symbol_area.S`               |
+| `flash build deploy`                   | Copy the Pi build and firmware to `$SD_BOOT` |
+| `flash build -Dboard=rpi4b run`        | Run QEMU `-M raspi4b`                        |
+| `flash build -Dboard=virt run-virt`    | Run QEMU `-M virt`                           |
+| `flash build -Dboard=rpi4b test-rpi4b` | Validate a `raspi4b` boot                    |
+| `flash build -Dboard=virt test-virt`   | Validate a `virt` boot                       |
+| `flash build -Dboard=virt iso`         | Build the `virt` GRUB-EFI rescue ISO         |
+| `flash build test`                     | Run host tests                               |
+| `flash build clean`                    | Remove caches and build output               |
 
 The default optimization mode is `ReleaseSmall`; override it with
 `-Doptimize=ReleaseSafe`, `Debug`, or `ReleaseFast`.
@@ -245,18 +243,18 @@ Source [`flashos.zsh`](flashos.zsh) from the repository or your
 source ~/FlashOS/flashos.zsh
 ```
 
-| Helper | Purpose |
-| :----- | :------ |
-| `build [-d]` | Two-pass symbol build; `-d` also deploys to the SD card |
-| `run qemu` / `run virt` | Build and start the selected QEMU board |
-| `run watchdog [rpi4b|virt]` | Run the unattended boot validation |
-| `run test [--NAME]` | Run all host tests or a filtered test |
-| `run hw [--trace]` | Attach to the Pi console |
-| `pi capture [usb|mu]` | Capture a boot into `boot.log` |
-| `pi connect [usb|mu]` | Open an interactive console |
-| `pi list` / `pi quit` | List devices or stop a capture session |
-| `pi log` / `pi tail [N]` | Read or follow the latest capture |
-| `flashos` | List helpers and build steps |
+| Helper                        | Purpose                                                 |
+| :---------------------------- | :------------------------------------------------------ |
+| `build [-d]`                  | Two-pass symbol build; `-d` also deploys to the SD card |
+| `run qemu` / `run virt`       | Build and start the selected QEMU board                 |
+| `run watchdog [rpi4b \| virt]` | Run the unattended boot validation                      |
+| `run test [--NAME]`           | Run all host tests or a filtered test                   |
+| `run hw [--trace]`            | Attach to the Pi console                                |
+| `pi capture [usb \| mu]`       | Capture a boot into `boot.log`                          |
+| `pi connect [usb \| mu]`       | Open an interactive console                             |
+| `pi list` / `pi quit`         | List devices or stop a capture session                  |
+| `pi log` / `pi tail [N]`      | Read or follow the latest capture                       |
+| `flashos`                     | List helpers and build steps                            |
 
 The legacy names `picapture`, `piconnect`, `piquit`, and `pilist`
 remain aliases. USB CDC devices are detected as `/dev/cu.usbmodem*`;
@@ -267,6 +265,7 @@ be changed with `PI_CAPTURE_TIMEOUT` and `PI_PROBE_TIMEOUT`.
 Set `BOARD=virt` to make `build` target `virt`, or `NM=llvm-nm`
 to override the symbol tool. Kernel faults are printed only on
 Mini-UART, so use `pi capture mu` for fault diagnosis.
+
 ## 7. Host-side unit tests
 
 ```bash
@@ -282,4 +281,4 @@ core kernel logic still holds.
 
 ---
 
-[← Prev: Documentation](DOCUMENTATION.md) · [Next: Port →](PORT.md)
+[← Prev: Documentation](DOCUMENTATION.md) · [Next: Changelog →](CHANGELOG.md)

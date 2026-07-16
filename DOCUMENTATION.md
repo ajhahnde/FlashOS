@@ -10,8 +10,6 @@
     <a href="README.md"><b>README</b></a> ·
     <b>Documentation</b> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="PORT.md"><b>Port</b></a> ·
-    <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
@@ -19,12 +17,6 @@
 </div>
 
 ---
-
-> **Board note.** `-Dboard=rpi4b` is the validated board. The QEMU `-M virt`
-> target has been deprioritized since
-> [v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0), the last
-> release verified to boot it, and is no longer CI-gated. The per-board
-> descriptions below still document it, but later releases may have regressed.
 
 ## Contents
 
@@ -1224,13 +1216,13 @@ virt `0x3be50` / `0x3be5f`.
 
 The 427 host tests cover 38 modules. Major groups include:
 
-| Area                     | Modules                                                                                    |
-| :----------------------- | :----------------------------------------------------------------------------------------- |
-| Memory and processes     | `page_alloc`, `mm_user`, `fork`, `sched`, `wait_queue`                                     |
-| Filesystems and I/O      | `vfs`, `initramfs`, `fat32`, `fdtable`, `pipe`, `console`, `klog_ring`                     |
-| Formats and utilities    | `elf`, `path`, `perm`, `overlay`, `pwfile`, `shadow`                                       |
-| Crypto and hardware data | `sha256`, `hwrng`, `mailbox`, `sdhci_cmd`, USB descriptor and TX-ring logic                |
-| Userland                 | `readline`, `completion`, `keys`, `pager`, and shell tokenization                          |
+| Area                     | Modules                                                                     |
+| :----------------------- | :-------------------------------------------------------------------------- |
+| Memory and processes     | `page_alloc`, `mm_user`, `fork`, `sched`, `wait_queue`                      |
+| Filesystems and I/O      | `vfs`, `initramfs`, `fat32`, `fdtable`, `pipe`, `console`, `klog_ring`      |
+| Formats and utilities    | `elf`, `path`, `perm`, `overlay`, `pwfile`, `shadow`                        |
+| Crypto and hardware data | `sha256`, `hwrng`, `mailbox`, `sdhci_cmd`, USB descriptor and TX-ring logic |
+| Userland                 | `readline`, `completion`, `keys`, `pager`, and shell tokenization           |
 
 Board MMIO drivers and live tracing are primarily runtime- or
 hardware-tested. The authoritative count is the output of

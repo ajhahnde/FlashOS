@@ -11,11 +11,10 @@ The kernel core, the board drivers, and the userland (including the
 [Flash](https://github.com/ajhahnde/Flash), a systems language whose
 compiler, `flashc`, targets LLVM. The repository keeps `zig build` as its
 command surface, but product modules are compiled to native objects by
-`flashc`; generated Zig is confined to compatibility tests and tooling. As
-`PORT.md` (in the repository root) documents, FlashOS did not start
-this way — it began as a C kernel, was rewritten in pure Zig and
-AArch64 assembly, and later had its OS-image modules ported from Zig
-to Flash module by module. Hand-written AArch64 assembly and linker scripts
+`flashc`; generated Zig is confined to compatibility tests and tooling.
+FlashOS did not start this way — it began as a C kernel, was rewritten in
+pure Zig and AArch64 assembly, and later had its OS-image modules ported
+from Zig to Flash module by module. Hand-written AArch64 assembly and linker scripts
 remain where those formats are the right tool; `build.zig` is the host-side
 orchestrator rather than part of the operating-system image.
 

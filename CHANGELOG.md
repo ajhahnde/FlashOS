@@ -10,8 +10,6 @@
     <a href="README.md"><b>README</b></a> ·
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="PORT.md"><b>Port</b></a> ·
-    <a href="VERSIONING.md"><b>Versioning</b></a> ·
     <b>Changelog</b> ·
     <a href="LICENSE.md"><b>License</b></a>
   </p>
@@ -20,10 +18,7 @@
 ---
 
 All notable changes to FlashOS are recorded in this file. The format is
-based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
-project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-(see [VERSIONING.md](VERSIONING.md)). Per-tag notes also appear on the
-[releases page](https://github.com/ajhahnde/FlashOS/releases).
+based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Per-tag notes also appear on the [releases page](https://github.com/ajhahnde/FlashOS/releases).
 
 The project was founded on April 28th, 2026.
 
@@ -157,6 +152,16 @@ The project was founded on April 28th, 2026.
   scripted login scenario prints `login:` mid-run, which would
   otherwise truncate the capture early).
 
+### Removed
+
+- **`PORT.md` and `VERSIONING.md` are no longer shipped.** The port record
+  described a Zig-to-Flash migration that the Rust port supersedes, and the
+  versioning policy is process documentation rather than a description of the
+  system. Both remain in git history. The navigation bar across the shipped
+  docs now runs README → Documentation → Setup → Changelog → License. The
+  attribution notice they referenced continues to live in
+  [License](LICENSE.md).
+
 ## [v0.7.3] - 2026-07-04
 
 ### Changed
@@ -277,16 +282,14 @@ cannot drop privilege`, a confusing half-success that could never grant a
   build time, so the kernel image is behaviourally identical to the
   pre-port build: both boot watchdogs assert the same 28-scenario /
   32-checkpoint contract and the same per-board free-page checkpoints,
-  with no re-capture across the port. See [PORT.md](PORT.md) for the full
-  lineage.
+  with no re-capture across the port.
 - **New build dependency: the Flash compiler (`flashc`).** Builds now
   transpile the `.flash` modules through `flashc`, pinned by
   `flash-toolchain.lock` and resolved via `-Dflashc=<path>` (default
   `~/Flash/zig-out/bin/flashc-stage1`). Build it once from the pinned
   commit — see [Setup §1](SETUP.md#1-host-toolchain). The AArch64
   assembly, the tracing subsystem, the host build tooling, and two kernel
-  modules awaiting a compiler feature stay Zig (see
-  [PORT.md §4](PORT.md#4-what-stays-zig)).
+  modules awaiting a compiler feature stay Zig.
 
 ## [v0.3.0] - 2026-06-07
 
@@ -512,4 +515,4 @@ highlights are below.
 
 ---
 
-[← Prev: Versioning](VERSIONING.md) · [Next: License →](LICENSE.md)
+[← Prev: Setup](SETUP.md) · [Next: License →](LICENSE.md)
