@@ -2,15 +2,13 @@
 //
 // src/file.zig calls get_free_page / free_page / preempt_disable /
 // preempt_enable. The page_alloc test target links the real allocator,
-// so adding the same symbols to tests/host_stubs.zig would duplicate
-// them at link time.
+// so a target that also supplied those symbols would duplicate them at link
+// time.
 //
-// `current` is typed against layout.TaskStruct here (instead of
-// `?*anyopaque` as in tests/host_stubs.zig) because future
-// initramfs/file host tests reach into `current.fds` directly,
-// and the per-target stub keeps task_layout out of the shared stub
-// TU (one stub file per test target). The link-time symbol is a
-// single 8-byte pointer slot either way;
+// `current` is typed against layout.TaskStruct because future initramfs/file
+// host tests reach into `current.fds` directly. Keeping the stub per-target
+// avoids pulling task_layout into unrelated test translation units. The
+// link-time symbol is a single 8-byte pointer slot either way;
 // file.zig only declares the externs it actually consumes (no
 // `current` decl), so the typed shape stays a host-test-only concern.
 

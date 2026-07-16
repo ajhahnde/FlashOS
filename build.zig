@@ -598,29 +598,12 @@ pub fn build(b: *std.Build) void {
         .root_source_file = pwfile_src,
     });
 
-    // hwrng — kernel entropy source (timer-backed SplitMix64 fallback).
-    // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
-    // pulls hwrng_init into the ELF with `_ = @import("hwrng")` and sys.zig
-    // reaches fill()/Source through the same named module; kernel.zig calls
-    // hwrng_init via a C-ABI `extern fn` and owns its status line (the module
-    // draws to no console).
-    // The one transpile is shared with the host-test build below (src_lazy).
+    // hwrng — call-site adapter for the Rust-owned timer-backed fallback.
+    // The remaining Flash syscall module passes its salt slice through this
+    // named module; initialization, state, mixing, and tests live in Rust.
     const hwrng_src = addFlashSource(b, "src/hwrng.flash");
     const hwrng_mod = b.createModule(.{
         .root_source_file = hwrng_src,
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // generic_timer — generic ARM timer driver (absolute CNTP_CVAL cadence).
-    // Ported to Flash; flashc transpiles it via addFlashSource. start.zig
-    // pulls generic_timer_init / handle_generic_timer into the ELF with
-    // `_ = @import("generic_timer")`; kernel.zig calls generic_timer_init via
-    // a C-ABI `extern fn` and irq.S reaches handle_generic_timer by symbol.
-    // Pure externs — no module imports.
-    const generic_timer_src = addFlashSource(b, "src/generic_timer.flash");
-    const generic_timer_mod = b.createModule(.{
-        .root_source_file = generic_timer_src,
         .target = target,
         .optimize = optimize,
     });
@@ -1036,7 +1019,6 @@ pub fn build(b: *std.Build) void {
     // @imported by any kernel source, so the kernel image stays byte-identical
     // until the migration call sites land.
     kernel_mod.addImport("console_ui", console_ui_mod);
-    kernel_mod.addImport("generic_timer", generic_timer_mod);
     kernel_mod.addImport("kernel", kernel_kmod);
 
     // ---- hello.elf — Rust payload for [TEST] exec-elf ----
@@ -1576,24 +1558,8 @@ pub fn build(b: *std.Build) void {
         iso_step.dependOn(&iso_fail.step);
     }
 
-    // Host-side unit tests. One test target per kernel module under test
-    // — the module file IS the test root, so its inline `test "…"` blocks
-    // land in `builtin.test_functions`. The shared `tests/host_stubs.zig`
-    // object satisfies the kernel module's `extern fn` HW-side
-    // dependencies at link time. The natural alternative — a single test
-    // root that imports `src/start.zig` — fails to link because
-    // `start.zig` transitively pulls in assembly-only externs
-    // (`set_pgd`, `ret_from_fork`, `ksyms_init`, …) that no host stub
-    // can satisfy.
-    const stubs_obj = b.addObject(.{
-        .name = "host_stubs",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/host_stubs.zig"),
-            .target = b.graph.host,
-            .optimize = .Debug,
-        }),
-    });
-
+    // Host-side unit tests. One test target per surviving Zig module under
+    // test; Rust-owned module tests run through `cargo xtask test` above.
     const test_step = b.step("test", "Run host-side unit tests");
     test_step.dependOn(hygiene_step);
 
@@ -1687,17 +1653,6 @@ pub fn build(b: *std.Build) void {
     // (src/initramfs.zig); an encoder/parser drift here would be a silent
     // permission bypass.
     _ = addHostTest(b, test_step, .{ .src = "scripts/build_initramfs.zig" });
-
-    // hwrng.zig — kernel entropy source host coverage. The pure
-    // SplitMix64 mixer is vector- and differential-tested; the kernel glue
-    // (fill / hwrng_init) runs against host_stubs' ramping get_sys_count,
-    // so the boot self-test + announce path is exercised end-to-end.
-    _ = addHostTest(b, test_step, .{
-        .src = "src/hwrng.flash",
-        .src_lazy = hwrng_src,
-        .stubs = stubs_obj,
-        .imports = &.{.{ .name = "console_ui", .mod = console_ui_mod }},
-    });
 
     // Final pass banner. Zig's build runner is silent on a fully-green test
     // step (counts only surface with `--summary all`), so wire a last system

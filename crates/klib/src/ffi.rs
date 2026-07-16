@@ -10,9 +10,9 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    block_dev, console, execve, fat32_backend, fdtable, file, fork, initramfs_backend, klog_ring,
-    mailbox, mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd, sha256, shadow,
-    usb_descriptors, usb_tx_ring, vfs,
+    block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
+    initramfs_backend, klog_ring, mailbox, mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd,
+    sha256, shadow, usb_descriptors, usb_tx_ring, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -111,6 +111,10 @@ unsafe extern "C" {
     /// The kernel's panic (`src/utilc.flash`): prints the message and halts.
     pub unsafe fn panic(msg: *const u8) -> !;
     fn memzero(start: u64, size: u64);
+    fn get_sys_count() -> u64;
+    fn get_sys_freq() -> u64;
+    fn set_CNTP_CVAL(value: u64);
+    fn setup_CNTP_CTL();
     fn main_output(interface: i32, string: *const u8);
     fn main_output_u64(interface: i32, value: u64);
     fn memcpy(
@@ -119,6 +123,72 @@ unsafe extern "C" {
         bytes: u64,
     ) -> *mut core::ffi::c_void;
     static mut current: *mut mm_user::TaskStruct;
+}
+
+// ---- architectural timer and entropy fallback ----
+
+fn architectural_count() -> u64 {
+    // SAFETY: reading CNTPCT_EL0 is side-effect-free in the kernel's EL1 context.
+    unsafe { get_sys_count() }
+}
+
+/// Arm the generic timer from the current architectural count.
+///
+/// # Safety
+/// Called once during single-core bring-up before the timer IRQ is enabled.
+#[no_mangle]
+pub unsafe extern "C" fn generic_timer_init() {
+    unsafe { setup_CNTP_CTL() };
+    // SAFETY: bring-up exclusively initializes the timer deadline.
+    let deadline = unsafe { generic_timer::initialize(architectural_count) };
+    unsafe { set_CNTP_CVAL(deadline) };
+}
+
+/// Advance and re-arm the generic timer after one interrupt.
+///
+/// # Safety
+/// Called only by the serialized timer IRQ on the active core.
+#[no_mangle]
+pub unsafe extern "C" fn handle_generic_timer() {
+    // SAFETY: the IRQ path exclusively mutates the deadline.
+    let deadline = unsafe { generic_timer::advance(architectural_count) };
+    unsafe { set_CNTP_CVAL(deadline) };
+}
+
+/// Return whole seconds elapsed according to the architectural counter.
+///
+/// # Safety
+/// Called from serialized kernel code while architectural counter access is
+/// available at EL1.
+#[no_mangle]
+pub unsafe extern "C" fn uptime_seconds() -> u64 {
+    let frequency = unsafe { get_sys_freq() };
+    if frequency == 0 {
+        return 0;
+    }
+    generic_timer::uptime_seconds(architectural_count(), frequency)
+}
+
+/// Seed and self-test the timer-backed entropy fallback.
+///
+/// # Safety
+/// Called once during single-core bring-up before PID 1 starts.
+#[no_mangle]
+pub unsafe extern "C" fn hwrng_init() -> i32 {
+    // SAFETY: bring-up exclusively initializes the mixer.
+    unsafe { hwrng::initialize(architectural_count) }
+}
+
+/// Fill caller-owned bytes from the timer-backed entropy fallback.
+///
+/// # Safety
+/// `buffer` points to `len` writable bytes and the caller serializes access in
+/// syscall context after [`hwrng_init`].
+#[no_mangle]
+pub unsafe extern "C" fn fos_hwrng_fill(buffer: *mut u8, len: usize) {
+    let buffer = unsafe { mut_slice_from_raw(buffer, len) };
+    // SAFETY: the caller forwards the serialized syscall and buffer contract.
+    let _ = unsafe { hwrng::fill(buffer, architectural_count) };
 }
 
 // ---- scheduler state and task lifecycle ----

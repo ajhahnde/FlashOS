@@ -58,14 +58,12 @@ comptime {
     _ = board.uart;
     _ = board.gpio;
     _ = board.timer;
-    _ = @import("generic_timer");
     _ = board.irq;
     _ = board.emmc2;
     _ = board.usb;
     _ = @import("sched");
     _ = @import("sys");
     _ = @import("utilc");
-    _ = @import("hwrng");
 
     _ = @import("trace/utils.zig");
     _ = @import("trace/trace_main.zig");

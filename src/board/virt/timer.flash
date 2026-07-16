@@ -1,6 +1,7 @@
 // QEMU virt does not expose a BCM2711-style system timer; periodic
 // ticks come from the ARM generic timer (driven by
-// src/generic_timer.flash / arch/aarch64/generic_timer.S, board-independent).
+// crates/kernel/src/generic_timer.rs / arch/aarch64/generic_timer.S,
+// board-independent).
 // Pi's `timer_init` and `handle_sys_timer_1` exports are referenced
 // by Pi's IRQ wiring; the virt build does not invoke them, but
 // stubbing both keeps the symbol surface consistent so any

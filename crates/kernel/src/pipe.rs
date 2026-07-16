@@ -96,9 +96,9 @@ mod seam {
     }
 }
 
-// Host seam: a leaking page bump-arena (matching the retired host_stubs.zig — the
-// bump allocator never recycles) plus inert scheduler hooks. Atomic bump so
-// parallel test threads never hand out the same page.
+// Host seam: a leaking page bump-arena (the bump allocator never recycles) plus
+// inert scheduler hooks. Atomic bump so parallel test threads never hand out
+// the same page.
 #[cfg(not(target_os = "none"))]
 mod seam {
     use super::PAGE_SIZE;
