@@ -46,7 +46,7 @@ pub fn parse_line(line: &[u8]) -> Option<Entry<'_>> {
 }
 
 pub fn hex_decode(input: &[u8], out: &mut [u8]) -> Option<usize> {
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return None;
     }
     let count = input.len() / 2;

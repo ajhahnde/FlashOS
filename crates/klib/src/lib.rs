@@ -24,6 +24,7 @@ pub mod ffi;
 /// message is a fixed NUL-terminated literal, never formatted: pulling
 /// `core::fmt` in here would multiply the symbol table against a fixed 128 KiB
 /// budget, for output nobody reads.
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     // SAFETY: the kernel's panic never returns and takes a NUL-terminated string;

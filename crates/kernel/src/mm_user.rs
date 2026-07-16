@@ -945,7 +945,7 @@ mod tests {
 
         // SAFETY: local current task and serialized fake services.
         assert_eq!(
-            unsafe { check_and_prefault_user_range(&mut task, 0xDEAD_BEEF_000, 1, &SERVICES) },
+            unsafe { check_and_prefault_user_range(&mut task, 0x0DEA_DBEE_F000, 1, &SERVICES) },
             -1
         );
         assert!(!EXIT_CALLED.load(Ordering::SeqCst));

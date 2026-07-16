@@ -126,31 +126,29 @@ src/                                        Kernel core (Flash modules + drivers
     hook.S                                  Trace hook stub (saves regs, calls 'traced')
     patchable_trampolines.S                 Patchable per-function entry trampolines
 
+user/pid1/
+  src/lib.rs                                PID 1 ELF root (staged at /sbin/init)
+  src/harness.rs                            In-kernel test harness ([TEST]/[PASS]/[FAIL])
+
 user_space/
-  init_main.flash                           PID 1 ELF root (staged at /sbin/init)
-  kernel_tests.flash                        In-kernel test harness ([TEST]/[PASS]/[FAIL])
   etc/                                      Seed identity files staged into the initramfs
     passwd                                  Account database (name:uid:gid:…)
     perms.tab                               Initramfs permission table (owner/mode)
   fsh/                                      Flash shell
-    fsh.flash                               Interactive shell main
-    tokenize.flash                          Command-line tokenizer
     fshrc                                   Default shell rc
-  lib/flibc/                                Userland mini-libc for ELF-loaded programs
-    flibc.flash                             Root re-exports (printf, malloc, fork, ...)
-    start.flash                             ELF entry crt0 (argv unpack → main → exit)
-    syscalls.flash                          Raw SVC wrappers (sys.write/fork/exit/...)
-    io.flash                                printf / puts / write on sys_writeConsole
-    heap.flash                              Bump allocator over sys_brk / sys_sbrk
-    mem.flash                               memcpy / memset / memcmp
-    process.flash                           fork / wait / exit / execve glue
-    execvp.flash                            PATH search + execve
-    readline.flash                          Line editor (history, cursor edit)
-    completion.flash                        TAB completion
-    keys.flash                              Key decode (escape sequences → keycodes)
-    pager.flash                             Scroll pager (less core)
 
 crates/user-rt/                             Rust EL0 entry, syscall, panic, and memory runtime
+crates/flibc/                               Rust userland mini-libc for ELF-loaded programs
+  src/lib.rs                                Root re-exports and runtime surface
+  src/io.rs                                 printf / puts / write helpers
+  src/heap.rs                               Bump allocator over brk / sbrk
+  src/process.rs                            fork / wait / exit / execve glue
+  src/execvp.rs                             PATH search + execve
+  src/readline.rs                           Line editor (history, cursor edit)
+  src/completion.rs                         TAB completion
+  src/keys.rs                               Key decode (escape sequences → keycodes)
+  src/pager.rs                              Scroll pager (less core)
+user/fsh/                                   Rust interactive shell
 user/hello/                                 Rust /test/hello.elf exec fixture
 
 lib/
@@ -223,9 +221,9 @@ config.txt                                  RPi 4 firmware configuration
    `prepare_move_to_user_elf`, which walks the PT_LOAD segments,
    maps each with per-region permissions, eagerly maps the top
    stack page, and `eret`s to the ELF entry point.
-6. `user_space/init_main.flash` is the `pid1.elf` root: `_start`
-   calls `pid1_main`, which runs `run_all()` from
-   `kernel_tests.flash`. The harness runs the thirty scenarios and
+6. `user/pid1/src/lib.rs` is the `pid1.elf` root: the runtime entry
+   calls `pid1_main`, which runs the harness in
+   `user/pid1/src/harness.rs`. The harness runs the thirty scenarios and
    prints an `X/Y passed` tally, then hands PID 1 to `/bin/login`:
    the login gate authenticates against `/etc/shadow`,
    drops privilege per `/etc/passwd`, and execs the user's shell —
@@ -255,12 +253,13 @@ A four-level translation regime: PGD → PUD → PMD → PTE, 4 KiB pages.
 | Device high  | `0xffff0000FC000000` | `0xFC000000`  | Device-nGnRnE        |
 
 Translation between physical and the linear-high mapping uses
-`PA_TO_KVA` / `KVA_TO_PA` from `src/mm_user.flash`.
+`PA_TO_KVA` / `KVA_TO_PA` from `crates/kernel/src/mm_user.rs`.
 
 ### User virtual layout (EL0)
 
 Constants are defined in `src/user_layout.flash` (Zig-authoritative,
-imported by both `src/fork.flash` and `src/mm_user.flash`).
+imported by both `crates/kernel/src/fork.rs` and
+`crates/kernel/src/mm_user.rs`).
 
 | Region | Virtual base         | Direction      | Attributes (post-loader) |
 | :----- | :------------------- | :------------- | :----------------------- |
@@ -280,13 +279,13 @@ and `do_data_abort` panics with `[KERN] invalid uva at 0x<hex>` after
 zombie-ing the offending task (the parent's `sys_wait` reaps as
 usual). Region classification keys off `mm.brk` plus the static
 layout constants in `src/user_layout.flash`; see `do_data_abort` in
-`src/mm_user.flash` for the full dispatch.
+`crates/kernel/src/mm_user.rs` for the full dispatch.
 
 Per-region attributes (text RX, data/heap/stack RW with UXN) apply
 universally now that PID 1 is ELF-loaded from initramfs:
-`prepare_move_to_user_elf` (`src/fork.flash`) maps each PT_LOAD
+`prepare_move_to_user_elf` (`crates/kernel/src/fork.rs`) maps each PT_LOAD
 segment with flags derived from `p_flags`, and `do_data_abort`
-(`src/mm_user.flash`) stamps demand-allocated heap and stack pages
+(`crates/kernel/src/mm_user.rs`) stamps demand-allocated heap and stack pages
 with `TD_USER_PAGE_FLAGS_DEFAULT | TD_USER_XN`. The non-ELF blob
 path (`prepare_move_to_user`) backed the retired blob loader and no
 longer has a live caller; every task today is ELF-loaded with
@@ -425,7 +424,7 @@ roundtrip (`[PASS] fs-roundtrip-write` on boot 1, `[PASS] fs-roundtrip`
 after a power-cycle on boot 2), the CRUD leg, and all of
 `fat32_backend.writeBack` / `create` / `unlink` / `rename` / `sys_write`
 are validated on **real Pi-4 hardware only**;
-`flash build test` covers `src/fat32.flash`'s decode units but not
+`flash build test` covers `crates/kernel/src/fat32.rs`'s decode units but not
 `fat32_backend.flash`. Dispatch is a
 single `startsWith("/mnt/")` branch; the trailing slash is
 load-bearing, so `/mnt2/foo` stays an initramfs path and `/mnt` with
@@ -492,7 +491,7 @@ ABI type is documented in §5.
 
 ## 4. Process management & scheduling
 
-- **Scheduler.** Priority round-robin in `src/sched.flash`. `_schedule`
+- **Scheduler.** Priority round-robin in `crates/kernel/src/sched.rs`. `_schedule`
   picks the runnable task with the largest counter via
   `pick_next_running`; if that task's counter is zero (round end) it
   invokes `refill_counters`, which rewrites every non-null slot as
@@ -514,7 +513,8 @@ ABI type is documented in §5.
   applies the same `zombify_and_wake_parent` helper. Self-kill is
   rejected — the running task is its own kernel page; `sys_exit` is
   the safe self-cancel path.
-- **Exec.** `sys_execve(path, argv)` (slot 31, `src/execve.flash`) is the
+- **Exec.** `sys_execve(path, argv)` (slot 31,
+  `crates/kernel/src/execve.rs`) is the
   path-resolved ELF loader. It resolves `path` through the VFS, validates
   the ELF header, then — past the point of no return — tears down the
   caller's address space and installs a fresh PGD, streaming each
@@ -530,7 +530,7 @@ Each task carries a **single tagged fd table** —
 `FD_TABLE_SIZE = 8`. It replaces the two parallel `?*anyopaque` /
 `?*File` arrays (pipes + files) that an earlier design indexed
 independently, plus the synthetic console fd. The mechanics live in
-`src/fdtable.flash` (`install` / `get` / `getPipe` / `getFile` /
+`crates/kernel/src/fdtable.rs` (`install` / `get` / `getPipe` / `getFile` /
 `isConsole` / `close` / `dup2` / `dupAll` / `closeAll`), which is
 kernel + host-testable pure pointer bookkeeping.
 
@@ -563,8 +563,8 @@ pub const FdSlot = extern struct {        // 16 B; 8 slots = 128 B
   user space. No page is allocated, so the PID-1 baseline
   `0xbbff1` is unchanged.
 - **fork inherits, execve preserves.** `copy_process`
-  (`src/fork.flash`) calls `fdtable.dupAll`, bumping the pipe/file ref of
-  every non-console slot; `do_wait` (`src/sched.flash`) calls
+  (`crates/kernel/src/fork.rs`) calls `fdtable.dupAll`, bumping the pipe/file ref of
+  every non-console slot; `do_wait` (`crates/kernel/src/sched.rs`) calls
   `fdtable.closeAll` on the zombie. `execve` tears down only the
   address space (`mm.*`) and **leaves `fds` intact**, so a shell hands
   a child its redirected stdio across the `exec` boundary.
@@ -579,7 +579,7 @@ The syscall surface is assembled into an interactive shell, `fsh`, staged
 in the initramfs at `/bin/fsh`, alongside the `/bin` coreutils (`echo`,
 `cat`, `ls`, `grep`, the FAT32 trio `cp` / `mv` / `rm`, the `less` pager,
 the `edit` editor, and the system-info readers). fsh and the coreutils link against **flibc**
-(`user_space/lib/flibc/`), the userland mini-libc: SVC wrappers, a
+(`crates/flibc/`), the userland mini-libc: SVC wrappers, a
 comptime-format `printf`, the `_start` argc/argv shim, and — for payloads
 that trip LLVM's `memcpy` / `strlen` idiom lowering — a freestanding
 `mem.flash` provider. The coreutils use fixed-size stack/static buffers, so
@@ -870,7 +870,8 @@ canary guards (§8).
 world-readable, a committed file — parsed everywhere by the host-tested
 `src/pwfile.flash`) and `/etc/shadow`
 (`user:iterations:salt_hex:hash_hex`, generated at build time by
-`tools/gen_shadow.zig` running the same `src/sha256.flash` PBKDF2 the kernel
+`cargo xtask gen-shadow` (implemented in `xtask/src/shadow.rs`) running the
+same `crates/kernel/src/sha256.rs` PBKDF2 the kernel
 verifies with) ship in the initramfs. `/etc/shadow` is mode `0o100600`
 root:root — the cpio encoder stamps per-file modes from the build's policy
 list (`build.zig`), and the VFS permission layer (below) refuses a
@@ -916,7 +917,7 @@ and enforced at the syscall boundary by the pure, host-test-gated
   owner/mode concept, so `/mnt` metadata comes from the **permission
   overlay**: a root-level text file (`PERMS.TAB`, format
   `NAME MODE UID GID` per line, parsed by the host-tested
-  `src/overlay.flash`) that the backend reads once at mount time. Annotated
+  `crates/kernel/src/overlay.rs`) that the backend reads once at mount time. Annotated
   basenames get their entry; un-annotated paths keep the documented
   default `0o100666` root:root (rw-rw-rw-, no exec bit — the historical
   "any process may read/write SD-card files" contract) — except the
@@ -992,7 +993,7 @@ names it.
 initramfs files take their modes from the cpio headers (the build stamps
 `0600` on shadow, `0755` on binaries, `0644` on the rest, all
 root:root); FAT32 files default to `0666 root:root` unless the optional
-root-level `PERMS.TAB` overlay (`src/overlay.flash`) names them. The checks
+root-level `PERMS.TAB` overlay (`crates/kernel/src/overlay.rs`) names them. The checks
 run at the syscall boundary — `open` for read intent, `write` for write
 intent, `execve` for the exec bit — and decide by the first matching
 triad (owner if `euid` matches the file's uid, else group, else other),
@@ -1041,14 +1042,14 @@ security model, not a hardened isolation boundary.
 
 The board IRQ handler (`src/board/{rpi4b,virt}/irq.flash`) drains the
 UART RX FIFO on every IRQ slot and pushes each byte into a 256-byte
-BSS-resident ring in `src/console.flash` via `console_push`. The ring
+BSS-resident ring in `crates/kernel/src/console.rs` via `console_push`. The ring
 is single-producer (IRQ) / single-consumer (syscall) by construction
 on single core. `console_push` wakes the per-ring `WaitQueue`
-(`src/wait_queue.flash`); the console read path blocks on it when the
+(`crates/kernel/src/wait_queue.rs`); the console read path blocks on it when the
 ring is empty and drains a short read on wake. Echo policy lives in
 user space — the kernel does _not_ loop the byte back through the
 TX path. When the ring is full `console_push`
-(`src/console.flash:54`) silently drops the incoming byte; this is
+(`crates/kernel/src/console.rs`) silently drops the incoming byte; this is
 correct for the current human-typing-rate use case and a future line-
 buffered terminal mode will not change it. Console
 and pipe reads are unified behind a single `sys_read(fd, buf, len)`
@@ -1151,7 +1152,7 @@ FlashOS has two complementary test surfaces:
 - **Host tests** (`flash build test`) cover pure kernel and userland logic
   with stubs for assembly and MMIO dependencies. The suite currently has
   **427 tests across 38 modules**.
-- **Runtime tests** (`user_space/kernel_tests.flash`) run 30 scenarios
+- **Runtime tests** (`user/pid1/src/harness.rs`) run 30 scenarios
   as PID 1 against real kernel state. Each scenario checks its result and
   restores the free-page baseline.
 

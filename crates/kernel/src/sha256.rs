@@ -691,10 +691,30 @@ mod tests {
         }
 
         let cases = [
-            Case { pw: b"password", salt: b"salt", c: 1, len: 20 },
-            Case { pw: b"password", salt: b"salt", c: 100, len: 33 },
-            Case { pw: b"", salt: b"salt", c: 7, len: 32 },
-            Case { pw: b"password", salt: b"", c: 7, len: 32 },
+            Case {
+                pw: b"password",
+                salt: b"salt",
+                c: 1,
+                len: 20,
+            },
+            Case {
+                pw: b"password",
+                salt: b"salt",
+                c: 100,
+                len: 33,
+            },
+            Case {
+                pw: b"",
+                salt: b"salt",
+                c: 7,
+                len: 32,
+            },
+            Case {
+                pw: b"password",
+                salt: b"",
+                c: 7,
+                len: 32,
+            },
             Case {
                 pw: b"a-fairly-long-password-beyond-one-sha-block-aaaaaaaaaaaaaaaaaaaaaaaaaa",
                 salt: b"pepper",

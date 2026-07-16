@@ -123,8 +123,8 @@ flash build -Dboard=rpi4b run
 arch/aarch64/               AArch64 ISA core (boot, vectors, context switch)
 src/                        kernel core (modules + drivers)
 src/board/<name>/           per-board driver bag (rpi4b / virt) + linker script
-user_space/                 PID 1 image + in-kernel test harness
-user_space/lib/flibc/       userland mini-libc for ELF demos
+user/pid1/                  Rust PID 1 image + in-kernel test harness
+crates/flibc/               Rust userland mini-libc for ELF programs
 lib/                        shared kernel↔user constants (syscall IDs)
 crates/user-rt/             Rust EL0 entry, syscall, panic, and memory runtime
 user/hello/                 Rust /test/hello.elf exec fixture
