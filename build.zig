@@ -655,22 +655,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Scheduler module. Promoted from a relative-path
-    // import to a named module so sys.zig can `@import("sched")` and call
-    // the pure helpers (pick_next_running / refill_counters /
-    // zombify_and_wake_parent) without re-declaring extern signatures.
-    // Imports pipe + task_layout because sched.zig consumes both
-    // (pipe.closeAll in do_wait_impl; TaskStruct from task_layout).
-    // Ported to Flash; the one transpile feeds the kernel module and
-    // sched's own host test below (src_lazy).
-    const sched_src = addFlashSource(b, "src/sched.flash");
+    // Scheduler adapter. Rust owns the state rules, selection, context-switch
+    // orchestration, and task teardown. The named module remains only because
+    // sys imports the zombify-and-wake helper by source-level name; all other
+    // consumers already use the scheduler's preserved C symbols directly.
     const sched_mod = b.createModule(.{
-        .root_source_file = sched_src,
+        .root_source_file = b.path("src/sched.zig"),
         .target = target,
         .optimize = optimize,
     });
     sched_mod.addImport("task_layout", task_layout_mod);
-    sched_mod.addImport("fdtable", fdtable_mod);
 
     // Cwd-aware path-resolution adapter. The pure joinResolve implementation
     // and its tests live in crates/kernel; this module preserves the Flash
@@ -1775,33 +1769,7 @@ pub fn build(b: *std.Build) void {
     // modules that still consume them through the thin .zig shims keep host
     // targets here.
 
-    // sched.zig — pure-helper host coverage. sched.zig
-    // itself exports current / preempt_disable / preempt_enable /
-    // schedule, so the shared stubs_obj would double-define those at
-    // link time. Dedicated sched-stub object plugs only the HW-side gap
-    // (core_switch_to, set_pgd, irq_*, free_page*, _schedule) plus a
-    // null get_free_page for the transitively-imported pipe module.
-    const sched_stubs_obj = b.addObject(.{
-        .name = "host_stubs_sched",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/host_stubs_sched.zig"),
-            .target = b.graph.host,
-            .optimize = .Debug,
-        }),
-    });
-    // fdtable is Rust-owned now (host coverage in crates/kernel). sched
-    // only calls its closeAll, so the shared fork/sched fdtable stub — a no-op
-    // dupAll/closeAll over task_layout — stands in, and the whole real-fdtable
-    // chain the old sched target hand-built is gone.
-    _ = addHostTest(b, test_step, .{
-        .src = "src/sched.flash",
-        .src_lazy = sched_src,
-        .stubs = sched_stubs_obj,
-        .imports = &.{
-            .{ .name = "task_layout", .mod = task_layout_test_mod },
-            .{ .name = "fdtable", .mod = fork_stubs_mod },
-        },
-    });
+    // Scheduler host coverage lives with the Rust implementation.
     // utilc's host tests exercise UART formatting, not the Rust-owned ring.
     // Give that test target a no-op named-module stand-in for its tee call.
     const klog_ring_test_mod = b.createModule(.{

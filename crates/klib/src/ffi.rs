@@ -11,8 +11,8 @@
 
 use flashos_kernel::{
     block_dev, console, elf, fat32_backend, fdtable, file, initramfs_backend, klog_ring, mailbox,
-    mm_user, page_alloc, path, perm, pipe, sdhci_cmd, sha256, shadow, usb_descriptors, usb_tx_ring,
-    vfs,
+    mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd, sha256, shadow, usb_descriptors,
+    usb_tx_ring, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -176,15 +176,118 @@ unsafe extern "C" {
     fn memzero(start: u64, size: u64);
     fn main_output(interface: i32, string: *const u8);
     fn main_output_u64(interface: i32, value: u64);
-    fn preempt_disable();
-    fn preempt_enable();
     fn memcpy(
         destination: *mut core::ffi::c_void,
         source: *const core::ffi::c_void,
         bytes: u64,
     ) -> *mut core::ffi::c_void;
-    fn exit_process();
     static mut current: *mut mm_user::TaskStruct;
+}
+
+// ---- scheduler state and task lifecycle ----
+//
+// The four globals remain defined by the transitional Zig adapter so surviving
+// Flash/Zig direct loads stay PC-relative in the high-half kernel. Function
+// bodies live in crates/kernel; these facades preserve the historical assembly
+// and mixed-language symbol surface.
+
+/// Increment the active task's preemption nesting count.
+///
+/// # Safety
+/// Scheduler initialization has published a live current task.
+#[no_mangle]
+pub unsafe extern "C" fn preempt_disable() {
+    unsafe { sched::preempt_disable() };
+}
+
+/// Decrement the active task's preemption nesting count.
+///
+/// # Safety
+/// Matches a preceding `preempt_disable` for the active task.
+#[no_mangle]
+pub unsafe extern "C" fn preempt_enable() {
+    unsafe { sched::preempt_enable() };
+}
+
+/// Body reached by the retained patchable `_schedule` trampoline.
+///
+/// # Safety
+/// Called only after scheduler initialization.
+#[no_mangle]
+pub unsafe extern "C" fn _schedule_impl() {
+    unsafe { sched::schedule_impl() };
+}
+
+/// Yield the active task.
+///
+/// # Safety
+/// Called only after scheduler initialization.
+#[no_mangle]
+pub unsafe extern "C" fn schedule() {
+    unsafe { sched::schedule() };
+}
+
+/// Switch to a live published task.
+///
+/// # Safety
+/// `next` is live and scheduling is serialized.
+#[no_mangle]
+pub unsafe extern "C" fn switch_to(next: *mut sched::TaskStruct) {
+    unsafe { sched::switch_to(next) };
+}
+
+/// Account a timer tick from the serialized IRQ path.
+///
+/// # Safety
+/// Scheduler initialization has completed.
+#[no_mangle]
+pub unsafe extern "C" fn timer_tick() {
+    unsafe { sched::timer_tick() };
+}
+
+/// Zombie the active task and yield.
+///
+/// # Safety
+/// Called by the active task from kernel context.
+#[no_mangle]
+pub unsafe extern "C" fn exit_process() {
+    unsafe { sched::exit_process() };
+}
+
+/// Release all user and page-table pages owned by a child task.
+///
+/// # Safety
+/// `child` is unpublished or a zombie exclusively owned by its reaper.
+#[no_mangle]
+pub unsafe extern "C" fn release_user_mm(child: *mut sched::TaskStruct) {
+    unsafe { sched::release_user_mm(child) };
+}
+
+/// Body reached by the retained patchable `do_wait` trampoline.
+///
+/// # Safety
+/// Called by the active task from serialized syscall context.
+#[no_mangle]
+pub unsafe extern "C" fn do_wait_impl() -> i32 {
+    unsafe { sched::do_wait_impl() }
+}
+
+/// Publish the boot task during single-core bring-up.
+///
+/// # Safety
+/// Called once before task creation.
+#[no_mangle]
+pub unsafe extern "C" fn sched_init() {
+    unsafe { sched::sched_init() };
+}
+
+/// Mark a target task zombie and wake an interruptible parent.
+///
+/// # Safety
+/// `target` is live and the caller holds preemption exclusion.
+#[no_mangle]
+pub unsafe extern "C" fn fos_sched_zombify_and_wake_parent(target: *mut sched::TaskStruct) {
+    unsafe { sched::zombify_and_wake_parent(target) };
 }
 
 const MM_USER_SERVICES: mm_user::Services = mm_user::Services {
