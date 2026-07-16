@@ -90,8 +90,9 @@ impl Paths {
 ///
 /// The archive carries all of `compiler_builtins`, but an archive is not a link: the
 /// linker pulls only the members it needs, and the kernel's own strong `memcpy`/
-/// `memset` (`src/utilc.flash`) outrank the weak ones here. What actually lands in
-/// the image is what the symbol budget and image-size gates measure.
+/// `memset` (`crates/kernel/src/utilc.rs`, exported through `ffi`) outrank the weak
+/// ones here. What actually lands in the image is what the symbol budget and
+/// image-size gates measure.
 pub fn klib(root: &Path, output: Option<&Path>, features: &[String]) -> Result<PathBuf, String> {
     let trace = root.join("rust-out").join("xtask-trace.log");
     fs::create_dir_all(root.join("rust-out")).map_err(|e| format!("mkdir rust-out: {e}"))?;

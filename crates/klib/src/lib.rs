@@ -7,10 +7,11 @@
 //! testable library. When the last Flash module ports, the kernel links from Rust
 //! directly and this crate is deleted whole.
 //!
-//! `memcpy`/`memset` are deliberately NOT provided here: the kernel exports its
-//! own (`src/utilc.flash`), and those strong definitions override the weak ones
-//! `compiler_builtins` carries, so this archive contributes no builtins of its
-//! own. The symbol gate proves that on every build.
+//! `memcpy`/`memset` are the kernel's own, and `ffi` exports them from here.
+//! Their strong definitions override the weak ones `compiler_builtins` carries,
+//! so what the image links is the kernel's byte loop and not a wide-load copy
+//! that would fault against `SCTLR_EL1.A`. The symbol gate proves that on every
+//! build.
 
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
@@ -19,8 +20,8 @@ pub mod ffi;
 
 /// Kernel-side panic path.
 ///
-/// Routes into the kernel's existing panic (`src/utilc.flash`), so a Rust panic
-/// is observably the same event as a Flash one — same marker, same halt. The
+/// Routes into the kernel's own panic, so a Rust panic is observably the same
+/// event as any other kernel panic — same marker, same halt. The
 /// message is a fixed NUL-terminated literal, never formatted: pulling
 /// `core::fmt` in here would multiply the symbol table against a fixed 128 KiB
 /// budget, for output nobody reads.

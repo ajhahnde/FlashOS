@@ -535,8 +535,10 @@ pub fn build(b: *std.Build) void {
     virt_uart_mod.addImport("virt_dtb", virt_dtb_mod);
 
     // Kernel-log adapter. Rust owns the ring arithmetic; this named Flash
-    // module retains the shared BSS instance and its fixed C layout until the
-    // utilc/sys consumers port. Imports syscall_defs for the ABI-shared size.
+    // module retains the shared BSS instance and its fixed C layout. Its last
+    // Flash importer is gone, so start.zig force-imports it and Rust reaches
+    // the instance through fos_klog_ring. Imports syscall_defs for the
+    // ABI-shared size.
     const klog_ring_src = addFlashSource(b, "src/klog_ring.flash");
     const klog_ring_mod = b.createModule(.{
         .root_source_file = klog_ring_src,
@@ -544,22 +546,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     klog_ring_mod.addImport("syscall_defs", syscall_defs_mod);
-
-    // utilc — kernel utility exports (hex render, byte mem*, UART tee,
-    // panic). Ported to Flash; flashc transpiles it to Zig at build time
-    // via addFlashSource. start.zig pulls the symbols into the ELF with
-    // `_ = @import("utilc")` (named, like sched/execve); every other
-    // consumer reaches them through a C-ABI `extern fn` declaration, so the
-    // import graph needs only this one named module. The one transpile is
-    // shared with the host-test build below (src_lazy).
-    const utilc_src = addFlashSource(b, "src/utilc.flash");
-    const utilc_mod = b.createModule(.{
-        .root_source_file = utilc_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    utilc_mod.addImport("task_layout", task_layout_mod);
-    utilc_mod.addImport("klog_ring", klog_ring_mod);
 
     // sha256 — the call-site adapter over the Rust crypto unit (crates/kernel).
     // The primitives themselves are Rust; this module only unpacks Flash slices
@@ -876,7 +862,8 @@ pub fn build(b: *std.Build) void {
     // linker while both languages share the image; the seam is the C ABI in
     // crates/klib (see src/sha256.flash for the Flash side of one). The archive
     // carries compiler_builtins, but the linker pulls only what it needs, and
-    // src/utilc.flash's strong memcpy/memset outrank the weak copies in there.
+    // the kernel's own strong memcpy/memset (exported from the archive's ffi
+    // seam) outrank the weak copies compiler_builtins carries alongside them.
     //
     // Built through addSystemCommand (like the Rust EL0 payloads below) so Cargo
     // re-checks its own source graph on every build instead of handing back a
@@ -965,7 +952,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("board", board_mod);
     kernel_mod.addImport("ksyms", ksyms_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
-    kernel_mod.addImport("utilc", utilc_mod);
     kernel_mod.addImport("sha256", sha256_mod);
     kernel_mod.addImport("shadow", shadow_mod);
     kernel_mod.addImport("perm", perm_mod);
@@ -1520,14 +1506,6 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run host-side unit tests");
     test_step.dependOn(hygiene_step);
 
-    // Shared task_layout module — see kernel-build comment above for
-    // why the named modules must share a single Module instance.
-    const task_layout_test_mod = b.createModule(.{
-        .root_source_file = task_layout_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
     // trace/fp_walk.zig — the -Dtrace sampler's AAPCS64 frame-pointer
     // chain decoder. Pure `walkChain` over a flat stack-page view (no
     // kernel externs), so the FP-record math + the bounds/alignment/
@@ -1568,36 +1546,7 @@ pub fn build(b: *std.Build) void {
     // modules that still consume them through the thin .zig shims keep host
     // targets here.
 
-    // Scheduler host coverage lives with the Rust implementation.
-    // utilc's host tests exercise UART formatting, not the Rust-owned ring.
-    // Give that test target a no-op named-module stand-in for its tee call.
-    const klog_ring_test_mod = b.createModule(.{
-        .root_source_file = b.path("tests/host_stubs_klog_ring.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
-    // utilc.zig — kernel utility host coverage.
-    // Trivial hex/mem helpers; stubs provided for board-specific UARTs.
-    const utilc_stubs_obj = b.addObject(.{
-        .name = "host_stubs_utilc",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/host_stubs_utilc.zig"),
-            .target = b.graph.host,
-            .optimize = .Debug,
-        }),
-    });
-    _ = addHostTest(b, test_step, .{
-        .src = "src/utilc.flash",
-        .src_lazy = utilc_src,
-        .stubs = utilc_stubs_obj,
-        .imports = &.{
-            .{ .name = "task_layout", .mod = task_layout_test_mod },
-            // utilc.main_output now tees into the kernel log ring; the host
-            // test build needs the same module the kernel build wires.
-            .{ .name = "klog_ring", .mod = klog_ring_test_mod },
-        },
-    });
+    // Scheduler and utility host coverage lives with the Rust implementation.
 
     // pwfile.zig — /etc/passwd parser host coverage. Pure
     // name/uid lookups shared by sys_passwd (kernel), /bin/login, and

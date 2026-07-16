@@ -18,10 +18,11 @@ use flashos_abi::syscall::{
     SYS_SBRK, SYS_SEEK, SYS_SEMGET, SYS_SETGID, SYS_SETUID, SYS_SET_CONSOLE_MODE, SYS_SHMGET,
     SYS_SOCKET, SYS_UNLINK, SYS_UPTIME, SYS_WAIT, SYS_WRITE,
 };
+use flashos_abi::task::KeRegs;
 use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
     initramfs_backend, klog_ring, mailbox, mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd,
-    sha256, shadow, sys, usb_descriptors, usb_tx_ring, vfs,
+    sha256, shadow, sys, usb_descriptors, usb_tx_ring, utilc, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -117,21 +118,150 @@ pub struct FosShadowEntry {
 }
 
 unsafe extern "C" {
-    /// The kernel's panic (`src/utilc.flash`): prints the message and halts.
-    pub unsafe fn panic(msg: *const u8) -> !;
     fn memzero(start: u64, size: u64);
     fn get_sys_count() -> u64;
     fn get_sys_freq() -> u64;
     fn set_CNTP_CVAL(value: u64);
     fn setup_CNTP_CTL();
-    fn main_output(interface: i32, string: *const u8);
-    fn main_output_u64(interface: i32, value: u64);
-    fn memcpy(
-        destination: *mut core::ffi::c_void,
-        source: *const core::ffi::c_void,
-        bytes: u64,
-    ) -> *mut core::ffi::c_void;
     static mut current: *mut mm_user::TaskStruct;
+}
+
+// ---- kernel console, byte movers, and the panic path ----
+//
+// The unmangled half of `flashos_kernel::utilc`. These names are what the
+// remaining Flash modules, the retained assembly, and the compiler's own
+// lowering of a struct copy all bind to, so they are spelled exactly as the
+// kernel has always exported them.
+
+/// Emit a NUL-terminated string on `interface`, teeing it into the kernel log.
+///
+/// # Safety
+/// `string` is NUL-terminated and not retained past the call.
+#[no_mangle]
+pub unsafe extern "C" fn main_output(interface: i32, string: *const u8) {
+    // SAFETY: forwarded NUL-termination contract.
+    unsafe { utilc::main_output(interface, string) };
+}
+
+/// Emit one byte on `interface`.
+///
+/// # Safety
+/// Called in kernel, syscall, or IRQ context.
+#[no_mangle]
+pub unsafe extern "C" fn main_output_char(interface: i32, byte: u8) {
+    // SAFETY: the callee builds its own NUL-terminated pair.
+    unsafe { utilc::main_output_char(interface, byte) };
+}
+
+/// Emit `value` as 16 hex chars on `interface`.
+///
+/// # Safety
+/// Called in kernel, syscall, or IRQ context.
+#[no_mangle]
+pub unsafe extern "C" fn main_output_u64(interface: i32, value: u64) {
+    // SAFETY: the callee owns its own render buffer.
+    unsafe { utilc::main_output_u64(interface, value) };
+}
+
+/// Dump a task record's scheduler fields on `interface`.
+///
+/// # Safety
+/// `task` points to a live `TaskStruct`.
+#[no_mangle]
+pub unsafe extern "C" fn main_output_process(interface: i32, task: *mut mm_user::TaskStruct) {
+    // SAFETY: forwarded live-task contract.
+    unsafe { utilc::main_output_process(interface, task) };
+}
+
+/// Read one byte from the console on `interface`.
+///
+/// # Safety
+/// Called in kernel or syscall context.
+#[no_mangle]
+pub unsafe extern "C" fn main_recv(interface: i32) -> u8 {
+    // SAFETY: the callee reads the driver's own MMIO.
+    unsafe { utilc::main_recv(interface) }
+}
+
+/// Render `value` as 16 hex chars into `buf`. No NUL.
+///
+/// # Safety
+/// `buf` is writable for 16 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn u64_to_char_array(value: u64, buf: *mut u8) {
+    // SAFETY: forwarded 16-byte writable contract.
+    unsafe { utilc::u64_to_char_array(value, buf) };
+}
+
+/// # Safety
+/// `buf` is writable for one byte.
+#[no_mangle]
+pub unsafe extern "C" fn char_to_char_array(byte: u8, buf: *mut u8) {
+    // SAFETY: forwarded one-byte writable contract.
+    unsafe { utilc::char_to_char_array(byte, buf) };
+}
+
+/// Copy a saved register frame.
+///
+/// # Safety
+/// Both pointers reference live, non-overlapping `KeRegs`.
+#[no_mangle]
+pub unsafe extern "C" fn copy_ke_regs(to: *mut KeRegs, from: *mut KeRegs) {
+    // SAFETY: forwarded live-frame contract.
+    unsafe { utilc::copy_ke_regs(to, from) };
+}
+
+/// Byte-wise compare without alignment requirements.
+///
+/// # Safety
+/// Both pointers are readable for `n` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn mem_eql_bytes(a: *const u8, b: *const u8, n: u64) -> bool {
+    // SAFETY: forwarded readable-span contract.
+    unsafe { utilc::mem_eql_bytes(a, b, n) }
+}
+
+/// Fill `n` bytes at `dst` with the low byte of `value`.
+///
+/// The kernel's own `memset`. This strong definition is what the linker binds,
+/// in preference to the weak one `compiler_builtins` carries.
+///
+/// # Safety
+/// `dst` is writable for `n` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn memset(dst: *mut u8, value: i32, n: u64) -> *mut u8 {
+    // SAFETY: forwarded writable-span contract.
+    unsafe { utilc::memset(dst, value, n) }
+}
+
+/// Byte-granular memory copy, with an 8-byte fast path when both sides are
+/// already 8-aligned.
+///
+/// The kernel's own `memcpy`, and the reason the image never grows a wide-load
+/// copy: `SCTLR_EL1.A` is asserted, and callers hand this odd addresses.
+///
+/// # Safety
+/// `destination` is writable and `source` readable for `bytes`; the regions do
+/// not overlap.
+#[no_mangle]
+pub unsafe extern "C" fn memcpy(
+    destination: *mut core::ffi::c_void,
+    source: *const core::ffi::c_void,
+    bytes: u64,
+) -> *mut core::ffi::c_void {
+    // SAFETY: forwarded non-overlapping span contract.
+    unsafe { utilc::memcpy(destination.cast::<u8>(), source.cast::<u8>(), bytes) };
+    destination
+}
+
+/// Print the message and halt. The kernel's terminal error path.
+///
+/// # Safety
+/// `msg` is NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn panic(msg: *const u8) -> ! {
+    // SAFETY: forwarded NUL-termination contract.
+    unsafe { utilc::panic(msg) }
 }
 
 // ---- architectural timer and entropy fallback ----

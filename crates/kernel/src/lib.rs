@@ -41,5 +41,6 @@ pub mod shadow;
 pub mod sys;
 pub mod usb_descriptors;
 pub mod usb_tx_ring;
+pub mod utilc;
 pub mod vfs;
 pub mod wait_queue;
