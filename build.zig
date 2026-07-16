@@ -676,27 +676,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Path-resolved ELF loader. Ported to Flash; flashc transpiles it via
-    // addFlashSource. The one transpile is shared between the kernel module
-    // and the execve host-test below (src_lazy). start.zig pulls execve_impl
-    // into the ELF; fork imports execve for the ArgvBlock type.
-    const execve_src = addFlashSource(b, "src/execve.flash");
+    // Execve adapter. Rust owns the path loader and argv encoder; this named
+    // module keeps only the fixed-layout ArgvBlock type consumed by fork.flash
+    // while the process loader remains implemented in Zig.
     const execve_mod = b.createModule(.{
-        .root_source_file = execve_src,
+        .root_source_file = b.path("src/execve.zig"),
         .target = target,
         .optimize = optimize,
     });
-    // Kernel-build imports for execveKernel (path-resolve + PT_LOAD stream).
-    // The host-test build (build.zig below) wires src/execve.flash with no
-    // kernel imports; the comptime is_kernel guard keeps these out of host
-    // analysis.
-    execve_mod.addImport("task_layout", task_layout_mod);
-    execve_mod.addImport("vfs", vfs_mod);
-    execve_mod.addImport("user_layout", user_layout_mod);
-    execve_mod.addImport("path", path_mod);
-    // Permission gate: exec-intent check + the EACCES constant.
-    execve_mod.addImport("perm", perm_mod);
-    execve_mod.addImport("syscall_defs", syscall_defs_mod);
 
     // Process creation + move-to-user ELF loader. Ported to Flash; flashc
     // transpiles it via addFlashSource. start.zig pulls the export fns
@@ -1665,15 +1652,6 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     });
 
-    // Host-target alias of the path shim so execve's host build can satisfy
-    // its unconditional `@import("path")`; the kernel-only call site remains
-    // dead on the host, and the resolver tests run in crates/kernel.
-    const path_test_mod = b.createModule(.{
-        .root_source_file = path_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
     const fork_stubs_mod = b.createModule(.{
         .root_source_file = b.path("tests/fork_stubs.zig"),
         .target = b.graph.host,
@@ -1688,17 +1666,12 @@ pub fn build(b: *std.Build) void {
     });
     host_stubs_fork_mod.addImport("task_layout", task_layout_test_mod);
 
-    // execve.zig — argv-block encoder host coverage. Pure
-    // layout function, no externs, so no stubs. The returned Module is
-    // reused as the fork.zig test target's "execve" import — fork.zig
-    // names execve.ArgvBlock in prepare_move_to_user_elf_argv. The
-    // `path` import is satisfied even on host because the file
-    // top-level @imports the module unconditionally; the kernel-only
-    // join site sits behind the comptime is_kernel guard.
-    const execve_test_mod = addHostTest(b, test_step, .{
-        .src = "src/execve.flash",
-        .src_lazy = execve_src,
-        .imports = &.{.{ .name = "path", .mod = path_test_mod }},
+    // Host-target copy of the fixed-layout adapter for fork's named import.
+    // The six argv encoder assertions now run in crates/kernel.
+    const execve_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/execve.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
     });
 
     // trace/fp_walk.zig — the -Dtrace sampler's AAPCS64 frame-pointer

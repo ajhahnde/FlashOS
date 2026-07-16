@@ -319,8 +319,8 @@ pub fn prepare_move_to_user_elf_argv(
         // page via its KVA alias (TTBR0 still holds the old pgd until
         // set_pgd below). encodeArgvBlock laid the block flush against
         // STACK_TOP, so it lands at PAGE_SIZE - len from the page base.
-        const dst [*]mut u8 = #ptrFromInt(stack_kva + (PAGE_SIZE - ab.bytes.len))
-        #memcpy(dst[0..ab.bytes.len], ab.bytes)
+        const dst [*]mut u8 = #ptrFromInt(stack_kva + (PAGE_SIZE - ab.bytes_len))
+        #memcpy(dst[0..ab.bytes_len], ab.bytes_ptr[0..ab.bytes_len])
         // x1 = argv and sp = &argv[0] survive to the new program: kernel_exit
         // restores them from this frame and ret_from_syscall (arch/aarch64/entry.S)
         // does not touch them. x0 = argc is the AAPCS64 contract, but for the

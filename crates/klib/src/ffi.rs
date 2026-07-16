@@ -10,9 +10,9 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    block_dev, console, elf, fat32_backend, fdtable, file, initramfs_backend, klog_ring, mailbox,
-    mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd, sha256, shadow, usb_descriptors,
-    usb_tx_ring, vfs,
+    block_dev, console, elf, execve, fat32_backend, fdtable, file, initramfs_backend, klog_ring,
+    mailbox, mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd, sha256, shadow,
+    usb_descriptors, usb_tx_ring, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -288,6 +288,16 @@ pub unsafe extern "C" fn sched_init() {
 #[no_mangle]
 pub unsafe extern "C" fn fos_sched_zombify_and_wake_parent(target: *mut sched::TaskStruct) {
     unsafe { sched::zombify_and_wake_parent(target) };
+}
+
+/// Replace the active task's user image through the path-resolved loader.
+///
+/// # Safety
+/// `path_ptr` and nonzero `argv_ptr` are user virtual addresses owned by the
+/// active task and follow the syscall's NUL-termination contracts.
+#[no_mangle]
+pub unsafe extern "C" fn execve_impl(path_ptr: u64, argv_ptr: u64) -> i32 {
+    unsafe { execve::execve_impl(path_ptr, argv_ptr) }
 }
 
 const MM_USER_SERVICES: mm_user::Services = mm_user::Services {
