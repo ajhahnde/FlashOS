@@ -577,15 +577,18 @@ pub fn build(b: *std.Build) void {
         .root_source_file = sha256_src,
     });
     // shadow — call-site adapter over the Rust /etc/shadow unit. The parser,
-    // hex codec, lookup, rewrite logic, and tests live in crates/kernel; this
-    // module only preserves the Flash slice API until sys.flash ports.
+    // hex codec, lookup, rewrite logic, and tests live in crates/kernel. The
+    // syscall layer was its last consumer, so nothing imports this adapter any
+    // more and it is not linked; it is kept only until the orphaned Flash
+    // adapters are retired together.
     const shadow_src = addFlashSource(b, "src/shadow.flash");
     const shadow_mod = b.createModule(.{
         .root_source_file = shadow_src,
     });
     // perm — call-site adapter over the Rust Unix permission check. The pure
-    // decision and truth-table tests live in crates/kernel; this module keeps
-    // the enum-shaped Flash API until sys.flash and execve.flash port.
+    // decision and truth-table tests live in crates/kernel. Like the shadow
+    // adapter above, its last consumer ported, so it is unimported and unlinked
+    // pending the shared cleanup.
     const perm_src = addFlashSource(b, "src/perm.flash");
     const perm_mod = b.createModule(.{
         .root_source_file = perm_src,
@@ -598,15 +601,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = pwfile_src,
     });
 
-    // hwrng — call-site adapter for the Rust-owned timer-backed fallback.
-    // The remaining Flash syscall module passes its salt slice through this
-    // named module; initialization, state, mixing, and tests live in Rust.
-    const hwrng_src = addFlashSource(b, "src/hwrng.flash");
-    const hwrng_mod = b.createModule(.{
-        .root_source_file = hwrng_src,
-        .target = target,
-        .optimize = optimize,
-    });
+
 
     // Boot adapter for the Rust-owned FAT32 VFS backend. The board-owned
     // `sd_dev` callback record remains in the block_dev module until R9.
@@ -648,42 +643,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
-    // Syscall dispatch table + handlers. Ported to Flash; flashc transpiles
-    // it via addFlashSource. Moved from a relative `@import("sys.zig")` in
-    // start.zig to a named module — the generated .zig lives in the build
-    // cache, so the path import no longer resolves. start.zig force-includes
-    // it (`_ = @import("sys")`) so the dispatch table + every export fn land
-    // in the ELF; entry.S reaches sys_call_table by symbol and kernel.flash
-    // calls sys_call_table_relocate through a C-ABI `extern fn`. The board
-    // driver bag is not imported here — sys reaches its three board entry
-    // points through C-ABI trampolines in src/start.zig (the kernel root
-    // module, which imports the board bag as a named module). No host test:
-    // sys.zig carries no test blocks.
-    const sys_src = addFlashSource(b, "src/sys.flash");
-    const sys_mod = b.createModule(.{
-        .root_source_file = sys_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    sys_mod.addImport("syscall_defs", syscall_defs_mod);
-    sys_mod.addImport("task_layout", task_layout_mod);
-    sys_mod.addImport("user_layout", user_layout_mod);
-    sys_mod.addImport("pipe", pipe_mod);
-    sys_mod.addImport("console", console_mod);
-    sys_mod.addImport("sched", sched_mod);
-    sys_mod.addImport("vfs", vfs_mod);
-    sys_mod.addImport("file", file_mod);
-    sys_mod.addImport("fdtable", fdtable_mod);
-    sys_mod.addImport("path", path_mod);
-    sys_mod.addImport("klog_ring", klog_ring_mod);
-    sys_mod.addImport("sha256", sha256_mod);
-    sys_mod.addImport("shadow", shadow_mod);
-    sys_mod.addImport("perm", perm_mod);
-    sys_mod.addImport("pwfile", pwfile_mod);
-    sys_mod.addImport("hwrng", hwrng_mod);
-    // console_ui supplies the shared `[Debug]` trace-prefix bytes.
-    sys_mod.addImport("console_ui", console_ui_mod);
 
     // Boot sequence + main loop. Ported to Flash; flashc transpiles it via
     // addFlashSource. Moved from a relative `@import("kernel.zig")` in
@@ -963,7 +922,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("fdtable", fdtable_mod);
     kernel_mod.addImport("console", console_mod);
     kernel_mod.addImport("sched", sched_mod);
-    kernel_mod.addImport("sys", sys_mod);
     kernel_mod.addImport("path", path_mod);
     kernel_mod.addImport("initramfs", initramfs_mod);
     kernel_mod.addImport("file", file_mod);
@@ -1011,7 +969,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("sha256", sha256_mod);
     kernel_mod.addImport("shadow", shadow_mod);
     kernel_mod.addImport("perm", perm_mod);
-    kernel_mod.addImport("hwrng", hwrng_mod);
     // sys_passwd authorization: uid -> login-name lookup against
     // /etc/passwd (the same parser /bin/login and fsh's whoami import).
     kernel_mod.addImport("pwfile", pwfile_mod);

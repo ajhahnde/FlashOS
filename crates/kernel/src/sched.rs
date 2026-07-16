@@ -227,6 +227,44 @@ unsafe fn set_task_at(index: usize, value: *mut TaskStruct) {
     unsafe { seam::task_base().add(index).write(value) };
 }
 
+/// The active task, as published by the scheduler.
+///
+/// The scheduler owns `current` and the task table; consumers that must read
+/// them (the kill syscall walks the table) go through here rather than
+/// redeclaring the globals, so the host build has one task state, not one per
+/// module.
+///
+/// # Safety
+/// Scheduler initialization has published a live current task.
+pub unsafe fn current_task() -> *mut TaskStruct {
+    // SAFETY: forwarded publication contract.
+    unsafe { seam::current_task() }
+}
+
+/// Base of the scheduler's `NR_TASKS`-slot task table.
+pub fn task_base() -> *mut *mut TaskStruct {
+    seam::task_base()
+}
+
+/// Publish a current task and table contents for host tests.
+///
+/// # Safety
+/// The caller owns the referenced storage for the duration of the test.
+#[cfg(test)]
+pub(crate) unsafe fn set_test_state(current: *mut TaskStruct, tasks: &[*mut TaskStruct]) {
+    // SAFETY: the host suite drives this state single-threaded.
+    unsafe {
+        seam::set_current(current);
+        let base = seam::task_base();
+        let mut index = 0;
+        while index < NR_TASKS {
+            base.add(index)
+                .write(tasks.get(index).copied().unwrap_or(core::ptr::null_mut()));
+            index += 1;
+        }
+    }
+}
+
 /// Increment the active task's preemption nesting count.
 ///
 /// # Safety

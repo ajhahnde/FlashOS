@@ -13,6 +13,10 @@ verbose-fork = []
 
 [dependencies]
 flashos-abi = { path = "../abi" }
+# Workspace-internal no_std crates, not third-party runtime: the syscall layer
+# needs the frozen boot-marker bytes and the account-file lookup.
+flashos-console-ui = { path = "../console-ui" }
+flashos-pwfile = { path = "../pwfile" }
 
 # Host-test oracles ONLY. Dev-dependencies never reach the kernel image, so it
 # keeps its no-third-party-runtime posture; the symbol gate proves no RustCrypto

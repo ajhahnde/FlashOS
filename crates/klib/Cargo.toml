@@ -15,6 +15,7 @@ name = "flashos_klib"
 crate-type = ["staticlib"]
 
 [dependencies]
+flashos-abi = { path = "../abi" }
 flashos-kernel = { path = "../kernel" }
 
 [features]

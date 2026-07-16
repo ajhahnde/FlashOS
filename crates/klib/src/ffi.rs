@@ -9,10 +9,19 @@
 //! Rules for anything added here: `extern "C"`, `#[no_mangle]`, no panic may
 //! cross the boundary, and no Rust type without a fixed representation.
 
+use flashos_abi::syscall::{
+    NR_SYSCALLS, SYS_AUTHENTICATE, SYS_BRK, SYS_CHDIR, SYS_CLOSE, SYS_CLOSE_CONSOLE,
+    SYS_CONSOLE_INJECT, SYS_CPU_FREQ, SYS_CPU_TEMP, SYS_CREATE, SYS_DUMP_FREE, SYS_DUP2,
+    SYS_EXECVE, SYS_EXIT, SYS_FORK, SYS_GETCWD, SYS_GETEGID, SYS_GETEUID, SYS_GETGID, SYS_GETUID,
+    SYS_KILL, SYS_KLOG_READ, SYS_MEMTOTAL, SYS_MLOCK, SYS_MMAP, SYS_MSGGET, SYS_MUNLOCK,
+    SYS_MUNMAP, SYS_OPEN_FILE, SYS_PASSWD, SYS_PIPE, SYS_READ, SYS_READDIR, SYS_REBOOT, SYS_RENAME,
+    SYS_SBRK, SYS_SEEK, SYS_SEMGET, SYS_SETGID, SYS_SETUID, SYS_SET_CONSOLE_MODE, SYS_SHMGET,
+    SYS_SOCKET, SYS_UNLINK, SYS_UPTIME, SYS_WAIT, SYS_WRITE,
+};
 use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
     initramfs_backend, klog_ring, mailbox, mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd,
-    sha256, shadow, usb_descriptors, usb_tx_ring, vfs,
+    sha256, shadow, sys, usb_descriptors, usb_tx_ring, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -177,18 +186,6 @@ pub unsafe extern "C" fn uptime_seconds() -> u64 {
 pub unsafe extern "C" fn hwrng_init() -> i32 {
     // SAFETY: bring-up exclusively initializes the mixer.
     unsafe { hwrng::initialize(architectural_count) }
-}
-
-/// Fill caller-owned bytes from the timer-backed entropy fallback.
-///
-/// # Safety
-/// `buffer` points to `len` writable bytes and the caller serializes access in
-/// syscall context after [`hwrng_init`].
-#[no_mangle]
-pub unsafe extern "C" fn fos_hwrng_fill(buffer: *mut u8, len: usize) {
-    let buffer = unsafe { mut_slice_from_raw(buffer, len) };
-    // SAFETY: the caller forwards the serialized syscall and buffer contract.
-    let _ = unsafe { hwrng::fill(buffer, architectural_count) };
 }
 
 // ---- scheduler state and task lifecycle ----
@@ -578,16 +575,8 @@ pub unsafe extern "C" fn mem_total_count() -> u64 {
 /// Allocate and zero one ABI-owned `File` record.
 #[no_mangle]
 pub extern "C" fn fos_file_alloc() -> *mut file::File {
-    // SAFETY: the kernel allocator exports this leaf primitive and returns zero
-    // or one page exclusively owned by the caller.
-    let page_pa = unsafe { get_free_page() };
-    if page_pa == 0 {
-        return core::ptr::null_mut();
-    }
-    let file = file::page_kva(page_pa, true) as *mut file::File;
-    // SAFETY: the fresh page is aligned, writable, and exclusively owned.
-    unsafe { file::initialize(file) };
-    file
+    // SAFETY: the kernel's single-core allocator exclusion holds on this path.
+    unsafe { file::alloc() }
 }
 
 /// Drop a file reference and free the page on the last one.
@@ -596,13 +585,7 @@ pub extern "C" fn fos_file_alloc() -> *mut file::File {
 /// `value` points to a live allocated `File` with at least one reference.
 #[no_mangle]
 pub unsafe extern "C" fn fos_file_unref(value: *mut file::File) {
-    unsafe { preempt_disable() };
-    let last = unsafe { file::drop_ref(value) };
-    unsafe { preempt_enable() };
-    if last {
-        let page_pa = file::page_pa(value as u64, true);
-        unsafe { free_page(page_pa) };
-    }
+    unsafe { file::unref(value) };
 }
 
 /// Add a file reference under the existing preemption exclusion.
@@ -611,9 +594,7 @@ pub unsafe extern "C" fn fos_file_unref(value: *mut file::File) {
 /// `value` points to a live allocated `File`.
 #[no_mangle]
 pub unsafe extern "C" fn fos_file_ref(value: *mut file::File) {
-    unsafe { preempt_disable() };
-    unsafe { file::add_ref(value) };
-    unsafe { preempt_enable() };
+    unsafe { file::reference(value) };
 }
 
 /// Offset/length-only view of one parsed initramfs entry. No archive pointer is
@@ -1199,6 +1180,271 @@ pub unsafe extern "C" fn fos_shadow_rewrite_line_in_place(
     let salt = unsafe { slice_from_raw(salt, salt_len) };
     let hash = unsafe { slice_from_raw(hash, hash_len) };
     u8::from(shadow::rewrite_line_in_place(content, user, salt, hash))
+}
+
+// ---- syscall handlers, the fixed dispatch table, and its relocation ----
+//
+// `entry.S` reaches the table with `adr x27, sys_call_table` and bounds the
+// dispatch with the NR_SYSCALLS literal in asm_defs_common.inc, so the symbol
+// name, the slot map, and the table's 56 entries are all frozen ABI. The
+// handlers below are the C-ABI face of `flashos_kernel::sys`; unlike the rest of
+// this module they are not transitional — when the last Flash caller goes, these
+// stay as the assembly's entry points.
+
+/// Every handler the table binds. Each is the unmangled symbol the reference
+/// exported, with the same signature and the same error sentinels.
+macro_rules! syscall_handlers {
+    ($($(#[$meta:meta])* fn $name:ident($($arg:ident: $ty:ty),*) $(-> $ret:ty)?;)*) => {
+        $(
+            $(#[$meta])*
+            /// # Safety
+            /// Reached only through the dispatch table from `el0_svc`, which
+            /// supplies the serialized EL1 syscall context — a live current
+            /// task, single-core exclusion, and user addresses owned by that
+            /// task — that the `flashos_kernel::sys` body documents.
+            #[no_mangle]
+            pub unsafe extern "C" fn $name($($arg: $ty),*) $(-> $ret)? {
+                // SAFETY: reached only through the dispatch table from `el0_svc`,
+                // which supplies the serialized syscall context every handler
+                // documents.
+                unsafe { sys::$name($($arg),*) }
+            }
+        )*
+    };
+}
+
+syscall_handlers! {
+    fn sys_fork() -> i32;
+    fn sys_execve(path_ptr: u64, argv_ptr: u64) -> i32;
+    fn sys_wait() -> i32;
+    fn sys_exit();
+    fn sys_kill(pid: i32) -> i32;
+    fn sys_dump_free() -> u64;
+    fn sys_mem_total() -> u64;
+    fn sys_uptime() -> u64;
+    fn sys_cpu_temp() -> u64;
+    fn sys_cpu_freq() -> u64;
+    fn sys_open_file(path_ptr: u64) -> i32;
+    fn sys_create(path_ptr: u64) -> i32;
+    fn sys_unlink(path_ptr: u64) -> i32;
+    fn sys_rename(old_ptr: u64, new_ptr: u64) -> i32;
+    fn sys_seek(fd: i32, off: i64, whence: i32) -> i64;
+    fn sys_brk(addr: u64) -> i64;
+    fn sys_sbrk(delta: i64) -> i64;
+    fn sys_pipe() -> i64;
+    fn sys_set_console_mode(mode: u64) -> i64;
+    fn sys_console_inject(byte: u64);
+    fn sys_read(fd: i32, buf_uva: u64, len: u64) -> i64;
+    fn sys_write(fd: i32, buf_uva: u64, len: u64) -> i64;
+    fn sys_close(fd: i32) -> i32;
+    fn sys_dup2(oldfd: i32, newfd: i32) -> i32;
+    fn sys_chdir(path_ptr: u64) -> i32;
+    fn sys_getcwd(buf_uva: u64, len: u64) -> i64;
+    fn sys_readdir(path_ptr: u64, index: u64, dirent_uva: u64) -> i32;
+    fn sys_klog_read(buf_uva: u64, len: u64) -> i64;
+    fn sys_getuid() -> i64;
+    fn sys_geteuid() -> i64;
+    fn sys_getgid() -> i64;
+    fn sys_getegid() -> i64;
+    fn sys_setuid(uid: u32) -> i64;
+    fn sys_setgid(gid: u32) -> i64;
+    fn sys_authenticate(user_uva: u64, user_len: u64, pass_uva: u64, pass_len: u64) -> i64;
+    fn sys_passwd(
+        user_uva: u64,
+        user_len: u64,
+        old_uva: u64,
+        old_len: u64,
+        new_uva: u64,
+        new_len: u64
+    ) -> i64;
+}
+
+/// SYS_REBOOT — resets the board and never returns, so `el0_svc` never reaches
+/// the eret back to the caller.
+///
+/// # Safety
+/// Reached only through the dispatch table.
+#[no_mangle]
+pub unsafe extern "C" fn sys_reboot() -> ! {
+    // SAFETY: forwarded syscall context.
+    unsafe { sys::sys_reboot() }
+}
+
+/// Reserved slots that were never implemented, plus the inert console close.
+/// They occupy their table entries so the numbers stay claimed.
+#[no_mangle]
+pub extern "C" fn sys_mmap() {
+    sys::sys_mmap();
+}
+/// See [`sys_mmap`].
+#[no_mangle]
+pub extern "C" fn sys_munmap() {
+    sys::sys_munmap();
+}
+/// See [`sys_mmap`].
+#[no_mangle]
+pub extern "C" fn sys_mlock() {
+    sys::sys_mlock();
+}
+/// See [`sys_mmap`].
+#[no_mangle]
+pub extern "C" fn sys_munlock() {
+    sys::sys_munlock();
+}
+/// See [`sys_mmap`].
+#[no_mangle]
+pub extern "C" fn sys_socket() {
+    sys::sys_socket();
+}
+/// See [`sys_mmap`].
+#[no_mangle]
+pub extern "C" fn sys_msgget() {
+    sys::sys_msgget();
+}
+/// See [`sys_mmap`].
+#[no_mangle]
+pub extern "C" fn sys_semget() {
+    sys::sys_semget();
+}
+/// See [`sys_mmap`].
+#[no_mangle]
+pub extern "C" fn sys_shmget() {
+    sys::sys_shmget();
+}
+/// See [`sys_mmap`].
+#[no_mangle]
+pub extern "C" fn sys_close_console() {
+    sys::sys_close_console();
+}
+
+/// Retired ABI slots. The numbers stay reserved forever — a stale binary
+/// invoking one gets a clean -1, never a silently different syscall.
+#[no_mangle]
+pub extern "C" fn sys_retired() -> i64 {
+    sys::sys_retired()
+}
+
+/// Syscalls run at EL1h with TTBR0 holding the *user* pgd, so each entry is
+/// OR-ed with the linear-map base and the `blr` in `el0_svc` lands in the
+/// kernel's high-mem mapping.
+const LINEAR_MAP_BASE: u64 = 0xFFFF_0000_0000_0000;
+
+/// Syscall dispatch table — referenced from `entry.S` (`adr x27, sys_call_table`).
+///
+/// The slot-to-constant binding is compiler-enforced by the indexed writes
+/// below: a renumbering in the ABI crate propagates here automatically, a
+/// duplicate id would overwrite, and a gap leaves a null that still traps
+/// cleanly. The upper dispatch bound is the NR_SYSCALLS literal in
+/// `arch/aarch64/asm_defs_common.inc`; keep it in lockstep with the highest
+/// user-facing id + 1.
+///
+/// The unified ABI (slots 32..35) carries all console / pipe / file I/O. The
+/// legacy per-kind shims at slots 0 / 5 / 8 / 9 / 11 / 23 / 24 / 27..29 were
+/// retired: those slots route to `sys_retired` (a clean -1) and their numbers
+/// are never reused.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+pub static mut sys_call_table: [*const (); NR_SYSCALLS] = {
+    let mut t: [*const (); NR_SYSCALLS] = [core::ptr::null(); NR_SYSCALLS];
+
+    t[SYS_FORK as usize] = sys_fork as *const ();
+    t[SYS_EXIT as usize] = sys_exit as *const ();
+    t[SYS_WAIT as usize] = sys_wait as *const ();
+    t[SYS_DUMP_FREE as usize] = sys_dump_free as *const ();
+    t[SYS_KILL as usize] = sys_kill as *const ();
+    t[SYS_EXECVE as usize] = sys_execve as *const ();
+
+    t[SYS_OPEN_FILE as usize] = sys_open_file as *const ();
+    t[SYS_SEEK as usize] = sys_seek as *const ();
+
+    t[SYS_BRK as usize] = sys_brk as *const ();
+    t[SYS_SBRK as usize] = sys_sbrk as *const ();
+    t[SYS_MMAP as usize] = sys_mmap as *const ();
+    t[SYS_MUNMAP as usize] = sys_munmap as *const ();
+    t[SYS_MLOCK as usize] = sys_mlock as *const ();
+    t[SYS_MUNLOCK as usize] = sys_munlock as *const ();
+
+    t[SYS_PIPE as usize] = sys_pipe as *const ();
+    t[SYS_SOCKET as usize] = sys_socket as *const ();
+    t[SYS_MSGGET as usize] = sys_msgget as *const ();
+    t[SYS_SEMGET as usize] = sys_semget as *const ();
+    t[SYS_SHMGET as usize] = sys_shmget as *const ();
+
+    t[SYS_SET_CONSOLE_MODE as usize] = sys_set_console_mode as *const ();
+    t[SYS_CLOSE_CONSOLE as usize] = sys_close_console as *const ();
+
+    t[SYS_CONSOLE_INJECT as usize] = sys_console_inject as *const ();
+
+    t[SYS_READ as usize] = sys_read as *const ();
+    t[SYS_WRITE as usize] = sys_write as *const ();
+    t[SYS_CLOSE as usize] = sys_close as *const ();
+    t[SYS_DUP2 as usize] = sys_dup2 as *const ();
+
+    t[SYS_CHDIR as usize] = sys_chdir as *const ();
+    t[SYS_GETCWD as usize] = sys_getcwd as *const ();
+    t[SYS_READDIR as usize] = sys_readdir as *const ();
+
+    t[SYS_KLOG_READ as usize] = sys_klog_read as *const ();
+
+    t[SYS_GETUID as usize] = sys_getuid as *const ();
+    t[SYS_GETEUID as usize] = sys_geteuid as *const ();
+    t[SYS_GETGID as usize] = sys_getgid as *const ();
+    t[SYS_GETEGID as usize] = sys_getegid as *const ();
+    t[SYS_SETUID as usize] = sys_setuid as *const ();
+    t[SYS_SETGID as usize] = sys_setgid as *const ();
+
+    t[SYS_AUTHENTICATE as usize] = sys_authenticate as *const ();
+    t[SYS_PASSWD as usize] = sys_passwd as *const ();
+    t[SYS_REBOOT as usize] = sys_reboot as *const ();
+
+    t[SYS_MEMTOTAL as usize] = sys_mem_total as *const ();
+    t[SYS_UPTIME as usize] = sys_uptime as *const ();
+    t[SYS_CPU_TEMP as usize] = sys_cpu_temp as *const ();
+    t[SYS_CPU_FREQ as usize] = sys_cpu_freq as *const ();
+
+    t[SYS_CREATE as usize] = sys_create as *const ();
+    t[SYS_UNLINK as usize] = sys_unlink as *const ();
+    t[SYS_RENAME as usize] = sys_rename as *const ();
+
+    // Retired: legacy per-kind console / file / pipe / exec shims (write_str,
+    // exec, readFile, writeFile, closeFile, openConsole, readConsole,
+    // pipe_read, pipe_write, pipe_close). Slot numbers are never reused; any
+    // caller gets -1.
+    let retired = [0usize, 5, 8, 9, 11, 23, 24, 27, 28, 29];
+    let mut i = 0;
+    while i < retired.len() {
+        t[retired[i]] = sys_retired as *const ();
+        i += 1;
+    }
+
+    t
+};
+
+// Build-time guard: `arch/aarch64/asm_defs_common.inc` must declare
+// `#define NR_SYSCALLS 56` to match. If the highest SYS_* constant moves, bump
+// the asm-side literal too, then update this check.
+const _: () = assert!(NR_SYSCALLS == 56);
+
+/// Map each syscall function pointer to its high-mem (TTBR1) alias so `el0_svc`
+/// can `blr` through the table after the user pgd has been installed in TTBR0.
+///
+/// # Safety
+/// Called exactly once during bring-up, before any user pgd replaces the
+/// identity map.
+#[no_mangle]
+pub unsafe extern "C" fn sys_call_table_relocate() {
+    let mut i = 0;
+    while i < NR_SYSCALLS {
+        // SAFETY: bring-up owns the table exclusively; each slot is either null
+        // or a live kernel function whose low-half address gains its high-half
+        // alias exactly once.
+        unsafe {
+            let slot = (&raw mut sys_call_table).cast::<*const ()>().add(i);
+            let low_half = slot.read() as u64;
+            slot.write((low_half | LINEAR_MAP_BASE) as *const ());
+        }
+        i += 1;
+    }
 }
 
 /// `core::slice::from_raw_parts`, with the empty case made explicit rather than

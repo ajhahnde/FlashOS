@@ -48,3 +48,10 @@ extern fn fos_klog_snapshot(ring *KlogRing, dst [*]mut u8, dst_len usize) usize
 
 // The one kernel-wide log ring. BSS-resident and allocation-free.
 pub var klog KlogRing = .{}
+
+// Hand the ring's address to the Rust syscall layer. The storage is a
+// module-private symbol here, so Rust cannot bind to it directly; this getter is
+// the narrowest possible bridge and retires together with this module.
+export fn fos_klog_ring() *mut KlogRing {
+    return &klog
+}

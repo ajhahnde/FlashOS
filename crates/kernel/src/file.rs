@@ -72,6 +72,97 @@ pub unsafe fn drop_ref(file: *mut File) -> bool {
     next == 0
 }
 
+#[cfg(target_os = "none")]
+mod seam {
+    unsafe extern "C" {
+        pub fn get_free_page() -> u64;
+        pub fn free_page(page: u64);
+        pub fn preempt_disable();
+        pub fn preempt_enable();
+    }
+
+    pub const FREESTANDING: bool = true;
+}
+
+// Host seam: a leaking bump arena, matching the pipe module's. Atomic bump so
+// parallel test threads never hand out the same page.
+#[cfg(not(target_os = "none"))]
+mod seam {
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    pub const FREESTANDING: bool = false;
+
+    const PAGE_SIZE: usize = 4096;
+    const PAGES: usize = 64;
+
+    // Alignment-only storage: the bytes are addressed through raw pointers, so
+    // the field itself is never read by name.
+    #[repr(align(4096))]
+    struct Page(#[allow(dead_code)] [u8; PAGE_SIZE]);
+
+    static mut ARENA: [Page; PAGES] = [const { Page([0; PAGE_SIZE]) }; PAGES];
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    pub unsafe fn get_free_page() -> u64 {
+        let index = NEXT.fetch_add(1, Ordering::Relaxed);
+        if index >= PAGES {
+            return 0;
+        }
+        // SAFETY: each index is handed out once, so the page is exclusive.
+        unsafe { core::ptr::addr_of_mut!(ARENA).cast::<Page>().add(index) as u64 }
+    }
+
+    pub unsafe fn free_page(_page: u64) {}
+    pub unsafe fn preempt_disable() {}
+    pub unsafe fn preempt_enable() {}
+}
+
+/// Allocate and zero one `File`, or null when the allocator is exhausted.
+///
+/// The record occupies its own page: the allocator is the kernel's only
+/// fixed-size supply, and `File` records are freed individually.
+///
+/// # Safety
+/// The caller must satisfy the kernel's single-core allocator exclusion.
+pub unsafe fn alloc() -> *mut File {
+    // SAFETY: the allocator seam yields zero or one exclusively owned page.
+    let page_pa = unsafe { seam::get_free_page() };
+    if page_pa == 0 {
+        return core::ptr::null_mut();
+    }
+    let file = page_kva(page_pa, seam::FREESTANDING) as *mut File;
+    // SAFETY: the fresh page is aligned, writable, and exclusively owned.
+    unsafe { initialize(file) };
+    file
+}
+
+/// Drop one reference and free the backing page on the last one.
+///
+/// # Safety
+/// `file` points to a live allocated `File` with at least one reference.
+pub unsafe fn unref(file: *mut File) {
+    // SAFETY: the count transition must not race the timer IRQ.
+    unsafe { seam::preempt_disable() };
+    let last = unsafe { drop_ref(file) };
+    unsafe { seam::preempt_enable() };
+    if last {
+        let page_pa = page_pa(file as u64, seam::FREESTANDING);
+        // SAFETY: the last reference owned the page; no alias survives.
+        unsafe { seam::free_page(page_pa) };
+    }
+}
+
+/// Take one reference under the module's preemption exclusion.
+///
+/// # Safety
+/// `file` points to a live allocated `File`.
+pub unsafe fn reference(file: *mut File) {
+    // SAFETY: the count transition must not race the timer IRQ.
+    unsafe { seam::preempt_disable() };
+    unsafe { add_ref(file) };
+    unsafe { seam::preempt_enable() };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

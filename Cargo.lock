@@ -184,6 +184,8 @@ name = "flashos-kernel"
 version = "0.8.0"
 dependencies = [
  "flashos-abi",
+ "flashos-console-ui",
+ "flashos-pwfile",
  "hmac",
  "pbkdf2",
  "sha2",
@@ -193,6 +195,7 @@ dependencies = [
 name = "flashos-klib"
 version = "0.8.0"
 dependencies = [
+ "flashos-abi",
  "flashos-kernel",
 ]
 

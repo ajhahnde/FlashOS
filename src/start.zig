@@ -62,7 +62,6 @@ comptime {
     _ = board.emmc2;
     _ = board.usb;
     _ = @import("sched");
-    _ = @import("sys");
     _ = @import("utilc");
 
     _ = @import("trace/utils.zig");
