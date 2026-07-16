@@ -1,8 +1,8 @@
 //! ELF64 header records.
 //!
-//! Layouts ported from `src/elf.flash`; the parser itself (validation,
-//! `iterate_phdrs`) stays with that module and moves in its own stage. Scope is
-//! deliberately narrow — ELF64, little-endian, AArch64, ET_EXEC only.
+//! Layouts ported from the former Flash ELF module. The Rust parser owns
+//! validation and program-header iteration. Scope is deliberately narrow —
+//! ELF64, little-endian, AArch64, ET_EXEC only.
 
 use core::mem::{align_of, offset_of, size_of};
 

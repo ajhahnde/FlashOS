@@ -13,7 +13,7 @@ const board = @import("board");
 // relative @import. This root module imports the board bag as a named module,
 // so these thin C-ABI wrappers bridge the boundary — kernel.flash / sys.flash
 // reach each board entry point through a matching `extern fn`. (Same role
-// fork.zig's move_to_user_elf_argv plays for execve.)
+// the remaining named Flash modules use for board access.)
 export fn board_irq_init() void {
     board.irq.board_irq_init();
 }
@@ -63,8 +63,6 @@ comptime {
     _ = board.emmc2;
     _ = board.usb;
     _ = @import("sched");
-    _ = @import("fork");
-    _ = @import("execve");
     _ = @import("sys");
     _ = @import("utilc");
     _ = @import("hwrng");

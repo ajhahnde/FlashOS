@@ -1,9 +1,8 @@
 // user_layout: user-space virtual address layout.
 //
-// Single source of truth for the regions the ELF loader populates and
-// the page-fault path classifies. Imported by src/fork.zig
-// (prepare_move_to_user_elf) and src/mm_user.zig (do_data_abort,
-// map_page) so both sides agree on text/data/heap/stack.
+// Flash-side copy of the regions the Rust ELF loader and page-fault path use.
+// The remaining syscall handlers import it for brk bounds; build-time ABI
+// assertions keep the Rust and Flash values aligned.
 //
 // Region map (matches DOCUMENTATION.md §3 "User virtual layout"):
 //

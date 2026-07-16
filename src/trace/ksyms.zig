@@ -9,7 +9,7 @@ extern fn trace_output_u64(interface: i32, in: u64) void;
 
 extern var ksyms: u64;
 
-// Same constant as src/sys.zig / src/fork.zig / src/trace/trace_main.zig.
+// Same constant as the syscall, process-loader, and trace modules.
 // The compiler emits `&ksyms` through a literal-pool quad whose stored
 // value is the link-time low VA (e.g. 0x4009E648 on virt). Boot-time
 // callers of ksTable() are fine because TTBR0 still holds id_pg_dir,

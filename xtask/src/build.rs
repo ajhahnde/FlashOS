@@ -92,20 +92,21 @@ impl Paths {
 /// linker pulls only the members it needs, and the kernel's own strong `memcpy`/
 /// `memset` (`src/utilc.flash`) outrank the weak ones here. What actually lands in
 /// the image is what the symbol budget and image-size gates measure.
-pub fn klib(root: &Path, output: Option<&Path>) -> Result<PathBuf, String> {
+pub fn klib(root: &Path, output: Option<&Path>, features: &[String]) -> Result<PathBuf, String> {
     let trace = root.join("rust-out").join("xtask-trace.log");
     fs::create_dir_all(root.join("rust-out")).map_err(|e| format!("mkdir rust-out: {e}"))?;
-    Cmd::new("cargo", &trace)
-        .cwd(root)
-        .args([
-            "build",
-            "--release",
-            "-p",
-            "flashos-klib",
-            "--target",
-            TARGET,
-        ])
-        .run()?;
+    let mut cargo = Cmd::new("cargo", &trace).cwd(root).args([
+        "build",
+        "--release",
+        "-p",
+        "flashos-klib",
+        "--target",
+        TARGET,
+    ]);
+    if !features.is_empty() {
+        cargo = cargo.args(["--features".to_string(), features.join(",")]);
+    }
+    cargo.run()?;
 
     let built = root
         .join("target")

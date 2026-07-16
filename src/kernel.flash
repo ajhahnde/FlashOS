@@ -69,7 +69,7 @@ extern fn sys_call_table_relocate() void
 // its generated .zig lives in the build cache, so it can no longer reach the
 // board bag by a relative @import. The thin C-ABI wrappers live in the build
 // root (src/start.zig), which imports the board bag as a named module — the same
-// role fork.zig's move_to_user_elf_argv plays for execve. Reached here by symbol.
+// role used by the other named Flash modules. Reached here by symbol.
 extern fn board_irq_init() void
 extern fn board_usb_init() i32
 extern fn board_usb_poll() void

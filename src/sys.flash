@@ -45,9 +45,8 @@ extern fn copy_process(clone_flags u64, fn_ptr u64, arg u64) i32
 extern fn exit_process() void
 extern fn do_wait() i32
 extern fn dump_free_count() u64
-// Body lives in src/execve.zig; sys_execve below is the dispatch-table
-// wrapper. Activates the real path-resolve → stream-PT_LOAD →
-// encode-argv flow.
+// Rust owns the execve body; sys_execve below preserves the dispatch-table
+// wrapper and activates the path-resolve → PT_LOAD → encode-argv flow.
 extern fn execve_impl(path_ptr u64, argv_ptr u64) i32
 extern fn unmap_user_range(t *mut TaskStruct, start_uva u64, end_uva u64) void
 extern fn set_pgd(pgd u64) void
@@ -59,9 +58,8 @@ extern fn copy_to_user(uva u64, kbuf [*]u8, len u64) i32
 // The board bag is a named module imported by the kernel root module, so a
 // leaf Flash module — whose generated .zig lives in the build cache — cannot
 // @import it. start.zig (which is in the root and imports board) exports
-// these thin wrappers, the same boundary fork.zig bridges with
-// move_to_user_elf_argv. The usb pair backs console_tx; board_power_reboot
-// backs sys_reboot.
+// these thin wrappers. The usb pair backs console_tx; board_power_reboot backs
+// sys_reboot.
 extern fn board_usb_enumerated() bool
 extern fn board_usb_cdc_tx(ptr [*]u8, len u64) void
 extern fn board_power_reboot() noreturn
@@ -100,9 +98,9 @@ var console_mask bool = false
 export fn sys_fork() i32 {
     return copy_process(UTHREAD, 0, 0)
 }
-// Path-resolved ELF loader. Thin wrapper over execve_impl
-// in src/execve.zig — keeps the dispatch-table binding adjacent to
-// the other process-control syscalls. x0 = path_ptr (NUL-terminated
+// Path-resolved ELF loader. Thin wrapper over the Rust execve_impl keeps the
+// dispatch-table binding adjacent to the other process-control syscalls.
+// x0 = path_ptr (NUL-terminated
 // absolute UVA), x1 = argv_ptr (UVA of NULL-terminated argv array).
 // Returns 0 (does-not-return on success — eret jumps to e_entry),
 // -1 on resolve / parse / alloc / argv-fault failure.
@@ -974,8 +972,8 @@ const MNT_SHADOW_PATH []u8 = "/mnt/shadow"
 // share of that. Carrying another ~1.4 KiB of credential / file / digest
 // buffers in sys_authenticate's own frame overflows the page and smashes
 // the TaskStruct tail (fds table → wild vtable dispatch on the next
-// sys_write). Statics sidestep that, exactly like execve.zig's exec_buf /
-// argv_scratch. Same serialization argument too: single core, and the only
+// sys_write). Statics sidestep that, exactly like the Rust execve staging
+// buffers. Same serialization argument too: single core, and the only
 // callers are PID-1's [TEST] scenarios, /bin/login, and /bin/passwd — never
 // concurrent. The password copy is overwritten by the next call; nothing
 // here persists secrets beyond the syscall that wrote them.
@@ -992,7 +990,7 @@ var auth_scratch AuthScratch = undefined
 const ReadFileError = error{ OpenFailed, ReadFailed }
 
 // In-kernel whole-file read through the privileged VFS door (the
-// execve.zig stack-File recipe: no file_mod.alloc → no page → the harness
+// Rust execve stack-File recipe: no file_mod.alloc → no page → the harness
 // free-page baseline is untouched; preempt-guarded per VFS call). Returns
 // the filled prefix of `buf`. OpenFailed = path does not resolve (not
 // mounted / absent); ReadFailed = it resolved but a backend read errored
@@ -1107,7 +1105,7 @@ export fn sys_authenticate(user_uva u64, user_len u64, pass_uva u64, pass_len u6
     // to overwrite it — a post-boot memory dump could lift it. Plain @memset
     // (not a volatile loop) suffices: auth_scratch's address escapes to the
     // extern copy_from_user below, so the stores are not dead-store-eliminable.
-    // Mirrors execve.zig's argv_scratch scrub. Runs after the result is
+    // Mirrors the Rust execve argv scratch scrub. Runs after the result is
     // computed, so pass/fail timing is unchanged.
     defer {
         #memset(&auth_scratch.pass, 0)

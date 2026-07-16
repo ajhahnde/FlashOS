@@ -16,3 +16,6 @@ crate-type = ["staticlib"]
 
 [dependencies]
 flashos-kernel = { path = "../kernel" }
+
+[features]
+verbose-fork = ["flashos-kernel/verbose-fork"]

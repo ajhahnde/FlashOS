@@ -19,7 +19,8 @@ extern var __start_patchable_functions: u64;
 extern var __stop_patchable_functions: u64;
 extern var hook: u64;
 
-// Kernel high-mapping base. Same constant as src/sys.zig and src/fork.zig.
+// Kernel high-mapping base. Same constant as the syscall and process-loader
+// modules.
 // trace_relocate ORs this into each link-time low-VA entry to obtain the
 // runtime kernel-virtual alias the patch path needs.
 const LINEAR_MAP_BASE: u64 = 0xFFFF000000000000;

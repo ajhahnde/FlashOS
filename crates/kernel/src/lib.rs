@@ -21,6 +21,7 @@ pub mod fat32;
 pub mod fat32_backend;
 pub mod fdtable;
 pub mod file;
+pub mod fork;
 pub mod initramfs;
 pub mod initramfs_backend;
 pub mod klog_ring;

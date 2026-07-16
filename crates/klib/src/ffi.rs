@@ -10,7 +10,7 @@
 //! cross the boundary, and no Rust type without a fixed representation.
 
 use flashos_kernel::{
-    block_dev, console, elf, execve, fat32_backend, fdtable, file, initramfs_backend, klog_ring,
+    block_dev, console, execve, fat32_backend, fdtable, file, fork, initramfs_backend, klog_ring,
     mailbox, mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd, sha256, shadow,
     usb_descriptors, usb_tx_ring, vfs,
 };
@@ -91,69 +91,6 @@ pub unsafe extern "C" fn fos_usb_tx_ring_advance(ring: *mut usb_tx_ring::UsbTxRi
 #[no_mangle]
 pub unsafe extern "C" fn fos_usb_tx_ring_clear(ring: *mut usb_tx_ring::UsbTxRing) {
     unsafe { &mut *ring }.clear();
-}
-
-fn elf_error_code(error: elf::ParseError) -> u32 {
-    match error {
-        elf::ParseError::BadMagic => 1,
-        elf::ParseError::NotElf64 => 2,
-        elf::ParseError::NotLittleEndian => 3,
-        elf::ParseError::NotExecutable => 4,
-        elf::ParseError::NotAarch64 => 5,
-        elf::ParseError::BadVersion => 6,
-        elf::ParseError::BadEntry => 7,
-        elf::ParseError::EntryOutOfBounds => 8,
-        elf::ParseError::PhoffOutOfBounds => 9,
-        elf::ParseError::TooManyPhdrs => 10,
-        elf::ParseError::MemszOverflow => 11,
-        elf::ParseError::VaddrOutOfBounds => 12,
-    }
-}
-
-/// Parse an ELF header into the ABI-owned output record. Zero means success.
-///
-/// # Safety
-/// `blob` points to `blob_len` readable bytes and `output` points to one
-/// writable, aligned `Ehdr` record.
-#[no_mangle]
-pub unsafe extern "C" fn fos_elf_parse_ehdr(
-    blob: *const u8,
-    blob_len: usize,
-    output: *mut elf::Ehdr,
-) -> u32 {
-    if blob_len < core::mem::size_of::<elf::Ehdr>() {
-        return elf_error_code(elf::ParseError::BadMagic);
-    }
-    let blob = unsafe { core::slice::from_raw_parts(blob, blob_len) };
-    match elf::parse_ehdr(blob) {
-        Ok(header) => {
-            unsafe { output.write(header) };
-            0
-        }
-        Err(error) => elf_error_code(error),
-    }
-}
-
-/// Parse one ELF program header at `cursor`. Zero means success.
-///
-/// # Safety
-/// `blob` points to `blob_len` readable bytes and `output` points to one
-/// writable, aligned `Phdr` record.
-#[no_mangle]
-pub unsafe extern "C" fn fos_elf_parse_phdr(
-    blob: *const u8,
-    blob_len: usize,
-    cursor: u64,
-    output: *mut elf::Phdr,
-) -> u32 {
-    let blob = unsafe { core::slice::from_raw_parts(blob, blob_len) };
-    match elf::parse_phdr_at(blob, cursor) {
-        Ok(header) => {
-            unsafe { output.write(header) };
-            0
-        }
-        Err(error) => elf_error_code(error),
-    }
 }
 
 /// Offset-based representation of a parsed shadow entry. The slices all point
@@ -298,6 +235,35 @@ pub unsafe extern "C" fn fos_sched_zombify_and_wake_parent(target: *mut sched::T
 #[no_mangle]
 pub unsafe extern "C" fn execve_impl(path_ptr: u64, argv_ptr: u64) -> i32 {
     unsafe { execve::execve_impl(path_ptr, argv_ptr) }
+}
+
+/// Build and publish a kernel thread or user fork clone.
+///
+/// # Safety
+/// Called from the retained process-creation assembly trampoline with a live
+/// current task and serialized scheduler/allocator state.
+#[no_mangle]
+pub unsafe extern "C" fn copy_process_impl(clone_flags: u64, fn_addr: u64, arg: u64) -> i32 {
+    unsafe { fork::copy_process_impl(clone_flags, fn_addr, arg) }
+}
+
+/// Resolve a task's exception frame at the top of its kernel-stack page.
+///
+/// # Safety
+/// `task` points to a live task and any nonzero dedicated stack page is live.
+#[no_mangle]
+pub unsafe extern "C" fn task_ke_regs(task: *mut fork::TaskStruct) -> *mut fork::KeRegs {
+    unsafe { fork::task_ke_regs(task) }
+}
+
+/// Install a boot ELF image without argv in the current task.
+///
+/// # Safety
+/// The blob span is readable kernel memory and the caller owns current-mm
+/// replacement.
+#[no_mangle]
+pub unsafe extern "C" fn prepare_move_to_user_elf(blob_addr_kva: u64, blob_size: u64) -> i32 {
+    unsafe { fork::prepare_move_to_user_elf(blob_addr_kva, blob_size) }
 }
 
 const MM_USER_SERVICES: mm_user::Services = mm_user::Services {

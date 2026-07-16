@@ -140,7 +140,7 @@ pub fn build(b: *std.Build) void {
     // bounds-check traps: a missed overflow becomes silent UB instead of a
     // panic. Deliberate ceiling — arithmetic on untrusted input carries
     // explicit checks at the source (the ELF p_vaddr/p_memsz range+wrap
-    // guards in src/elf.zig, the clusterLba fail-closed guard in
+    // guards in crates/kernel/src/elf.rs, the clusterLba fail-closed guard in
     // src/fat32.zig). Pass -Doptimize=ReleaseSafe to restore the traps.
     const optimize: std.builtin.OptimizeMode = b.option(
         std.builtin.OptimizeMode,
@@ -327,10 +327,9 @@ pub fn build(b: *std.Build) void {
     });
 
     // User-space virtual address layout (text/data/heap/stack bases +
-    // per-region permission bits). Kernel-only consumer for now —
-    // src/fork.zig (prepare_move_to_user_elf) and src/mm_user.zig
-    // (map_page, do_data_abort) share the constants. Same module-level
-    // exposure pattern as syscall_defs_mod.
+    // per-region permission bits). The remaining Flash syscall handlers use
+    // these constants for brk bounds; Rust owns the matching loader and
+    // page-fault values in flashos-abi.
     const user_layout_src = addFlashSource(b, "src/user_layout.flash");
     const user_layout_mod = b.createModule(.{
         .root_source_file = user_layout_src,
@@ -371,15 +370,6 @@ pub fn build(b: *std.Build) void {
     const initramfs_src = addFlashSource(b, "src/initramfs.flash");
     const initramfs_mod = b.createModule(.{
         .root_source_file = initramfs_src,
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // ELF64 parser adapter. Rust owns byte decoding and validation; this named
-    // module preserves the records and iterator API consumed by fork.flash.
-    const elf_src = addFlashSource(b, "src/elf.flash");
-    const elf_mod = b.createModule(.{
-        .root_source_file = elf_src,
         .target = target,
         .optimize = optimize,
     });
@@ -676,36 +666,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Execve adapter. Rust owns the path loader and argv encoder; this named
-    // module keeps only the fixed-layout ArgvBlock type consumed by fork.flash
-    // while the process loader remains implemented in Zig.
-    const execve_mod = b.createModule(.{
-        .root_source_file = b.path("src/execve.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Process creation + move-to-user ELF loader. Ported to Flash; flashc
-    // transpiles it via addFlashSource. start.zig pulls the export fns
-    // (copy_process_impl / prepare_move_to_user_elf / move_to_user_elf_argv)
-    // into the ELF with `_ = @import("fork")`; sys.zig / kernel.zig reach
-    // them through C-ABI `extern fn`. fork imports execve for the ArgvBlock
-    // type (execve itself reaches back through the exported trampoline, so
-    // there is no import cycle). The one transpile is shared with the
-    // host-test build below (src_lazy).
-    const fork_src = addFlashSource(b, "src/fork.flash");
-    const fork_mod = b.createModule(.{
-        .root_source_file = fork_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    fork_mod.addImport("task_layout", task_layout_mod);
-    fork_mod.addImport("fdtable", fdtable_mod);
-    fork_mod.addImport("user_layout", user_layout_mod);
-    fork_mod.addImport("elf", elf_mod);
-    fork_mod.addImport("execve", execve_mod);
-    fork_mod.addImport("build_options", build_options_mod);
-
     // Syscall dispatch table + handlers. Ported to Flash; flashc transpiles
     // it via addFlashSource. Moved from a relative `@import("sys.zig")` in
     // start.zig to a named module — the generated .zig lives in the build
@@ -988,7 +948,9 @@ pub fn build(b: *std.Build) void {
     // scripts/run_qemu_test.sh was recaptured against it. It is a one-time shift: it
     // happens when the FIRST Rust archive enters the link, not once per ported
     // module.
-    const rust_klib_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "klib", "--output" });
+    const rust_klib_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "klib" });
+    if (verbose_fork) rust_klib_cmd.addArgs(&.{ "--feature", "verbose-fork" });
+    rust_klib_cmd.addArg("--output");
     rust_klib_cmd.setName("cargo xtask klib");
     const klib_a = rust_klib_cmd.addOutputFileArg("libflashos_klib.a");
     rust_klib_cmd.has_side_effects = true;
@@ -1019,16 +981,13 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("console", console_mod);
     kernel_mod.addImport("sched", sched_mod);
     kernel_mod.addImport("sys", sys_mod);
-    kernel_mod.addImport("execve", execve_mod);
     kernel_mod.addImport("path", path_mod);
     kernel_mod.addImport("initramfs", initramfs_mod);
-    kernel_mod.addImport("elf", elf_mod);
     kernel_mod.addImport("file", file_mod);
     kernel_mod.addImport("vfs", vfs_mod);
     kernel_mod.addImport("initramfs_backend", initramfs_backend_mod);
     kernel_mod.addImport("fat32_backend", fat32_backend_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
-    kernel_mod.addImport("fork", fork_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
     kernel_mod.addImport("mailbox", mailbox_mod);
     kernel_mod.addImport("usb_descriptors", usb_descriptors_mod);
@@ -1646,34 +1605,6 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     });
 
-    const user_layout_test_mod = b.createModule(.{
-        .root_source_file = user_layout_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
-    const fork_stubs_mod = b.createModule(.{
-        .root_source_file = b.path("tests/fork_stubs.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    fork_stubs_mod.addImport("task_layout", task_layout_test_mod);
-
-    const host_stubs_fork_mod = b.createModule(.{
-        .root_source_file = b.path("tests/host_stubs_fork.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-    host_stubs_fork_mod.addImport("task_layout", task_layout_test_mod);
-
-    // Host-target copy of the fixed-layout adapter for fork's named import.
-    // The six argv encoder assertions now run in crates/kernel.
-    const execve_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/execve.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
     // trace/fp_walk.zig — the -Dtrace sampler's AAPCS64 frame-pointer
     // chain decoder. Pure `walkChain` over a flat stack-page view (no
     // kernel externs), so the FP-record math + the bounds/alignment/
@@ -1707,34 +1638,6 @@ pub fn build(b: *std.Build) void {
     // hand-written blob and exercise findNode/getProp/findReg/findInterrupt
     // plus the corrupt-length guard. Imports only std → no stubs.
     _ = addHostTest(b, test_step, .{ .src = "src/board/virt/dtb.flash", .src_lazy = virt_dtb_src });
-
-    // Host-target build of the adapter for fork.flash's named import. Its ELF
-    // calls remain lazy in fork's unrelated host tests, so no FFI stub is linked.
-    const elf_for_fork_mod = b.createModule(.{
-        .root_source_file = elf_src,
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
-    const fork_test_mod = addHostTest(b, test_step, .{
-        .src = "src/fork.flash",
-        .src_lazy = fork_src,
-        .stubs = b.addObject(.{
-            .name = "host_stubs_fork",
-            .root_module = host_stubs_fork_mod,
-        }),
-        .imports = &.{
-            .{ .name = "task_layout", .mod = task_layout_test_mod },
-            .{ .name = "user_layout", .mod = user_layout_test_mod },
-            .{ .name = "fdtable", .mod = fork_stubs_mod },
-            .{ .name = "execve", .mod = execve_test_mod },
-            .{ .name = "elf", .mod = elf_for_fork_mod },
-        },
-    });
-    // fork.zig top-level @imports build_options for the verbose-fork gate;
-    // the kernel build gets it via kernel_mod, the host test needs it wired
-    // explicitly since this module is built standalone.
-    fork_test_mod.addOptions("build_options", build_options);
 
     // vanilla single-module test targets — shared stubs, no named imports.
     // wait_queue, pipe, console, and fdtable are Rust-owned now; their

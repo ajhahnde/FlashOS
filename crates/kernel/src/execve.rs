@@ -1,8 +1,8 @@
 //! Path-resolved ELF loading and argv staging.
 //!
 //! The VFS image is snapshotted into one static kernel buffer, argv is copied
-//! and encoded before the current address space is torn down, and the still-
-//! transitional process loader consumes both buffers synchronously. FlashOS is
+//! and encoded before the current address space is torn down, and the process
+//! loader consumes both buffers synchronously. FlashOS is
 //! single-core; one function-wide preemption exclusion window serializes every
 //! static from its first write through that final consume.
 
@@ -30,10 +30,7 @@ const PATH_BYTES: usize = 1024;
 #[cfg(target_os = "none")]
 const MU: i32 = 0;
 
-/// Fixed-layout argv image passed to the temporary Zig process-loader seam.
-///
-/// Explicit pointer/length fields avoid sending either language's native slice
-/// ABI across the boundary. `src/execve.zig` asserts the same 40-byte layout.
+/// Fixed-layout argv image passed synchronously to the process loader.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct ArgvBlock {
@@ -75,6 +72,7 @@ static mut ARGV_SCRATCH: [u8; MAX_ARGV_BYTES] = [0; MAX_ARGV_BYTES];
 #[cfg(target_os = "none")]
 mod seam {
     use super::TaskStruct;
+    use crate::fork;
     use core::ptr::addr_of;
 
     unsafe extern "C" {
@@ -83,7 +81,6 @@ mod seam {
         fn preempt_disable();
         fn preempt_enable();
         fn free_page(page: u64);
-        fn move_to_user_elf_argv(blob_addr_kva: u64, blob_size: u64, argv_block_ptr: u64) -> i32;
         fn main_output(interface: i32, string: *const u8);
         fn exit_process();
     }
@@ -120,8 +117,9 @@ mod seam {
 
     #[inline]
     pub unsafe fn load_image(blob: *mut u8, size: u64, argv: *const super::ArgvBlock) -> i32 {
-        // SAFETY: both buffers remain live for the synchronous loader call.
-        unsafe { move_to_user_elf_argv(blob as u64, size, argv as u64) }
+        // SAFETY: both buffers remain live for the synchronous loader call and
+        // execve owns current-mm replacement from this point onward.
+        unsafe { fork::move_to_user_elf_argv(blob as u64, size, argv) }
     }
 
     #[inline]
