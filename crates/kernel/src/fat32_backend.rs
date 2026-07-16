@@ -117,6 +117,12 @@ pub unsafe fn init(dev: *mut BlockDev) -> i32 {
     if dev.is_null() {
         return -1;
     }
+    // The caller reaches `sd_dev` through the GOT, so `dev` arrives as a low
+    // link address that stops resolving once TTBR0 holds a user pgd. The mount
+    // below keeps this pointer for the kernel lifetime and file syscalls
+    // dereference it, so fold it before it is stored.
+    #[cfg(target_os = "none")]
+    let dev = crate::block_dev::high_alias_ptr(dev);
     #[cfg(target_os = "none")]
     {
         // SAFETY: one-time bring-up owns the live board callback record.

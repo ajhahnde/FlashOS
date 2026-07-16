@@ -1,9 +1,10 @@
 // Transitional adapter for the Rust-owned block-device vtable.
 //
-// The single global instance (`sd_dev`) stays BSS-resident here so the board
-// layer (src/board/<board>/emmc2.flash) and the FAT32 backend keep sharing the
-// same "exactly one SD card" vtable. The fixed-layout record crosses the C ABI
-// and the high-alias relocation lives in crates/kernel.
+// The single global instance (`sd_dev`) is BSS-resident in crates/kernel, which
+// also owns the fixed-layout record and the high-alias relocation. The rpi4b
+// board layer wires it natively; this module keeps the record reachable by name
+// for the remaining Flash consumers (the virt board layer and the FAT32 backend
+// adapter) until kernel bring-up is ported.
 //
 // `extern struct` + `callconv(.c)` keep the layout reachable from assembly and
 // the future board ports without depending on the Zig compiler's internal
@@ -20,11 +21,9 @@ comptime {
     if #sizeOf(BlockDev) != 16 { #compileError("BlockDev size drifted from Rust") }
 }
 
-// Wired at boot by board.emmc2.init() — null before that point.
-pub var sd_dev BlockDev = .{
-    .read_fn = null,
-    .write_fn = null,
-}
+// Wired at boot by board.emmc2.init() — null before that point. The storage
+// lives in crates/kernel; this is the name the Flash consumers reach it by.
+pub extern var sd_dev BlockDev
 
 extern fn fos_block_dev_relocate(dev *mut BlockDev) void
 

@@ -21,7 +21,8 @@ use flashos_abi::syscall::{
 use flashos_abi::task::KeRegs;
 use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
-    initramfs_backend, klog_ring, mailbox, mm_user, page_alloc, path, perm, pipe, sched, sdhci_cmd,
+    initramfs_backend, klog_ring, mailbox, mm_user, page_alloc, path, perm, pipe, rpi4b_emmc2,
+    rpi4b_gpio, rpi4b_irq, rpi4b_mailbox, rpi4b_power, rpi4b_timer, rpi4b_uart, sched, sdhci_cmd,
     sha256, shadow, sys, usb_descriptors, usb_tx_ring, utilc, vfs,
 };
 
@@ -316,6 +317,235 @@ pub unsafe extern "C" fn uptime_seconds() -> u64 {
 pub unsafe extern "C" fn hwrng_init() -> i32 {
     // SAFETY: bring-up exclusively initializes the mixer.
     unsafe { hwrng::initialize(architectural_count) }
+}
+
+// ---- Raspberry Pi 4 board drivers ----
+
+/// Set one BCM2711 GPIO pin's alternate function.
+///
+/// # Safety
+/// Called only after the high device mapping is installed, with a valid pin.
+#[no_mangle]
+pub unsafe extern "C" fn gpio_pin_set_func(pin_number: u8, func: u8) {
+    unsafe { rpi4b_gpio::gpio_pin_set_func(pin_number, func) };
+}
+
+/// Disable pulls for one BCM2711 GPIO pin.
+///
+/// # Safety
+/// Called only after the high device mapping is installed, with a valid pin.
+#[no_mangle]
+pub unsafe extern "C" fn gpio_pin_enable(pin_number: u8) {
+    unsafe { rpi4b_gpio::gpio_pin_enable(pin_number) };
+}
+
+/// Arm BCM2711 system-timer compare channel 1.
+///
+/// # Safety
+/// Called once during board bring-up after the device mapping is installed.
+#[no_mangle]
+pub unsafe extern "C" fn timer_init() {
+    unsafe { rpi4b_timer::timer_init() };
+}
+
+/// Service BCM2711 system-timer compare channel 1.
+///
+/// # Safety
+/// Called only from the serialized channel-1 IRQ path.
+#[no_mangle]
+pub unsafe extern "C" fn handle_sys_timer_1() {
+    unsafe { rpi4b_timer::handle_sys_timer_1() };
+}
+
+/// Request a full BCM2711 watchdog reset.
+///
+/// # Safety
+/// Called only from the terminal reboot syscall path.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_power_reboot() -> ! {
+    unsafe { rpi4b_power::reboot() }
+}
+
+/// Initialize the BCM2711 AUX mini-UART.
+///
+/// # Safety
+/// Called once during board bring-up after the device mapping is installed.
+#[no_mangle]
+pub unsafe extern "C" fn mini_uart_init() {
+    unsafe { rpi4b_uart::mini_uart_init() };
+}
+
+/// Send one byte through the AUX mini-UART.
+///
+/// # Safety
+/// The mini-UART is initialized.
+#[no_mangle]
+pub unsafe extern "C" fn mini_uart_send(byte: u8) {
+    unsafe { rpi4b_uart::mini_uart_send(byte) };
+}
+
+/// Receive one byte from the AUX mini-UART.
+///
+/// # Safety
+/// The mini-UART is initialized and the caller may block.
+#[no_mangle]
+pub unsafe extern "C" fn mini_uart_recv() -> u8 {
+    unsafe { rpi4b_uart::mini_uart_recv() }
+}
+
+/// Check whether the AUX mini-UART has a byte ready.
+///
+/// # Safety
+/// The mini-UART is initialized.
+#[no_mangle]
+pub unsafe extern "C" fn mini_uart_rx_pending() -> bool {
+    unsafe { rpi4b_uart::mini_uart_rx_pending() }
+}
+
+/// Send a NUL-terminated string through the AUX mini-UART.
+///
+/// # Safety
+/// `string` is readable through its NUL terminator and the UART is initialized.
+#[no_mangle]
+pub unsafe extern "C" fn mini_uart_send_string(string: *const u8) {
+    unsafe { rpi4b_uart::mini_uart_send_string(string) };
+}
+
+/// Drain AUX RX into the shared console ring from the idle loop.
+///
+/// # Safety
+/// Called only by the single-core kernel idle path.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_uart_poll_rx_into_console() {
+    unsafe { rpi4b_uart::poll_rx_into_console() };
+}
+
+/// Query a VideoCore-managed clock rate.
+///
+/// # Safety
+/// Called only from serialized board-driver paths.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_mailbox_get_clock_rate(clock_id: u32) -> u32 {
+    unsafe { rpi4b_mailbox::get_clock_rate(clock_id) }
+}
+
+/// Read the SoC temperature in milli-degrees Celsius.
+///
+/// # Safety
+/// Called only from serialized board-driver paths.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_mailbox_get_temperature() -> u32 {
+    unsafe { rpi4b_mailbox::get_temperature() }
+}
+
+/// Read the firmware-reported ARM clock in Hz.
+///
+/// # Safety
+/// Called only from serialized board-driver paths.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_mailbox_get_cpu_clock() -> u32 {
+    unsafe { rpi4b_mailbox::get_cpu_clock() }
+}
+
+/// Set one firmware-managed GPIO. Returns one on success.
+///
+/// # Safety
+/// Called only from serialized board-driver paths.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_mailbox_set_gpio_state(gpio: u32, state: u32) -> u8 {
+    u8::from(unsafe { rpi4b_mailbox::set_gpio_state(gpio, state) })
+}
+
+/// Set one firmware-managed power rail. Returns one on success.
+///
+/// # Safety
+/// Called only from serialized board-driver paths.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_mailbox_set_power_state(device_id: u32, state: u32) -> u8 {
+    u8::from(unsafe { rpi4b_mailbox::set_power_state(device_id, state) })
+}
+
+/// Print one invalid exception-entry report.
+///
+/// # Safety
+/// Called only from the terminal exception path.
+#[no_mangle]
+pub unsafe extern "C" fn show_invalid_entry_message(typ: u32, esr: u64, address: u64) {
+    unsafe { rpi4b_irq::show_invalid_entry_message(typ, esr, address) };
+}
+
+/// Enable one GICv2 distributor interrupt.
+///
+/// # Safety
+/// Called only after the GIC mapping is installed.
+#[no_mangle]
+pub unsafe extern "C" fn enable_gic_distributor(intid: u32) {
+    unsafe { rpi4b_irq::enable_gic_distributor(intid) };
+}
+
+/// Route one GICv2 interrupt to a core.
+///
+/// # Safety
+/// Called only after the GIC mapping is installed.
+#[no_mangle]
+pub unsafe extern "C" fn assign_interrupt_core(intid: u32, core: u32) {
+    unsafe { rpi4b_irq::assign_interrupt_core(intid, core) };
+}
+
+/// Enable and route one GICv2 interrupt.
+///
+/// # Safety
+/// Called only after the GIC mapping is installed.
+#[no_mangle]
+pub unsafe extern "C" fn enable_interrupt_gic(intid: u32, core: u32) {
+    unsafe { rpi4b_irq::enable_interrupt_gic(intid, core) };
+}
+
+/// Dispatch one saved-frame IRQ.
+///
+/// # Safety
+/// Called only from the EL1 IRQ vector with a live `KeRegs` frame.
+#[no_mangle]
+pub unsafe extern "C" fn handle_irq(frame: *mut KeRegs) {
+    unsafe { rpi4b_irq::handle_irq(frame) };
+}
+
+/// Initialize the BCM2711 GICv2 CPU interface.
+///
+/// # Safety
+/// Called once during serialized board bring-up.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_board_irq_init() {
+    unsafe { rpi4b_irq::board_irq_init() };
+}
+
+// ---- EMMC2 SDHCI block device ----
+
+/// Bring the SD card up to transfer state and wire the block-device vtable.
+///
+/// # Safety
+/// Called once during serialized board bring-up, before any block I/O.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_emmc2_init() -> i32 {
+    unsafe { rpi4b_emmc2::init() }
+}
+
+/// Read one 512-byte sector.
+///
+/// # Safety
+/// `buf` must point to a live, writable 512-byte buffer.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_emmc2_read_block(lba: u32, buf: *mut [u8; 512]) -> i32 {
+    rpi4b_emmc2::read_block(lba, buf)
+}
+
+/// Write one 512-byte sector.
+///
+/// # Safety
+/// `buf` must point to a live, readable 512-byte buffer.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_emmc2_write_block(lba: u32, buf: *const [u8; 512]) -> i32 {
+    rpi4b_emmc2::write_block(lba, buf)
 }
 
 // ---- scheduler state and task lifecycle ----

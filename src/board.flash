@@ -10,22 +10,29 @@
 const build_options = #import("build_options")
 
 pub const uart = switch build_options.board {
-    .rpi4b => #import("rpi4b_uart"),
+    // The Pi mini-UART symbols are Rust-owned; start.zig reaches its one
+    // source-level poll method through a C seam while virt keeps its module.
+    .rpi4b => struct {},
     .virt => #import("virt_uart"),
 }
 
 pub const gpio = switch build_options.board {
-    .rpi4b => #import("rpi4b_gpio"),
+    // The real GPIO symbols are Rust-owned. Keep the empty prong so
+    // start.zig's board force-import remains valid until the virt tree ports.
+    .rpi4b => struct {},
     .virt => #import("virt_gpio"),
 }
 
 pub const timer = switch build_options.board {
-    .rpi4b => #import("rpi4b_timer"),
+    // The real system-timer symbols are Rust-owned. Keep the empty prong so
+    // start.zig can still force-import the virt stubs when that board returns.
+    .rpi4b => struct {},
     .virt => #import("virt_timer"),
 }
 
 pub const irq = switch build_options.board {
-    .rpi4b => #import("rpi4b_irq"),
+    // Pi GICv2 dispatch is Rust-owned; virt retains its Flash module.
+    .rpi4b => struct {},
     .virt => #import("virt_irq"),
 }
 
@@ -33,7 +40,9 @@ pub const irq = switch build_options.board {
 // (QEMU `-M virt` exposes no SDHCI peripheral; see
 // src/board/virt/emmc2.zig).
 pub const emmc2 = switch build_options.board {
-    .rpi4b => #import("rpi4b_emmc2"),
+    // The Pi SDHCI symbols are Rust-owned; start.zig reaches them through the
+    // C seam while virt keeps its memory-backed module.
+    .rpi4b => struct {},
     .virt => #import("virt_emmc2"),
 }
 
@@ -50,7 +59,8 @@ pub const usb = switch build_options.board {
 // (SYS_REBOOT) — power.zig exports no driver `export fn`, so the call
 // site pulls it in, not a start.zig side-effect import.
 pub const power = switch build_options.board {
-    .rpi4b => #import("rpi4b_power"),
+    // start.zig reaches the Rust-owned Pi reset path through its C symbol.
+    .rpi4b => struct {},
     .virt => #import("virt_power"),
 }
 

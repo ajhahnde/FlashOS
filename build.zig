@@ -590,7 +590,7 @@ pub fn build(b: *std.Build) void {
 
 
     // Boot adapter for the Rust-owned FAT32 VFS backend. The board-owned
-    // `sd_dev` callback record remains in the block_dev module until R9.
+    // `sd_dev` callback record remains in the block_dev module.
     const fat32_backend_src = addFlashSource(b, "src/fat32_backend.flash");
     const fat32_backend_mod = b.createModule(.{
         .root_source_file = fat32_backend_src,
@@ -653,57 +653,15 @@ pub fn build(b: *std.Build) void {
     kernel_kmod.addImport("console_ui", console_ui_mod);
     kernel_kmod.addImport("build_options", build_options_mod);
 
-    // rpi4b board driver leaves promoted to Flash named modules (same
-    // pattern as the virt set above). gpio/timer/power/uart are board.zig
-    // switch prongs; rpi4b_mailbox is the VideoCore MMIO doorbell consumed
-    // by the rpi4b emmc2/usb board drivers (it can't take the name
-    // "mailbox" — that's the pure message-layout data module it imports).
-    // Created here so rpi4b_uart can reach console_mod and rpi4b_mailbox
-    // can reach mailbox_mod.
-    const rpi4b_gpio_src = addFlashSource(b, "src/board/rpi4b/gpio.flash");
-    const rpi4b_gpio_mod = b.createModule(.{
-        .root_source_file = rpi4b_gpio_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const rpi4b_timer_src = addFlashSource(b, "src/board/rpi4b/timer.flash");
-    const rpi4b_timer_mod = b.createModule(.{
-        .root_source_file = rpi4b_timer_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const rpi4b_power_src = addFlashSource(b, "src/board/rpi4b/power.flash");
-    const rpi4b_power_mod = b.createModule(.{
-        .root_source_file = rpi4b_power_src,
-        .target = target,
-        .optimize = optimize,
-    });
+    // Temporary source-level facade used by the still-Flash rpi4b EMMC2 and
+    // USB drivers. The VideoCore transaction itself is Rust-owned; this
+    // module only forwards their existing method-shaped calls to C symbols.
     const rpi4b_mailbox_src = addFlashSource(b, "src/board/rpi4b/mailbox.flash");
     const rpi4b_mailbox_mod = b.createModule(.{
         .root_source_file = rpi4b_mailbox_src,
         .target = target,
         .optimize = optimize,
     });
-    rpi4b_mailbox_mod.addImport("mailbox", mailbox_mod);
-    const rpi4b_uart_src = addFlashSource(b, "src/board/rpi4b/uart.flash");
-    const rpi4b_uart_mod = b.createModule(.{
-        .root_source_file = rpi4b_uart_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    rpi4b_uart_mod.addImport("console", console_mod);
-    const rpi4b_emmc2_src = addFlashSource(b, "src/board/rpi4b/emmc2.flash");
-    const rpi4b_emmc2_mod = b.createModule(.{
-        .root_source_file = rpi4b_emmc2_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    rpi4b_emmc2_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
-    rpi4b_emmc2_mod.addImport("block_dev", block_dev_mod);
-    rpi4b_emmc2_mod.addImport("mailbox", mailbox_mod);
-    rpi4b_emmc2_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
-    // console_ui supplies the shared `[Debug]` trace-prefix bytes.
-    rpi4b_emmc2_mod.addImport("console_ui", console_ui_mod);
     const rpi4b_usb_src = addFlashSource(b, "src/board/rpi4b/usb.flash");
     const rpi4b_usb_mod = b.createModule(.{
         .root_source_file = rpi4b_usb_src,
@@ -745,23 +703,9 @@ pub fn build(b: *std.Build) void {
     sampler_mod.addImport("ksyms", ksyms_mod);
     sampler_mod.addImport("fp_walk", fp_walk_mod);
 
-    // Per-board interrupt controllers — GICv2 (GIC-400) on rpi4b, GICv3 on
-    // virt — promoted to Flash named modules. board.zig's irq prong selects
-    // the active one; the non-selected prong is dead comptime code. Both
-    // reach the -Dtrace sampler by name (trace_sampler seam in handle_irq);
-    // the default build leaves that import in a dead comptime branch, so no
-    // trace module is compiled and the kernel image is byte-identical.
-    const rpi4b_irq_src = addFlashSource(b, "src/board/rpi4b/irq.flash");
-    const rpi4b_irq_mod = b.createModule(.{
-        .root_source_file = rpi4b_irq_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    rpi4b_irq_mod.addImport("console", console_mod);
-    rpi4b_irq_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
-    rpi4b_irq_mod.addImport("build_options", build_options_mod);
-    rpi4b_irq_mod.addImport("task_layout", task_layout_mod);
-    rpi4b_irq_mod.addImport("sampler", sampler_mod);
+    // The remaining Flash interrupt controller is virt GICv3. The rpi4b
+    // GICv2 path is Rust-owned; its saved-frame trace seam stays a no-op until
+    // the trace subsystem is ported.
     const virt_irq_src = addFlashSource(b, "src/board/virt/irq.flash");
     const virt_irq_mod = b.createModule(.{
         .root_source_file = virt_irq_src,
@@ -792,19 +736,13 @@ pub fn build(b: *std.Build) void {
     });
     board_mod.addImport("build_options", build_options_mod);
     board_mod.addImport("virt_uart", virt_uart_mod);
-    board_mod.addImport("rpi4b_uart", rpi4b_uart_mod);
     board_mod.addImport("virt_gpio", virt_gpio_mod);
-    board_mod.addImport("rpi4b_gpio", rpi4b_gpio_mod);
     board_mod.addImport("virt_timer", virt_timer_mod);
-    board_mod.addImport("rpi4b_timer", rpi4b_timer_mod);
     board_mod.addImport("virt_irq", virt_irq_mod);
-    board_mod.addImport("rpi4b_irq", rpi4b_irq_mod);
     board_mod.addImport("virt_emmc2", virt_emmc2_mod);
-    board_mod.addImport("rpi4b_emmc2", rpi4b_emmc2_mod);
     board_mod.addImport("virt_usb", virt_usb_mod);
     board_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
     board_mod.addImport("virt_power", virt_power_mod);
-    board_mod.addImport("rpi4b_power", rpi4b_power_mod);
     board_mod.addImport("virt_mailbox", virt_mailbox_mod);
     board_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
 
@@ -920,8 +858,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("mailbox", mailbox_mod);
     kernel_mod.addImport("usb_descriptors", usb_descriptors_mod);
     kernel_mod.addImport("usb_tx_ring", usb_tx_ring_mod);
-    // Per-board driver leaves promoted to named modules (see comment above
-    // their createModule). board.zig's comptime switch picks the active set.
+    // Remaining virt driver leaves are named modules selected by board.zig.
     kernel_mod.addImport("virt_timer", virt_timer_mod);
     kernel_mod.addImport("virt_gpio", virt_gpio_mod);
     kernel_mod.addImport("virt_power", virt_power_mod);
@@ -932,20 +869,12 @@ pub fn build(b: *std.Build) void {
     // uart/irq, not its own board.zig prong).
     kernel_mod.addImport("virt_dtb", virt_dtb_mod);
     kernel_mod.addImport("virt_uart", virt_uart_mod);
-    // rpi4b board leaves: gpio/timer/power/uart are board.zig prongs;
-    // rpi4b_mailbox is reached by the still-Zig rpi4b emmc2/usb drivers.
-    kernel_mod.addImport("rpi4b_gpio", rpi4b_gpio_mod);
-    kernel_mod.addImport("rpi4b_timer", rpi4b_timer_mod);
-    kernel_mod.addImport("rpi4b_power", rpi4b_power_mod);
+    // The temporary rpi4b mailbox facade is reached only by the still-Flash
+    // USB driver.
     kernel_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
-    kernel_mod.addImport("rpi4b_uart", rpi4b_uart_mod);
-    kernel_mod.addImport("rpi4b_emmc2", rpi4b_emmc2_mod);
     kernel_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
-    // Per-board IRQ controllers (board.zig's irq prong) + the unconditional
-    // ksyms force-import (start.zig pulls its symbol table into every image).
-    // sampler/fp_walk are not added here: only the IRQ modules' -Dtrace seam
-    // references the sampler, so kernel_mod never imports them directly.
-    kernel_mod.addImport("rpi4b_irq", rpi4b_irq_mod);
+    // The virt IRQ controller remains a named module. ksyms is still
+    // force-imported by start.zig for the existing trace machinery.
     kernel_mod.addImport("virt_irq", virt_irq_mod);
     // board: the comptime driver-alias bag (src/board.flash). start.zig
     // force-imports it so each active driver's export fns reach the linker.

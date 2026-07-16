@@ -1,10 +1,11 @@
 //! The block-device vtable shared with the board and FAT32 layers.
 //!
-//! A single global instance (`sd_dev`, still owned by the Flash adapter during
-//! the bridge) covers the current "exactly one SD card" assumption. This module
-//! owns the fixed C layout that crosses the ABI and the high-alias relocation of
-//! its callbacks; the board `emmc2` layer populates the vtable at boot and the
-//! FAT32 backend reads/writes through it.
+//! A single global instance (`sd_dev`) covers the current "exactly one SD card"
+//! assumption. This module owns the fixed C layout that crosses the ABI, the
+//! BSS-resident record itself, and the high-alias relocation of its callbacks;
+//! the board `emmc2` layer populates the vtable at boot and the FAT32 backend
+//! reads/writes through it. The Flash adapter reaches the same record through
+//! its exported C symbol until kernel bring-up is ported.
 
 /// One block device's callback pair. `read_fn` fills a caller-owned 512-byte
 /// buffer from a sector; `write_fn` stores one. Both are `null` until the board
@@ -24,6 +25,27 @@ pub type BlockReadFn = extern "C" fn(u32, *mut [u8; 512]) -> i32;
 /// negative error otherwise.
 pub type BlockWriteFn = extern "C" fn(u32, *const [u8; 512]) -> i32;
 
+/// The one block device the kernel knows about. Wired at boot by the board
+/// `emmc2` layer — both callbacks are `null` before that point, and the FAT32
+/// backend treats a null slot as "no card". Exported under its bare name because
+/// the Flash adapter still declares it as `extern var sd_dev`.
+#[export_name = "sd_dev"]
+pub static mut SD_DEV: BlockDev = BlockDev {
+    read_fn: None,
+    write_fn: None,
+};
+
+/// Install the board's callback pair into the shared vtable.
+///
+/// # Safety
+/// Called once from board `emmc2` bring-up, before any reader exists.
+pub unsafe fn set_sd_dev(dev: BlockDev) {
+    // SAFETY: the caller guarantees exclusive access during bring-up. A raw
+    // write avoids forming a `&mut` to a record the FAT32 backend also
+    // references.
+    unsafe { core::ptr::write(core::ptr::addr_of_mut!(SD_DEV), dev) };
+}
+
 const _: () = assert!(core::mem::size_of::<BlockDev>() == 16);
 const _: () = assert!(core::mem::align_of::<BlockDev>() == 8);
 const _: () = assert!(core::mem::offset_of!(BlockDev, read_fn) == 0);
@@ -39,6 +61,19 @@ const LINEAR_MAP_BASE: u64 = 0xFFFF_0000_0000_0000;
 /// are already set on a second application, so `x | BASE == x`.
 fn high_alias(address: u64) -> u64 {
     address | LINEAR_MAP_BASE
+}
+
+/// Fold a block-device record pointer into its high-half (TTBR1) alias.
+///
+/// The Flash adapter declares `sd_dev` as `extern var`, so the compiler resolves
+/// its address through the GOT — an absolute low link address, unlike a locally
+/// defined global, which lowers PC-relative. That low pointer is only
+/// dereferenceable while the identity map is live, i.e. during bring-up. A
+/// mount stores the record pointer for the kernel lifetime, so it must be
+/// folded before it outlives the identity map. `relocate` fixes the callbacks
+/// *inside* the record; this fixes the pointer *to* it.
+pub fn high_alias_ptr(dev: *mut BlockDev) -> *mut BlockDev {
+    high_alias(dev as usize as u64) as usize as *mut BlockDev
 }
 
 /// Re-point a block device's callbacks to their high-half (TTBR1) aliases.
@@ -81,7 +116,7 @@ pub unsafe fn relocate(dev: *mut BlockDev) {
 
 #[cfg(test)]
 mod tests {
-    use super::{high_alias, relocate, BlockDev, LINEAR_MAP_BASE};
+    use super::{high_alias, high_alias_ptr, relocate, BlockDev, LINEAR_MAP_BASE};
 
     extern "C" fn dummy_read(_: u32, _: *mut [u8; 512]) -> i32 {
         0
@@ -95,6 +130,16 @@ mod tests {
         let once = high_alias(0x8_0000);
         assert_eq!(once, 0xFFFF_0000_0008_0000);
         assert_eq!(high_alias(once), once);
+    }
+
+    #[test]
+    fn high_alias_ptr_folds_a_low_record_pointer_and_is_idempotent() {
+        // A GOT-resolved `sd_dev` arrives as a low link address; dereferencing
+        // it from syscall context faults once the identity map is gone.
+        let low = 0x187cd0 as *mut BlockDev;
+        let high = high_alias_ptr(low);
+        assert_eq!(high as usize as u64, 0xFFFF_0000_0018_7CD0);
+        assert_eq!(high_alias_ptr(high), high);
     }
 
     #[test]

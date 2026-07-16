@@ -6,16 +6,24 @@
 // @import so all `export fn` decls land in the final ELF.
 
 const board = @import("board");
+const build_options = @import("build_options");
+extern fn rpi4b_power_reboot() noreturn;
+extern fn rpi4b_uart_poll_rx_into_console() void;
+extern fn rpi4b_board_irq_init() void;
+extern fn rpi4b_emmc2_init() i32;
+extern fn rpi4b_emmc2_write_block(lba: u32, buf: *const [512]u8) i32;
+extern fn rpi4b_emmc2_read_block(lba: u32, buf: *[512]u8) i32;
 
-// Board-driver trampolines for the Flash-sourced kernel + syscall modules.
-// src/kernel.flash and src/sys.flash are named modules whose generated .zig
-// lives in the build cache, so they can no longer reach the board bag by a
-// relative @import. This root module imports the board bag as a named module,
-// so these thin C-ABI wrappers bridge the boundary — kernel.flash / sys.flash
-// reach each board entry point through a matching `extern fn`. (Same role
-// the remaining named Flash modules use for board access.)
+// Board-driver trampolines for the Flash-sourced kernel and Rust syscall
+// implementation. The generated kernel module cannot safely import board.zig
+// by a relative path, so both sides reach board entry points through stable C
+// symbols. The same boundary keeps the mixed-language driver cutover local.
 export fn board_irq_init() void {
-    board.irq.board_irq_init();
+    if (build_options.board == .rpi4b) {
+        rpi4b_board_irq_init();
+    } else {
+        board.irq.board_irq_init();
+    }
 }
 export fn board_usb_init() i32 {
     return board.usb.usb_init();
@@ -30,19 +38,39 @@ export fn board_usb_cdc_tx(ptr: [*]const u8, len: u64) void {
     board.usb.cdc_tx(ptr[0..len]);
 }
 export fn board_emmc2_init() i32 {
-    return board.emmc2.init();
+    if (build_options.board == .rpi4b) {
+        return rpi4b_emmc2_init();
+    } else {
+        return board.emmc2.init();
+    }
 }
 export fn board_emmc2_write_block(lba: u32, buf: *const [512]u8) i32 {
-    return board.emmc2.write_block(lba, buf);
+    if (build_options.board == .rpi4b) {
+        return rpi4b_emmc2_write_block(lba, buf);
+    } else {
+        return board.emmc2.write_block(lba, buf);
+    }
 }
 export fn board_emmc2_read_block(lba: u32, buf: *[512]u8) i32 {
-    return board.emmc2.read_block(lba, buf);
+    if (build_options.board == .rpi4b) {
+        return rpi4b_emmc2_read_block(lba, buf);
+    } else {
+        return board.emmc2.read_block(lba, buf);
+    }
 }
 export fn board_uart_poll_rx_into_console() void {
-    board.uart.poll_rx_into_console();
+    if (build_options.board == .rpi4b) {
+        rpi4b_uart_poll_rx_into_console();
+    } else {
+        board.uart.poll_rx_into_console();
+    }
 }
 export fn board_power_reboot() noreturn {
-    board.power.reboot();
+    if (build_options.board == .rpi4b) {
+        rpi4b_power_reboot();
+    } else {
+        board.power.reboot();
+    }
 }
 
 export fn board_mailbox_temperature() u32 {
