@@ -458,21 +458,9 @@ pub fn build(b: *std.Build) void {
 
     // USB descriptor adapter. Rust owns the byte-exact descriptor set and
     // SETUP decode; the named module preserves the DWC2 driver's API.
-    const usb_descriptors_src = addFlashSource(b, "src/usb_descriptors.flash");
-    const usb_descriptors_mod = b.createModule(.{
-        .root_source_file = usb_descriptors_src,
-        .target = target,
-        .optimize = optimize,
-    });
 
     // Bulk-IN TX ring adapter. Rust owns the bounded ring arithmetic while
     // the DWC2 driver retains preemption policy and MMIO FIFO writes.
-    const usb_tx_ring_src = addFlashSource(b, "src/usb_tx_ring.flash");
-    const usb_tx_ring_mod = b.createModule(.{
-        .root_source_file = usb_tx_ring_src,
-        .target = target,
-        .optimize = optimize,
-    });
 
     // Per-board driver leaves (src/board/<board>/*). Ported to Flash, these
     // can no longer be reached by src/board.zig's relative `@import(
@@ -656,23 +644,6 @@ pub fn build(b: *std.Build) void {
     // Temporary source-level facade used by the still-Flash rpi4b EMMC2 and
     // USB drivers. The VideoCore transaction itself is Rust-owned; this
     // module only forwards their existing method-shaped calls to C symbols.
-    const rpi4b_mailbox_src = addFlashSource(b, "src/board/rpi4b/mailbox.flash");
-    const rpi4b_mailbox_mod = b.createModule(.{
-        .root_source_file = rpi4b_mailbox_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const rpi4b_usb_src = addFlashSource(b, "src/board/rpi4b/usb.flash");
-    const rpi4b_usb_mod = b.createModule(.{
-        .root_source_file = rpi4b_usb_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    rpi4b_usb_mod.addImport("usb_descriptors", usb_descriptors_mod);
-    rpi4b_usb_mod.addImport("usb_tx_ring", usb_tx_ring_mod);
-    rpi4b_usb_mod.addImport("mailbox", mailbox_mod);
-    rpi4b_usb_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
-    rpi4b_usb_mod.addImport("console", console_mod);
 
     // Trace-cluster named modules (kept in Zig; the profiler is opt-in and
     // not on the boot contract). Promoted from kernel_mod-relative imports so
@@ -741,10 +712,8 @@ pub fn build(b: *std.Build) void {
     board_mod.addImport("virt_irq", virt_irq_mod);
     board_mod.addImport("virt_emmc2", virt_emmc2_mod);
     board_mod.addImport("virt_usb", virt_usb_mod);
-    board_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
     board_mod.addImport("virt_power", virt_power_mod);
     board_mod.addImport("virt_mailbox", virt_mailbox_mod);
-    board_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
 
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
@@ -856,8 +825,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("block_dev", block_dev_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
     kernel_mod.addImport("mailbox", mailbox_mod);
-    kernel_mod.addImport("usb_descriptors", usb_descriptors_mod);
-    kernel_mod.addImport("usb_tx_ring", usb_tx_ring_mod);
     // Remaining virt driver leaves are named modules selected by board.zig.
     kernel_mod.addImport("virt_timer", virt_timer_mod);
     kernel_mod.addImport("virt_gpio", virt_gpio_mod);
@@ -869,10 +836,6 @@ pub fn build(b: *std.Build) void {
     // uart/irq, not its own board.zig prong).
     kernel_mod.addImport("virt_dtb", virt_dtb_mod);
     kernel_mod.addImport("virt_uart", virt_uart_mod);
-    // The temporary rpi4b mailbox facade is reached only by the still-Flash
-    // USB driver.
-    kernel_mod.addImport("rpi4b_mailbox", rpi4b_mailbox_mod);
-    kernel_mod.addImport("rpi4b_usb", rpi4b_usb_mod);
     // The virt IRQ controller remains a named module. ksyms is still
     // force-imported by start.zig for the existing trace machinery.
     kernel_mod.addImport("virt_irq", virt_irq_mod);

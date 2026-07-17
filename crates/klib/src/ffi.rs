@@ -22,87 +22,11 @@ use flashos_abi::task::KeRegs;
 use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
     initramfs_backend, klog_ring, mailbox, mm_user, page_alloc, path, perm, pipe, rpi4b_emmc2,
-    rpi4b_gpio, rpi4b_irq, rpi4b_mailbox, rpi4b_power, rpi4b_timer, rpi4b_uart, sched, sdhci_cmd,
-    sha256, shadow, sys, usb_descriptors, usb_tx_ring, utilc, vfs,
+    rpi4b_gpio, rpi4b_irq, rpi4b_mailbox, rpi4b_power, rpi4b_timer, rpi4b_uart, rpi4b_usb, sched,
+    sdhci_cmd, sha256, shadow, sys, utilc, vfs,
 };
 
 const NONE: usize = usize::MAX;
-
-/// Resolve a USB descriptor. A null pointer means the endpoint should stall.
-///
-/// # Safety
-/// `length` points to a writable `usize`.
-#[no_mangle]
-pub unsafe extern "C" fn fos_usb_get_descriptor(
-    descriptor_type: u8,
-    index: u8,
-    length: *mut usize,
-) -> *const u8 {
-    match usb_descriptors::get_descriptor(descriptor_type, index) {
-        Some(descriptor) => {
-            unsafe { length.write(descriptor.len()) };
-            descriptor.as_ptr()
-        }
-        None => {
-            unsafe { length.write(0) };
-            core::ptr::null()
-        }
-    }
-}
-
-/// Decode one eight-byte USB SETUP packet into the fixed output record.
-///
-/// # Safety
-/// `raw` points to eight readable bytes and `output` to one writable, aligned
-/// `Setup` record.
-#[no_mangle]
-pub unsafe extern "C" fn fos_usb_decode_setup(raw: *const u8, output: *mut usb_descriptors::Setup) {
-    let mut bytes = [0; 8];
-    unsafe { core::ptr::copy_nonoverlapping(raw, bytes.as_mut_ptr(), bytes.len()) };
-    unsafe { output.write(usb_descriptors::decode_setup(bytes)) };
-}
-
-/// Enqueue one byte in the shared USB TX ring.
-///
-/// # Safety
-/// `ring` points to the live, exclusively accessed 528-byte ring record.
-#[no_mangle]
-pub unsafe extern "C" fn fos_usb_tx_ring_push(ring: *mut usb_tx_ring::UsbTxRing, byte: u8) -> u8 {
-    u8::from(unsafe { &mut *ring }.push(byte))
-}
-
-/// Copy queued bytes without consuming them.
-///
-/// # Safety
-/// `ring` points to a live ring and `destination` to `destination_len`
-/// writable bytes. The two regions do not overlap.
-#[no_mangle]
-pub unsafe extern "C" fn fos_usb_tx_ring_peek(
-    ring: *const usb_tx_ring::UsbTxRing,
-    destination: *mut u8,
-    destination_len: usize,
-) -> usize {
-    let destination = unsafe { core::slice::from_raw_parts_mut(destination, destination_len) };
-    unsafe { &*ring }.peek(destination)
-}
-
-/// Consume bytes already accepted by the hardware FIFO.
-///
-/// # Safety
-/// `ring` satisfies [`fos_usb_tx_ring_push`]'s contract.
-#[no_mangle]
-pub unsafe extern "C" fn fos_usb_tx_ring_advance(ring: *mut usb_tx_ring::UsbTxRing, count: u64) {
-    unsafe { &mut *ring }.advance(count);
-}
-
-/// Drop all queued bytes after reset or deconfiguration.
-///
-/// # Safety
-/// `ring` satisfies [`fos_usb_tx_ring_push`]'s contract.
-#[no_mangle]
-pub unsafe extern "C" fn fos_usb_tx_ring_clear(ring: *mut usb_tx_ring::UsbTxRing) {
-    unsafe { &mut *ring }.clear();
-}
 
 /// Offset-based representation of a parsed shadow entry. The slices all point
 /// into the input line, so only their offsets and lengths cross the ABI.
@@ -546,6 +470,46 @@ pub unsafe extern "C" fn rpi4b_emmc2_read_block(lba: u32, buf: *mut [u8; 512]) -
 #[no_mangle]
 pub unsafe extern "C" fn rpi4b_emmc2_write_block(lba: u32, buf: *const [u8; 512]) -> i32 {
     rpi4b_emmc2::write_block(lba, buf)
+}
+
+// ---- DWC2 USB-OTG gadget (CDC-ACM console) ----
+
+/// Bring the DWC2 core up as a detached Full-Speed CDC-ACM gadget.
+///
+/// # Safety
+/// Called once during serialized board bring-up.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_usb_init() -> i32 {
+    unsafe { rpi4b_usb::init() }
+}
+
+/// Service one GINTSTS pass from the idle loop or the timer-tick backstop.
+///
+/// # Safety
+/// Called on the single kernel core; a no-op until `rpi4b_usb_init` succeeded.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_usb_poll() {
+    unsafe { rpi4b_usb::poll() };
+}
+
+/// Whether the gadget is enumerated and its CDC data path is live.
+///
+/// # Safety
+/// Called on the single kernel core.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_usb_enumerated() -> bool {
+    unsafe { rpi4b_usb::enumerated() }
+}
+
+/// Queue console bytes for the host over EP2 bulk IN.
+///
+/// # Safety
+/// `ptr` must point to `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rpi4b_usb_cdc_tx(ptr: *const u8, len: u64) {
+    // SAFETY: the caller guarantees `ptr` covers `len` readable bytes.
+    let data = unsafe { core::slice::from_raw_parts(ptr, len as usize) };
+    unsafe { rpi4b_usb::cdc_tx(data) };
 }
 
 // ---- scheduler state and task lifecycle ----

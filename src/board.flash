@@ -50,7 +50,9 @@ pub const emmc2 = switch build_options.board {
 // stub on virt (QEMU emulates no DWC2 device path; see
 // src/board/virt/usb.zig).
 pub const usb = switch build_options.board {
-    .rpi4b => #import("rpi4b_usb"),
+    // The Pi DWC2 gadget symbols are Rust-owned; start.zig reaches its four
+    // entry points through the C seam while virt keeps its stub module.
+    .rpi4b => struct {},
     .virt => #import("virt_usb"),
 }
 
@@ -67,9 +69,10 @@ pub const power = switch build_options.board {
 // mailbox: hardware-monitoring reads (SoC temperature, ARM clock) over
 // the VideoCore property channel on rpi4b; a 0-returning stub on virt,
 // which has no mailbox. Consumed by the sys_cpu_temp / sys_cpu_freq
-// syscalls — the EMMC2/GPIO/power mailbox traffic stays on the direct
-// rpi4b_mailbox import, not this alias.
+// syscalls.
 pub const mailbox = switch build_options.board {
-    .rpi4b => #import("rpi4b_mailbox"),
+    // The Pi property-channel symbols are Rust-owned; start.zig reaches the two
+    // hardware-monitoring reads through the C seam while virt keeps its stub.
+    .rpi4b => struct {},
     .virt => #import("virt_mailbox"),
 }

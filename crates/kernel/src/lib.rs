@@ -41,6 +41,7 @@ pub mod rpi4b_mailbox;
 pub mod rpi4b_power;
 pub mod rpi4b_timer;
 pub mod rpi4b_uart;
+pub mod rpi4b_usb;
 pub mod sched;
 pub mod sdhci_cmd;
 pub mod sha256;

@@ -13,6 +13,12 @@ extern fn rpi4b_board_irq_init() void;
 extern fn rpi4b_emmc2_init() i32;
 extern fn rpi4b_emmc2_write_block(lba: u32, buf: *const [512]u8) i32;
 extern fn rpi4b_emmc2_read_block(lba: u32, buf: *[512]u8) i32;
+extern fn rpi4b_usb_init() i32;
+extern fn rpi4b_usb_poll() void;
+extern fn rpi4b_usb_enumerated() bool;
+extern fn rpi4b_usb_cdc_tx(ptr: [*]const u8, len: u64) void;
+extern fn rpi4b_mailbox_get_temperature() u32;
+extern fn rpi4b_mailbox_get_cpu_clock() u32;
 
 // Board-driver trampolines for the Flash-sourced kernel and Rust syscall
 // implementation. The generated kernel module cannot safely import board.zig
@@ -26,16 +32,32 @@ export fn board_irq_init() void {
     }
 }
 export fn board_usb_init() i32 {
-    return board.usb.usb_init();
+    if (build_options.board == .rpi4b) {
+        return rpi4b_usb_init();
+    } else {
+        return board.usb.usb_init();
+    }
 }
 export fn board_usb_poll() void {
-    board.usb.poll();
+    if (build_options.board == .rpi4b) {
+        rpi4b_usb_poll();
+    } else {
+        board.usb.poll();
+    }
 }
 export fn board_usb_enumerated() bool {
-    return board.usb.enumerated();
+    if (build_options.board == .rpi4b) {
+        return rpi4b_usb_enumerated();
+    } else {
+        return board.usb.enumerated();
+    }
 }
 export fn board_usb_cdc_tx(ptr: [*]const u8, len: u64) void {
-    board.usb.cdc_tx(ptr[0..len]);
+    if (build_options.board == .rpi4b) {
+        rpi4b_usb_cdc_tx(ptr, len);
+    } else {
+        board.usb.cdc_tx(ptr[0..len]);
+    }
 }
 export fn board_emmc2_init() i32 {
     if (build_options.board == .rpi4b) {
@@ -74,11 +96,19 @@ export fn board_power_reboot() noreturn {
 }
 
 export fn board_mailbox_temperature() u32 {
-    return board.mailbox.getTemperature();
+    if (build_options.board == .rpi4b) {
+        return rpi4b_mailbox_get_temperature();
+    } else {
+        return board.mailbox.getTemperature();
+    }
 }
 
 export fn board_mailbox_cpu_clock() u32 {
-    return board.mailbox.getCpuClock();
+    if (build_options.board == .rpi4b) {
+        return rpi4b_mailbox_get_cpu_clock();
+    } else {
+        return board.mailbox.getCpuClock();
+    }
 }
 
 comptime {
