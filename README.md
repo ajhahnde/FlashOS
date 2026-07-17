@@ -71,7 +71,7 @@ console setup are documented in **[Setup](SETUP.md)**.
   `kill`, including zombie reaping.
 - **ELF64 loader**. `sys_execve` loads VFS-backed ELF segments into a
   fresh address space and prepares the user stack with `argv`.
-- **Userland mini-libc (`flibc`)**. Syscall wrappers, formatted output,
+- **Userland mini-libc** (`flibc`). Syscall wrappers, formatted output,
   heap allocation, and process APIs for ELF programs.
 - **Dynamic heap.** `sys_brk` and `sys_sbrk` grow pages on demand and
   release them when shrinking.
