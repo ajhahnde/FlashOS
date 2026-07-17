@@ -346,37 +346,12 @@ pub fn build(b: *std.Build) void {
     // them, so they carried zero symbols into the link and are dropped here.
     // Their .zig files are left on disk for now.
 
-    // Block-device abstraction. Single global
-    // `sd_dev` vtable that the FAT32 backend reads + writes
-    // through; the board layer (src/board/<board>/emmc2.zig)
-    // populates `read_fn` / `write_fn` post-init. No tests
-    // (pure data + one extern struct).
-    const block_dev_src = addFlashSource(b, "src/block_dev.flash");
-    const block_dev_mod = b.createModule(.{
-        .root_source_file = block_dev_src,
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // SDHCI command adapter. Rust owns the pure command codec, CSD parser,
-    // and clock arithmetic; this named module preserves the API imported by
-    // the rpi4b BCM2711 EMMC2 driver during the mixed-language bridge.
-    const sdhci_cmd_src = addFlashSource(b, "src/sdhci_cmd.flash");
-    const sdhci_cmd_mod = b.createModule(.{
-        .root_source_file = sdhci_cmd_src,
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // VideoCore mailbox protocol adapter. Rust owns property-tag construction
-    // and parsing; the rpi4b module still owns the aligned buffer and MMIO
-    // doorbell while its board driver remains Flash.
-    const mailbox_src = addFlashSource(b, "src/mailbox.flash");
-    const mailbox_mod = b.createModule(.{
-        .root_source_file = mailbox_src,
-        .target = target,
-        .optimize = optimize,
-    });
+    // The block-device, SDHCI-command and VideoCore-mailbox call-site adapters
+    // were export-less forwarders over their Rust owners in crates/kernel. With
+    // the last Flash/Zig importer gone (block_dev's was virt EMMC2), nothing in
+    // the kernel root's import graph reached them, so they carried zero symbols
+    // and are dropped here alongside the other retired adapters. Their .flash
+    // files stay on disk until the shared source deletion.
 
     // USB descriptor adapter. Rust owns the byte-exact descriptor set and
     // SETUP decode; the named module preserves the DWC2 driver's API.
@@ -398,47 +373,17 @@ pub fn build(b: *std.Build) void {
     });
     klog_ring_mod.addImport("syscall_defs", syscall_defs_mod);
 
-    // sha256 — the call-site adapter over the Rust crypto unit (crates/kernel).
-    // The primitives themselves are Rust; this module only unpacks Flash slices
-    // into the C ABI the staticlib exports, so it holds no arithmetic and no
-    // tests. Both live on the Rust side now.
-    //
-    // The frame budget that used to pin this module to ReleaseSmall did not go
-    // away, it moved: sys_authenticate still runs the PBKDF2 → HMAC → SHA-256
-    // chain on the per-task kernel stack (the 4 KiB TaskStruct page, ~2.4 KiB
-    // usable), so it is now the Rust release profile that has to keep the chain
-    // inside the page. The pin here would no longer do anything — the code it
-    // applied to is gone — and the stack-frame gate is what proves the budget.
-    const sha256_src = addFlashSource(b, "src/sha256.flash");
-    const sha256_mod = b.createModule(.{
-        .root_source_file = sha256_src,
-    });
-    // shadow — call-site adapter over the Rust /etc/shadow unit. The parser,
-    // hex codec, lookup, rewrite logic, and tests live in crates/kernel. The
-    // syscall layer was its last consumer, so nothing imports this adapter any
-    // more and it is not linked; it is kept only until the orphaned Flash
-    // adapters are retired together.
-    const shadow_src = addFlashSource(b, "src/shadow.flash");
-    const shadow_mod = b.createModule(.{
-        .root_source_file = shadow_src,
-    });
-    // perm — call-site adapter over the Rust Unix permission check. The pure
-    // decision and truth-table tests live in crates/kernel. Like the shadow
-    // adapter above, its last consumer ported, so it is unimported and unlinked
-    // pending the shared cleanup.
-    const perm_src = addFlashSource(b, "src/perm.flash");
-    const perm_mod = b.createModule(.{
-        .root_source_file = perm_src,
-    });
-    // pwfile — /etc/passwd parser. Pure name/uid lookups shared
-    // by the kernel (sys_passwd authorization), /bin/login, and fsh's
-    // whoami builtin.
+    // The sha256, shadow and perm call-site adapters were orphaned forwarders
+    // over their Rust owners in crates/kernel: the crypto primitives, the
+    // /etc/shadow parser + rewrite, and the Unix permission check all live on
+    // the Rust side with their tests. Their last syscall-layer consumer ported,
+    // so none is imported or linked any more; they are dropped here. The .flash
+    // files stay on disk until the shared source deletion.
+
+    // pwfile — /etc/passwd parser. Its Rust owner drives the kernel path now, so
+    // the module no longer enters the kernel link; the Flash source is retained
+    // only to feed its standalone host test below (retired with the source).
     const pwfile_src = addFlashSource(b, "src/pwfile.flash");
-    const pwfile_mod = b.createModule(.{
-        .root_source_file = pwfile_src,
-    });
-
-
 
 
     // The console adapter was another export-less pass-through and is dropped
@@ -450,15 +395,10 @@ pub fn build(b: *std.Build) void {
     // hazard). Its zombify-and-wake `pub fn` had no reachable importer. Both
     // .zig files are left on disk for now.
 
-    // Cwd-aware path-resolution adapter. The pure joinResolve implementation
-    // and its tests live in crates/kernel; this module preserves the Flash
-    // slice API shared by sys_chdir, sys_openFile, and execveKernel.
-    const path_src = addFlashSource(b, "src/path.flash");
-    const path_mod = b.createModule(.{
-        .root_source_file = path_src,
-        .target = target,
-        .optimize = optimize,
-    });
+    // The cwd-aware path-resolution adapter was another orphaned forwarder:
+    // the pure joinResolve implementation and its tests are Rust-owned in
+    // crates/kernel, and its sys_chdir / sys_openFile / execveKernel consumers
+    // ported, so nothing imports it any more. Dropped with the group above.
 
     // Temporary source-level facade used by the still-Flash rpi4b EMMC2 and
     // USB drivers. The VideoCore transaction itself is Rust-owned; this
@@ -571,17 +511,7 @@ pub fn build(b: *std.Build) void {
 
     kernel_mod.addImport("build_options", build_options_mod);
     kernel_mod.addImport("syscall_defs", syscall_defs_mod);
-    kernel_mod.addImport("path", path_mod);
-    kernel_mod.addImport("block_dev", block_dev_mod);
-    kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
-    kernel_mod.addImport("mailbox", mailbox_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
-    kernel_mod.addImport("sha256", sha256_mod);
-    kernel_mod.addImport("shadow", shadow_mod);
-    kernel_mod.addImport("perm", perm_mod);
-    // sys_passwd authorization: uid -> login-name lookup against
-    // /etc/passwd (the same parser /bin/login and fsh's whoami import).
-    kernel_mod.addImport("pwfile", pwfile_mod);
 
     // ---- hello.elf — Rust payload for [TEST] exec-elf ----
     // xtask builds the first production Rust EL0 program as the same
