@@ -200,7 +200,7 @@ pub fn render_prompt<'a>(buf: &'a mut [u8], user: &[u8], cwd: &[u8], root: bool)
     &buf[..n]
 }
 
-/// FlashOS shell homescreen: `.flashOS [v<version>] by <author> - type 'help' for
+/// FlashOS shell homescreen: `FlashOS [v<version>] by <author> - type 'help' for
 /// commands`, followed by a blank line. `version` and `author` are passed in (this
 /// crate is freestanding), so the release version lives in exactly one place.
 ///
@@ -208,7 +208,7 @@ pub fn render_prompt<'a>(buf: &'a mut [u8], user: &[u8], cwd: &[u8], root: bool)
 /// boot-watchdog substring grep still matches bare bytes -- an unclosed color here
 /// would splice an escape into the marker and break the contract.
 pub fn homescreen(sink: Sink, version: &[u8], author: &[u8]) {
-    sink(b".flash");
+    sink(b"Flash");
     sink(palette::YELLOW);
     sink(b"OS");
     sink(palette::RESET);
@@ -321,7 +321,7 @@ mod tests {
         );
         assert_eq!(
             uncolored(&out),
-            b".flashOS [v0.8.0] by ajhahn - type 'help' for commands\n\n".to_vec()
+            b"FlashOS [v0.8.0] by ajhahn - type 'help' for commands\n\n".to_vec()
         );
     }
 
