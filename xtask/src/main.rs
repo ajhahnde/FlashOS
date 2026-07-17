@@ -31,7 +31,9 @@ Commands:
                                initramfs, kernel link) — no zig. `kernel` is an alias.
   canary --board <rpi4b|virt>   Build the Rust canary kernel (ELF + raw image)
   smoke  --board <rpi4b|virt>   Build the canary, boot it in QEMU, assert the marker
-  guard  --board <rpi4b|virt>   Build the canary under the clean-room guard (no zig/flashc)
+  guard  --board <rpi4b|virt> [--full] [gate flags]
+                               Build under the clean-room guard (no zig/flashc): the
+                               canary by default, or the full production kernel with --full
   nm     --board <rpi4b|virt>   Dump the canary's symbol table
   asm-defs [--check]            Generate the assembly-visible layout facts from crates/abi;
                                 --check diffs them against arch/aarch64/asm_defs_common.inc
@@ -127,8 +129,19 @@ fn dispatch() -> Result<(), String> {
         "guard" => {
             let board = board_of(&rest)?;
             let tc = Toolchain::discover()?;
-            guard::run(&root, board, &tc)?;
-            println!("guard PASS ({}): clean-room build", board.name());
+            if rest.iter().any(|a| a == "--full") {
+                // --full is the guard's own flag; the rest are the kernel gate flags.
+                let gates: Vec<String> = rest.iter().filter(|a| *a != "--full").cloned().collect();
+                let feats = kernel_features_of(&gates)?;
+                guard::run_full(&root, board, &tc, feats)?;
+                println!(
+                    "guard PASS ({}): clean-room full production build",
+                    board.name()
+                );
+            } else {
+                guard::run(&root, board, &tc)?;
+                println!("guard PASS ({}): clean-room canary build", board.name());
+            }
             Ok(())
         }
         "nm" => {

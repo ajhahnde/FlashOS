@@ -17,7 +17,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::build::{self, Board, Paths};
+use crate::build::{self, Board, KernelFeatures, Paths};
 use crate::toolchain::Toolchain;
 
 const FORBIDDEN: [&str; 2] = ["zig", "flashc"];
@@ -48,13 +48,35 @@ fn shim_dir(root: &Path) -> Result<PathBuf, String> {
 
 /// Build the canary under the shim PATH, then assert both checks.
 pub fn run(root: &Path, board: Board, tc: &Toolchain) -> Result<(), String> {
+    with_shims(root, |root| build::canary(root, board, tc))
+}
+
+/// Build the full production kernel (payloads, initramfs, native link) under the
+/// shim PATH, then assert both checks: the shipped artefact must link with no zig
+/// and no flashc anywhere in its build.
+pub fn run_full(
+    root: &Path,
+    board: Board,
+    tc: &Toolchain,
+    feats: KernelFeatures,
+) -> Result<(), String> {
+    with_shims(root, |root| build::build(root, board, tc, feats))
+}
+
+/// Run `build_fn` with the forbidden-tool shims prepended to `PATH`, restore
+/// `PATH`, then verify the trace and the shim witness. Shared by both entry
+/// points so the canary and the full build prove the same property the same way.
+fn with_shims(
+    root: &Path,
+    build_fn: impl FnOnce(&Path) -> Result<Paths, String>,
+) -> Result<(), String> {
     let dir = shim_dir(root)?;
     let old_path = std::env::var("PATH").unwrap_or_default();
     // SAFETY-of-process note: xtask is single-threaded here, and the shimmed PATH
     // must be inherited by cargo and every tool it spawns.
     std::env::set_var("PATH", format!("{}:{}", dir.display(), old_path));
 
-    let built = build::canary(root, board, tc);
+    let built = build_fn(root);
 
     std::env::set_var("PATH", &old_path);
     let p = built?;
