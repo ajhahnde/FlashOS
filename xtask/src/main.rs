@@ -8,6 +8,7 @@
 mod asm_defs;
 mod build;
 mod guard;
+mod initramfs;
 mod qemu;
 mod shadow;
 mod toolchain;
@@ -24,6 +25,9 @@ const USAGE: &str = "\
 cargo xtask <command> [options]
 
 Commands:
+  build  --board <rpi4b|virt> [--boot-selftest] [--ci-login-seed] [--trace] [--verbose-fork]
+                               Build the full production kernel image natively (payloads,
+                               initramfs, kernel link) — no zig. `kernel` is an alias.
   canary --board <rpi4b|virt>   Build the Rust canary kernel (ELF + raw image)
   smoke  --board <rpi4b|virt>   Build the canary, boot it in QEMU, assert the marker
   guard  --board <rpi4b|virt>   Build the canary under the clean-room guard (no zig/flashc)
@@ -69,6 +73,14 @@ fn dispatch() -> Result<(), String> {
             let board = board_of(&rest)?;
             let tc = Toolchain::discover()?;
             let p = build::canary(&root, board, &tc)?;
+            println!("built {}", p.img().display());
+            Ok(())
+        }
+        "build" | "kernel" => {
+            let board = board_of(&rest)?;
+            let feats = kernel_features_of(&rest)?;
+            let tc = Toolchain::discover()?;
+            let p = build::build(&root, board, &tc, feats)?;
             println!("built {}", p.img().display());
             Ok(())
         }
@@ -202,6 +214,35 @@ fn user_args_of(args: &[String]) -> Result<(Option<PathBuf>, Vec<String>), Strin
         }
     }
     Ok((output, features))
+}
+
+/// The build-time gate flags for `build`/`kernel`, mirroring the `-D…` options
+/// build.zig threads through. Unknown `--flags` are the board/other options the
+/// caller already parsed, so only the four gates are recognised here; anything
+/// that looks like a gate but is misspelt is rejected rather than silently off,
+/// the same fail-loud rule `user_args_of` follows.
+fn kernel_features_of(args: &[String]) -> Result<build::KernelFeatures, String> {
+    let mut f = build::KernelFeatures::default();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--boot-selftest" => f.boot_selftest = true,
+            "--ci-login-seed" => f.ci_login_seed = true,
+            "--trace" => f.trace = true,
+            "--verbose-fork" => f.verbose_fork = true,
+            "--board" => {
+                it.next();
+            }
+            other if other.starts_with("--board=") => {}
+            other => {
+                return Err(format!(
+                    "build accepts --board <..> [--boot-selftest] [--ci-login-seed] \
+                     [--trace] [--verbose-fork], got `{other}`"
+                ));
+            }
+        }
+    }
+    Ok(f)
 }
 
 fn board_of(args: &[String]) -> Result<Board, String> {

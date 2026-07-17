@@ -7,6 +7,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::initramfs::{self, Entry};
+use crate::shadow;
 use crate::toolchain::{Cmd, Toolchain};
 
 pub const TARGET: &str = "aarch64-unknown-none-softfloat";
@@ -768,9 +770,266 @@ fn inspect(p: &Paths, tc: &Toolchain) -> Result<(), String> {
     Ok(())
 }
 
+/// The kernel-only assembly the canary does not link: the symbol table, the two
+/// trace `.S` files, appended after `COMMON_ASM` and before the board's own and
+/// `tools/initramfs.S`. Order within `.text` does not matter for these — only
+/// boot.S's position in `.text.boot` is load-bearing, and that is `COMMON_ASM[0]`.
+const KERNEL_EXTRA_ASM: &[&str] = &[
+    "src/symbol_area.S",
+    "src/trace/hook.S",
+    "src/trace/patchable_trampolines.S",
+];
+
+/// Build-time gates that flip cargo features on the kernel staticlib and PID 1.
+/// Mirrors the `-D…` options build.zig threads into `cargo xtask klib`/`user`.
+#[derive(Clone, Copy, Default)]
+pub struct KernelFeatures {
+    /// Boot-as-test harness (the pre-PID-1 EMMC2 smoke + free-page baseline).
+    pub boot_selftest: bool,
+    /// Seed the CI auto-login so the watchdog reaches the shell unattended.
+    pub ci_login_seed: bool,
+    /// Compile the statistical sampler into the IRQ path.
+    pub trace: bool,
+    /// Verbose fork tracing.
+    pub verbose_fork: bool,
+}
+
+impl KernelFeatures {
+    /// Cargo features for the kernel staticlib (`crates/klib`).
+    fn klib(self) -> Vec<String> {
+        let mut f = Vec::new();
+        if self.boot_selftest {
+            f.push("boot-selftest".into());
+        }
+        if self.trace {
+            f.push("trace".into());
+        }
+        if self.verbose_fork {
+            f.push("verbose-fork".into());
+        }
+        f
+    }
+
+    /// Cargo features for PID 1 (`user/pid1`) — the only payload that takes any.
+    fn pid1(self) -> Vec<String> {
+        let mut f = Vec::new();
+        if self.boot_selftest {
+            f.push("boot-selftest".into());
+        }
+        if self.ci_login_seed {
+            f.push("ci-login-seed".into());
+        }
+        f
+    }
+}
+
+/// Where one initramfs entry's bytes come from.
+enum ArcSource {
+    /// A Rust EL0 payload, looked up in `USER_ELFS` by stem.
+    User(&'static str),
+    /// A checked-in file, repository-root-relative.
+    Static(&'static str),
+    /// The deterministic `/etc/shadow`, baked by the kernel's own PBKDF2.
+    Shadow,
+}
+
+/// The initramfs contents: (archive path, newc mode, source). Kept sorted by
+/// archive path — the encoder writes entries in this order, so the list is the
+/// single source of truth for the archive's entry order and therefore its
+/// sha256. Mirrors build.zig's `initramfs_arcs` + `cpio_stage` exactly.
+const INITRAMFS: &[(&str, u32, ArcSource)] = &[
+    ("bin/cat", 0o100755, ArcSource::User("cat")),
+    ("bin/clear", 0o100755, ArcSource::User("clear")),
+    ("bin/cp", 0o100755, ArcSource::User("cp")),
+    ("bin/cpuinfo", 0o100755, ArcSource::User("cpuinfo")),
+    ("bin/dmesg", 0o100755, ArcSource::User("dmesg")),
+    ("bin/echo", 0o100755, ArcSource::User("echo")),
+    ("bin/edit", 0o100755, ArcSource::User("edit")),
+    ("bin/forkbomb", 0o100755, ArcSource::User("forkbomb")),
+    ("bin/fsh", 0o100755, ArcSource::User("fsh")),
+    ("bin/grep", 0o100755, ArcSource::User("grep")),
+    ("bin/less", 0o100755, ArcSource::User("less")),
+    ("bin/login", 0o100755, ArcSource::User("login")),
+    ("bin/ls", 0o100755, ArcSource::User("ls")),
+    ("bin/meminfo", 0o100755, ArcSource::User("meminfo")),
+    ("bin/mv", 0o100755, ArcSource::User("mv")),
+    ("bin/passwd", 0o100755, ArcSource::User("passwd")),
+    ("bin/rm", 0o100755, ArcSource::User("rm")),
+    ("bin/sysinfo", 0o100755, ArcSource::User("sysinfo")),
+    ("bin/uptime", 0o100755, ArcSource::User("uptime")),
+    ("etc/fshrc", 0o100644, ArcSource::Static("user_space/fsh/fshrc")),
+    ("etc/passwd", 0o100644, ArcSource::Static("user_space/etc/passwd")),
+    ("etc/shadow", 0o100600, ArcSource::Shadow),
+    ("sbin/init", 0o100755, ArcSource::User("pid1")),
+    ("test/argv_echo.elf", 0o100755, ArcSource::User("argv_echo")),
+    ("test/flibc_demo.elf", 0o100755, ArcSource::User("flibc_demo")),
+    ("test/hello.elf", 0o100755, ArcSource::User("hello")),
+    ("test/stackbomb.elf", 0o100755, ArcSource::User("stackbomb")),
+];
+
+/// Build the complete production kernel image natively: every Rust EL0 payload,
+/// the deterministic initramfs, and the kernel link against the retained `.S`
+/// files and board linker script. This is the artefact `zig build` produces
+/// today; the two differ in link mechanics, not in observable behaviour.
+pub fn build(
+    root: &Path,
+    board: Board,
+    tc: &Toolchain,
+    feats: KernelFeatures,
+) -> Result<Paths, String> {
+    let p = Paths::new(root, board);
+    fs::create_dir_all(p.out.join("obj")).map_err(|e| format!("mkdir {}: {e}", p.out.display()))?;
+    let _ = fs::remove_file(&p.trace);
+
+    // 1. The kernel staticlib, with the requested gates.
+    let staticlib = klib(root, None, &feats.klib())?;
+
+    // 2. The initramfs: build every payload straight into the stage tree at its
+    //    archive path, copy the static files, bake shadow, then encode.
+    let cpio = build_initramfs(root, tc, feats)?;
+
+    // 3. Link and raw-image.
+    kernel_link(root, board, tc, &p, &staticlib, &cpio)?;
+    inspect(&p, tc)?;
+    Ok(p)
+}
+
+/// Stage every initramfs entry and encode the newc archive. Returns the path to
+/// a directory containing `initramfs.cpio`, ready to hand the assembler as an
+/// `-I` include dir for `tools/initramfs.S`'s `.incbin`.
+fn build_initramfs(root: &Path, tc: &Toolchain, feats: KernelFeatures) -> Result<PathBuf, String> {
+    let stage = root.join("rust-out/initramfs-stage");
+    fs::create_dir_all(&stage).map_err(|e| format!("mkdir {}: {e}", stage.display()))?;
+
+    let mut entries: Vec<Entry> = Vec::with_capacity(INITRAMFS.len());
+    for (arc, mode, source) in INITRAMFS {
+        let staged = stage.join(arc);
+        if let Some(parent) = staged.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        }
+        match source {
+            ArcSource::User(stem) => {
+                let spec = user_elf(stem)?;
+                // PID 1 is the one payload that carries build-time features.
+                let features = if *stem == "pid1" { feats.pid1() } else { Vec::new() };
+                build_user_elf(root, tc, spec, Some(&staged), &features)?;
+            }
+            ArcSource::Static(rel) => {
+                let src = root.join(rel);
+                fs::copy(&src, &staged)
+                    .map_err(|e| format!("copy {} -> {}: {e}", src.display(), staged.display()))?;
+            }
+            ArcSource::Shadow => shadow::run(&staged)?,
+        }
+        let data = fs::read(&staged).map_err(|e| format!("read {}: {e}", staged.display()))?;
+        entries.push(Entry {
+            arc: (*arc).to_string(),
+            mode: *mode,
+            data,
+        });
+    }
+
+    let cpio_dir = root.join("rust-out/initramfs-bin");
+    fs::create_dir_all(&cpio_dir).map_err(|e| format!("mkdir {}: {e}", cpio_dir.display()))?;
+    let cpio = cpio_dir.join("initramfs.cpio");
+    fs::write(&cpio, initramfs::encode(&entries))
+        .map_err(|e| format!("write {}: {e}", cpio.display()))?;
+    Ok(cpio_dir)
+}
+
+/// Assemble the retained `.S` files (the canary set plus the kernel-only symbol
+/// table, trace hooks, and the initramfs `.incbin`), then link the Rust kernel
+/// staticlib against the board linker script and produce the raw image.
+fn kernel_link(
+    root: &Path,
+    board: Board,
+    tc: &Toolchain,
+    p: &Paths,
+    staticlib: &Path,
+    cpio_dir: &Path,
+) -> Result<(), String> {
+    let board_dir = root.join("src/board").join(board.name());
+
+    // (source path, extra include dir). initramfs.S resolves `.incbin
+    // "initramfs.cpio"` against the staged cpio directory; nothing else needs it.
+    let mut sources: Vec<(PathBuf, Option<PathBuf>)> = COMMON_ASM
+        .iter()
+        .chain(KERNEL_EXTRA_ASM.iter())
+        .map(|s| (root.join(s), None))
+        .chain(board.board_asm().iter().map(|s| (board_dir.join(s), None)))
+        .collect();
+    sources.push((root.join("tools/initramfs.S"), Some(cpio_dir.to_path_buf())));
+
+    let mut objs: Vec<PathBuf> = Vec::new();
+    for (src, extra_inc) in &sources {
+        let stem = src
+            .file_stem()
+            .ok_or_else(|| format!("no stem: {}", src.display()))?;
+        let obj = p
+            .out
+            .join("obj")
+            .join(format!("{}.o", stem.to_string_lossy()));
+        let mut cmd = Cmd::new(tc.clang.clone(), &p.trace).args([
+            "--target=aarch64-unknown-none-elf".into(),
+            "-c".into(),
+            "-ffreestanding".into(),
+            "-fno-pic".into(),
+            format!("-I{}", root.join("arch/aarch64").display()),
+            format!("-I{}", root.join("src").display()),
+            format!("-I{}", board_dir.display()),
+        ]);
+        if let Some(inc) = extra_inc {
+            cmd = cmd.arg(format!("-I{}", inc.display()));
+        }
+        cmd.args([
+            "-o".into(),
+            obj.display().to_string(),
+            src.display().to_string(),
+        ])
+        .run()?;
+        objs.push(obj);
+    }
+
+    let script = board_dir.join("linker.ld");
+    Cmd::new(tc.lld.clone(), &p.trace)
+        .args([
+            "-flavor".to_string(),
+            "gnu".to_string(),
+            "-T".to_string(),
+            script.display().to_string(),
+            "-z".to_string(),
+            "max-page-size=0x1000".to_string(),
+            "--no-gc-sections".to_string(),
+            "-o".to_string(),
+            p.elf().display().to_string(),
+        ])
+        .args(objs.iter().map(|o| o.display().to_string()))
+        .arg(staticlib.display().to_string())
+        .run()?;
+
+    Cmd::new(tc.objcopy.clone(), &p.trace)
+        .args([
+            "-O".to_string(),
+            "binary".to_string(),
+            p.elf().display().to_string(),
+            p.img().display().to_string(),
+        ])
+        .run()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_initramfs_arc_list_is_sorted_and_unique() {
+        // The encoder writes entries in list order and the sha256 depends on it;
+        // a duplicate or an out-of-order arc silently changes the archive.
+        for w in INITRAMFS.windows(2) {
+            assert!(w[0].0 < w[1].0, "initramfs arcs not strictly sorted: {} !< {}", w[0].0, w[1].0);
+        }
+    }
 
     #[test]
     fn a_vector_or_floating_point_instruction_is_reported() {
