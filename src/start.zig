@@ -7,7 +7,6 @@
 // `export fn` decls land in the final ELF.
 
 comptime {
-    _ = @import("sched");
     // The kernel log ring's storage. utilc used to pull this in; with utilc
     // Rust-owned, the only remaining reference is a C-ABI call, so the module
     // needs a force-import of its own to reach the linker.

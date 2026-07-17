@@ -80,6 +80,29 @@ const fn initial_task() -> TaskStruct {
 
 static mut INIT_TASK: TaskStruct = initial_task();
 
+// Cross-language scheduler storage, formerly provided by `src/sched.zig`'s
+// `export var`. It stayed on the Zig side only so the last Flash/Zig consumers
+// would reach it through a plain data symbol instead of a low-half GOT pointer
+// that unmaps once TTBR0 switches to a user page table. Every consumer is now
+// Rust, and the kernel ELF carries no GOT at all (all references are
+// PC-relative to the high-VA alias), so the storage moves into the Rust image
+// with no relocation hazard. The unmangled C names keep the sibling modules
+// (fork, execve, kmain, the trace sampler) resolving the same four words.
+#[cfg(target_os = "none")]
+mod globals {
+    use super::{TaskStruct, NR_TASKS};
+    use core::ptr::null_mut;
+
+    #[no_mangle]
+    pub static mut current: *mut TaskStruct = null_mut();
+    #[no_mangle]
+    pub static mut task: [*mut TaskStruct; NR_TASKS] = [null_mut(); NR_TASKS];
+    #[no_mangle]
+    pub static mut nr_tasks: i32 = 1;
+    #[no_mangle]
+    pub static mut next_pid: i32 = 1;
+}
+
 #[cfg(target_os = "none")]
 mod seam {
     use super::{TaskStruct, NR_TASKS};

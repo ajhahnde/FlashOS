@@ -356,53 +356,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Anonymous-pipe adapter (src/pipe.zig): a thin shim over the Rust-owned
-    // pipe in crates/kernel. The page layout, wait queue, ref-counted lifetime,
-    // and blocking read/write are Rust; the shim mirrors only the header fields
-    // a Flash caller still touches directly. wait_queue is fully Rust-owned now,
-    // so it no longer has a Flash-visible named module.
-    const pipe_mod = b.createModule(.{
-        .root_source_file = b.path("src/pipe.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // File handle module. Owns the open_files
-    // lifetime helpers (alloc / unref / fdAlloc / fdGet / fdClose /
-    // dupAll / closeAll). Imports task_layout for TaskStruct + File
-    // (which lives in task_layout.zig to break the circular import
-    // with the typed `open_files: [_]?*File` slot).
-    const file_mod = b.createModule(.{
-        .root_source_file = b.path("src/file.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    file_mod.addImport("task_layout", task_layout_mod);
-
-    // File-descriptor table adapter (src/fdtable.zig): a thin shim over the
-    // Rust-owned fd table in crates/kernel. Slot dispatch and ref-count
-    // discipline are Rust; the shim preserves the Kind tag and the
-    // install/get/dup2/close/dupAll/closeAll API its Flash callers still use.
-    const fdtable_mod = b.createModule(.{
-        .root_source_file = b.path("src/fdtable.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    fdtable_mod.addImport("task_layout", task_layout_mod);
-
-    // VFS dispatch layer. 1-bit superblock tag +
-    // two-slot mount table; imports `file` for the File type its
-    // vtable signatures reference. Host-test wiring for vfs.zig lives
-    // at the bottom of this file.
-    const vfs_mod = b.createModule(.{
-        .root_source_file = b.path("src/vfs.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    vfs_mod.addImport("file", file_mod);
-    // vfs.zig re-exports the shared Dirent ABI type for the
-    // readdir vtable signature.
-    vfs_mod.addImport("syscall_defs", syscall_defs_mod);
+    // The pipe / file / fdtable / vfs Zig adapters were export-less `pub fn`
+    // pass-throughs over their Rust owners in crates/kernel; with the last
+    // Flash/Zig importer gone, nothing in the kernel root's import graph reached
+    // them, so they carried zero symbols into the link and are dropped here.
+    // Their .zig files are left on disk for now.
 
     // Block-device abstraction. Single global
     // `sd_dev` vtable that the FAT32 backend reads + writes
@@ -499,26 +457,14 @@ pub fn build(b: *std.Build) void {
 
 
 
-    // Console RX adapter (src/console.zig): a thin shim over the Rust-owned
-    // console ring in crates/kernel. The 256-byte ring, its WaitQueue, and the
-    // blocking read discipline are Rust; the shim only forwards push/read/
-    // test_push, so it needs no named imports.
-    const console_mod = b.createModule(.{
-        .root_source_file = b.path("src/console.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Scheduler adapter. Rust owns the state rules, selection, context-switch
-    // orchestration, and task teardown. The named module remains only because
-    // sys imports the zombify-and-wake helper by source-level name; all other
-    // consumers already use the scheduler's preserved C symbols directly.
-    const sched_mod = b.createModule(.{
-        .root_source_file = b.path("src/sched.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    sched_mod.addImport("task_layout", task_layout_mod);
+    // The console adapter was another export-less pass-through and is dropped
+    // with the pipe/file/fdtable/vfs group above. The scheduler adapter
+    // (src/sched.zig) is dropped too: its only live contribution was the
+    // cross-language storage `export var current/task/nr_tasks/next_pid`, which
+    // moves into crates/kernel/src/sched.rs now that every consumer is Rust and
+    // the kernel ELF carries no GOT (so the storage has no low-half relocation
+    // hazard). Its zombify-and-wake `pub fn` had no reachable importer. Both
+    // .zig files are left on disk for now.
 
     // Cwd-aware path-resolution adapter. The pure joinResolve implementation
     // and its tests live in crates/kernel; this module preserves the Flash
@@ -643,13 +589,7 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("syscall_defs", syscall_defs_mod);
     kernel_mod.addImport("user_layout", user_layout_mod);
     kernel_mod.addImport("task_layout", task_layout_mod);
-    kernel_mod.addImport("pipe", pipe_mod);
-    kernel_mod.addImport("fdtable", fdtable_mod);
-    kernel_mod.addImport("console", console_mod);
-    kernel_mod.addImport("sched", sched_mod);
     kernel_mod.addImport("path", path_mod);
-    kernel_mod.addImport("file", file_mod);
-    kernel_mod.addImport("vfs", vfs_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
     kernel_mod.addImport("mailbox", mailbox_mod);
