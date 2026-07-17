@@ -297,19 +297,11 @@ pub fn build(b: *std.Build) void {
 
     // Shared syscall ID constants — single source of truth for the
     // kernel-side dispatch table (src/sys.zig); the EL0 side now takes them
-    // from crates/abi, which pins the same numbers. Exposed as a named module
-    // because Zig 0.16 forbids `@import` reaching outside the importing
-    // module's root directory.
-    // lib/syscall_defs.flash is the source of truth; flashc transpiles it to
-    // Zig at build time via addFlashSource. The generated .zig is shared by
-    // the kernel/userspace module here and the host-test module below, so the
-    // transpile runs once.
-    const syscall_defs_src = addFlashSource(b, "lib/syscall_defs.flash");
-    const syscall_defs_mod = b.createModule(.{
-        .root_source_file = syscall_defs_src,
-        .target = target,
-        .optimize = optimize,
-    });
+    // from crates/abi, which pins the same numbers. The Flash syscall-defs
+    // module (lib/syscall_defs.flash) was reached only through the kernel-log
+    // adapter, which has since moved its storage into Rust; nothing in the
+    // kernel link imports these constants any more, so the module is gone. The
+    // .flash source stays on disk until the shared source deletion.
 
     // console_ui — shared terminal look (status tags, ANSI palette, the
     // boot-success marker, and the line/stage/banner renderers). No image
@@ -360,18 +352,10 @@ pub fn build(b: *std.Build) void {
     // the DWC2 driver retains preemption policy and MMIO FIFO writes.
 
 
-    // Kernel-log adapter. Rust owns the ring arithmetic; this named Flash
-    // module retains the shared BSS instance and its fixed C layout. Its last
-    // Flash importer is gone, so start.zig force-imports it and Rust reaches
-    // the instance through fos_klog_ring. Imports syscall_defs for the
-    // ABI-shared size.
-    const klog_ring_src = addFlashSource(b, "src/klog_ring.flash");
-    const klog_ring_mod = b.createModule(.{
-        .root_source_file = klog_ring_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    klog_ring_mod.addImport("syscall_defs", syscall_defs_mod);
+    // The kernel-log ring's BSS storage moved into crates/kernel (utilc's
+    // device seam owns the static now that every consumer is Rust and the ELF
+    // carries no GOT), so the last Flash kernel module and its start.zig
+    // force-import are both gone. Its .flash source stays on disk for now.
 
     // The sha256, shadow and perm call-site adapters were orphaned forwarders
     // over their Rust owners in crates/kernel: the crypto primitives, the
@@ -510,8 +494,6 @@ pub fn build(b: *std.Build) void {
     if (trace) kernel_mod.addCMacro("FLASHOS_TRACE", "1");
 
     kernel_mod.addImport("build_options", build_options_mod);
-    kernel_mod.addImport("syscall_defs", syscall_defs_mod);
-    kernel_mod.addImport("klog_ring", klog_ring_mod);
 
     // ---- hello.elf — Rust payload for [TEST] exec-elf ----
     // xtask builds the first production Rust EL0 program as the same

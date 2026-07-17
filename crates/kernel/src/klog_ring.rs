@@ -42,6 +42,24 @@ const _: () = assert!(core::mem::offset_of!(KlogRing, tail) == SIZE + 8);
 const _: () = assert!(core::mem::size_of::<KlogRing>() == SIZE + 16);
 const _: () = assert!(core::mem::align_of::<KlogRing>() == 8);
 
+/// The one kernel-wide log ring's storage, BSS-resident and allocation-free.
+///
+/// It used to live in a Flash module reached through a C-ABI getter; every
+/// consumer (utilc's output seam and sys_klog_read) is Rust now and the kernel
+/// ELF carries no GOT, so the storage owns its place here with no low-half
+/// relocation hazard. All access goes through [`device_ring`] as a raw pointer:
+/// logging may be interrupted and re-entered on the same core, so no `&mut` is
+/// ever formed.
+#[cfg(target_os = "none")]
+static mut DEVICE_RING: KlogRing = KlogRing::new();
+
+/// Address of the kernel-wide log ring. Valid for the kernel's whole life.
+#[cfg(target_os = "none")]
+#[inline]
+pub fn device_ring() -> *mut KlogRing {
+    core::ptr::addr_of_mut!(DEVICE_RING)
+}
+
 /// Return the number of retained bytes.
 ///
 /// # Safety

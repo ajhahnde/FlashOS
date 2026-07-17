@@ -34,18 +34,14 @@ mod seam {
         pub fn mini_uart_send_string(string: *const u8);
         pub fn mini_uart_recv() -> u8;
         pub fn err_hang() -> !;
-        fn fos_klog_ring() -> *mut klog_ring::KlogRing;
     }
 
-    /// The one kernel-wide log ring, still resident in the Flash module that
-    /// declares its storage.
-    ///
     /// # Safety
     /// Returns the address of a BSS-resident static; valid for the kernel's life.
     #[inline]
     pub unsafe fn klog_ring() -> *mut klog_ring::KlogRing {
-        // SAFETY: the Flash module's getter returns its BSS-resident ring.
-        unsafe { fos_klog_ring() }
+        // The ring's storage is Rust-owned now; forward to its single definition.
+        klog_ring::device_ring()
     }
 }
 

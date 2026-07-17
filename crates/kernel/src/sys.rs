@@ -48,7 +48,6 @@ mod seam {
         fn dump_free_count() -> u64;
         fn mem_total_count() -> u64;
         fn uptime_seconds() -> u64;
-        fn fos_klog_ring() -> *mut klog_ring::KlogRing;
         fn get_sys_count() -> u64;
         fn main_output(interface: i32, string: *const u8);
     }
@@ -125,8 +124,8 @@ mod seam {
 
     #[inline]
     pub unsafe fn klog_ring() -> *mut klog_ring::KlogRing {
-        // SAFETY: the Flash module's getter returns its BSS-resident ring.
-        unsafe { fos_klog_ring() }
+        // The ring's storage is Rust-owned now; forward to its single definition.
+        klog_ring::device_ring()
     }
 
     #[inline]
