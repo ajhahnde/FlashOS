@@ -11,6 +11,7 @@ mod guard;
 mod initramfs;
 mod qemu;
 mod shadow;
+mod syms;
 mod toolchain;
 mod ui_defs;
 
@@ -40,6 +41,11 @@ Commands:
                                Build a Rust EL0 payload (hello, clear, pid1, ...)
   klib [--output <path>] [--feature <name>]...
                                Build the Rust kernel staticlib the Zig kernel links
+  populate-syms --board <..> [gate flags]
+                               Relink the kernel, then regenerate src/symbol_area.S
+                               from its symbol table. Re-run `build` to relink with it.
+  clear-syms                    Reset src/symbol_area.S to an empty (placeholder)
+                               table of the same size, for a from-scratch two-pass
   gen-shadow --output <path>    Bake /etc/shadow with the kernel's own PBKDF2
   test                          Run the Rust host tests (all crates but the bare-metal ones)
   check-hygiene                 Run the repo's whitespace and hex-literal gates
@@ -82,6 +88,31 @@ fn dispatch() -> Result<(), String> {
             let tc = Toolchain::discover()?;
             let p = build::build(&root, board, &tc, feats)?;
             println!("built {}", p.img().display());
+            Ok(())
+        }
+        "populate-syms" => {
+            let board = board_of(&rest)?;
+            let feats = kernel_features_of(&rest)?;
+            let tc = Toolchain::discover()?;
+            // Relink first so the symbol table reflects the current code, then read
+            // it back with the same `nm -n | grep -v '$' | grep -v 'compiler_rt.'`
+            // filter the old shell pipeline used. `-n` (no --demangle): the generator
+            // carries its own v0 decoder so it can emit path-only names under the
+            // fixed-width field, which rustc's full demangling would overflow.
+            let p = build::build(&root, board, &tc, feats)?;
+            let nm = Cmd::new(tc.nm.clone(), &p.trace)
+                .args(["-n".to_string(), p.elf().display().to_string()])
+                .capture()?;
+            let filtered: String = nm
+                .lines()
+                .filter(|l| syms::keep_nm_line(l))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let (content, used) = syms::generate(&filtered)?;
+            let dst = root.join("src/symbol_area.S");
+            std::fs::write(&dst, content).map_err(|e| format!("write {}: {e}", dst.display()))?;
+            println!("       -> symbol area: {used} bytes");
+            println!("wrote {} — re-run `cargo xtask build` to relink", dst.display());
             Ok(())
         }
         "smoke" => {
@@ -135,6 +166,13 @@ fn dispatch() -> Result<(), String> {
             let (output, features) = user_args_of(&rest)?;
             let a = build::klib(&root, output.as_deref(), &features)?;
             println!("built {}", a.display());
+            Ok(())
+        }
+        "clear-syms" => {
+            let dst = root.join("src/symbol_area.S");
+            std::fs::write(&dst, syms::clear())
+                .map_err(|e| format!("write {}: {e}", dst.display()))?;
+            println!("cleared {}", dst.display());
             Ok(())
         }
         "gen-shadow" => {

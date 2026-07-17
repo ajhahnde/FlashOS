@@ -1,0 +1,311 @@
+//! The kernel symbol table generator — the Rust owner of `src/symbol_area.S`.
+//!
+//! `populate-syms` runs `nm -n` over the linked kernel, drops the mapping symbols
+//! and long compiler aliases the way the old shell pipeline did, and regenerates
+//! the `_symbols` section: one fixed-width `addr -> name` entry per symbol so a
+//! backtrace can turn a return address into a function name. The section is
+//! self-sized — it always fills to exactly `PRE_ALLOCATED_SIZE` regardless of how
+//! many symbols land in it — so populating it never moves any other address and
+//! the two-pass build converges in a single regen (build, nm, regen, relink).
+//!
+//! Ported from the retired `scripts/{generate_syms,clear_syms}.zig`.
+
+/// Total reserved size of the `_symbols` section. The section is self-contained:
+/// [`generate`] emits its entries followed by a `.space` fill up to exactly this
+/// size, and the linker scripts just `KEEP(*(_symbols))` with no separate
+/// reservation — so this constant is the only knob. Grew 64 KiB -> 96 KiB when the
+/// FS modules pushed past 64 KiB, then 96 KiB -> 128 KiB for the USB gadget driver.
+const PRE_ALLOCATED_SIZE: usize = 131072;
+
+/// One entry: an 8-byte address followed by a fixed-width name field.
+const ENTRY_SIZE: usize = 64;
+
+/// The name field is the entry minus the 8-byte address and the NUL terminator.
+const MAX_SYM_NAME_LEN: usize = ENTRY_SIZE - 8 - 1;
+
+/// Turn a Rust v0 mangled symbol into the readable path the trace symbolizer wants,
+/// e.g.
+///
+///   `_RNvMs_NtCs1VexIXjCVNi_14flashos_kernel6sha256NtB4_10HmacSha2566finish`
+///   -> `flashos_kernel::sha256::HmacSha256::finish`
+///
+/// Returns `None` for anything that is not a v0 symbol (the kernel's assembly and
+/// `#[no_mangle]` seam names pass through untouched).
+///
+/// Only the path segments are recovered, not generics or signatures — the symbol
+/// area is an `addr -> name` table for backtraces, not a debugger. v0 encodes each
+/// segment as a decimal length followed by that many bytes, so the whole job is:
+/// skip the control characters, keep the length-prefixed names. Two control forms
+/// swallow text and must be skipped explicitly, or their payload would be misread
+/// as a segment:
+///
+///   * `Cs<base62>_`  the crate-root disambiguator (its base62 hash can start with
+///                    a digit — `Cs1VexIXjCVNi_` would otherwise read as a 1-byte
+///                    segment "V")
+///   * `B<base62>_`   a backreference to an earlier segment
+///
+/// If the joined path still exceeds the entry's name budget, leading segments are
+/// dropped: the tail (the function) identifies a frame, the crate prefix merely
+/// qualifies it. Truncation is never used — v0 puts the crate/hash prefix first, so
+/// cutting at the limit would throw away exactly the function name a backtrace needs.
+pub fn demangle_v0(sym: &str) -> Option<String> {
+    let bytes = sym.as_bytes();
+    if !sym.starts_with("_R") {
+        return None;
+    }
+
+    // Collect the path segments in order.
+    let mut segs: Vec<&str> = Vec::with_capacity(16);
+    let mut i = 2usize;
+    while i < bytes.len() && segs.len() < 16 {
+        let c = bytes[i];
+
+        if c == b'C' && i + 1 < bytes.len() && bytes[i + 1] == b's' {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'_' {
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            continue;
+        }
+        if c == b'B' {
+            i += 1;
+            while i < bytes.len() && bytes[i] != b'_' {
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            continue;
+        }
+        if !c.is_ascii_digit() {
+            // A namespace/impl/disambiguator control byte — nothing to keep.
+            i += 1;
+            continue;
+        }
+
+        let mut len = 0usize;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            len = len * 10 + (bytes[i] - b'0') as usize;
+            i += 1;
+        }
+        if len == 0 {
+            continue; // an `s0_`-style disambiguator, not a segment
+        }
+        // `get` fails on both an out-of-range span (malformed) and a non-char
+        // boundary — either way leave the raw name alone rather than panic.
+        let seg = sym.get(i..i + len)?;
+        segs.push(seg);
+        i += len;
+    }
+    if segs.is_empty() {
+        return None;
+    }
+
+    // Join with "::", dropping leading segments until the result fits.
+    let mut first = 0usize;
+    while first < segs.len() {
+        let need: usize = segs[first..]
+            .iter()
+            .enumerate()
+            .map(|(k, s)| s.len() + if k == 0 { 0 } else { 2 })
+            .sum();
+        if need <= MAX_SYM_NAME_LEN {
+            break;
+        }
+        first += 1;
+    }
+    if first == segs.len() {
+        return None;
+    }
+
+    Some(segs[first..].join("::"))
+}
+
+/// Whether an `nm -n` line survives the pre-filter the old shell pipeline applied
+/// as `grep -v '$' | grep -v 'compiler_rt.'`:
+///   * `$` drops the AArch64 mapping symbols (`$x`, `$d`) — link bookkeeping, not
+///     code, that would otherwise waste table entries;
+///   * `compiler_rt.` drops the long namespaced compiler-rt aliases (e.g.
+///     `compiler_rt.aarch64_outline_atomics.__aarch64_cas16_acq_rel`, 59+ chars)
+///     that overflow the name budget. The short alias sits at the same address and
+///     survives, so trace coverage is unchanged. Retained for parity even though
+///     the native Rust link no longer emits that Zig-side spelling.
+pub fn keep_nm_line(line: &str) -> bool {
+    !line.contains('$') && !line.contains("compiler_rt.")
+}
+
+/// Build the `.section "_symbols"` body from filtered `nm -n` output. Returns the
+/// assembly text and the bytes it occupies (`used_space`). Each line is
+/// `addr type name`; the type is ignored and the name is v0-demangled where it is a
+/// Rust symbol. A single over-long name or an over-budget table is an error — the
+/// callers surface it rather than silently truncating or overrunning the section.
+pub fn generate(nm_output: &str) -> Result<(String, usize), String> {
+    let mut out = String::from(".section \"_symbols\", \"a\"\n");
+    let mut count = 0usize;
+
+    for line in nm_output.lines() {
+        let trimmed = line.trim_matches([' ', '\r']);
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut it = trimmed.split_whitespace();
+        let Some(addr) = it.next() else { continue };
+        // ignore the symbol type field
+        if it.next().is_none() {
+            continue;
+        }
+        let Some(raw) = it.next() else { continue };
+
+        let name = demangle_v0(raw).unwrap_or_else(|| raw.to_string());
+        if name.len() > MAX_SYM_NAME_LEN {
+            return Err(format!("{name} is too long!"));
+        }
+
+        out.push_str(&format!(".quad 0x{addr}\n"));
+        out.push_str(&format!(".string \"{name}\"\n"));
+        out.push_str(&format!(".space {}\n", MAX_SYM_NAME_LEN - name.len()));
+        count += 1;
+    }
+
+    // null entry sentinel that terminates the symbol table
+    out.push_str(".space 64\n");
+    count += 1;
+
+    let used_space = ENTRY_SIZE * count;
+    if used_space > PRE_ALLOCATED_SIZE {
+        // Actionable numbers: the bump must be at least the shortfall. The knob is
+        // PRE_ALLOCATED_SIZE at the top of this file — the `_symbols` section is
+        // self-sized (the trailing `.space` fill) and the linker scripts just
+        // `KEEP(*(_symbols))`, so nothing else moves in lockstep. Never widen
+        // ENTRY_SIZE to fit a name — that halves capacity inside the frozen 128 KiB.
+        return Err(format!(
+            "too many symbols! used_space={used_space} > pre_allocated_size={PRE_ALLOCATED_SIZE} \
+             (shortfall {} bytes, {count} symbols at {ENTRY_SIZE} bytes each). \
+             Bump PRE_ALLOCATED_SIZE in xtask/src/syms.rs.",
+            used_space - PRE_ALLOCATED_SIZE
+        ));
+    }
+
+    out.push_str(&format!(".space {}\n", PRE_ALLOCATED_SIZE - used_space));
+    Ok((out, used_space))
+}
+
+/// A cleared placeholder `_symbols` section: the same size as a populated one, so a
+/// cleared table links identically and the two-pass build still converges in one
+/// regen. Mirrors the retired `clear_syms.zig`.
+pub fn clear() -> String {
+    format!(".section \"_symbols\", \"a\"\n.space {PRE_ALLOCATED_SIZE}\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_v0_name_becomes_its_path() {
+        // The known-issue's canonical case: 70 raw chars -> 41, under the 55 budget.
+        assert_eq!(
+            demangle_v0("_RNvMs_NtCs1VexIXjCVNi_14flashos_kernel6sha256NtB4_10HmacSha2566finish")
+                .as_deref(),
+            Some("flashos_kernel::sha256::HmacSha256::finish")
+        );
+    }
+
+    #[test]
+    fn the_crate_disambiguator_hash_is_not_read_as_a_segment() {
+        // `Cs1VexIXjCVNi_`: the base62 hash starts with `1`, so a naive length read
+        // would take a 1-byte segment "V". The `Cs..._` skip prevents that.
+        let d = demangle_v0("_RNvCs1VexIXjCVNi_14flashos_kernel4main").unwrap();
+        assert_eq!(d, "flashos_kernel::main");
+        assert!(!d.contains('V') || d.contains("VexI") == false);
+    }
+
+    #[test]
+    fn a_backreference_control_form_is_skipped() {
+        // `B4_` is a backref, not a `4`-length segment; skipping it keeps `finish`
+        // from being mis-split.
+        let d =
+            demangle_v0("_RNvMs_NtCs1VexIXjCVNi_14flashos_kernel6sha256NtB4_10HmacSha2566finish")
+                .unwrap();
+        assert!(d.ends_with("HmacSha256::finish"));
+    }
+
+    #[test]
+    fn non_v0_names_pass_through_as_none() {
+        assert_eq!(demangle_v0("_start"), None);
+        assert_eq!(demangle_v0("__aarch64_cas16_acq_rel"), None);
+        assert_eq!(demangle_v0("kernel_main"), None);
+    }
+
+    #[test]
+    fn a_malformed_length_leaves_the_name_alone() {
+        // A segment length that runs past the end must not slice out of bounds.
+        assert_eq!(demangle_v0("_RNv99short"), None);
+    }
+
+    #[test]
+    fn a_long_path_drops_leading_segments_to_fit() {
+        // Three 30-char segments cannot all fit in 55; the leading ones drop so the
+        // tail (the function) survives. Build a synthetic v0 name.
+        let seg = "a".repeat(30);
+        let sym = format!("_RNvNtNtCs0_4crate30{seg}30{seg}30{seg}");
+        let d = demangle_v0(&sym).unwrap();
+        assert!(d.len() <= MAX_SYM_NAME_LEN, "path {d:?} exceeds the entry budget");
+        assert!(d.ends_with(&seg), "the trailing (function) segment must survive");
+    }
+
+    #[test]
+    fn generate_emits_one_entry_per_symbol_and_fills_the_section() {
+        let nm = "\
+0000000000080000 T _start
+0000000000080100 t kernel_main
+";
+        let (asm, used) = generate(nm).unwrap();
+        // two symbols + the sentinel entry.
+        assert_eq!(used, ENTRY_SIZE * 3);
+        assert!(asm.starts_with(".section \"_symbols\", \"a\"\n"));
+        assert!(asm.contains(".quad 0x0000000000080000\n.string \"_start\"\n.space 49\n"));
+        assert!(asm.contains(".quad 0x0000000000080100\n.string \"kernel_main\"\n.space 44\n"));
+        // the trailing fill takes the section to exactly PRE_ALLOCATED_SIZE.
+        assert!(asm.contains(&format!(".space {}\n", PRE_ALLOCATED_SIZE - used)));
+    }
+
+    #[test]
+    fn generate_demangles_v0_names_in_the_stream() {
+        let nm =
+            "00000000000801a0 t _RNvMs_NtCs1VexIXjCVNi_14flashos_kernel6sha256NtB4_10HmacSha2566finish\n";
+        let (asm, _) = generate(nm).unwrap();
+        assert!(asm.contains(".string \"flashos_kernel::sha256::HmacSha256::finish\"\n"));
+    }
+
+    #[test]
+    fn generate_rejects_a_name_over_the_field_width() {
+        // A non-v0 symbol longer than 55 chars cannot be demangled shorter and must
+        // be surfaced, not silently truncated.
+        let long = "z".repeat(MAX_SYM_NAME_LEN + 1);
+        let nm = format!("0000000000080000 T {long}\n");
+        assert!(generate(&nm).unwrap_err().contains("is too long"));
+    }
+
+    #[test]
+    fn clear_links_at_the_same_size_as_a_populated_table() {
+        let cleared = clear();
+        assert_eq!(
+            cleared,
+            format!(".section \"_symbols\", \"a\"\n.space {PRE_ALLOCATED_SIZE}\n")
+        );
+    }
+
+    #[test]
+    fn the_nm_prefilter_drops_mapping_symbols_and_long_aliases() {
+        assert!(keep_nm_line("0000000000080000 T _start"));
+        assert!(!keep_nm_line("0000000000080000 t $x"));
+        assert!(!keep_nm_line(
+            "0000000000080000 t compiler_rt.aarch64_outline_atomics.__aarch64_cas16_acq_rel"
+        ));
+    }
+}
