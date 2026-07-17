@@ -49,27 +49,47 @@ unsafe fn board_usb_enumerated() -> bool {
     true
 }
 
-const ENTRY_ERROR_MESSAGES: [&core::ffi::CStr; 19] = [
-    c"SYNC_INVALID_EL1t",
-    c"IRQ_INVALID_EL1t",
-    c"FIQ_INVALID_EL1t",
-    c"SERROR_INVALID_EL1t",
-    c"SYNC_INVALID_EL1h",
-    c"IRQ_INVALID_EL1h",
-    c"FIQ_INVALID_EL1h",
-    c"SERROR_INVALID_EL1h",
-    c"SYNC_INVALID_EL0_64",
-    c"IRQ_INVALID_EL0_64",
-    c"FIQ_INVALID_EL0_64",
-    c"SERROR_INVALID_EL0_64",
-    c"SYNC_INVALID_EL0_32",
-    c"IRQ_INVALID_EL0_32",
-    c"FIQ_INVALID_EL0_32",
-    c"SERROR_INVALID_EL0_32",
-    c"SYNC_ERROR",
-    c"SYSCALL_ERROR",
-    c"DATA_ABORT_ERROR",
-];
+/// The 19 exception-entry failure names plus the out-of-range fallback, as one
+/// NUL-separated blob addressed by integer span.
+///
+/// This must NOT be a `[&CStr; 19]`, and the lookup must NOT be a `match` on the
+/// type index. Both lower to a table of *absolute* pointers holding the strings'
+/// low link addresses (`ldr x1, [table, i*16]`); that pointer faults the moment
+/// this path runs with TTBR0 on a user pgd — and it runs in exactly that state,
+/// from the terminal EL0 exception handler, so the fault would be a silent
+/// fault-while-faulting. A single blob is reached PC-relative — one base address
+/// plus an integer offset — so every message pointer lands in the high linear-map
+/// alias like the rest of this function's string arguments. Order matches the
+/// `typ` the entry stub passes; index 19 is the fallback.
+static ENTRY_ERROR_MESSAGES: &[u8] = b"\
+SYNC_INVALID_EL1t\0IRQ_INVALID_EL1t\0FIQ_INVALID_EL1t\0SERROR_INVALID_EL1t\0\
+SYNC_INVALID_EL1h\0IRQ_INVALID_EL1h\0FIQ_INVALID_EL1h\0SERROR_INVALID_EL1h\0\
+SYNC_INVALID_EL0_64\0IRQ_INVALID_EL0_64\0FIQ_INVALID_EL0_64\0SERROR_INVALID_EL0_64\0\
+SYNC_INVALID_EL0_32\0IRQ_INVALID_EL0_32\0FIQ_INVALID_EL0_32\0SERROR_INVALID_EL0_32\0\
+SYNC_ERROR\0SYSCALL_ERROR\0DATA_ABORT_ERROR\0UNKNOWN_ENTRY\0";
+
+/// Index the entry-message blob and return a C-string pointer to the `typ`-th
+/// name, or the `UNKNOWN_ENTRY` fallback for an out-of-range index. The returned
+/// pointer is `blob_base + integer_offset` — never loaded from a pointer table —
+/// so it inherits the base's PC-relative high-alias addressing.
+fn entry_message_ptr(typ: u32) -> *const u8 {
+    let target = if typ <= 18 { typ as usize } else { 19 };
+    let base = ENTRY_ERROR_MESSAGES.as_ptr();
+    let mut seen = 0usize;
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < ENTRY_ERROR_MESSAGES.len() {
+        if seen == target {
+            break;
+        }
+        if ENTRY_ERROR_MESSAGES[i] == 0 {
+            seen += 1;
+            start = i + 1;
+        }
+        i += 1;
+    }
+    base.wrapping_add(start)
+}
 
 fn interrupt_id(iar: u32) -> u32 {
     iar & 0x3ff
@@ -95,11 +115,7 @@ fn trace_sample(frame: *mut KeRegs) {
 /// Called from the terminal exception path with the mini-UART initialized.
 pub unsafe fn show_invalid_entry_message(typ: u32, esr: u64, address: u64) {
     unsafe { utilc::main_output(MU, c"ERROR CAUGHT: ".as_ptr().cast()) };
-    let message = ENTRY_ERROR_MESSAGES
-        .get(typ as usize)
-        .copied()
-        .unwrap_or(c"UNKNOWN_ENTRY");
-    unsafe { utilc::main_output(MU, message.as_ptr().cast()) };
+    unsafe { utilc::main_output(MU, entry_message_ptr(typ)) };
     unsafe { utilc::main_output(MU, c", ESR: ".as_ptr().cast()) };
     unsafe { utilc::main_output_u64(MU, esr) };
     unsafe { utilc::main_output(MU, c", Address: ".as_ptr().cast()) };
@@ -191,9 +207,21 @@ mod tests {
     }
 
     #[test]
-    fn entry_error_table_matches_the_vector_contract() {
-        assert_eq!(ENTRY_ERROR_MESSAGES.len(), 19);
-        assert_eq!(ENTRY_ERROR_MESSAGES[0], c"SYNC_INVALID_EL1t");
-        assert_eq!(ENTRY_ERROR_MESSAGES[18], c"DATA_ABORT_ERROR");
+    fn entry_error_blob_matches_the_vector_contract() {
+        // Read back a message the same way the fault path does — through the
+        // integer-span walk, not an array index — so the test also exercises the
+        // lookup that replaced the absolute-pointer table.
+        fn name(typ: u32) -> &'static [u8] {
+            let p = entry_message_ptr(typ);
+            // SAFETY: `p` points into the static blob at the start of a
+            // NUL-terminated name; the test process maps it.
+            unsafe { core::ffi::CStr::from_ptr(p.cast()) }.to_bytes()
+        }
+        assert_eq!(name(0), b"SYNC_INVALID_EL1t");
+        assert_eq!(name(3), b"SERROR_INVALID_EL1t");
+        assert_eq!(name(18), b"DATA_ABORT_ERROR");
+        // Out-of-range indices fall back to the fallback name, never past the blob.
+        assert_eq!(name(19), b"UNKNOWN_ENTRY");
+        assert_eq!(name(255), b"UNKNOWN_ENTRY");
     }
 }
