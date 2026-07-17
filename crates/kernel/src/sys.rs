@@ -50,12 +50,7 @@ mod seam {
         fn uptime_seconds() -> u64;
         fn fos_klog_ring() -> *mut klog_ring::KlogRing;
         fn get_sys_count() -> u64;
-        fn board_usb_enumerated() -> bool;
-        fn board_usb_cdc_tx(ptr: *const u8, len: u64);
         fn main_output(interface: i32, string: *const u8);
-        fn board_power_reboot() -> !;
-        fn board_mailbox_temperature() -> u32;
-        fn board_mailbox_cpu_clock() -> u32;
     }
 
     #[inline]
@@ -115,7 +110,7 @@ mod seam {
     #[inline]
     pub unsafe fn reboot() -> ! {
         // SAFETY: the board reset never returns.
-        unsafe { board_power_reboot() }
+        unsafe { crate::rpi4b_power::reboot() }
     }
 
     /// Fill caller-owned bytes from the kernel entropy fallback. The mixer and
@@ -137,13 +132,15 @@ mod seam {
     #[inline]
     pub unsafe fn usb_enumerated() -> bool {
         // SAFETY: reads the gadget's enumeration flag in kernel context.
-        unsafe { board_usb_enumerated() }
+        unsafe { crate::rpi4b_usb::enumerated() }
     }
 
     #[inline]
     pub unsafe fn usb_cdc_tx(ptr: *const u8, len: u64) {
-        // SAFETY: forwarded pointer/length contract.
-        unsafe { board_usb_cdc_tx(ptr, len) };
+        // SAFETY: the caller guarantees `ptr` covers `len` readable bytes, and
+        // the gadget copies into its own TX ring without retaining the slice.
+        let data = unsafe { core::slice::from_raw_parts(ptr, len as usize) };
+        unsafe { crate::rpi4b_usb::cdc_tx(data) };
     }
 
     #[inline]
@@ -155,13 +152,13 @@ mod seam {
     #[inline]
     pub unsafe fn mailbox_temperature() -> u32 {
         // SAFETY: the caller holds preemption exclusion over the shared prop_buf.
-        unsafe { board_mailbox_temperature() }
+        unsafe { crate::rpi4b_mailbox::get_temperature() }
     }
 
     #[inline]
     pub unsafe fn mailbox_cpu_clock() -> u32 {
         // SAFETY: same shared-prop_buf exclusion as the temperature read.
-        unsafe { board_mailbox_cpu_clock() }
+        unsafe { crate::rpi4b_mailbox::get_cpu_clock() }
     }
 }
 

@@ -153,9 +153,23 @@ pub fn build(b: *std.Build) void {
         "Target board (rpi4b | virt)",
     ) orelse .rpi4b;
 
+    // virt has no driver set in the build graph: its leaves and the comptime
+    // alias bag they hung from were cut once the kernel reached its drivers by
+    // direct call rather than through a per-board indirection. The sources are
+    // still in src/board/virt/ for a later revival. Fail closed and say so --
+    // otherwise selecting the board dies on a missing-module error that reads
+    // like a broken checkout.
+    if (board == .virt) {
+        std.debug.print(
+            \\-Dboard=virt cannot build: the virt driver leaves are not wired
+            \\into this build graph. The sources remain under src/board/virt/.
+            \\Build with -Dboard=rpi4b.
+            \\
+        , .{});
+        std.process.exit(1);
+    }
+
     // Expose the active board to Zig source via @import("build_options").
-    // src/board.zig switches on this at comptime to alias each driver
-    // module to the right `src/board/<board>/*.zig`.
     const build_options = b.addOptions();
     build_options.addOption(Board, "board", board);
 
@@ -428,65 +442,6 @@ pub fn build(b: *std.Build) void {
     // Bulk-IN TX ring adapter. Rust owns the bounded ring arithmetic while
     // the DWC2 driver retains preemption policy and MMIO FIFO writes.
 
-    // Per-board driver leaves (src/board/<board>/*). Ported to Flash, these
-    // can no longer be reached by src/board.zig's relative `@import(
-    // "board/<board>/x.zig")` — the generated .zig lives in the build cache.
-    // Each is promoted to a named module; board.zig's comptime switch selects
-    // the active board's prong via the named import below. The non-selected
-    // prong is dead comptime code, so registering both boards' leaves here is
-    // harmless (the unused module is never compiled).
-    const virt_timer_src = addFlashSource(b, "src/board/virt/timer.flash");
-    const virt_timer_mod = b.createModule(.{
-        .root_source_file = virt_timer_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const virt_gpio_src = addFlashSource(b, "src/board/virt/gpio.flash");
-    const virt_gpio_mod = b.createModule(.{
-        .root_source_file = virt_gpio_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const virt_power_src = addFlashSource(b, "src/board/virt/power.flash");
-    const virt_power_mod = b.createModule(.{
-        .root_source_file = virt_power_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const virt_mailbox_src = addFlashSource(b, "src/board/virt/mailbox.flash");
-    const virt_mailbox_mod = b.createModule(.{
-        .root_source_file = virt_mailbox_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const virt_usb_src = addFlashSource(b, "src/board/virt/usb.flash");
-    const virt_usb_mod = b.createModule(.{
-        .root_source_file = virt_usb_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const virt_emmc2_src = addFlashSource(b, "src/board/virt/emmc2.flash");
-    const virt_emmc2_mod = b.createModule(.{
-        .root_source_file = virt_emmc2_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    virt_emmc2_mod.addImport("block_dev", block_dev_mod);
-    // FDT parser — a sibling of uart/irq, not a board.zig switch prong;
-    // virt_uart and virt_irq reach it as the named "virt_dtb" import.
-    const virt_dtb_src = addFlashSource(b, "src/board/virt/dtb.flash");
-    const virt_dtb_mod = b.createModule(.{
-        .root_source_file = virt_dtb_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    const virt_uart_src = addFlashSource(b, "src/board/virt/uart.flash");
-    const virt_uart_mod = b.createModule(.{
-        .root_source_file = virt_uart_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    virt_uart_mod.addImport("virt_dtb", virt_dtb_mod);
 
     // Kernel-log adapter. Rust owns the ring arithmetic; this named Flash
     // module retains the shared BSS instance and its fixed C layout. Its last
@@ -582,42 +537,7 @@ pub fn build(b: *std.Build) void {
 
     // The remaining Flash interrupt controller is virt GICv3. The rpi4b
     // GICv2 path is Rust-owned, and so is the sampler its trace seam feeds.
-    const virt_irq_src = addFlashSource(b, "src/board/virt/irq.flash");
-    const virt_irq_mod = b.createModule(.{
-        .root_source_file = virt_irq_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    virt_irq_mod.addImport("virt_dtb", virt_dtb_mod);
-    virt_irq_mod.addImport("virt_uart", virt_uart_mod);
-    virt_irq_mod.addImport("console", console_mod);
-    virt_irq_mod.addImport("build_options", build_options_mod);
-    virt_irq_mod.addImport("task_layout", task_layout_mod);
 
-    // board: comptime indirection that aliases each driver slot to the active
-    // board's leaf module. Ported to Flash; flashc transpiles it via
-    // addFlashSource. Moved from a relative `@import("board.zig")` in start.zig
-    // to a named module — the generated .zig lives in the build cache, so the
-    // path import no longer resolves. start.zig force-imports it (`_ =
-    // board.uart` etc.) so each driver's `export fn` decls land in the ELF.
-    // Both boards' leaf modules are imported here; board.zig's comptime switch
-    // on build_options.board selects the active set, so the linker only keeps
-    // the chosen prong.
-    const board_src = addFlashSource(b, "src/board.flash");
-    const board_mod = b.createModule(.{
-        .root_source_file = board_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    board_mod.addImport("build_options", build_options_mod);
-    board_mod.addImport("virt_uart", virt_uart_mod);
-    board_mod.addImport("virt_gpio", virt_gpio_mod);
-    board_mod.addImport("virt_timer", virt_timer_mod);
-    board_mod.addImport("virt_irq", virt_irq_mod);
-    board_mod.addImport("virt_emmc2", virt_emmc2_mod);
-    board_mod.addImport("virt_usb", virt_usb_mod);
-    board_mod.addImport("virt_power", virt_power_mod);
-    board_mod.addImport("virt_mailbox", virt_mailbox_mod);
 
     // ---- kernel executable ----
     const kernel_mod = b.createModule(.{
@@ -733,22 +653,6 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("block_dev", block_dev_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
     kernel_mod.addImport("mailbox", mailbox_mod);
-    // Remaining virt driver leaves are named modules selected by board.zig.
-    kernel_mod.addImport("virt_timer", virt_timer_mod);
-    kernel_mod.addImport("virt_gpio", virt_gpio_mod);
-    kernel_mod.addImport("virt_power", virt_power_mod);
-    kernel_mod.addImport("virt_usb", virt_usb_mod);
-    kernel_mod.addImport("virt_emmc2", virt_emmc2_mod);
-    // virt_dtb + virt_uart: board.zig's uart prong selects virt_uart; the
-    // virt IRQ controller (virt_irq) reaches both by name (a sibling of
-    // uart/irq, not its own board.zig prong).
-    kernel_mod.addImport("virt_dtb", virt_dtb_mod);
-    kernel_mod.addImport("virt_uart", virt_uart_mod);
-    // The virt IRQ controller remains a named module.
-    kernel_mod.addImport("virt_irq", virt_irq_mod);
-    // board: the comptime driver-alias bag (src/board.flash). start.zig
-    // force-imports it so each active driver's export fns reach the linker.
-    kernel_mod.addImport("board", board_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
     kernel_mod.addImport("sha256", sha256_mod);
     kernel_mod.addImport("shadow", shadow_mod);
@@ -1323,7 +1227,10 @@ pub fn build(b: *std.Build) void {
     // linear map, so it stays kernel-only; the tests build a `Dtb` over a
     // hand-written blob and exercise findNode/getProp/findReg/findInterrupt
     // plus the corrupt-length guard. Imports only std → no stubs.
-    _ = addHostTest(b, test_step, .{ .src = "src/board/virt/dtb.flash", .src_lazy = virt_dtb_src });
+    // src/board/virt/dtb.flash's 4 host tests retired with the virt driver
+    // leaves: the parser they cover is not built or run anywhere. Recorded in
+    // the port's behaviour manifest; the source is still there to test again if
+    // virt is revived.
 
     // vanilla single-module test targets — shared stubs, no named imports.
     // wait_queue, pipe, console, and fdtable are Rust-owned now; their

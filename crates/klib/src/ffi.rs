@@ -21,9 +21,9 @@ use flashos_abi::syscall::{
 use flashos_abi::task::KeRegs;
 use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
-    initramfs_backend, klog_ring, kmain, mailbox, mm_user, page_alloc, path, perm, pipe,
-    rpi4b_emmc2, rpi4b_gpio, rpi4b_irq, rpi4b_mailbox, rpi4b_power, rpi4b_timer, rpi4b_uart,
-    rpi4b_usb, sched, sdhci_cmd, sha256, shadow, sys, trace, utilc, vfs,
+    initramfs_backend, klog_ring, kmain, mailbox, mm_user, page_alloc, path, perm, pipe, rpi4b_gpio,
+    rpi4b_irq, rpi4b_mailbox, rpi4b_timer, rpi4b_uart, sched, sdhci_cmd, sha256, shadow, sys, trace,
+    utilc, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -281,14 +281,6 @@ pub unsafe extern "C" fn handle_sys_timer_1() {
     unsafe { rpi4b_timer::handle_sys_timer_1() };
 }
 
-/// Request a full BCM2711 watchdog reset.
-///
-/// # Safety
-/// Called only from the terminal reboot syscall path.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_power_reboot() -> ! {
-    unsafe { rpi4b_power::reboot() }
-}
 
 /// Initialize the BCM2711 AUX mini-UART.
 ///
@@ -335,14 +327,6 @@ pub unsafe extern "C" fn mini_uart_send_string(string: *const u8) {
     unsafe { rpi4b_uart::mini_uart_send_string(string) };
 }
 
-/// Drain AUX RX into the shared console ring from the idle loop.
-///
-/// # Safety
-/// Called only by the single-core kernel idle path.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_uart_poll_rx_into_console() {
-    unsafe { rpi4b_uart::poll_rx_into_console() };
-}
 
 /// Query a VideoCore-managed clock rate.
 ///
@@ -353,23 +337,7 @@ pub unsafe extern "C" fn rpi4b_mailbox_get_clock_rate(clock_id: u32) -> u32 {
     unsafe { rpi4b_mailbox::get_clock_rate(clock_id) }
 }
 
-/// Read the SoC temperature in milli-degrees Celsius.
-///
-/// # Safety
-/// Called only from serialized board-driver paths.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_mailbox_get_temperature() -> u32 {
-    unsafe { rpi4b_mailbox::get_temperature() }
-}
 
-/// Read the firmware-reported ARM clock in Hz.
-///
-/// # Safety
-/// Called only from serialized board-driver paths.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_mailbox_get_cpu_clock() -> u32 {
-    unsafe { rpi4b_mailbox::get_cpu_clock() }
-}
 
 /// Set one firmware-managed GPIO. Returns one on success.
 ///
@@ -434,83 +402,17 @@ pub unsafe extern "C" fn handle_irq(frame: *mut KeRegs) {
     unsafe { rpi4b_irq::handle_irq(frame) };
 }
 
-/// Initialize the BCM2711 GICv2 CPU interface.
-///
-/// # Safety
-/// Called once during serialized board bring-up.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_board_irq_init() {
-    unsafe { rpi4b_irq::board_irq_init() };
-}
 
 // ---- EMMC2 SDHCI block device ----
 
-/// Bring the SD card up to transfer state and wire the block-device vtable.
-///
-/// # Safety
-/// Called once during serialized board bring-up, before any block I/O.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_emmc2_init() -> i32 {
-    unsafe { rpi4b_emmc2::init() }
-}
 
-/// Read one 512-byte sector.
-///
-/// # Safety
-/// `buf` must point to a live, writable 512-byte buffer.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_emmc2_read_block(lba: u32, buf: *mut [u8; 512]) -> i32 {
-    rpi4b_emmc2::read_block(lba, buf)
-}
 
-/// Write one 512-byte sector.
-///
-/// # Safety
-/// `buf` must point to a live, readable 512-byte buffer.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_emmc2_write_block(lba: u32, buf: *const [u8; 512]) -> i32 {
-    rpi4b_emmc2::write_block(lba, buf)
-}
 
 // ---- DWC2 USB-OTG gadget (CDC-ACM console) ----
 
-/// Bring the DWC2 core up as a detached Full-Speed CDC-ACM gadget.
-///
-/// # Safety
-/// Called once during serialized board bring-up.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_usb_init() -> i32 {
-    unsafe { rpi4b_usb::init() }
-}
 
-/// Service one GINTSTS pass from the idle loop or the timer-tick backstop.
-///
-/// # Safety
-/// Called on the single kernel core; a no-op until `rpi4b_usb_init` succeeded.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_usb_poll() {
-    unsafe { rpi4b_usb::poll() };
-}
 
-/// Whether the gadget is enumerated and its CDC data path is live.
-///
-/// # Safety
-/// Called on the single kernel core.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_usb_enumerated() -> bool {
-    unsafe { rpi4b_usb::enumerated() }
-}
 
-/// Queue console bytes for the host over EP2 bulk IN.
-///
-/// # Safety
-/// `ptr` must point to `len` readable bytes.
-#[no_mangle]
-pub unsafe extern "C" fn rpi4b_usb_cdc_tx(ptr: *const u8, len: u64) {
-    // SAFETY: the caller guarantees `ptr` covers `len` readable bytes.
-    let data = unsafe { core::slice::from_raw_parts(ptr, len as usize) };
-    unsafe { rpi4b_usb::cdc_tx(data) };
-}
 
 // ---- scheduler state and task lifecycle ----
 //

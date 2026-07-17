@@ -14,10 +14,9 @@
 //! userspace contract markers still hand-roll the `[ OK ]` form; migrating them
 //! onto console_ui is a follow-up.)
 //!
-//! The `board_*` trampolines in src/start.zig are the one seam this module still
-//! reaches by C symbol: they pick the active board's driver, which keeps the
-//! driver cutover local to that file. Everything else the sequence needs is a
-//! direct call into this crate.
+//! Board drivers are reached by direct call into this crate. The bring-up
+//! sequence still crosses a C symbol only where assembly owns the other side
+//! (`irq_init_vectors`, `schedule`, the patchable trampolines).
 
 /// The kernel's high-half (TTBR1) linear-map base.
 #[cfg(any(test, target_os = "none"))]
@@ -116,18 +115,6 @@ mod target {
             pub fn sys_call_table_relocate();
             #[cfg(feature = "boot-selftest")]
             pub fn dump_free_count() -> u64;
-
-            // Board-driver trampolines (src/start.zig).
-            pub fn board_irq_init();
-            pub fn board_usb_init() -> i32;
-            pub fn board_usb_poll();
-            pub fn board_emmc2_init() -> i32;
-            // Only the boot-as-test smoke moves blocks from the root.
-            #[cfg(feature = "boot-selftest")]
-            pub fn board_emmc2_write_block(lba: u32, buf: *const [u8; 512]) -> i32;
-            #[cfg(feature = "boot-selftest")]
-            pub fn board_emmc2_read_block(lba: u32, buf: *mut [u8; 512]) -> i32;
-            pub fn board_uart_poll_rx_into_console();
         }
     }
 
@@ -171,13 +158,13 @@ mod target {
         boot_sink(b"emmc2-block\n");
 
         // SAFETY: bring-up owns the device; both buffers outlive the calls.
-        if unsafe { seam::board_emmc2_write_block(EMMC2_BLOCK_LBA, &write_buf) } != 0 {
+        if unsafe { crate::rpi4b_emmc2::write_block(EMMC2_BLOCK_LBA, &write_buf) } != 0 {
             boot_sink(tags::FAIL_MARK);
             boot_sink(b"emmc2-block (write)\n");
             return;
         }
         // SAFETY: as above.
-        if unsafe { seam::board_emmc2_read_block(EMMC2_BLOCK_LBA, &mut read_buf) } != 0 {
+        if unsafe { crate::rpi4b_emmc2::read_block(EMMC2_BLOCK_LBA, &mut read_buf) } != 0 {
             boot_sink(tags::FAIL_MARK);
             boot_sink(b"emmc2-block (read)\n");
             return;
@@ -300,7 +287,7 @@ mod target {
         // Board-specific GIC bring-up: GICv3 needs ICC_*_EL1 + a per-core
         // redistributor wakeup. The Pi's GICv2 inlines to nothing.
         // SAFETY: forwarded bring-up ordering.
-        unsafe { seam::board_irq_init() };
+        unsafe { crate::rpi4b_irq::board_irq_init() };
 
         // SAFETY: the distributor is up and `id` is the running core.
         unsafe { rpi4b_irq::enable_interrupt_gic(VC_AUX_IRQ, id as u32) };
@@ -312,7 +299,7 @@ mod target {
         // the polled console simply never enumerates. Serviced from the PID-0
         // idle loop below.
         // SAFETY: forwarded bring-up ordering.
-        let usb_level = if unsafe { seam::board_usb_init() } < 0 {
+        let usb_level = if unsafe { crate::rpi4b_usb::init() } < 0 {
             console_ui::Level::Skip
         } else {
             console_ui::Level::Ok
@@ -349,7 +336,7 @@ mod target {
         // smoke check below exercises the BlockDev vtable end-to-end and proves
         // init() wired the callback pair.
         // SAFETY: forwarded bring-up ordering.
-        let emmc2_ok = unsafe { seam::board_emmc2_init() } >= 0;
+        let emmc2_ok = unsafe { crate::rpi4b_emmc2::init() } >= 0;
         boot.status(
             if emmc2_ok {
                 console_ui::Level::Ok
@@ -468,8 +455,8 @@ mod target {
                 // hardware; this only catches a byte left between IRQ slots.
                 // SAFETY: the idle loop holds no lock and both polls are bounded.
                 unsafe {
-                    seam::board_uart_poll_rx_into_console();
-                    seam::board_usb_poll();
+                    crate::rpi4b_uart::poll_rx_into_console();
+                    crate::rpi4b_usb::poll();
                     seam::schedule();
                 }
             }

@@ -25,8 +25,6 @@ unsafe extern "C" {
     fn handle_generic_timer();
     fn timer_tick();
     fn get_core() -> u32;
-    fn board_usb_poll();
-    fn board_usb_enumerated() -> bool;
 }
 
 #[cfg(not(target_os = "none"))]
@@ -37,6 +35,13 @@ unsafe fn timer_tick() {}
 unsafe fn get_core() -> u32 {
     0
 }
+
+/// The DWC2 gadget, reached by direct call. IRQ landed before the USB port, so
+/// this path used to reach the driver through a C trampoline; it consumes the
+/// module natively now.
+#[cfg(target_os = "none")]
+use crate::rpi4b_usb::{enumerated as board_usb_enumerated, poll as board_usb_poll};
+
 #[cfg(not(target_os = "none"))]
 unsafe fn board_usb_poll() {}
 #[cfg(not(target_os = "none"))]
