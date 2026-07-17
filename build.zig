@@ -332,29 +332,13 @@ pub fn build(b: *std.Build) void {
         if (std.mem.eql(u8, name, "screen")) console_ui_screen_src = dest;
     }
 
-    // User-space virtual address layout (text/data/heap/stack bases +
-    // per-region permission bits). The remaining Flash syscall handlers use
-    // these constants for brk bounds; Rust owns the matching loader and
-    // page-fault values in flashos-abi.
-    const user_layout_src = addFlashSource(b, "src/user_layout.flash");
-    const user_layout_mod = b.createModule(.{
-        .root_source_file = user_layout_src,
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // TaskStruct/CoreContext/etc. layout module. Already implicitly
-    // imported by kernel-root modules via `@import("task_layout.zig")`,
-    // but the named modules (wait_queue, pipe) need
-    // an explicit named import to keep task_layout.zig from being
-    // pulled into two sibling named modules through relative paths
-    // (which Zig 0.16 rejects as "file exists in two modules").
-    const task_layout_src = addFlashSource(b, "src/task_layout.flash");
-    const task_layout_mod = b.createModule(.{
-        .root_source_file = task_layout_src,
-        .target = target,
-        .optimize = optimize,
-    });
+    // The user_layout (user-space virtual address layout) and task_layout
+    // (TaskStruct/CoreContext extern-struct layouts) Flash modules were reached
+    // only through kernel modules that have since left the link; flashos-abi
+    // now owns those facts natively for every Rust consumer, and the assembly
+    // reads them from the hand-written arch/aarch64/asm_defs_common.inc. Nothing
+    // in the kernel root's import graph pulls either module in, so they carried
+    // zero symbols and are dropped here; their .flash files stay on disk.
 
     // The pipe / file / fdtable / vfs Zig adapters were export-less `pub fn`
     // pass-throughs over their Rust owners in crates/kernel; with the last
@@ -587,8 +571,6 @@ pub fn build(b: *std.Build) void {
 
     kernel_mod.addImport("build_options", build_options_mod);
     kernel_mod.addImport("syscall_defs", syscall_defs_mod);
-    kernel_mod.addImport("user_layout", user_layout_mod);
-    kernel_mod.addImport("task_layout", task_layout_mod);
     kernel_mod.addImport("path", path_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
