@@ -23,7 +23,7 @@ use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
     initramfs_backend, klog_ring, mailbox, mm_user, page_alloc, path, perm, pipe, rpi4b_emmc2,
     rpi4b_gpio, rpi4b_irq, rpi4b_mailbox, rpi4b_power, rpi4b_timer, rpi4b_uart, rpi4b_usb, sched,
-    sdhci_cmd, sha256, shadow, sys, utilc, vfs,
+    sdhci_cmd, sha256, shadow, sys, trace, utilc, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -1976,4 +1976,66 @@ pub unsafe extern "C" fn fos_fdtable_dup_all(
 ) {
     // SAFETY: forwarded task contract.
     unsafe { fdtable::dup_all(src, dst) }
+}
+
+// ---- Trace subsystem ----
+
+/// Bring up the PL011 trace UART.
+///
+/// # Safety
+/// Called once during bring-up, after the device mapping is installed.
+#[no_mangle]
+pub unsafe extern "C" fn pl011_uart_init() {
+    // SAFETY: forwarded bring-up ordering.
+    unsafe { trace::pl011_uart::pl011_uart_init() }
+}
+
+/// Send a NUL-terminated string over the PL011 trace UART.
+///
+/// # Safety
+/// `string` is NUL-terminated and the trace UART is up.
+#[no_mangle]
+pub unsafe extern "C" fn pl011_uart_send_string(string: *const u8) {
+    // SAFETY: forwarded NUL-termination contract.
+    unsafe { trace::pl011_uart::pl011_uart_send_string(string) }
+}
+
+/// Count the kernel symbols and dump the table over the trace UART.
+///
+/// # Safety
+/// Called once during bring-up, after the trace UART is up.
+#[no_mangle]
+pub unsafe extern "C" fn ksyms_init() {
+    // SAFETY: forwarded bring-up ordering.
+    unsafe { trace::ksyms::ksyms_init() }
+}
+
+/// Initialize dynamic tracing: relocate the entry table and patch the slots.
+///
+/// # Safety
+/// Called once during bring-up, after the trace UART is up.
+#[no_mangle]
+pub unsafe extern "C" fn trace_init() {
+    // SAFETY: forwarded bring-up ordering.
+    unsafe { trace::trace_main::trace_init() }
+}
+
+/// Dump the kernel's identity and high-half page tables over the trace UART.
+///
+/// # Safety
+/// Called during bring-up while the linker-placed tables are mapped.
+#[no_mangle]
+pub unsafe extern "C" fn trace_output_kernel_pts(interface: i32) {
+    // SAFETY: forwarded bring-up ordering.
+    unsafe { trace::utils::trace_output_kernel_pts(interface) }
+}
+
+/// Reached from `hook.S` after a patched `bl hook` — prints the traced symbol.
+///
+/// # Safety
+/// Called from the hook trampoline with the patched entry's address.
+#[no_mangle]
+pub unsafe extern "C" fn traced(real_func_entry: u64) {
+    // SAFETY: forwarded hook-trampoline contract.
+    unsafe { trace::trace_main::traced(real_func_entry) }
 }

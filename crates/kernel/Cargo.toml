@@ -10,6 +10,9 @@ name = "flashos_kernel"
 
 [features]
 verbose-fork = []
+# Compiles the statistical sampler into the IRQ path. Mirrors the build's
+# -Dtrace / --trace flag; without it the hook costs nothing.
+trace = []
 
 [dependencies]
 flashos-abi = { path = "../abi" }

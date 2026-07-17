@@ -20,3 +20,4 @@ flashos-kernel = { path = "../kernel" }
 
 [features]
 verbose-fork = ["flashos-kernel/verbose-fork"]
+trace = ["flashos-kernel/trace"]

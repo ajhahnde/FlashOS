@@ -645,38 +645,9 @@ pub fn build(b: *std.Build) void {
     // USB drivers. The VideoCore transaction itself is Rust-owned; this
     // module only forwards their existing method-shaped calls to C symbols.
 
-    // Trace-cluster named modules (kept in Zig; the profiler is opt-in and
-    // not on the boot contract). Promoted from kernel_mod-relative imports so
-    // the Flash-sourced IRQ drivers can reach the sampler by name — a named
-    // module can no longer be pulled in through a relative path once its
-    // source moves to the build cache. ksyms is force-imported by start.zig
-    // in every build (its symbol table backs the trace machinery); sampler +
-    // fp_walk are referenced only by the IRQ handlers' -Dtrace seam, so the
-    // default build never compiles them (the import sits in a dead comptime
-    // branch). Promoting all three to named modules keeps ksyms a member of
-    // exactly one module instead of landing in both kernel_mod and sampler.
-    const ksyms_mod = b.createModule(.{
-        .root_source_file = b.path("src/trace/ksyms.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const fp_walk_mod = b.createModule(.{
-        .root_source_file = b.path("src/trace/fp_walk.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const sampler_mod = b.createModule(.{
-        .root_source_file = b.path("src/trace/sampler.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    sampler_mod.addImport("task_layout", task_layout_mod);
-    sampler_mod.addImport("ksyms", ksyms_mod);
-    sampler_mod.addImport("fp_walk", fp_walk_mod);
 
     // The remaining Flash interrupt controller is virt GICv3. The rpi4b
-    // GICv2 path is Rust-owned; its saved-frame trace seam stays a no-op until
-    // the trace subsystem is ported.
+    // GICv2 path is Rust-owned, and so is the sampler its trace seam feeds.
     const virt_irq_src = addFlashSource(b, "src/board/virt/irq.flash");
     const virt_irq_mod = b.createModule(.{
         .root_source_file = virt_irq_src,
@@ -688,7 +659,6 @@ pub fn build(b: *std.Build) void {
     virt_irq_mod.addImport("console", console_mod);
     virt_irq_mod.addImport("build_options", build_options_mod);
     virt_irq_mod.addImport("task_layout", task_layout_mod);
-    virt_irq_mod.addImport("sampler", sampler_mod);
 
     // board: comptime indirection that aliases each driver slot to the active
     // board's leaf module. Ported to Flash; flashc transpiles it via
@@ -786,6 +756,9 @@ pub fn build(b: *std.Build) void {
     // module.
     const rust_klib_cmd = b.addSystemCommand(&.{ "cargo", "xtask", "klib" });
     if (verbose_fork) rust_klib_cmd.addArgs(&.{ "--feature", "verbose-fork" });
+    // -Dtrace compiles the sampler into the Rust IRQ path. Without it the hook
+    // is not merely disabled but absent, so a default kernel pays nothing.
+    if (trace) rust_klib_cmd.addArgs(&.{ "--feature", "trace" });
     rust_klib_cmd.addArg("--output");
     rust_klib_cmd.setName("cargo xtask klib");
     const klib_a = rust_klib_cmd.addOutputFileArg("libflashos_klib.a");
@@ -836,13 +809,11 @@ pub fn build(b: *std.Build) void {
     // uart/irq, not its own board.zig prong).
     kernel_mod.addImport("virt_dtb", virt_dtb_mod);
     kernel_mod.addImport("virt_uart", virt_uart_mod);
-    // The virt IRQ controller remains a named module. ksyms is still
-    // force-imported by start.zig for the existing trace machinery.
+    // The virt IRQ controller remains a named module.
     kernel_mod.addImport("virt_irq", virt_irq_mod);
     // board: the comptime driver-alias bag (src/board.flash). start.zig
     // force-imports it so each active driver's export fns reach the linker.
     kernel_mod.addImport("board", board_mod);
-    kernel_mod.addImport("ksyms", ksyms_mod);
     kernel_mod.addImport("klog_ring", klog_ring_mod);
     kernel_mod.addImport("sha256", sha256_mod);
     kernel_mod.addImport("shadow", shadow_mod);
@@ -1397,14 +1368,6 @@ pub fn build(b: *std.Build) void {
     // test; Rust-owned module tests run through `cargo xtask test` above.
     const test_step = b.step("test", "Run host-side unit tests");
     test_step.dependOn(hygiene_step);
-
-    // trace/fp_walk.zig — the -Dtrace sampler's AAPCS64 frame-pointer
-    // chain decoder. Pure `walkChain` over a flat stack-page view (no
-    // kernel externs), so the FP-record math + the bounds/alignment/
-    // monotonic guards are host-verified deterministically. The live
-    // sampler only fires on real-Pi async timer ticks, so this is the
-    // decode-correctness gate; no stubs, no imports.
-    _ = addHostTest(b, test_step, .{ .src = "src/trace/fp_walk.zig" });
 
     // grep match core — pure windowed substring matcher with ASCII case-fold.
     // No externs, no stubs, no SVC. /bin/grep carries its own matcher now; this one

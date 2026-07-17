@@ -124,11 +124,4 @@ comptime {
     // Rust-owned, the only remaining reference is a C-ABI call, so the module
     // needs a force-import of its own to reach the linker.
     _ = @import("klog_ring");
-
-    _ = @import("trace/utils.zig");
-    _ = @import("trace/trace_main.zig");
-    // ksyms is a named module (see build.zig) so the -Dtrace sampler can
-    // reach it without ksyms.zig ending up a member of two modules.
-    _ = @import("ksyms");
-    _ = @import("trace/pl011_uart.zig");
 }

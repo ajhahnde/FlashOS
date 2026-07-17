@@ -70,11 +70,18 @@ fn interrupt_id(iar: u32) -> u32 {
     iar & 0x3ff
 }
 
+/// Hand the saved exception frame to the sampler, which is compiled in only for
+/// a trace build.
 #[inline]
-fn trace_sample(_frame: *mut KeRegs) {
-    // The saved-frame seam is preserved for the trace port. The hook stays
-    // inert so the board-driver translation does not pull that subsystem
-    // forward.
+fn trace_sample(frame: *mut KeRegs) {
+    #[cfg(feature = "trace")]
+    // SAFETY: we are on the IRQ path, and `frame` is the exception frame the
+    // entry stub saved on the kernel stack we are running on.
+    unsafe {
+        crate::trace::sampler::trace_sample(frame)
+    };
+    #[cfg(not(feature = "trace"))]
+    let _ = frame;
 }
 
 /// Print the decoded exception-entry failure and its architectural fields.

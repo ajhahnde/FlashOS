@@ -60,18 +60,16 @@ extern var current *mut anyopaque
 
 const console = #import("console")
 
-// -Dtrace profiler seam. The empty stub keeps handle_irq's signature and
-// `frame` argument identical in a non-trace build (the call inlines to
-// nothing and emits no code), so the default kernel image is byte-for-byte
-// unchanged; only under -Dtrace does the sampler get pulled in.
+// -Dtrace profiler seam. The sampler moved to the Rust side, which this board
+// does not link, so the stub is now unconditional: it keeps handle_irq's
+// signature and `frame` argument identical, and the call inlines to nothing.
+// Nothing observable is lost — this board runs only under emulation, and the
+// timer IRQ that would drive a sample never fires there.
 const build_options = #import("build_options")
 const KeRegs = #import("task_layout").KeRegs
-const trace_sampler = if (build_options.trace)
-    #import("sampler")
-else
-    struct {
-        pub fn trace_sample(_ *mut KeRegs) void {}
-    }
+const trace_sampler = struct {
+    pub fn trace_sample(_ *mut KeRegs) void {}
+}
 
 const entry_error_messages = [_][*:0]u8{
     "SYNC_INVALID_EL1t",

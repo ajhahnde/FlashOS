@@ -47,6 +47,7 @@ pub mod sdhci_cmd;
 pub mod sha256;
 pub mod shadow;
 pub mod sys;
+pub mod trace;
 pub mod usb_descriptors;
 pub mod usb_tx_ring;
 pub mod utilc;

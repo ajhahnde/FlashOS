@@ -26,10 +26,13 @@ pub const PL: i32 = 1;
 mod seam {
     use crate::klog_ring;
 
+    /// The trace UART is Rust-owned, so the PL011 sink is a plain call rather
+    /// than a trip back out through the C ABI.
+    pub use crate::trace::pl011_uart::pl011_uart_send_string;
+
     unsafe extern "C" {
         pub fn mini_uart_send_string(string: *const u8);
         pub fn mini_uart_recv() -> u8;
-        pub fn pl011_uart_send_string(string: *const u8);
         pub fn err_hang() -> !;
         fn fos_klog_ring() -> *mut klog_ring::KlogRing;
     }
