@@ -1,7 +1,0 @@
-// Transitional kernel-root adapter for the Rust-owned initramfs VFS backend.
-
-extern fn fos_initramfs_backend_init() void
-
-pub fn init() void {
-    fos_initramfs_backend_init()
-}

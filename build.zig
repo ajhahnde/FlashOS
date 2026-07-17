@@ -298,14 +298,11 @@ pub fn build(b: *std.Build) void {
     });
 
     // console_ui — shared terminal look (status tags, ANSI palette, the
-    // boot-success marker, and the line/stage/banner renderers). Pure and
-    // target-agnostic (no .target, like shadow_mod): the one source compiles
-    // into every console-drawing binary — the kernel boot log and the
-    // userspace tools — so the whole system restyles from a single file.
-    // Output is routed through a caller-supplied Sink, so it depends on
-    // neither kernel internals nor flibc. Added to consumers below
-    // (kernel_mod, fsh_mod); unused until a call site @imports it, so staging
-    // it leaves every image byte-identical.
+    // boot-success marker, and the line/stage/banner renderers). No image
+    // consumes this copy any more: the kernel boot log was the last one, and it
+    // now renders through crates/console-ui. What remains is the pair the drift
+    // gate needs — the transpile that `cargo xtask ui-defs --check` parses to
+    // hold the Rust constants byte-identical, and the screen host test below.
     // console_ui is a multi-file Flash module: console_ui.flash re-exports its
     // palette / tags / screen siblings through relative imports. flashc
     // transpiles one file at a time, so compose the generated .zig into a single
@@ -314,17 +311,12 @@ pub fn build(b: *std.Build) void {
     // std/selfhost modules. lib/console_ui/*.flash is the source of truth.
     const console_ui_dir = b.addWriteFiles();
     const console_ui_files = [_][]const u8{ "palette", "tags", "screen", "console_ui" };
-    var console_ui_root: std.Build.LazyPath = undefined;
     var console_ui_screen_src: std.Build.LazyPath = undefined;
     for (console_ui_files) |name| {
         const gen = addFlashSource(b, b.fmt("lib/console_ui/{s}.flash", .{name}));
         const dest = console_ui_dir.addCopyFile(gen, b.fmt("{s}.zig", .{name}));
-        if (std.mem.eql(u8, name, "console_ui")) console_ui_root = dest;
         if (std.mem.eql(u8, name, "screen")) console_ui_screen_src = dest;
     }
-    const console_ui_mod = b.createModule(.{
-        .root_source_file = console_ui_root,
-    });
 
     // User-space virtual address layout (text/data/heap/stack bases +
     // per-region permission bits). The remaining Flash syscall handlers use
@@ -357,19 +349,6 @@ pub fn build(b: *std.Build) void {
     // so it no longer has a Flash-visible named module.
     const pipe_mod = b.createModule(.{
         .root_source_file = b.path("src/pipe.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Initramfs parser module. Pure-data newc cpio
-    // walker with linker-provided section bounds; no external imports
-    // needed in freestanding (the host-test build flips a comptime
-    // branch onto fixture globals — see src/initramfs.flash). Ported to
-    // Flash; the one flashc transpile is shared with the host-test builds
-    // below (src_lazy), including initramfs_backend's test module.
-    const initramfs_src = addFlashSource(b, "src/initramfs.flash");
-    const initramfs_mod = b.createModule(.{
-        .root_source_file = initramfs_src,
         .target = target,
         .optimize = optimize,
     });
@@ -410,19 +389,6 @@ pub fn build(b: *std.Build) void {
     // vfs.zig re-exports the shared Dirent ABI type for the
     // readdir vtable signature.
     vfs_mod.addImport("syscall_defs", syscall_defs_mod);
-
-    // Initramfs VFS backend. Thin wrapper turning
-    // initramfs.zig's locate/read/seek into a VfsOps vtable — kept
-    // separate from initramfs.zig so the parser stays VFS-agnostic
-    // and host-testable in isolation.
-    // Transpiled from src/initramfs_backend.flash; shared with the
-    // host-test build below (src_lazy).
-    const initramfs_backend_src = addFlashSource(b, "src/initramfs_backend.flash");
-    const initramfs_backend_mod = b.createModule(.{
-        .root_source_file = initramfs_backend_src,
-        .target = target,
-        .optimize = optimize,
-    });
 
     // Block-device abstraction. Single global
     // `sd_dev` vtable that the FAT32 backend reads + writes
@@ -577,15 +543,6 @@ pub fn build(b: *std.Build) void {
 
 
 
-    // Boot adapter for the Rust-owned FAT32 VFS backend. The board-owned
-    // `sd_dev` callback record remains in the block_dev module.
-    const fat32_backend_src = addFlashSource(b, "src/fat32_backend.flash");
-    const fat32_backend_mod = b.createModule(.{
-        .root_source_file = fat32_backend_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    fat32_backend_mod.addImport("block_dev", block_dev_mod);
 
     // Console RX adapter (src/console.zig): a thin shim over the Rust-owned
     // console ring in crates/kernel. The 256-byte ring, its WaitQueue, and the
@@ -617,29 +574,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
-    // Boot sequence + main loop. Ported to Flash; flashc transpiles it via
-    // addFlashSource. Moved from a relative `@import("kernel.zig")` in
-    // start.zig to a named module — the generated .zig lives in the build
-    // cache, so the path import no longer resolves. start.zig force-includes
-    // it (`_ = @import("kernel")`) so kernel_main_impl + the other export fns
-    // land in the ELF; boot.S/entry.S reach kernel_main by symbol. The board
-    // driver bag is not imported here — kernel reaches its board entry points
-    // through C-ABI trampolines in src/start.zig (the kernel root imports the
-    // board bag as a named module). No host test: kernel.zig carries no tests.
-    const kernel_src = addFlashSource(b, "src/kernel.flash");
-    const kernel_kmod = b.createModule(.{
-        .root_source_file = kernel_src,
-        .target = target,
-        .optimize = optimize,
-    });
-    kernel_kmod.addImport("initramfs", initramfs_mod);
-    kernel_kmod.addImport("initramfs_backend", initramfs_backend_mod);
-    kernel_kmod.addImport("fat32_backend", fat32_backend_mod);
-    kernel_kmod.addImport("fdtable", fdtable_mod);
-    kernel_kmod.addImport("task_layout", task_layout_mod);
-    kernel_kmod.addImport("console_ui", console_ui_mod);
-    kernel_kmod.addImport("build_options", build_options_mod);
 
     // Temporary source-level facade used by the still-Flash rpi4b EMMC2 and
     // USB drivers. The VideoCore transaction itself is Rust-owned; this
@@ -759,6 +693,10 @@ pub fn build(b: *std.Build) void {
     // -Dtrace compiles the sampler into the Rust IRQ path. Without it the hook
     // is not merely disabled but absent, so a default kernel pays nothing.
     if (trace) rust_klib_cmd.addArgs(&.{ "--feature", "trace" });
+    // -Dboot-selftest compiles the boot-as-test path into the kernel root: the
+    // pre-PID-1 EMMC2 block smoke and the free-page baseline emit. Without it a
+    // clean boot carries neither.
+    if (boot_selftest) rust_klib_cmd.addArgs(&.{ "--feature", "boot-selftest" });
     rust_klib_cmd.addArg("--output");
     rust_klib_cmd.setName("cargo xtask klib");
     const klib_a = rust_klib_cmd.addOutputFileArg("libflashos_klib.a");
@@ -790,11 +728,8 @@ pub fn build(b: *std.Build) void {
     kernel_mod.addImport("console", console_mod);
     kernel_mod.addImport("sched", sched_mod);
     kernel_mod.addImport("path", path_mod);
-    kernel_mod.addImport("initramfs", initramfs_mod);
     kernel_mod.addImport("file", file_mod);
     kernel_mod.addImport("vfs", vfs_mod);
-    kernel_mod.addImport("initramfs_backend", initramfs_backend_mod);
-    kernel_mod.addImport("fat32_backend", fat32_backend_mod);
     kernel_mod.addImport("block_dev", block_dev_mod);
     kernel_mod.addImport("sdhci_cmd", sdhci_cmd_mod);
     kernel_mod.addImport("mailbox", mailbox_mod);
@@ -821,11 +756,6 @@ pub fn build(b: *std.Build) void {
     // sys_passwd authorization: uid -> login-name lookup against
     // /etc/passwd (the same parser /bin/login and fsh's whoami import).
     kernel_mod.addImport("pwfile", pwfile_mod);
-    // console_ui: shared terminal look for the boot log. Staged but not yet
-    // @imported by any kernel source, so the kernel image stays byte-identical
-    // until the migration call sites land.
-    kernel_mod.addImport("console_ui", console_ui_mod);
-    kernel_mod.addImport("kernel", kernel_kmod);
 
     // ---- hello.elf — Rust payload for [TEST] exec-elf ----
     // xtask builds the first production Rust EL0 program as the same

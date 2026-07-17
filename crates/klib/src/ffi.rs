@@ -21,9 +21,9 @@ use flashos_abi::syscall::{
 use flashos_abi::task::KeRegs;
 use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
-    initramfs_backend, klog_ring, mailbox, mm_user, page_alloc, path, perm, pipe, rpi4b_emmc2,
-    rpi4b_gpio, rpi4b_irq, rpi4b_mailbox, rpi4b_power, rpi4b_timer, rpi4b_uart, rpi4b_usb, sched,
-    sdhci_cmd, sha256, shadow, sys, trace, utilc, vfs,
+    initramfs_backend, klog_ring, kmain, mailbox, mm_user, page_alloc, path, perm, pipe,
+    rpi4b_emmc2, rpi4b_gpio, rpi4b_irq, rpi4b_mailbox, rpi4b_power, rpi4b_timer, rpi4b_uart,
+    rpi4b_usb, sched, sdhci_cmd, sha256, shadow, sys, trace, utilc, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -2038,4 +2038,23 @@ pub unsafe extern "C" fn trace_output_kernel_pts(interface: i32) {
 pub unsafe extern "C" fn traced(real_func_entry: u64) {
     // SAFETY: forwarded hook-trampoline contract.
     unsafe { trace::trace_main::traced(real_func_entry) }
+}
+
+// ---- Kernel root ----
+
+/// The kernel root, reached from the `kernel_main` trampoline in
+/// src/trace/patchable_trampolines.S, which `_start` (arch/aarch64/boot.S) calls.
+///
+/// Unlike the rest of this module, this export is not a language bridge: the
+/// caller is assembler, so it outlives the Flash seam. It lives here because only
+/// a symbol the staticlib itself defines is guaranteed to survive into the
+/// archive — nothing else in the link references the root by Rust path.
+///
+/// # Safety
+/// Entered once per core from the boot path, with the MMU on and the identity map
+/// live.
+#[no_mangle]
+pub unsafe extern "C" fn kernel_main_impl(id: u64) {
+    // SAFETY: forwarded boot-path contract.
+    unsafe { kmain::kernel_main_impl(id) }
 }

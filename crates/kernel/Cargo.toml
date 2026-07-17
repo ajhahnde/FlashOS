@@ -13,6 +13,12 @@ verbose-fork = []
 # Compiles the statistical sampler into the IRQ path. Mirrors the build's
 # -Dtrace / --trace flag; without it the hook costs nothing.
 trace = []
+# Compiles the boot-as-test path into the kernel root: the pre-PID-1 EMMC2 block
+# smoke and the free-page baseline emit. Mirrors the build's -Dboot-selftest, so
+# a clean boot carries neither. A feature, not an environment read, because it is
+# part of cargo's fingerprint -- flipping it rebuilds the archive instead of
+# leaving a stale one that boots without the checks it claims to run.
+boot-selftest = []
 
 [dependencies]
 flashos-abi = { path = "../abi" }

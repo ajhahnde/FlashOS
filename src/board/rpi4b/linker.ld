@@ -55,6 +55,13 @@ SECTIONS
         *(.bss.*)
         *(COMMON)
     }
+    /* memzero (arch/aarch64/mm.S) clears in 8-byte stores and rounds the count
+     * up, so it writes up to 7 bytes past bss_end. bss_begin is already
+     * 8-aligned; align the end to match, or the overrun lands in whatever the
+     * linker placed next. That is not hypothetical: with .initramfs only
+     * 4-aligned and butted against a 4-aligned bss_end, the overrun zeroed the
+     * cpio magic and PID 1 vanished from the archive. */
+    . = ALIGN(0x8);
     bss_end = .;
 
     /* Embedded initramfs. Placed between bss_end and

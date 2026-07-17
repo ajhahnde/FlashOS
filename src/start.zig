@@ -1,9 +1,10 @@
 // start: kernel entry root for the Zig build.
 //
 // The entry point is `_start` in arch/aarch64/boot.S, which calls `kernel_main`
-// (kernel.flash). Zig's executable target needs a root module; this file
-// is it: every other kernel module is pulled in here via comptime
-// @import so all `export fn` decls land in the final ELF.
+// (src/trace/patchable_trampolines.S) and lands in the Rust kernel root. Zig's
+// executable target still needs a root module; this file is it: every remaining
+// Zig/Flash kernel module is pulled in here via comptime @import so all
+// `export fn` decls land in the final ELF.
 
 const board = @import("board");
 const build_options = @import("build_options");
@@ -112,7 +113,6 @@ export fn board_mailbox_cpu_clock() u32 {
 }
 
 comptime {
-    _ = @import("kernel");
     _ = board.uart;
     _ = board.gpio;
     _ = board.timer;
