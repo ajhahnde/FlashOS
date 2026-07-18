@@ -14,7 +14,7 @@
 #[cfg(target_os = "none")]
 use flashos_flibc::{err_sink, sys};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg_ptr, entry, Argv};
+use flashsdk_rt::{arg_ptr, entry, Argv};
 
 #[cfg(target_os = "none")]
 fn main(argc: usize, argv: Argv) -> i32 {

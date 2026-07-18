@@ -20,7 +20,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use flashos_abi::syscall::NR_SYSCALLS;
+use flashsdk_abi::syscall::NR_SYSCALLS;
 use flashos_abi::task::{KeRegs, TaskStruct};
 
 /// The one include the .S files read the three facts from today.

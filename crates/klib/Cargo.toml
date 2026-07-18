@@ -16,6 +16,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 flashos-abi = { path = "../abi" }
+flashsdk-abi = { workspace = true }
 flashos-kernel = { path = "../kernel" }
 
 [features]

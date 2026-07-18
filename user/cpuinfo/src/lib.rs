@@ -14,7 +14,7 @@ use flashos_console_ui::{banner, screen};
 #[cfg(target_os = "none")]
 use flashos_flibc::{console_sink, Buf};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{entry, Argv};
+use flashsdk_rt::{entry, Argv};
 
 #[cfg(target_os = "none")]
 fn main(_argc: usize, _argv: Argv) -> i32 {

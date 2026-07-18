@@ -17,7 +17,7 @@ use flashos_flibc::{
     Part::{Str, Udec},
 };
 #[cfg(target_os = "none")]
-use flashos_user_rt::{entry, Argv};
+use flashsdk_rt::{entry, Argv};
 
 #[cfg(target_os = "none")]
 const FORKS: u32 = 16;

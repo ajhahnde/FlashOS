@@ -21,7 +21,7 @@ pub mod probe;
 mod harness;
 
 #[cfg(target_os = "none")]
-use flashos_user_rt::{entry, syscall as sys, Argv};
+use flashsdk_rt::{entry, syscall as sys, Argv};
 
 /// The login supervisor PID 1 hands the machine to.
 #[cfg(target_os = "none")]

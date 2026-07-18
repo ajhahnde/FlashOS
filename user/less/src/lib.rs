@@ -35,7 +35,7 @@ use flashos_flibc::tui::{self, Buffer, Cell, Event, Style, ATTR_REVERSE};
 #[cfg(target_os = "none")]
 use flashos_flibc::{console_input, console_sink, keys::Key, sys};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg, arg_ptr, entry, Argv};
+use flashsdk_rt::{arg, arg_ptr, entry, Argv};
 
 // Assumed serial-terminal geometry. One header row (the title bar), one status row,
 // the rest content. No window-size query exists, so these are fixed.

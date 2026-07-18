@@ -20,7 +20,7 @@ use flashos_console_ui::{banner, screen};
 #[cfg(target_os = "none")]
 use flashos_flibc::{console_sink, sys, Buf};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{entry, Argv};
+use flashsdk_rt::{entry, Argv};
 
 /// The one version string in the Rust tree, inherited from the Cargo workspace.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

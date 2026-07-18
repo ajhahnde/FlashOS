@@ -32,11 +32,11 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[cfg(target_os = "none")]
-use flashos_abi::syscall::EACCES;
+use flashsdk_abi::syscall::EACCES;
 #[cfg(target_os = "none")]
 use flashos_flibc::{console_sink, err_sink, grep_match, sys};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg, arg_ptr, entry, Argv};
+use flashsdk_rt::{arg, arg_ptr, entry, Argv};
 
 /// Read granularity from the source descriptor: one syscall per chunk.
 #[cfg(target_os = "none")]

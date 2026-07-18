@@ -9,7 +9,6 @@ members = [
     "crates/kernel",
     "crates/klib",
     "crates/pwfile",
-    "crates/user-rt",
     "user/argv-echo",
     "user/cat",
     "user/clear",

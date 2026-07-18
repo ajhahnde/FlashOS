@@ -12,7 +12,7 @@
 #[cfg(target_os = "none")]
 use flashos_flibc::{printf, Part::Str};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg, entry, Argv};
+use flashsdk_rt::{arg, entry, Argv};
 
 /// Read-only padding that pushes the linked ELF past one page.
 #[cfg(target_os = "none")]

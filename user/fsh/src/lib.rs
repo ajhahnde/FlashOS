@@ -24,7 +24,7 @@
 pub mod tokenize;
 
 #[cfg(target_os = "none")]
-use flashos_abi::syscall::Dirent;
+use flashsdk_abi::syscall::Dirent;
 #[cfg(target_os = "none")]
 use flashos_console_ui::{homescreen, palette, render_prompt};
 #[cfg(target_os = "none")]
@@ -34,7 +34,7 @@ use flashos_flibc::readline::{readline_edit, Completion, HistSlot, History, Outc
 #[cfg(target_os = "none")]
 use flashos_flibc::{console_sink, err_sink, printf, sys, Part};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{cstr_bytes, entry, Argv};
+use flashsdk_rt::{cstr_bytes, entry, Argv};
 #[cfg(target_os = "none")]
 use tokenize::{Arg, MAX_ARGS};
 

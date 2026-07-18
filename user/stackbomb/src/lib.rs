@@ -13,10 +13,10 @@
 // Nothing here calls the runtime, but every no_std payload needs its panic handler,
 // and an unreferenced dependency is not loaded -- so name it.
 #[cfg(target_os = "none")]
-extern crate flashos_user_rt as _;
+extern crate flashsdk_rt as _;
 
 #[cfg(target_os = "none")]
-use flashos_abi::user::STACK_BUDGET;
+use flashsdk_abi::user::STACK_BUDGET;
 
 // Each frame pushes 1 KiB. The recursion is only representative if the budget allows
 // a real descent before the guard page stops it, so hold that floor here rather than

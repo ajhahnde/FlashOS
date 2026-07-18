@@ -10,7 +10,7 @@ name = "flashos_passwd"
 crate-type = ["staticlib"]
 
 [dependencies]
-flashos-abi = { path = "../../crates/abi" }
+flashsdk-abi = { workspace = true }
 flashos-flibc = { path = "../../crates/flibc" }
 flashos-pwfile = { path = "../../crates/pwfile" }
-flashos-user-rt = { path = "../../crates/user-rt" }
+flashsdk-rt = { workspace = true }

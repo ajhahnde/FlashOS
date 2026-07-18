@@ -9,5 +9,6 @@ license.workspace = true
 name = "flashos_flibc"
 
 [dependencies]
-flashos-abi = { path = "../abi" }
-flashos-user-rt = { path = "../user-rt" }
+flashsdk-abi = { workspace = true }
+flashsdk-rt = { workspace = true }
+flashsdk-base = { workspace = true }

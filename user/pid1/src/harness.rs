@@ -13,8 +13,8 @@
 
 use crate::marks::*;
 use crate::probe::*;
-use flashos_abi::syscall::{Dirent, EACCES};
-use flashos_user_rt::syscall as sys;
+use flashsdk_abi::syscall::{Dirent, EACCES};
+use flashsdk_rt::syscall as sys;
 
 // ---- output -----------------------------------------------------------------
 

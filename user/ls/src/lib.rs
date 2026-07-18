@@ -8,11 +8,11 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[cfg(target_os = "none")]
-use flashos_abi::syscall::{Dirent, DT_DIR};
+use flashsdk_abi::syscall::{Dirent, DT_DIR};
 #[cfg(target_os = "none")]
 use flashos_flibc::{console_sink, sys};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg_ptr, entry, Argv};
+use flashsdk_rt::{arg_ptr, entry, Argv};
 
 /// Walk the directory at `path` by index. The readdir syscall is stateless -- there
 /// is no open handle -- so the walk counts up until the kernel stops filling entries.

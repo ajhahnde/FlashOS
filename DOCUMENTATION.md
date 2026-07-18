@@ -63,8 +63,7 @@ crates/kernel/                          active Rust kernel implementation
   rpi4b_*.rs                            active Pi drivers
   src/trace/                            symbol lookup, entry tracing, and sampling
 crates/klib/                            static-link and C-ABI export seam
-crates/user-rt/                         EL0 entry point, panic path, and raw syscalls
-crates/flibc/                           userland I/O, process, heap, and TUI support
+crates/flibc/                           userland engines (readline, pager, TUI)
 crates/console-ui/                      shared boot/status rendering
 crates/pwfile/                          shared /etc/passwd parser
 
@@ -335,10 +334,11 @@ check. There are no ACLs, supplementary groups, setuid bits, `chmod`,
 
 ### Userland
 
-`crates/user-rt/` provides the EL0 entry and SVC transport.
-`crates/flibc/` adds formatted output, readline/history/completion, process
-wrappers, a bump heap, key decoding, pager and gap-buffer cores, and TUI
-rendering.
+The FlashSDK `flashsdk-rt` crate provides the EL0 entry and SVC transport, and
+`flashsdk-base` the formatted output, process wrappers, and bump heap; both are
+consumed at one pinned revision. `crates/flibc/` adds the userland engines on
+top: readline/history/completion, key decoding, pager and gap-buffer cores, and
+TUI rendering.
 
 `fsh` implements built-ins in-process and forks external commands. Bare
 command names resolve to `/bin/<name>`; there is no environment or `PATH`
@@ -389,8 +389,8 @@ The active syscall groups are:
 
 Slots 0, 5, 8, 9, 11, 23, 24, and 27–29 are retired and permanently return
 an error. Slots 14–17 and 19–22 are reserved stubs. The ABI definitions,
-`NR_SYSCALLS = 56`, `Dirent`, and `EACCES = 13` live in
-`crates/abi/src/syscall.rs`.
+`NR_SYSCALLS = 56`, `Dirent`, and `EACCES = 13` live in the FlashSDK
+`flashsdk-abi` crate, consumed at one pinned revision.
 
 Synchronous faults decode ESR and the fault address in the board IRQ/exception
 path. Recoverable user translation faults are handled by

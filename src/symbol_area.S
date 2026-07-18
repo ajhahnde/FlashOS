@@ -1191,7 +1191,7 @@
 .string "flashos_kernel::vfs::MOUNT_TABLE"
 .space 23
 .quad 0x00000000001831a8
-.string "_RNvNtCslLenoelWSCo_14flashos_kernel3vfs11MOUNT_TABLE.1"
+.string "_RNvNtCseOS1KrjzySR_14flashos_kernel3vfs11MOUNT_TABLE.1"
 .space 0
 .quad 0x00000000001831b0
 .string "flashos_kernel::fat32::DIR_SECTOR_SCRATCH"
@@ -1271,7 +1271,7 @@
 .quad 0x0000000000187d60
 .string "bss_end"
 .space 48
-.quad 0x000000000019d940
+.quad 0x000000000019d850
 .string "__initramfs_end"
 .space 40
 .quad 0x000000000019e000

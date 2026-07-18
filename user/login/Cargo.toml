@@ -12,4 +12,4 @@ crate-type = ["staticlib"]
 [dependencies]
 flashos-flibc = { path = "../../crates/flibc" }
 flashos-pwfile = { path = "../../crates/pwfile" }
-flashos-user-rt = { path = "../../crates/user-rt" }
+flashsdk-rt = { workspace = true }

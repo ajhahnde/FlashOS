@@ -11,16 +11,17 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod completion;
-pub mod execvp;
 pub mod gapbuf;
 pub mod grep_match;
-pub mod heap;
-pub mod io;
 pub mod keys;
 pub mod pager;
-pub mod process;
 pub mod readline;
 pub mod tui;
+
+// The base modules now live in FlashSDK; re-export them under their original
+// paths so the engines' `crate::io` and the tools' `flashos_flibc::{io, process,
+// heap, execvp}` both keep resolving unchanged.
+pub use flashsdk_base::{execvp, heap, io, process};
 
 pub use io::{Buf, Part, Sink, Writer};
 
@@ -28,7 +29,7 @@ pub use io::{Buf, Part, Sink, Writer};
 /// not wrap (the file surface, the hardware monitors, the kernel log) reaches it
 /// here rather than re-deriving the trap.
 #[cfg(target_os = "none")]
-pub use flashos_user_rt::syscall as sys;
+pub use flashsdk_rt::syscall as sys;
 
 #[cfg(target_os = "none")]
 pub use heap::{free, malloc};

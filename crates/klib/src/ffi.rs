@@ -6,7 +6,7 @@
 //! `extern "C"`, `#[no_mangle]`, no panic across the boundary, and no Rust type
 //! without a fixed representation.
 
-use flashos_abi::syscall::{
+use flashsdk_abi::syscall::{
     NR_SYSCALLS, SYS_AUTHENTICATE, SYS_BRK, SYS_CHDIR, SYS_CLOSE, SYS_CLOSE_CONSOLE,
     SYS_CONSOLE_INJECT, SYS_CPU_FREQ, SYS_CPU_TEMP, SYS_CREATE, SYS_DUMP_FREE, SYS_DUP2,
     SYS_EXECVE, SYS_EXIT, SYS_FORK, SYS_GETCWD, SYS_GETEGID, SYS_GETEUID, SYS_GETGID, SYS_GETUID,

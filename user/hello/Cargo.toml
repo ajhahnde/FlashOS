@@ -10,4 +10,4 @@ name = "flashos_hello"
 crate-type = ["staticlib"]
 
 [dependencies]
-flashos-user-rt = { path = "../../crates/user-rt" }
+flashsdk-rt = { workspace = true }

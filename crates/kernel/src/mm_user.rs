@@ -8,10 +8,9 @@
 use core::ffi::c_void;
 
 pub use flashos_abi::task::TaskStruct;
-use flashos_abi::{
-    task::{UserPage, MAX_PAGE_COUNT},
-    user,
-};
+use flashos_abi::task::{UserPage, MAX_PAGE_COUNT};
+use flashos_abi::user::{TD_USER_PAGE_FLAGS_DEFAULT, TD_USER_XN};
+use flashsdk_abi::user;
 
 const PAGE_SHIFT: u32 = 12;
 const TABLE_SHIFT: u32 = 9;
@@ -512,7 +511,7 @@ pub unsafe fn do_data_abort(
     }
 
     let fault_uva = far & PAGE_MASK;
-    let rw_nx = user::TD_USER_PAGE_FLAGS_DEFAULT | user::TD_USER_XN;
+    let rw_nx = TD_USER_PAGE_FLAGS_DEFAULT | TD_USER_XN;
     // SAFETY: `current` is the active live task.
     let current_brk = unsafe { brk_ptr(current).read() };
 
@@ -597,7 +596,7 @@ pub unsafe fn do_el0_sync_fault(esr: u64, elr: u64, services: &Services) -> i32 
 }
 
 unsafe fn soft_demand_alloc(current: *mut TaskStruct, fault_uva: u64, services: &Services) -> i32 {
-    let rw_nx = user::TD_USER_PAGE_FLAGS_DEFAULT | user::TD_USER_XN;
+    let rw_nx = TD_USER_PAGE_FLAGS_DEFAULT | TD_USER_XN;
     // SAFETY: `current` is the active live task.
     let current_brk = unsafe { brk_ptr(current).read() };
     let legal = (user::HEAP_BASE..current_brk).contains(&fault_uva)

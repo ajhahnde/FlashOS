@@ -28,7 +28,7 @@ use flashos_flibc::{
     sys, wait,
 };
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg, entry, Argv};
+use flashsdk_rt::{arg, entry, Argv};
 
 #[cfg(target_os = "none")]
 const PASSWD_PATH: &[u8] = b"/etc/passwd\0";

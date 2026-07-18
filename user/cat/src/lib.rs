@@ -9,11 +9,11 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[cfg(target_os = "none")]
-use flashos_abi::syscall::EACCES;
+use flashsdk_abi::syscall::EACCES;
 #[cfg(target_os = "none")]
 use flashos_flibc::{console_sink, err_sink, sys};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg_ptr, entry, Argv};
+use flashsdk_rt::{arg_ptr, entry, Argv};
 
 #[cfg(target_os = "none")]
 const BUF_LEN: usize = 512;

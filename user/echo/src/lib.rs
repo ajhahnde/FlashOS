@@ -13,7 +13,7 @@
 #[cfg(target_os = "none")]
 use flashos_flibc::Writer;
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg, entry, Argv};
+use flashsdk_rt::{arg, entry, Argv};
 
 #[cfg(target_os = "none")]
 fn main(argc: usize, argv: Argv) -> i32 {

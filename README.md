@@ -83,9 +83,10 @@ console setup are documented in **[Setup](SETUP.md)**.
   they corrupt memory.
 - **Unified file descriptors**. Console, pipe, and file descriptors share
   one API with inherited and redirectable standard I/O.
-- **Future platform stack.** After the Rust-port release, **FlashSDK** will
-  define the narrow public syscall/userspace ABI, EL0 runtime, base library,
-  and target-and-link contract.
+- **Platform stack.** **[FlashSDK](https://github.com/ajhahnde/FlashSDK)**
+  defines the narrow public syscall/userspace ABI, EL0 runtime, base library,
+  and target-and-link contract; the kernel and every user program consume it at
+  one pinned revision.
   **[FlashShell](https://github.com/ajhahnde/FlashShell)** will be its first
   product consumer. **[FlashUI](https://ajhahn.de/repos/FlashUI/)** will follow
   as a native TUI that embeds FlashShell and becomes the post-login default;
@@ -112,10 +113,9 @@ A deeper walk-through of each subsystem is in [Documentation](DOCUMENTATION.md).
 arch/aarch64/               AArch64 ISA core (boot, vectors, context switch)
 src/                        board/linker glue, trace assembly, generated symbols
 src/board/<name>/           per-board assembly definitions + linker script
-crates/abi/                 shared kernel/user/assembly layouts and syscall IDs
+crates/abi/                 kernel-private task, ELF, and page-descriptor layouts
 crates/kernel/              Rust kernel implementation
-crates/flibc/               Rust userland mini-libc for ELF programs
-crates/user-rt/             Rust EL0 entry, syscall, panic, and memory runtime
+crates/flibc/               Rust userland engines (readline, pager, TUI) for ELF programs
 user/                       Rust PID 1, shell, tools, and test executables
 rootfs/                     static initramfs and FAT32 seed files
 tools/                      retained ELF linker scripts + initramfs embed assembly

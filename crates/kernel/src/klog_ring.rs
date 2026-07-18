@@ -7,7 +7,7 @@
 
 use core::ptr::{addr_of, addr_of_mut, read_volatile, write_volatile};
 
-use flashos_abi::syscall::KLOG_SIZE;
+use flashsdk_abi::syscall::KLOG_SIZE;
 
 pub const SIZE: usize = KLOG_SIZE as usize;
 

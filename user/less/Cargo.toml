@@ -10,6 +10,6 @@ name = "flashos_less"
 crate-type = ["staticlib"]
 
 [dependencies]
-flashos-abi = { path = "../../crates/abi" }
+flashsdk-abi = { workspace = true }
 flashos-flibc = { path = "../../crates/flibc" }
-flashos-user-rt = { path = "../../crates/user-rt" }
+flashsdk-rt = { workspace = true }

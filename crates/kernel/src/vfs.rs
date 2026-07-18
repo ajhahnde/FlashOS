@@ -5,7 +5,7 @@ use core::cell::UnsafeCell;
 use core::ffi::c_int;
 use core::mem::{align_of, offset_of, size_of};
 
-pub use flashos_abi::syscall::{Dirent, DT_DIR, DT_REG};
+pub use flashsdk_abi::syscall::{Dirent, DT_DIR, DT_REG};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]

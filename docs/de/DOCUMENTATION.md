@@ -77,8 +77,7 @@ crates/kernel/                      aktive Rust-Kernelimplementierung
   crates/kernel/src/rpi4b_emmc2.rs, rpi4b_usb.rs  repräsentative Pi-Treiber
   crates/kernel/src/trace/          Symbollookup, Entry-Tracing und Sampling
 crates/klib/                        Static-Link- und C-ABI-Export-Seam
-crates/user-rt/                     EL0-Entry, Panic-Pfad und rohe Syscalls
-crates/flibc/                       Userland-I/O, Prozesse, Heap und TUI-Support
+crates/flibc/                       Userland-Engines (Readline, Pager, TUI)
 crates/console-ui/                  gemeinsame Boot-/Statusdarstellung
 crates/pwfile/                      gemeinsamer /etc/passwd-Parser
 
@@ -356,9 +355,11 @@ Open-Mode-Flags fehlen noch.
 
 ### Userland
 
-`crates/user-rt/` stellt EL0-Entry und SVC-Transport bereit. `crates/flibc/`
-ergänzt formatierte Ausgabe, Readline/History/Completion, Prozess-Wrapper,
-Bump-Heap, Key-Decoding, Pager- und Gap-Buffer-Cores sowie TUI-Rendering.
+Das FlashSDK-Crate `flashsdk-rt` stellt EL0-Entry und SVC-Transport bereit,
+`flashsdk-base` die formatierte Ausgabe, Prozess-Wrapper und den Bump-Heap; beide
+werden an einer fixierten Revision eingebunden. `crates/flibc/` ergänzt die
+Userland-Engines darauf: Readline/History/Completion, Key-Decoding, Pager- und
+Gap-Buffer-Cores sowie TUI-Rendering.
 
 `fsh` führt Built-ins im eigenen Prozess aus und forkt externe Kommandos.
 Bloße Kommandonamen werden als `/bin/<name>` aufgelöst; Environment und
@@ -407,8 +408,8 @@ aus `crates/kernel/src/sys.rs`.
 
 Die Slots 0, 5, 8, 9, 11, 23, 24 und 27–29 sind stillgelegt und liefern
 dauerhaft einen Fehler; 14–17 und 19–22 sind reservierte Stubs. ABI-Definitionen,
-`NR_SYSCALLS = 56`, `Dirent` und `EACCES = 13` liegen in
-`crates/abi/src/syscall.rs`.
+`NR_SYSCALLS = 56`, `Dirent` und `EACCES = 13` liegen im FlashSDK-Crate
+`flashsdk-abi`, das an einer fixierten Revision eingebunden wird.
 
 Synchrone Faults dekodieren ESR und Fault-Adresse im Board-IRQ-/Exception-Pfad.
 Behandelbare User-Translation-Faults übernimmt

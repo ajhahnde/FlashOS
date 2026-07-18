@@ -56,7 +56,7 @@ name = "flashos-argv-echo"
 version = "0.8.0"
 dependencies = [
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -67,9 +67,9 @@ version = "0.8.0"
 name = "flashos-cat"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -78,7 +78,7 @@ version = "0.8.0"
 dependencies = [
  "flashos-console-ui",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -90,7 +90,7 @@ name = "flashos-cp"
 version = "0.8.0"
 dependencies = [
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -99,16 +99,16 @@ version = "0.8.0"
 dependencies = [
  "flashos-console-ui",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-dmesg"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -116,24 +116,25 @@ name = "flashos-echo"
 version = "0.8.0"
 dependencies = [
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-edit"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-flibc"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-base",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -141,7 +142,7 @@ name = "flashos-flibc-demo"
 version = "0.8.0"
 dependencies = [
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -149,34 +150,34 @@ name = "flashos-forkbomb"
 version = "0.8.0"
 dependencies = [
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-fsh"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-console-ui",
  "flashos-flibc",
  "flashos-pwfile",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-grep"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-hello"
 version = "0.8.0"
 dependencies = [
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -186,6 +187,7 @@ dependencies = [
  "flashos-abi",
  "flashos-console-ui",
  "flashos-pwfile",
+ "flashsdk-abi",
  "hmac",
  "pbkdf2",
  "sha2",
@@ -197,15 +199,16 @@ version = "0.8.0"
 dependencies = [
  "flashos-abi",
  "flashos-kernel",
+ "flashsdk-abi",
 ]
 
 [[package]]
 name = "flashos-less"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -214,16 +217,16 @@ version = "0.8.0"
 dependencies = [
  "flashos-flibc",
  "flashos-pwfile",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-ls"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -231,7 +234,7 @@ name = "flashos-meminfo"
 version = "0.8.0"
 dependencies = [
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -239,27 +242,27 @@ name = "flashos-mv"
 version = "0.8.0"
 dependencies = [
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-passwd"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-flibc",
  "flashos-pwfile",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-pid1"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-console-ui",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -271,15 +274,15 @@ name = "flashos-rm"
 version = "0.8.0"
 dependencies = [
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashos-stackbomb"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
- "flashos-user-rt",
+ "flashsdk-abi",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -289,7 +292,7 @@ dependencies = [
  "flashos-console-ui",
  "flashos-flibc",
  "flashos-pwfile",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
@@ -298,14 +301,28 @@ version = "0.8.0"
 dependencies = [
  "flashos-console-ui",
  "flashos-flibc",
- "flashos-user-rt",
+ "flashsdk-rt",
 ]
 
 [[package]]
-name = "flashos-user-rt"
-version = "0.8.0"
+name = "flashsdk-abi"
+version = "0.1.0"
+source = "git+https://github.com/ajhahnde/FlashSDK?rev=20e71ca35ce265a7c13876284ae72b3f26ea1e7b#20e71ca35ce265a7c13876284ae72b3f26ea1e7b"
+
+[[package]]
+name = "flashsdk-base"
+version = "0.1.0"
+source = "git+https://github.com/ajhahnde/FlashSDK?rev=20e71ca35ce265a7c13876284ae72b3f26ea1e7b#20e71ca35ce265a7c13876284ae72b3f26ea1e7b"
 dependencies = [
- "flashos-abi",
+ "flashsdk-rt",
+]
+
+[[package]]
+name = "flashsdk-rt"
+version = "0.1.0"
+source = "git+https://github.com/ajhahnde/FlashSDK?rev=20e71ca35ce265a7c13876284ae72b3f26ea1e7b#20e71ca35ce265a7c13876284ae72b3f26ea1e7b"
+dependencies = [
+ "flashsdk-abi",
 ]
 
 [[package]]
@@ -379,4 +396,5 @@ dependencies = [
  "flashos-abi",
  "flashos-console-ui",
  "flashos-kernel",
+ "flashsdk-abi",
 ]

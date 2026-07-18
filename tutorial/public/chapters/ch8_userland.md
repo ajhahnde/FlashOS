@@ -30,9 +30,9 @@ served read-only by `crates/kernel/src/initramfs_backend.rs`.
 
 ## The runtime boundary
 
-`crates/user-rt/` supplies the `_start`-side EL0 runtime, panic path, memory
-intrinsics, and raw SVC transport. The loader enters a program with a stack
-containing `argc`, the `argv` pointer array, and NUL-terminated argument
+The FlashSDK `flashsdk-rt` crate supplies the `_start`-side EL0 runtime, panic
+path, memory intrinsics, and raw SVC transport. The loader enters a program with
+a stack containing `argc`, the `argv` pointer array, and NUL-terminated argument
 strings.
 
 A teaching-sized entry shape looks like this:
@@ -46,8 +46,8 @@ pub extern "C" fn main(argc: usize, argv: *const *const u8) -> i32 {
 ```
 
 The exact exported symbol and panic glue are supplied by each user crate and
-`crates/user-rt/`; inspect the real crate before treating a simplified snippet
-as linkable code.
+the FlashSDK `flashsdk-rt` crate; inspect the real crate before treating a
+simplified snippet as linkable code.
 
 ## `flibc`
 

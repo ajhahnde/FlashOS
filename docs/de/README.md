@@ -118,10 +118,9 @@ Eine ausführliche Tour durch die Subsysteme steht in der
 arch/aarch64/               AArch64-ISA-Core (Boot, Vektoren, Context Switch)
 src/                        Board-/Linker-Glue, Trace-Assembly, generierte Symbole
 src/board/<name>/           Board-spezifische Assembly-Definitionen + Linker-Skript
-crates/abi/                 gemeinsame Kernel/User/Assembly-Layouts und Syscall-IDs
+crates/abi/                 kernelprivate Task-, ELF- und Page-Deskriptor-Layouts
 crates/kernel/              Rust-Kernelimplementierung
-crates/flibc/               Rust-Userland-Mini-libc für ELF-Programme
-crates/user-rt/             Rust-EL0-Entry, Syscalls, Panic- und Memory-Runtime
+crates/flibc/               Rust-Userland-Engines (Readline, Pager, TUI) für ELF-Programme
 user/                       Rust-PID-1, Shell, Tools und Testprogramme
 rootfs/                     statische Initramfs- und FAT32-Seed-Dateien
 tools/                      verbliebene ELF-Linker-Skripte + Initramfs-Embed-Assembly

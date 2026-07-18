@@ -51,7 +51,7 @@ use flashos_flibc::tui::{self, Buffer, Cell, Style, ATTR_REVERSE};
 #[cfg(target_os = "none")]
 use flashos_flibc::{alt_enter, alt_leave, console_sink, grep_match, malloc, park_cursor, sys};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg, arg_ptr, entry, Argv};
+use flashsdk_rt::{arg, arg_ptr, entry, Argv};
 
 // Assumed serial-terminal geometry (no window-size ioctl exists). Row 1 is the
 // header, row ROWS the status/prompt line, the rest content.

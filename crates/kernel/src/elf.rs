@@ -7,7 +7,7 @@ pub use flashos_abi::elf::{
     Ehdr, Phdr, ELFCLASS64, ELFDATA2LSB, ELF_MAGIC, EM_AARCH64, ET_EXEC, EV_CURRENT, MAX_PHDRS,
     PF_R, PF_W, PF_X, PT_LOAD,
 };
-use flashos_abi::user::{DATA_BASE, STACK_LOW};
+use flashsdk_abi::user::{DATA_BASE, STACK_LOW};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParseError {
@@ -190,7 +190,7 @@ use core::mem::size_of;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flashos_abi::user::STACK_TOP;
+    use flashsdk_abi::user::STACK_TOP;
 
     const EHSIZE: usize = size_of::<Ehdr>();
     const PHENTSIZE: usize = size_of::<Phdr>();

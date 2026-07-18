@@ -7,11 +7,14 @@ license.workspace = true
 publish = false
 
 # No third-party dependencies by design: the host build orchestrator is part of
-# the clean-room surface, so its supply chain stays empty. The one dependency is
-# in-tree: `asm-defs` derives the assembly-visible layout facts from the ABI
-# crate itself, so the numbers it checks cannot be a stale copy.
+# the clean-room surface, so its supply chain stays empty. Its dependencies are
+# FlashOS-family crates: `asm-defs` derives the assembly-visible layout facts
+# from the kernel-private ABI crate (the exception-frame size and core_context
+# offset) and from the pinned FlashSDK ABI (the syscall dispatch cap), so the
+# numbers it checks cannot be a stale copy.
 [dependencies]
 flashos-abi = { path = "../crates/abi" }
+flashsdk-abi = { workspace = true }
 flashos-console-ui = { path = "../crates/console-ui" }
 # `gen-shadow` runs the kernel's own PBKDF2 to bake /etc/shadow, so the verifier
 # in the image is produced by the exact code that later checks it at login.

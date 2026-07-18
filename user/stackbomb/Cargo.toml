@@ -10,6 +10,6 @@ name = "flashos_stackbomb"
 crate-type = ["staticlib"]
 
 [dependencies]
-flashos-abi = { path = "../../crates/abi" }
+flashsdk-abi = { workspace = true }
 # Not called -- linked for the EL0 panic handler every no_std payload must supply.
-flashos-user-rt = { path = "../../crates/user-rt" }
+flashsdk-rt = { workspace = true }

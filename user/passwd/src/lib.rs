@@ -16,11 +16,11 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[cfg(target_os = "none")]
-use flashos_abi::syscall::EACCES;
+use flashsdk_abi::syscall::EACCES;
 #[cfg(target_os = "none")]
 use flashos_flibc::{console_input, console_sink, err_sink, sys};
 #[cfg(target_os = "none")]
-use flashos_user_rt::{arg, entry, Argv};
+use flashsdk_rt::{arg, entry, Argv};
 
 #[cfg(target_os = "none")]
 const PASSWD_PATH: &[u8] = b"/etc/passwd\0";

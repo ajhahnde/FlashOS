@@ -45,9 +45,9 @@
 #[cfg(target_os = "none")]
 use crate::{completion, io, keys};
 #[cfg(target_os = "none")]
-use flashos_abi::syscall::{Dirent, DT_DIR};
+use flashsdk_abi::syscall::{Dirent, DT_DIR};
 #[cfg(target_os = "none")]
-use flashos_user_rt::syscall;
+use flashsdk_rt::syscall;
 
 /// Copy `src` into `dst`, returning the number of bytes copied (the shorter of the
 /// two lengths). A long source is clipped rather than rejected.

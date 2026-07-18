@@ -3,9 +3,9 @@
 An EL0 program cannot call a kernel Rust function directly. It places the
 syscall number in `x8`, arguments in `x0` through `x5`, and executes `svc #0`.
 
-The raw wrappers live in `crates/user-rt/src/syscall.rs`. Exception entry lives
-in `arch/aarch64/entry.S`; handler logic and the relocated dispatch table live
-in `crates/kernel/src/sys.rs`.
+The raw wrappers live in the FlashSDK `flashsdk-rt` crate (`syscall.rs`).
+Exception entry lives in `arch/aarch64/entry.S`; handler logic and the relocated
+dispatch table live in `crates/kernel/src/sys.rs`.
 
 ## Entry frame
 
@@ -26,15 +26,12 @@ EL0 wrapper
 
 ## ABI ownership
 
-`crates/abi/src/syscall.rs` defines syscall IDs and shared value types such as
-`Dirent`. It is an internal repository ABI today. It also contains some
-assembly-visible and kernel-adjacent data that must not automatically become a
-future public contract.
-
-The planned FlashSDK will extract a narrow public syscall/userspace ABI,
-runtime, base library, and target-and-link contract only after the Rust-port
-release. Private task records, saved frames, VFS objects, and descriptor
-internals stay private.
+The FlashSDK `flashsdk-abi` crate defines syscall IDs and shared value types
+such as `Dirent`; the kernel and every user program consume it at one pinned
+revision. FlashSDK is the narrow public syscall/userspace ABI, runtime, base
+library, and target-and-link contract. Private task records, saved frames, VFS
+objects, descriptor internals, and the user-page descriptor bits stay private in
+the repository's own `crates/abi`.
 
 ## Current syscall groups
 

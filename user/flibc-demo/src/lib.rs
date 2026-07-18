@@ -24,7 +24,7 @@ use flashos_flibc::{
     Part::{Dec, Str},
 };
 #[cfg(target_os = "none")]
-use flashos_user_rt::syscall;
+use flashsdk_rt::syscall;
 
 #[cfg(target_os = "none")]
 const ALLOC_BYTES: u64 = 32;
