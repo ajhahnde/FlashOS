@@ -68,10 +68,10 @@ const HIST_N: usize = 16;
 #[cfg(target_os = "none")]
 const AUTHOR: &[u8] = b"ajhahnde";
 
-/// The project version, read out of `build.zig.zon` by this crate's build script, so
-/// no release literal is spelled here.
+/// The project version, taken from the Cargo workspace version (the single source),
+/// so no release literal is spelled here.
 #[cfg(target_os = "none")]
-const VERSION: &[u8] = env!("FLASHOS_VERSION").as_bytes();
+const VERSION: &[u8] = env!("CARGO_PKG_VERSION").as_bytes();
 
 /// Built-in names, offered alongside `/bin` for first-token TAB completion. They
 /// dispatch in-process, so a directory listing alone would never surface them.

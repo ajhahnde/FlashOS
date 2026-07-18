@@ -4,8 +4,6 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-# The homescreen version, single-sourced from build.zig.zon.
-build = "build.rs"
 
 [lib]
 name = "flashos_fsh"
