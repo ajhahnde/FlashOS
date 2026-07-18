@@ -230,6 +230,71 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
     Ok(p)
 }
 
+/// Build `armstub8.bin` — the tiny EL3→EL1 shim the firmware drops at address 0
+/// before the kernel. Asm-only (the "root" is `armstub8.S`; there is no Rust or
+/// Zig half), rpi4b-only, and self-contained: its `asm_defs.inc` lives beside it
+/// in `armstub/src`, so a single include dir suffices — no `arch/aarch64`. No
+/// `-DBCM2711`/`-DHIGH_PERI` is passed, matching build.zig, so the `#if BCM2711`
+/// path assembles with BCM2711 undefined (0) and HIGH_PERI absent.
+///
+/// Returns the path to the raw `armstub8.bin`.
+pub fn armstub(root: &Path, tc: &Toolchain) -> Result<PathBuf, String> {
+    // Shares the rpi4b out dir + trace so the clean-room guard sees this spawn.
+    let p = Paths::new(root, Board::Rpi4b);
+    fs::create_dir_all(p.out.join("obj")).map_err(|e| format!("mkdir {}: {e}", p.out.display()))?;
+
+    let src_dir = root.join("armstub/src");
+    let src = src_dir.join("armstub8.S");
+    let obj = p.out.join("obj").join("armstub8.o");
+    let elf = p.out.join("armstub8.elf");
+    let bin = p.out.join("armstub8.bin");
+
+    // 1. Assemble. Same clang flags the kernel/canary use for the retained .S,
+    //    with armstub's own include dir as the only search path.
+    Cmd::new(tc.clang.clone(), &p.trace)
+        .args([
+            "--target=aarch64-unknown-none-elf".into(),
+            "-c".into(),
+            "-ffreestanding".into(),
+            "-fno-pic".into(),
+            format!("-I{}", src_dir.display()),
+            "-o".into(),
+            obj.display().to_string(),
+            src.display().to_string(),
+        ])
+        .run()?;
+
+    // 2. Link with armstub's script (ENTRY(_start), .text at 0). `--no-gc-sections`
+    //    and the 4 KiB max page size match build.zig.
+    let script = src_dir.join("linker.ld");
+    Cmd::new(tc.lld.clone(), &p.trace)
+        .args([
+            "-flavor".to_string(),
+            "gnu".to_string(),
+            "-T".to_string(),
+            script.display().to_string(),
+            "-z".to_string(),
+            "max-page-size=0x1000".to_string(),
+            "--no-gc-sections".to_string(),
+            "-o".to_string(),
+            elf.display().to_string(),
+            obj.display().to_string(),
+        ])
+        .run()?;
+
+    // 3. Raw binary the firmware expects.
+    Cmd::new(tc.objcopy.clone(), &p.trace)
+        .args([
+            "-O".to_string(),
+            "binary".to_string(),
+            elf.display().to_string(),
+            bin.display().to_string(),
+        ])
+        .run()?;
+
+    Ok(bin)
+}
+
 /// Symbol-table lines belonging to `core::fmt`, over *demangled* nm output.
 ///
 /// The formatting engine is a code-size and symbol-count multiplier that eats the

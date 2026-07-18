@@ -30,6 +30,7 @@ Commands:
                                Build the full production kernel image natively (payloads,
                                initramfs, kernel link) — no zig. `kernel` is an alias.
   canary --board <rpi4b|virt>   Build the Rust canary kernel (ELF + raw image)
+  armstub                       Build the rpi4b EL3->EL1 shim (armstub8.elf + .bin)
   smoke  --board <rpi4b|virt>   Build the canary, boot it in QEMU, assert the marker
   guard  --board <rpi4b|virt> [--full] [gate flags]
                                Build under the clean-room guard (no zig/flashc): the
@@ -82,6 +83,12 @@ fn dispatch() -> Result<(), String> {
             let tc = Toolchain::discover()?;
             let p = build::canary(&root, board, &tc)?;
             println!("built {}", p.img().display());
+            Ok(())
+        }
+        "armstub" => {
+            let tc = Toolchain::discover()?;
+            let bin = build::armstub(&root, &tc)?;
+            println!("built {}", bin.display());
             Ok(())
         }
         "build" | "kernel" => {
