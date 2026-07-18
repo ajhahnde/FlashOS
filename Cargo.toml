@@ -43,6 +43,14 @@ edition = "2021"
 rust-version = "1.97"
 license = "Apache-2.0"
 
+# FlashSDK: the public userspace foundation, pinned to one exact revision. The
+# kernel, flibc, xtask, and every user program consume these instead of local
+# copies of the syscall ABI, EL0 runtime, and base library.
+[workspace.dependencies]
+flashsdk-abi = { git = "https://github.com/ajhahnde/FlashSDK", rev = "20e71ca35ce265a7c13876284ae72b3f26ea1e7b" }
+flashsdk-rt = { git = "https://github.com/ajhahnde/FlashSDK", rev = "20e71ca35ce265a7c13876284ae72b3f26ea1e7b" }
+flashsdk-base = { git = "https://github.com/ajhahnde/FlashSDK", rev = "20e71ca35ce265a7c13876284ae72b3f26ea1e7b" }
+
 # Bare-metal profile shared by every target-side crate. panic=abort and
 # overflow-checks=off keep the panic path free of core::fmt: the handler emits a
 # fixed marker, so the formatting engine never links and the 128 KiB symbol
