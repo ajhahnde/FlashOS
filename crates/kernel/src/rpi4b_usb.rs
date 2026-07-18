@@ -377,6 +377,9 @@ fn trace(text: &'static [u8]) {
     unsafe { utilc::main_output(TRACE, text.as_ptr()) };
 }
 
+// The `b"…\0"` literals are deliberate nul-terminated u8 buffers for
+// `main_output`'s `*const u8` sink; a `c"…"` would hand it a `*const c_char`.
+#[allow(clippy::manual_c_str_literals)]
 fn trace_hex(text: &'static [u8], value: u64) {
     if !TRACE_VERBOSE {
         return;
@@ -518,6 +521,7 @@ fn arm_ep2_out() {
 ///     it simply NAKs the host's interrupt polls.
 ///   * EP2 IN  — bulk, MPS 64, TX FIFO #2. Driven by `service_tx_ring`.
 ///   * EP2 OUT — bulk, MPS 64. Armed here; bytes route to `console_push`.
+///
 /// SetD0PID starts each toggle at DATA0; the core auto-toggles afterwards.
 fn configure_data_endpoints() {
     reg_write(
@@ -565,6 +569,9 @@ fn deconfigure_data_endpoints() {
 // SETUP decode + standard-request dispatch
 // ---------------------------------------------------------------------------
 
+// `b"…\0"` literals are nul-terminated u8 buffers for `main_output`'s
+// `*const u8` sink, not `CStr`s.
+#[allow(clippy::manual_c_str_literals)]
 fn dispatch_setup() {
     // SAFETY: `SETUP_PACKET` was filled by the serialized RX-FIFO drain; the
     // trace sink is the serialized bring-up log.

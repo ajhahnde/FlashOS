@@ -857,12 +857,24 @@ const INITRAMFS: &[(&str, u32, ArcSource)] = &[
     ("bin/rm", 0o100755, ArcSource::User("rm")),
     ("bin/sysinfo", 0o100755, ArcSource::User("sysinfo")),
     ("bin/uptime", 0o100755, ArcSource::User("uptime")),
-    ("etc/fshrc", 0o100644, ArcSource::Static("user_space/fsh/fshrc")),
-    ("etc/passwd", 0o100644, ArcSource::Static("user_space/etc/passwd")),
+    (
+        "etc/fshrc",
+        0o100644,
+        ArcSource::Static("user_space/fsh/fshrc"),
+    ),
+    (
+        "etc/passwd",
+        0o100644,
+        ArcSource::Static("user_space/etc/passwd"),
+    ),
     ("etc/shadow", 0o100600, ArcSource::Shadow),
     ("sbin/init", 0o100755, ArcSource::User("pid1")),
     ("test/argv_echo.elf", 0o100755, ArcSource::User("argv_echo")),
-    ("test/flibc_demo.elf", 0o100755, ArcSource::User("flibc_demo")),
+    (
+        "test/flibc_demo.elf",
+        0o100755,
+        ArcSource::User("flibc_demo"),
+    ),
     ("test/hello.elf", 0o100755, ArcSource::User("hello")),
     ("test/stackbomb.elf", 0o100755, ArcSource::User("stackbomb")),
 ];
@@ -911,7 +923,11 @@ fn build_initramfs(root: &Path, tc: &Toolchain, feats: KernelFeatures) -> Result
             ArcSource::User(stem) => {
                 let spec = user_elf(stem)?;
                 // PID 1 is the one payload that carries build-time features.
-                let features = if *stem == "pid1" { feats.pid1() } else { Vec::new() };
+                let features = if *stem == "pid1" {
+                    feats.pid1()
+                } else {
+                    Vec::new()
+                };
                 build_user_elf(root, tc, spec, Some(&staged), &features)?;
             }
             ArcSource::Static(rel) => {
@@ -1036,7 +1052,12 @@ mod tests {
         // The encoder writes entries in list order and the sha256 depends on it;
         // a duplicate or an out-of-order arc silently changes the archive.
         for w in INITRAMFS.windows(2) {
-            assert!(w[0].0 < w[1].0, "initramfs arcs not strictly sorted: {} !< {}", w[0].0, w[1].0);
+            assert!(
+                w[0].0 < w[1].0,
+                "initramfs arcs not strictly sorted: {} !< {}",
+                w[0].0,
+                w[1].0
+            );
         }
     }
 

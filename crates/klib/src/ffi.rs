@@ -21,9 +21,9 @@ use flashos_abi::syscall::{
 use flashos_abi::task::KeRegs;
 use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
-    initramfs_backend, klog_ring, kmain, mailbox, mm_user, page_alloc, path, perm, pipe, rpi4b_gpio,
-    rpi4b_irq, rpi4b_mailbox, rpi4b_timer, rpi4b_uart, sched, sdhci_cmd, sha256, shadow, sys, trace,
-    utilc, vfs,
+    initramfs_backend, klog_ring, kmain, mailbox, mm_user, page_alloc, path, perm, pipe,
+    rpi4b_gpio, rpi4b_irq, rpi4b_mailbox, rpi4b_timer, rpi4b_uart, sched, sdhci_cmd, sha256,
+    shadow, sys, trace, utilc, vfs,
 };
 
 const NONE: usize = usize::MAX;
@@ -281,7 +281,6 @@ pub unsafe extern "C" fn handle_sys_timer_1() {
     unsafe { rpi4b_timer::handle_sys_timer_1() };
 }
 
-
 /// Initialize the BCM2711 AUX mini-UART.
 ///
 /// # Safety
@@ -327,7 +326,6 @@ pub unsafe extern "C" fn mini_uart_send_string(string: *const u8) {
     unsafe { rpi4b_uart::mini_uart_send_string(string) };
 }
 
-
 /// Query a VideoCore-managed clock rate.
 ///
 /// # Safety
@@ -336,8 +334,6 @@ pub unsafe extern "C" fn mini_uart_send_string(string: *const u8) {
 pub unsafe extern "C" fn rpi4b_mailbox_get_clock_rate(clock_id: u32) -> u32 {
     unsafe { rpi4b_mailbox::get_clock_rate(clock_id) }
 }
-
-
 
 /// Set one firmware-managed GPIO. Returns one on success.
 ///
@@ -402,17 +398,9 @@ pub unsafe extern "C" fn handle_irq(frame: *mut KeRegs) {
     unsafe { rpi4b_irq::handle_irq(frame) };
 }
 
-
 // ---- EMMC2 SDHCI block device ----
 
-
-
-
 // ---- DWC2 USB-OTG gadget (CDC-ACM console) ----
-
-
-
-
 
 // ---- scheduler state and task lifecycle ----
 //

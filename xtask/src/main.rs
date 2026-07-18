@@ -114,7 +114,10 @@ fn dispatch() -> Result<(), String> {
             let dst = root.join("src/symbol_area.S");
             std::fs::write(&dst, content).map_err(|e| format!("write {}: {e}", dst.display()))?;
             println!("       -> symbol area: {used} bytes");
-            println!("wrote {} — re-run `cargo xtask build` to relink", dst.display());
+            println!(
+                "wrote {} — re-run `cargo xtask build` to relink",
+                dst.display()
+            );
             Ok(())
         }
         "smoke" => {

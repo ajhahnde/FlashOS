@@ -930,6 +930,9 @@ mod tests {
         assert_eq!(INTERRUPT_ERR_MASK & INTERRUPT_WRITE_RDY, 0);
     }
 
+    // Asserts on a compile-time constant on purpose; kept a runnable test for
+    // the failure message.
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn identification_delay_covers_four_sd_clocks_at_the_id_clock() {
         // 4 cycles at ~390 kHz is ~10.3 µs; the constant rounds up.

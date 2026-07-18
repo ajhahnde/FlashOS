@@ -358,6 +358,9 @@ mod tests {
         assert_eq!(out, "main_recv bad interface\n");
     }
 
+    // Field-by-field on a defaulted struct is clearer here than a struct
+    // literal, since `task.mm.pgd` reaches into a nested sub-struct.
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn a_task_dump_keeps_its_field_order_and_labels() {
         let mut task = TaskStruct::default();

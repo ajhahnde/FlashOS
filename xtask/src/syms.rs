@@ -40,8 +40,8 @@ const MAX_SYM_NAME_LEN: usize = ENTRY_SIZE - 8 - 1;
 /// as a segment:
 ///
 ///   * `Cs<base62>_`  the crate-root disambiguator (its base62 hash can start with
-///                    a digit — `Cs1VexIXjCVNi_` would otherwise read as a 1-byte
-///                    segment "V")
+///     a digit — `Cs1VexIXjCVNi_` would otherwise read as a 1-byte
+///     segment "V")
 ///   * `B<base62>_`   a backreference to an earlier segment
 ///
 /// If the joined path still exceeds the entry's name budget, leading segments are
@@ -221,7 +221,7 @@ mod tests {
         // would take a 1-byte segment "V". The `Cs..._` skip prevents that.
         let d = demangle_v0("_RNvCs1VexIXjCVNi_14flashos_kernel4main").unwrap();
         assert_eq!(d, "flashos_kernel::main");
-        assert!(!d.contains('V') || d.contains("VexI") == false);
+        assert!(!d.contains('V') || !d.contains("VexI"));
     }
 
     #[test]
@@ -254,8 +254,14 @@ mod tests {
         let seg = "a".repeat(30);
         let sym = format!("_RNvNtNtCs0_4crate30{seg}30{seg}30{seg}");
         let d = demangle_v0(&sym).unwrap();
-        assert!(d.len() <= MAX_SYM_NAME_LEN, "path {d:?} exceeds the entry budget");
-        assert!(d.ends_with(&seg), "the trailing (function) segment must survive");
+        assert!(
+            d.len() <= MAX_SYM_NAME_LEN,
+            "path {d:?} exceeds the entry budget"
+        );
+        assert!(
+            d.ends_with(&seg),
+            "the trailing (function) segment must survive"
+        );
     }
 
     #[test]

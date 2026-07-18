@@ -533,6 +533,9 @@ mod tests {
         assert_eq!(first, second);
     }
 
+    // The asserts guard compile-time constants on purpose; keep them runnable
+    // tests for the named failure messages rather than const asserts.
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn scratch_lba_stays_in_the_fat32_reserved_window() {
         // The retarget's whole point: LBA 2064 must sit between the BPB at 2048

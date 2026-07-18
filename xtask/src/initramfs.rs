@@ -96,7 +96,7 @@ fn write_hex8(out: &mut Vec<u8>, v: u32) {
 /// the header) and the data.
 fn pad_to_4(out: &mut Vec<u8>, n: usize) {
     let pad = (4 - (n & 3)) & 3;
-    out.extend(std::iter::repeat(0u8).take(pad));
+    out.extend(std::iter::repeat_n(0u8, pad));
 }
 
 #[cfg(test)]
