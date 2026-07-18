@@ -55,13 +55,13 @@ console setup are documented in **[Setup](SETUP.md)**.
 
 ## Specs
 
-**Hardware**: Raspberry Pi 4 Model B (BCM2711)
-**Qualified RAM**: 4 GiB configuration
-**Architecture**: AArch64 (ARMv8-A)
-**Languages**: Rust & AArch64 assembly
-**Toolchain**: Cargo, Clang, _and_ the pinned Rust LLVM tools
-**Targets**: RPi 4B hardware _and_ `qemu-system-aarch64 -M raspi4b`
-**Release image**: about 1.2 MiB for the current `kernel8.img`
+- **Hardware**: Raspberry Pi 4 Model B (BCM2711)
+- **Qualified RAM**: 4 GiB configuration
+- **Architecture**: AArch64 (ARMv8-A)
+- **Languages**: Rust & AArch64 assembly
+- **Toolchain**: Cargo, Clang, _and_ the pinned Rust LLVM tools
+- **Targets**: RPi 4B hardware _and_ `qemu-system-aarch64 -M raspi4b`
+- **Release image**: about 1.2 MiB for the current `kernel8.img`
 
 ## Features
 
