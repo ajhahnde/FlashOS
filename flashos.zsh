@@ -4,9 +4,9 @@
 # Public interface — two verb dispatchers plus a build wrapper:
 #   pi    connect|capture|list|quit|log|tail   serial-console helpers (Raspberry Pi)
 #   run   qemu|virt|test|watchdog|hw|auto       build-and-run a board, the boot-watchdog, or attach to HW
-#   port  check|diff|gates|pin                  Flash-port helpers (transpile, review-diff, gate battery)
+#   port  check|diff|gates|pin                  legacy Flash-port inspection helpers
 #   build                                       two-pass kernel build orchestrator
-#   flashos                                     list shell helpers + zig build steps
+#   flashos                                     list shell helpers + cargo xtask commands
 # Legacy flat names (piconnect/picapture/pilist/piquit) stay as thin aliases.
 
 # Resolve the directory of this file once at source time. Inside a function,
@@ -33,8 +33,8 @@ typeset -gA _FLASHOS_DEV_GLOB=(     usb '/dev/cu.usbmodem*'    mu '/dev/cu.usbse
 typeset -gA _FLASHOS_DEV_OVERRIDE=( usb PI_USB_CONSOLE_DEVICE  mu PI_SERIAL_DEVICE )
 typeset -gA _FLASHOS_DEV_LABEL=(    usb 'usb console (fsh)'    mu 'usb-serial adapter (MU trace)' )
 
-# Default mount point for `zig build deploy`. Override per-shell with
-# SD_BOOT=/Volumes/OTHER zig build deploy.
+# Default mount point for `build -d`. Override per-shell with
+# SD_BOOT=/Volumes/OTHER build -d.
 : "${SD_BOOT:=/Volumes/BOOT}"
 export SD_BOOT
 
@@ -46,6 +46,23 @@ _flashos_err()  { print -u2 -- "${_RED}$*${_NC}"; }
 _flashos_warn() { print -u2 -- "${_YELLOW}$*${_NC}"; }
 _flashos_ok()   { print    -- "${_GREEN}$*${_NC}"; }
 _flashos_root() { ( cd "$_FLASHOS_DIR" && "$@" ); }
+
+# Run Cargo through the exact rustup toolchain pinned by rust-toolchain.toml.
+# This stays deterministic when a package-manager cargo precedes rustup's
+# shims on PATH (Homebrew commonly does that on the development Mac).
+_flashos_cargo() {
+  emulate -L zsh
+  local toolchain_file="$_FLASHOS_DIR/rust-toolchain.toml"
+  local channel
+  channel="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$toolchain_file" | head -1)"
+  if [[ -z "$channel" ]] || ! command -v rustup >/dev/null 2>&1; then
+    _flashos_err "cannot resolve the pinned rustup toolchain from $toolchain_file"
+    return 1
+  fi
+  local rustc_bin
+  rustc_bin="$(rustup which --toolchain "$channel" rustc)" || return 1
+  _flashos_root env PATH="${rustc_bin:h}:$PATH" rustup run "$channel" cargo "$@"
+}
 
 # Echo a console device path on stdout, or return non-zero with a message on
 # stderr. $1 = NAME of an override env-var (honored verbatim if set), $2 = the
@@ -477,8 +494,8 @@ piquit()    { _flashos_pi_quit "$@"; }
 #   BOARD=virt build    virt build (deploy skipped)
 #   NM=llvm-nm build    override the nm binary
 #
-# NOTE on Caching: This wrapper manages the rotating .build_history stack.
-# The actual Zig compiler cache (.zig-cache) is wiped automatically to prevent bloat.
+# NOTE on caching: this wrapper manages the rotating .build_history stack.
+# `cargo xtask clean` clears the Rust build outputs before the two-pass build.
 _flashos_build_usage() {
   print -- "usage: build [args...]"
   print -- "  -d                  build and deploy to SD card (rpi4b only)"
@@ -486,7 +503,7 @@ _flashos_build_usage() {
   print -- "  -t                  show both stacks (img, elf) as a tree"
   print -- "  -s <stack> <id>     show stats (creation date, etc.) for a specific build ID in a stack (img/elf)"
   print -- "  help                show this usage information"
-  print -- "  [zig args...]       passed transparently to the underlying build passes"
+  print -- "  [xtask flags...]    passed to cargo xtask build/populate-syms"
 }
 
 build() {
@@ -496,8 +513,8 @@ build() {
   if (( ${@[(I)help]} )) || (( ${@[(I)-h]} )) || (( ${@[(I)--help]} )); then
     _flashos_build_usage
     print -- ""
-    print -- "--- zig build options ---"
-    _flashos_root zig build --help
+    print -- "--- cargo xtask options ---"
+    _flashos_cargo xtask help
     return 0
   fi
 
@@ -562,16 +579,19 @@ build() {
 
     local BOARD="${BOARD:-rpi4b}"
     local DEPLOY=0
-    local -a ZIG_ARGS=()
+    local -a XTASK_ARGS=()
 
-    # Parse arguments: extract -d for deploy, extract -Dboard, forward all others to Zig
+    # Keep the historical -Dboard= spelling as a compatibility alias while
+    # forwarding every other flag to the native xtask build.
     for arg in "$@"; do
       if [[ "$arg" == "-d" ]]; then
         DEPLOY=1
       elif [[ "$arg" == -Dboard=* ]]; then
         BOARD="${arg#-Dboard=}"
+      elif [[ "$arg" == --board=* ]]; then
+        BOARD="${arg#--board=}"
       else
-        ZIG_ARGS+=("$arg")
+        XTASK_ARGS+=("$arg")
       fi
     done
 
@@ -582,8 +602,22 @@ build() {
     local YELLOW="\033[1;33m"
     local NC="\033[0m"
 
-    local KERNEL_ELF="zig-out/bin/kernel8.elf"
-    local NM_BIN="${NM:-aarch64-elf-nm}"
+    # rust-toolchain.toml is the pin; bypass any package-manager Rust earlier
+    # on PATH and run the exact channel through rustup.
+    local RUST_CHANNEL="$(awk -F\" "/^channel = / { print \$2; exit }" rust-toolchain.toml)"
+    if [[ -z "$RUST_CHANNEL" ]] || ! command -v rustup >/dev/null 2>&1; then
+      print -- "${RED}error: cannot resolve the pinned rustup toolchain.${NC}"
+      exit 1
+    fi
+    local RUSTC_BIN="$(rustup which --toolchain "$RUST_CHANNEL" rustc)"
+    export PATH="${RUSTC_BIN:h}:$PATH"
+
+    local KERNEL_ELF="rust-out/$BOARD/kernel8.elf"
+    local KERNEL_IMG="rust-out/$BOARD/kernel8.img"
+    local -a CARGO=(rustup run "$RUST_CHANNEL" cargo)
+    local RUST_SYSROOT="$(rustup run "$RUST_CHANNEL" rustc --print sysroot)"
+    local HOST_TRIPLE="$(rustup run "$RUST_CHANNEL" rustc -vV | awk "/^host:/ { print \$2 }")"
+    local NM_BIN="${NM:-$RUST_SYSROOT/lib/rustlib/$HOST_TRIPLE/bin/llvm-nm}"
 
     # Pre-flight 1: Ensure nm (symbol extraction tool) is installed
     if ! command -v "$NM_BIN" >/dev/null 2>&1; then
@@ -592,25 +626,8 @@ build() {
     fi
 
     # Pre-flight 2: Verify execution from project root
-    if [[ ! -f .zigversion ]]; then
-      print -- "${RED}error: .zigversion not found — build must run from the project root.${NC}"
-      exit 1
-    fi
-
-    local REQUIRED_ZIG_VERSION="$(cat .zigversion)"
-    # Pre-flight 3: check zig command exists before running it
-    if ! command -v zig >/dev/null 2>&1; then
-      print -- "${RED}error: zig not found in PATH.${NC}"
-      exit 1
-    fi
-    local ACTUAL_ZIG_VERSION="$(zig version)"
-    # Pre-flight 3: Strictly pin the Zig version to prevent silent compiler regressions
-    if [[ "$ACTUAL_ZIG_VERSION" != "$REQUIRED_ZIG_VERSION" ]]; then
-      print -- "${RED}error: flashos requires zig ${REQUIRED_ZIG_VERSION} (found ${ACTUAL_ZIG_VERSION}).${NC}"
-      print -- "${YELLOW}switch with one of:${NC}"
-      print -- "  zigup ${REQUIRED_ZIG_VERSION}"
-      print -- "  zvm use ${REQUIRED_ZIG_VERSION}"
-      print -- "  anyzig use ${REQUIRED_ZIG_VERSION}"
+    if [[ ! -f Cargo.toml || ! -f rust-toolchain.toml ]]; then
+      print -- "${RED}error: Cargo.toml/rust-toolchain.toml not found — build must run from the project root.${NC}"
       exit 1
     fi
 
@@ -675,22 +692,47 @@ build() {
         diff "$NM_TMPDIR/nmfirstpass" "$NM_TMPDIR/nmsecondpass"
     }
 
+    deploy_to_sd() {
+        local FIRMWARE="${FIRMWARE:-firmware}"
+        # Refuse to wipe anything that is not the explicitly mounted FAT card.
+        if ! mount | grep -q " on $SD_BOOT (msdos"; then
+            print -u2 -- "error: $SD_BOOT is not a mounted FAT32 volume — refusing to wipe it"
+            return 1
+        fi
+        rm -rf "$SD_BOOT"/*
+        cp "$KERNEL_IMG" rust-out/rpi4b/armstub8.bin config.txt "$SD_BOOT/"
+        cp "$FIRMWARE/bcm2711-rpi-4-b.dtb" "$SD_BOOT/"
+        cp "$FIRMWARE/start4.elf" "$SD_BOOT/"
+        cp "$FIRMWARE/fixup4.dat" "$SD_BOOT/"
+        mkdir -p "$SD_BOOT/overlays"
+        cp "$FIRMWARE/overlays/miniuart-bt.dtbo" "$SD_BOOT/overlays/"
+        dd if=/dev/zero of="$SD_BOOT/ROUNDTR.DAT" bs=4096 count=1 2>/dev/null
+        dd if=/dev/zero of="$SD_BOOT/ROUNDTR.MAG" bs=1 count=1 2>/dev/null
+        : > "$SD_BOOT/EMPTY.TXT"
+        cp rust-out/initramfs-stage/etc/shadow "$SD_BOOT/SHADOW"
+        cp user_space/etc/perms.tab "$SD_BOOT/PERMS.TAB"
+        rm -f "$SD_BOOT"/._ROUNDTR* "$SD_BOOT"/._EMPTY* \
+              "$SD_BOOT"/._SHADOW "$SD_BOOT"/._PERMS* 2>/dev/null || true
+        sync
+        diskutil eject "$SD_BOOT"
+    }
+
     # --- Core Two-Pass Build Pipeline ---
     # 1. First pass linking -> 2. Symbol layout generation -> 3. Final linking -> 4. Verification
-    run_task "clean build cache" rm -rf .zig-cache zig-out
-    run_task "check whitespace" sh scripts/check_whitespace_hygiene.sh
-    run_task "check hex hygiene" sh scripts/check_hex_hygiene.sh
-    run_task "link kernel (pass 1: initial)" zig build -Dboard="$BOARD" -Dskip-hygiene=true "${ZIG_ARGS[@]}"
+    run_task "clean build cache" "${CARGO[@]}" xtask clean
+    run_task "check hygiene" "${CARGO[@]}" xtask check-hygiene
+    run_task "link kernel (pass 1: initial)" "${CARGO[@]}" xtask build --board "$BOARD" "${XTASK_ARGS[@]}"
     run_task "extract symbol table (pass 1)" save_first_pass
-    run_task "generate layout (src/symbol_area.S)" zig build populate-syms -Dboard="$BOARD" -Dskip-hygiene=true "${ZIG_ARGS[@]}"
-    run_task "link kernel (pass 2: final)" zig build -Dboard="$BOARD" -Dskip-hygiene=true "${ZIG_ARGS[@]}"
+    run_task "generate layout (src/symbol_area.S)" "${CARGO[@]}" xtask populate-syms --board "$BOARD" "${XTASK_ARGS[@]}"
+    run_task "link kernel (pass 2: final)" "${CARGO[@]}" xtask build --board "$BOARD" "${XTASK_ARGS[@]}"
     run_task "extract symbol table (pass 2)" save_second_pass
     run_task "verify symbol layout consistency" check_diff
+    [[ "$BOARD" == "rpi4b" ]] && run_task "build armstub" "${CARGO[@]}" xtask armstub
 
     if [[ "$BOARD" != "rpi4b" ]]; then
         printf "[ ${YELLOW}SKIP${NC} ] deploy (board=$BOARD, rpi4b-only)\n"
     elif (( DEPLOY == 1 )); then
-        run_task "deploy to SD card" zig build deploy -Dboard="$BOARD" "${ZIG_ARGS[@]}"
+        run_task "deploy to SD card" deploy_to_sd
     else
         printf "[${YELLOW}SKIP${NC}] deploy (run with -d to deploy)\n"
     fi
@@ -700,18 +742,18 @@ build() {
 
     # 2. Check if artifacts are identical to the previous build.
     # 2a. Boards that emit kernel8.img (rpi4b): dedup on the image.
-    if [[ -f zig-out/kernel8.img ]] && [[ -f "$hist/img/kernel8_1.img" ]] && cmp -s zig-out/kernel8.img "$hist/img/kernel8_1.img"; then
+    if [[ -f "$KERNEL_IMG" ]] && [[ -f "$hist/img/kernel8_1.img" ]] && cmp -s "$KERNEL_IMG" "$hist/img/kernel8_1.img"; then
       # Refresh slot-1 .elf so its debug symbols always match the current source code,
       # even if the compiled binary instructions (.img) did not change (e.g. comment changes).
-      [[ -f zig-out/bin/kernel8.elf ]] && cp zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"
+      [[ -f "$KERNEL_ELF" ]] && cp "$KERNEL_ELF" "$hist/elf/kernel8_1.elf"
       print -- "[ \033[0;32mOK\033[0m ] Build successful (Artifacts identical to previous, history unchanged)"
       return 0
     fi
 
     # 2b. Boards without a kernel8.img (virt): dedup on the .elf instead, so an
     # unchanged build does not rotate history on every invocation.
-    if [[ ! -f zig-out/kernel8.img ]] && [[ -f zig-out/bin/kernel8.elf ]] && [[ -f "$hist/elf/kernel8_1.elf" ]] && cmp -s zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"; then
-      cp zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"
+    if [[ ! -f "$KERNEL_IMG" ]] && [[ -f "$KERNEL_ELF" ]] && [[ -f "$hist/elf/kernel8_1.elf" ]] && cmp -s "$KERNEL_ELF" "$hist/elf/kernel8_1.elf"; then
+      cp "$KERNEL_ELF" "$hist/elf/kernel8_1.elf"
       print -- "[ \033[0;32mOK\033[0m ] Build successful (Artifacts identical to previous, history unchanged)"
       return 0
     fi
@@ -728,8 +770,8 @@ build() {
     done
 
     # Save the new build as ID 1
-    [[ -f zig-out/kernel8.img ]] && cp zig-out/kernel8.img "$hist/img/kernel8_1.img"
-    [[ -f zig-out/bin/kernel8.elf ]] && cp zig-out/bin/kernel8.elf "$hist/elf/kernel8_1.elf"
+    [[ -f "$KERNEL_IMG" ]] && cp "$KERNEL_IMG" "$hist/img/kernel8_1.img"
+    [[ -f "$KERNEL_ELF" ]] && cp "$KERNEL_ELF" "$hist/elf/kernel8_1.elf"
 
     print -- "[ \033[0;32mOK\033[0m ] Build successful. Artifacts saved to stack ($hist/*_1)"
   ' _ "$@"
@@ -738,7 +780,7 @@ build() {
 # run <mode> — build-and-run a board in QEMU, run the boot-watchdog, or attach
 # to real hardware.
 _flashos_run_usage() {
-  print -- "usage: run [qemu|virt|test|watchdog|hw|auto] [zig args...]"
+  print -- "usage: run [qemu|virt|test|watchdog|hw|auto] [xtask flags...]"
   print -- "  qemu                rpi4b board in QEMU (default via 'auto')"
   print -- "  virt                qemu virt board (FROZEN 2026-06-17 — deprioritized; still builds)"
   print -- "  test                host unit tests   (--NAME filters by test name, e.g. run test --fat32)"
@@ -752,40 +794,71 @@ run() {
   local mode="${1:-auto}"
   (( $# > 0 )) && shift
   case "$mode" in
-    qemu|auto) _flashos_root zig build -Dboard=rpi4b run "$@" ;;
-    virt)      _flashos_root zig build -Dboard=virt run-virt "$@" ;;
+    qemu|auto)
+      _flashos_cargo xtask build --board rpi4b "$@" || return 1
+      _flashos_root sh scripts/make_test_disk.sh \
+        rust-out/initramfs-stage/etc/shadow user_space/etc/perms.tab || return 1
+      _flashos_root qemu-system-aarch64 \
+        -M raspi4b -display none -serial null -serial stdio \
+        -kernel rust-out/rpi4b/kernel8.img \
+        -drive if=sd,file=zig-out/test_sd.img,format=raw
+      ;;
+    virt)
+      _flashos_warn "virt is FROZEN (deprioritized); rpi4b + HW are the live gates"
+      _flashos_cargo xtask build --board virt "$@" || return 1
+      _flashos_root qemu-system-aarch64 \
+        -M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic \
+        -kernel rust-out/virt/kernel8.img
+      ;;
     test)
       # A bare `--NAME` is sugar for the host-test substring filter
-      # (`run test --fat32` -> `zig build test -Dtest-filter=fat32`); -D… and
-      # other args pass through untouched, and `--help` reaches zig verbatim.
+      # (`run test --fat32` -> `cargo test … fat32`).
       local -a targs=() a
       for a in "$@"; do
         case "$a" in
           --help) targs+=(--help) ;;
-          --?*)   targs+=("-Dtest-filter=${a#--}") ;;
+          --?*)   targs+=("${a#--}") ;;
           *)      targs+=("$a") ;;
         esac
       done
-      _flashos_root zig build test "${targs[@]}"
+      if (( ${#targs[@]} == 0 )); then
+        _flashos_cargo xtask test
+      else
+        _flashos_cargo test --workspace --exclude flashos-canary \
+          --exclude flashos-klib "${targs[@]}"
+      fi
       ;;
     watchdog|check)
-      # Boot-watchdog (test-virt / test-rpi4b). It hangs to its FULL timeout
-      # unless the kernel is built with BOTH -Dci-login-seed=true (auto-auth
-      # past the login: prompt) AND -Dboot-selftest=true (the in-kernel test
+      # The watchdog hangs to its FULL timeout unless the kernel is built with
+      # BOTH --ci-login-seed (auto-auth past the login: prompt) AND
+      # --boot-selftest (the in-kernel test
       # scenarios the contract counts). Missing either flag rides the timeout —
       # and on rpi4b that is ~12 min of TCG. Bake both in so
       # the footgun cannot happen. Defaults to rpi4b (the live board); virt
       # is frozen as of 2026-06-17 (deprioritized) but still an explicit opt-in.
-      local wb="${1:-rpi4b}" step
+      local wb="${1:-rpi4b}" timeout
       (( $# > 0 )) && shift
       case "$wb" in
-        virt)  step=test-virt
+        virt)  timeout=60
                _flashos_warn "virt watchdog: board is FROZEN (deprioritized 2026-06-17); rpi4b + HW are the live gates" ;;
-        rpi4b) step=test-rpi4b
+        rpi4b) timeout=720
                _flashos_warn "rpi4b watchdog: ~5-8 min of TCG (720s ceiling)" ;;
         *) _flashos_err "run watchdog: unknown board '$wb' (virt|rpi4b)"; return 1 ;;
       esac
-      _flashos_root zig build -Dboard="$wb" -Dci-login-seed=true -Dboot-selftest=true "$step" "$@"
+      _flashos_cargo xtask build --board "$wb" \
+        --ci-login-seed --boot-selftest "$@" || return 1
+      if [[ "$wb" == "rpi4b" ]]; then
+        _flashos_root sh scripts/make_test_disk.sh \
+          rust-out/initramfs-stage/etc/shadow user_space/etc/perms.tab || return 1
+        _flashos_root scripts/run_qemu_test.sh "$timeout" qemu-system-aarch64 \
+          -M raspi4b -display none -serial null -serial stdio \
+          -kernel rust-out/rpi4b/kernel8.img \
+          -drive if=sd,file=zig-out/test_sd.img,format=raw
+      else
+        _flashos_root scripts/run_qemu_test.sh "$timeout" qemu-system-aarch64 \
+          -M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic \
+          -kernel rust-out/virt/kernel8.img
+      fi
       local rc=$?
       # run_qemu_test.sh is silent on success — QEMU output goes to a temp log it
       # deletes on exit, and only a FAIL dumps the tail. Without an explicit
@@ -954,12 +1027,12 @@ port() {
 
 # ── introspection ──────────────────────────────────────────────────────────
 
-# List the public shell helpers and the zig build steps. Named `flashos` rather
+# List the public shell helpers and the cargo xtask commands. Named `flashos` rather
 # than `help` so sourcing this file does not clobber a user's `help`/`run-help`.
 flashos() {
   emulate -L zsh
   local project_file="$_FLASHOS_DIR/flashos.zsh"
-  local zig_file="$_FLASHOS_DIR/build.zig"
+  local cargo_file="$_FLASHOS_DIR/Cargo.toml"
 
   # Only the public surface — internal _flashos_* helpers start with '_'.
   print -- "--- shell functions (flashos.zsh) ---"
@@ -969,11 +1042,11 @@ flashos() {
     _flashos_err "not found: $project_file"
   fi
 
-  print -- "\n--- zig build steps (build.zig) ---"
-  if [[ -f "$zig_file" ]]; then
-    _flashos_root zig build --list-steps 2>/dev/null
+  print -- "\n--- cargo xtask commands ---"
+  if [[ -f "$cargo_file" ]]; then
+    _flashos_cargo xtask help
   else
-    _flashos_err "not found: $zig_file"
+    _flashos_err "not found: $cargo_file"
   fi
 }
 
@@ -1048,14 +1121,14 @@ _flashos_build_completion() {
   local -a args=(
     '-d:build and deploy to SD card'
     '-clean-stack:clear the build history stack'
-    '-t:show all three stacks (img, elf, zig) as a tree'
+    '-t:show both build-history stacks (img, elf) as a tree'
     '-s:show stats (creation date, etc.) for a specific build ID'
     'help:usage'
   )
   if (( CURRENT == 2 )); then
     _describe -t args 'build flag' args
   elif (( CURRENT == 3 )) && [[ "${words[2]}" == "-s" ]]; then
-    local -a stacks=(img elf zig)
+    local -a stacks=(img elf)
     _describe -t stacks 'stack' stacks
   elif (( CURRENT == 4 )) && [[ "${words[2]}" == "-s" ]]; then
     local -a ids=(1 2 3 4 5)

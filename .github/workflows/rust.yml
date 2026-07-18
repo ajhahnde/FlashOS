@@ -1,20 +1,6 @@
-# Rust-side CI for the in-progress port. Deliberately a separate workflow from
-# test.yml: that one is the production gate (zig build + the rpi4b boot
-# contract) and must not change while the Rust tree is still a parallel build.
-#
-# What this job proves per push:
-#   - the workspace formats, lints, and its host tests pass;
-#   - the Rust canary kernel still links against the real boot assembly and the
-#     real board linker scripts, on both boards;
-#   - the clean-room guard holds — the Rust build invokes neither zig nor flashc;
-#   - the canary still reaches EL1, booted in QEMU.
-#
-# The boot is done on `virt`, whose machine type apt's QEMU has. The `raspi4b`
-# machine needs QEMU >= 9.0, which no hosted runner ships and which test.yml
-# therefore builds from source (~10 min, cached); paying that a second time here
-# is not worth it, so rpi4b is covered by build + guard + the artefact checks
-# (_start at the image base, no undefined symbols, no core::fmt, no FP/SIMD),
-# and its boot is proven locally and on real hardware.
+# Production CI: Rust workspace gates plus the complete rpi4b boot contract.
+# The native build invokes Cargo, clang, and the LLVM tools installed with the
+# pinned Rust toolchain; neither Zig nor the Flash compiler is installed.
 name: rust
 
 on:
@@ -31,8 +17,7 @@ jobs:
 
       # rustup honours rust-toolchain.toml, so the pinned release, the
       # aarch64-unknown-none-softfloat target, and llvm-tools install from that
-      # one file. rust-lld, llvm-objcopy, llvm-nm and llvm-objdump come with it —
-      # the Rust build needs no binutils.
+      # one file. rust-lld, llvm-objcopy, llvm-nm and llvm-objdump come with it.
       - name: install the pinned Rust toolchain
         run: |
           rustup show active-toolchain || rustup toolchain install
@@ -40,8 +25,8 @@ jobs:
           rustc --print target-spec-json -Z unstable-options \
             --target aarch64-unknown-none-softfloat 2>/dev/null | grep -E '"features"|"abi"' || true
 
-      # clang is the assembler for the retained .S files: it is the
-      # only host prerequisite outside the Rust toolchain.
+      # clang assembles the retained .S files. It is the only compiler outside
+      # the Rust toolchain used by the production build.
       - name: assembler
         run: clang --version
 
@@ -49,14 +34,20 @@ jobs:
         run: cargo fmt --all --check
 
       - name: cargo clippy
-        run: cargo clippy --workspace --exclude flashos-canary --all-targets -- -D warnings
+        run: >-
+          cargo clippy --workspace --exclude flashos-canary
+          --exclude flashos-klib --all-targets -- -D warnings
 
       - name: rust host tests
-        run: cargo test --workspace --exclude flashos-canary
+        run: >-
+          cargo test --workspace --exclude flashos-canary
+          --exclude flashos-klib
 
-      # Every shipped payload, not a sample: the artefact checks behind each link
-      # (no undefined symbols, no core::fmt, no FP/SIMD, one mem* provider each) are
-      # what keep a payload from failing on hardware instead of here.
+      - name: hygiene gate
+        run: cargo xtask check-hygiene
+
+      # Every shipped payload, not a sample. Each link also checks for undefined
+      # symbols, core::fmt, FP/SIMD instructions, and duplicate mem providers.
       - name: EL0 payload link + artefact checks
         run: |
           for payload in hello clear echo cat ls rm cp mv grep meminfo dmesg \
@@ -69,24 +60,61 @@ jobs:
       - name: assembly layout facts
         run: cargo xtask asm-defs --check
 
-      # The kernel is still Flash and keeps its own copy of the console look, so
-      # the frozen tag/marker bytes live in two languages. Prove they agree.
+      # The retained console-look source remains the frozen comparison oracle
+      # until source retirement; no compiler is needed to compare its literals.
       - name: console look facts
         run: cargo xtask ui-defs --check
 
-      - name: canary link + artefact checks (rpi4b)
-        run: cargo xtask canary --board rpi4b
+      - name: armstub link
+        run: cargo xtask armstub
 
       - name: clean-room guard (rpi4b)
         run: cargo xtask guard --board rpi4b
 
-      - name: clean-room guard (virt)
-        run: cargo xtask guard --board virt
-
-      - name: qemu
+      # mtools builds the FAT32 test disk. Hosted runners ship QEMU 8.2, but the
+      # raspi4b machine requires QEMU >= 9.0, so build the contract-pinned 11.0.1
+      # release once and cache it by runner OS.
+      - name: install mtools + qemu build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-arm
+          sudo apt-get install -y mtools ninja-build pkg-config python3-pip \
+            python3-venv libglib2.0-dev libpixman-1-dev flex bison
 
-      - name: canary boot smoke (virt)
-        run: cargo xtask smoke --board virt
+      - name: cache qemu-system-aarch64 (pinned source build)
+        id: qemu
+        uses: actions/cache@v4
+        with:
+          path: ~/qemu-prefix
+          key: qemu-aarch64-11.0.1-${{ runner.os }}
+
+      - name: build qemu-system-aarch64 from pinned source
+        if: steps.qemu.outputs.cache-hit != 'true'
+        run: |
+          ver=11.0.1
+          curl -fsSL -o /tmp/qemu.tar.xz "https://download.qemu.org/qemu-$ver.tar.xz"
+          mkdir -p /tmp/qemu-src
+          tar -xJf /tmp/qemu.tar.xz -C /tmp/qemu-src --strip-components=1
+          cd /tmp/qemu-src
+          ./configure --prefix="$HOME/qemu-prefix" --target-list=aarch64-softmmu \
+            --disable-docs --disable-tools --disable-gtk --disable-sdl \
+            --disable-vnc --disable-curses --disable-werror
+          make -j"$(nproc)"
+          make install
+
+      - name: put pinned qemu on PATH
+        run: |
+          echo "$HOME/qemu-prefix/bin" >> "$GITHUB_PATH"
+          "$HOME/qemu-prefix/bin/qemu-system-aarch64" --version
+          "$HOME/qemu-prefix/bin/qemu-system-aarch64" -machine help | grep -i raspi4b
+
+      - name: rpi4b production watchdog
+        # Both flags are mandatory: one runs the in-kernel scenarios, the other
+        # authenticates the unattended login so the third shell marker appears.
+        run: |
+          cargo xtask build --board rpi4b --ci-login-seed --boot-selftest
+          sh scripts/make_test_disk.sh \
+            rust-out/initramfs-stage/etc/shadow user_space/etc/perms.tab
+          scripts/run_qemu_test.sh 720 qemu-system-aarch64 \
+            -M raspi4b -display none -serial null -serial stdio \
+            -kernel rust-out/rpi4b/kernel8.img \
+            -drive if=sd,file=zig-out/test_sd.img,format=raw
