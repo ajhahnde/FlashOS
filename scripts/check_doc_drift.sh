@@ -33,14 +33,15 @@ note "== dead-path check (FATAL) =="
 # Extract MAXIMAL slashed tokens (so `armstub/src/x.S` is not truncated to
 # `src/x.S`), then keep only those whose first segment is a real top-level
 # directory — that both filters out non-paths (`and/or`) and anchors the path
-# at its true root. Skip <placeholder> tokens and build artifacts (*.elf etc.
-# are generated, legitimately absent from a clean checkout — not doc drift).
+# at its true root. Skip <placeholder> tokens and the generated output tree
+# (`rust-out/` is legitimately absent from a clean checkout — not doc drift).
 raw=$(grep -rhoE '[A-Za-z0-9_][A-Za-z0-9_./-]*/[A-Za-z0-9_.-]+' $DOCS 2>/dev/null \
       | sed -E 's/[.,:;)]+$//' \
       | sort -u)
 dead=0
 for p in $raw; do
   case "$p" in *'<'*|*'>'*|*/) continue ;; esac      # placeholder / bare dir
+  case "$p" in rust-out/*) continue ;; esac          # generated product tree
   case "$p" in *.elf|*.img|*.o|*.bin|*.a) continue ;; esac  # build artifacts
   first=${p%%/*}
   [ -d "$first" ] || continue                        # first segment not a repo dir
