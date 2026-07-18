@@ -889,7 +889,7 @@ pub fn build(
     let cpio = build_initramfs(root, tc, feats)?;
 
     // 3. Link and raw-image.
-    kernel_link(root, board, tc, &p, &staticlib, &cpio)?;
+    kernel_link(root, board, tc, &p, &staticlib, &cpio, feats)?;
     inspect(&p, tc)?;
     Ok(p)
 }
@@ -947,6 +947,7 @@ fn kernel_link(
     p: &Paths,
     staticlib: &Path,
     cpio_dir: &Path,
+    feats: KernelFeatures,
 ) -> Result<(), String> {
     let board_dir = root.join("src/board").join(board.name());
 
@@ -978,6 +979,14 @@ fn kernel_link(
             format!("-I{}", root.join("src").display()),
             format!("-I{}", board_dir.display()),
         ]);
+        // The trace cargo feature only reaches Rust; entry.S gates the
+        // `mov x0, sp` that hands the exception frame to the sampler behind
+        // `#ifdef FLASHOS_TRACE`. Without this define the trace kernel calls
+        // handle_irq with a garbage frame pointer and faults on the first
+        // sample — so the asm define must track the same flag as the feature.
+        if feats.trace {
+            cmd = cmd.arg("-DFLASHOS_TRACE".to_string());
+        }
         if let Some(inc) = extra_inc {
             cmd = cmd.arg(format!("-I{}", inc.display()));
         }
