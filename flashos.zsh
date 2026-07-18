@@ -1,11 +1,11 @@
 # FlashOS shell helpers. Source from ~/.zshrc:
 #   [[ -f /path/to/FlashOS/flashos.zsh ]] && source /path/to/FlashOS/flashos.zsh
 #
-# Public interface — two verb dispatchers plus a build wrapper:
+# Public interface — three verb dispatchers plus a build wrapper:
 #   pi    connect|capture|list|quit|log|tail   serial-console helpers (Raspberry Pi)
 #   run   qemu|virt|test|watchdog|hw|auto       build-and-run a board, the boot-watchdog, or attach to HW
 #   build                                       two-pass kernel build orchestrator
-#   flashos                                     list shell helpers + cargo xtask commands
+#   flashos check|versions|list                 repository checks, version control, and command discovery
 # Legacy flat names (piconnect/picapture/pilist/piquit) stay as thin aliases.
 
 # Resolve the directory of this file once at source time. Inside a function,
@@ -18,8 +18,16 @@ typeset -g _GREEN=$'\033[0;32m'
 typeset -g _YELLOW=$'\033[1;33m'
 typeset -g _NC=$'\033[0m'
 
-# Screen session name shared by `pi capture` (creates it) and `pi quit` (kills it).
+# Capture process state. The screen session name is retained only so `pi quit`
+# can clean up a session left by older sourced versions of this file.
 typeset -g _FLASHOS_CAPTURE_SESSION="pi_capture"
+typeset -g _FLASHOS_CAPTURE_PID=""
+typeset -g _FLASHOS_CAPTURE_PIDFILE="${TMPDIR:-/tmp}/flashos-pi-capture-${UID}.pid"
+
+# Lazily resolved rustup state shared by every Cargo-backed helper. Keeping it
+# here avoids duplicating toolchain parsing in `build`, `run`, and discovery.
+typeset -g _FLASHOS_RUST_CHANNEL=""
+typeset -g _FLASHOS_TOOLCHAIN_BIN=""
 
 # Console serial parameters and the device tables the helpers match on, keyed by
 # logical name (usb|mu). Mini-UART trace rides a USB-serial adapter
@@ -46,21 +54,65 @@ _flashos_warn() { print -u2 -- "${_YELLOW}$*${_NC}"; }
 _flashos_ok()   { print    -- "${_GREEN}$*${_NC}"; }
 _flashos_root() { ( cd "$_FLASHOS_DIR" && "$@" ); }
 
-# Run Cargo through the exact rustup toolchain pinned by rust-toolchain.toml.
-# This stays deterministic when a package-manager cargo precedes rustup's
-# shims on PATH (Homebrew commonly does that on the development Mac).
-_flashos_cargo() {
+# Resolve the exact rustup toolchain pinned by rust-toolchain.toml. This stays
+# deterministic when a package-manager Rust precedes rustup's shims on PATH.
+_flashos_init_toolchain() {
   emulate -L zsh
+  [[ -n "$_FLASHOS_RUST_CHANNEL" && -d "$_FLASHOS_TOOLCHAIN_BIN" ]] && return 0
+
   local toolchain_file="$_FLASHOS_DIR/rust-toolchain.toml"
-  local channel
-  channel="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$toolchain_file" | head -1)"
-  if [[ -z "$channel" ]] || ! command -v rustup >/dev/null 2>&1; then
+  _FLASHOS_RUST_CHANNEL="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$toolchain_file" | head -1)"
+  if [[ -z "$_FLASHOS_RUST_CHANNEL" ]] || ! command -v rustup >/dev/null 2>&1; then
     _flashos_err "cannot resolve the pinned rustup toolchain from $toolchain_file"
     return 1
   fi
+
   local rustc_bin
-  rustc_bin="$(rustup which --toolchain "$channel" rustc)" || return 1
-  _flashos_root env PATH="${rustc_bin:h}:$PATH" rustup run "$channel" cargo "$@"
+  rustc_bin="$(rustup which --toolchain "$_FLASHOS_RUST_CHANNEL" rustc)" || return 1
+  _FLASHOS_TOOLCHAIN_BIN="${rustc_bin:h}"
+}
+
+# Run Cargo through that exact toolchain.
+_flashos_cargo() {
+  emulate -L zsh
+  _flashos_init_toolchain || return 1
+  _flashos_root env PATH="$_FLASHOS_TOOLCHAIN_BIN:$PATH" \
+    rustup run "$_FLASHOS_RUST_CHANNEL" cargo "$@"
+}
+
+# Centralized version operations. `versions.env` owns the numbers;
+# sync_versions.sh owns validation and mechanical propagation.
+_flashos_versions_check() {
+  _flashos_root sh scripts/sync_versions.sh --check
+}
+
+_flashos_versions() {
+  emulate -L zsh
+  local verb="${1:-show}"
+  (( $# > 0 )) && shift
+  case "$verb" in
+    show)
+      (( $# == 0 )) || { _flashos_err "flashos versions show: no arguments expected"; return 1; }
+      _flashos_root sh -c 'set -a; . ./versions.env; set +a; printf "FlashOS %s\nRust %s\nQEMU %s\n" "$FLASHOS_RELEASE_VERSION" "$FLASHOS_RUST_VERSION" "$FLASHOS_QEMU_VERSION"'
+      ;;
+    check)
+      (( $# == 0 )) || { _flashos_err "flashos versions check: no arguments expected"; return 1; }
+      _flashos_versions_check
+      ;;
+    sync)
+      (( $# == 0 )) || { _flashos_err "flashos versions sync: no arguments expected"; return 1; }
+      _flashos_root sh scripts/sync_versions.sh --write || return 1
+      # A long-lived sourced shell may have cached the previous rustup channel.
+      _FLASHOS_RUST_CHANNEL=""
+      _FLASHOS_TOOLCHAIN_BIN=""
+      ;;
+    help|-h|--help) _flashos_versions_usage ;;
+    *)
+      _flashos_err "flashos versions: unknown verb '$verb'"
+      _flashos_versions_usage >&2
+      return 1
+      ;;
+  esac
 }
 
 # Echo a console device path on stdout, or return non-zero with a message on
@@ -105,13 +157,38 @@ _flashos_usb_console_device() { _flashos_device usb; }
 # Verbs are dispatched by pi() below; each impl is also reachable through its
 # legacy flat alias (piquit/pilist/piconnect/picapture).
 
-# Quit the capture screen session.
-_flashos_pi_quit() {
+# Stop the descriptor-owning capture worker, plus any legacy screen session.
+_flashos_capture_stop() {
   emulate -L zsh
+  local pid="$_FLASHOS_CAPTURE_PID" command=""
+  if [[ -z "$pid" && -r "$_FLASHOS_CAPTURE_PIDFILE" ]]; then
+    read -r pid < "$_FLASHOS_CAPTURE_PIDFILE"
+  fi
+
+  local stopped=0
+  if [[ "$pid" == <-> ]] && kill -0 "$pid" 2>/dev/null; then
+    command="$(ps -p "$pid" -o command= 2>/dev/null)"
+    if [[ "$command" == *"$_FLASHOS_DIR/scripts/serial_capture.py"* ]]; then
+      kill -TERM "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      stopped=1
+    fi
+  fi
+  rm -f -- "$_FLASHOS_CAPTURE_PIDFILE"
+  _FLASHOS_CAPTURE_PID=""
+
+  # Compatibility cleanup for a capture started before this file was re-sourced.
   if screen -S "$_FLASHOS_CAPTURE_SESSION" -X quit 2>/dev/null; then
-    _flashos_ok "capture session terminated"
+    stopped=1
+  fi
+  (( stopped ))
+}
+
+_flashos_pi_quit() {
+  if _flashos_capture_stop; then
+    _flashos_ok "capture process terminated"
   else
-    _flashos_warn "no capture session is running"
+    _flashos_warn "no capture process is running"
   fi
 }
 
@@ -189,7 +266,7 @@ _flashos_pi_connect() {
 # closes the session. The log always lands at $_FLASHOS_DIR/boot.log (covered by
 # the repo .gitignore), regardless of the current directory. The work is split
 # so each stage is readable and the two poll loops are testable against a
-# fixture logfile without a Pi or a screen session: the wait helpers echo a
+# fixture logfile without a Pi: the wait helpers echo a
 # single result token on stdout and route progress/status to stderr.
 
 # Wait for the USB CDC gadget to enumerate. Echoes the device path on stdout;
@@ -231,46 +308,55 @@ _flashos_capture_acquire() {
   print -r -- "$device"
 }
 
-# Start a detached, logging screen session on $device. Returns 0 on success.
-_flashos_capture_screen_start() {
+# Start the descriptor-owning serial capture worker. USB mode asserts DTR/RTS
+# for the lifetime of the capture and sends the prompt probe through that same
+# descriptor; detached screen does not reliably provide that contract on macOS.
+_flashos_capture_worker_start() {
   emulate -L zsh
-  local session=$1 device=$2 logfile=$3 screenrc
-  screen -S "$session" -X quit >/dev/null 2>&1
-
-  # macOS ships screen 4.00.03, which has no -Logfile flag; the log filename
-  # comes from a screenrc `logfile` directive instead (plain -L would write
-  # screenlog.0). `logfile flush 1` flushes every 1s so the live grep in the
-  # wait loops sees the boot marker without screen's default 10s buffering.
-  screenrc="$(mktemp)" || { _flashos_err "mktemp failed"; return 1; }
-  print -r -- "logfile \"$logfile\"" > "$screenrc"
-  print -r -- "logfile flush 1"     >> "$screenrc"
-
-  if ! screen -c "$screenrc" -L -dmS "$session" "$device" "$_FLASHOS_BAUD"; then
-    rm -f -- "$screenrc"
-    _flashos_err "failed to start screen session"
+  unsetopt bgnice
+  local mode=$1 device=$2 logfile=$3
+  if ! command -v python3 >/dev/null 2>&1; then
+    _flashos_err "python3 is required for reliable serial capture"
     return 1
   fi
+
+  _flashos_capture_stop >/dev/null 2>&1
+  local -a command=(
+    python3 "$_FLASHOS_DIR/scripts/serial_capture.py"
+    --device "$device" --baud "$_FLASHOS_BAUD" --logfile "$logfile"
+  )
+  if [[ "$mode" == "usb" ]]; then
+    command+=(--assert-dtr --probe-cr)
+  fi
+  "${command[@]}" &
+  _FLASHOS_CAPTURE_PID=$!
+  print -r -- "$_FLASHOS_CAPTURE_PID" > "$_FLASHOS_CAPTURE_PIDFILE"
 
   sleep 1
-  if ! screen -list | grep -q "\.${session}[[:space:]]"; then
-    rm -f -- "$screenrc"
-    _flashos_err "screen session failed to start; port may be occupied"
+  if ! kill -0 "$_FLASHOS_CAPTURE_PID" 2>/dev/null; then
+    wait "$_FLASHOS_CAPTURE_PID" 2>/dev/null
+    rm -f -- "$_FLASHOS_CAPTURE_PIDFILE"
+    _FLASHOS_CAPTURE_PID=""
+    _flashos_err "serial capture failed to start; port may be occupied"
     return 1
   fi
-  rm -f -- "$screenrc" # screen has read the rc; safe to remove now
 }
 
 # Mini-UART capture loop. Echoes one result token (success|error|failed|timeout)
 # on stdout; progress dots go to stderr.
 _flashos_capture_wait_mu() {
   emulate -L zsh
-  local logfile=$1
+  local pid=$1 logfile=$2
   local timeout=${PI_CAPTURE_TIMEOUT:-120} elapsed=0 result=timeout
   print -nu2 -- "monitoring "
   while (( elapsed < timeout )); do
     sleep 1
     (( elapsed++ ))
     print -nu2 -- "."
+    if ! kill -0 "$pid" 2>/dev/null; then
+      result=died
+      break
+    fi
     [[ -f "$logfile" ]] || continue
 
     # Check ERROR before success: if both appear, the error is the more
@@ -311,25 +397,21 @@ _flashos_capture_wait_mu() {
 # stdout; progress dots go to stderr.
 _flashos_capture_wait_usb() {
   emulate -L zsh
-  local session=$1 logfile=$2
+  local pid=$1 logfile=$2
   local timeout=${PI_PROBE_TIMEOUT:-30} elapsed=0 result=timeout
-  # Stuff a CR each second to wake/keep the session (readline submits on CR,
-  # an empty line is a no-op dispatch), and watch for a boot signal — the
+  # The descriptor-owning worker sends a CR each second (an empty readline is
+  # a no-op dispatch). Watch for a boot signal — the
   # homescreen marker `type 'help' for commands`, or on a clean shipping
   # kernel the password-gated `login:` prompt (it never auto-logs-in, so the
   # marker never prints; mu-mode draws the same distinction). The shell
   # prompt is `# ` / `$ `; it never prints `>>> `.
-  # `-p 0` is mandatory: a born-detached (-dmS) session has no current
-  # window on macOS screen 4.00.03, so -X stuff silently goes nowhere
-  # without an explicit window target.
   print -nu2 -- "monitoring "
   while (( elapsed < timeout )); do
-    screen -S "$session" -p 0 -X stuff $'\r' >/dev/null 2>&1
     sleep 1
     (( elapsed++ ))
     print -nu2 -- "."
 
-    if ! screen -list 2>/dev/null | grep -q "\.${session}[[:space:]]"; then
+    if ! kill -0 "$pid" 2>/dev/null; then
       result=died
       break
     fi
@@ -342,7 +424,8 @@ _flashos_capture_wait_usb() {
           result=success
           break
         fi
-      elif grep -qF "type 'help' for commands" "$logfile" || grep -qF "login:" "$logfile"; then
+      elif grep -qF "type 'help' for commands" "$logfile" || \
+          grep -qF "login:" "$logfile" || grep -qF " @ " "$logfile"; then
         result=success
         break
       fi
@@ -351,7 +434,7 @@ _flashos_capture_wait_usb() {
   print -r -- "$result"
 }
 
-# Report the capture outcome, tear the session down, and return 0 on success.
+# Report the capture outcome, tear the worker down, and return 0 on success.
 _flashos_capture_report() {
   emulate -L zsh
   local mode=$1 result=$2 logfile=$3
@@ -368,7 +451,7 @@ _flashos_capture_report() {
       _flashos_err "\nharness failure: a '[FAIL]' scenario was detected"
       ;;
     died)
-      _flashos_err "\nscreen session died mid-capture — device disconnected or re-enumerated"
+      _flashos_err "\nserial capture ended mid-run — device disconnected or re-enumerated"
       _flashos_warn "device re-enumerated: re-run pi capture to attach to the fresh node"
       ;;
     timeout)
@@ -381,8 +464,8 @@ _flashos_capture_report() {
       ;;
   esac
 
-  screen -S "$_FLASHOS_CAPTURE_SESSION" -X quit >/dev/null 2>&1
-  print -- "session terminated"
+  _flashos_capture_stop >/dev/null 2>&1
+  print -- "capture process terminated"
   print -- "output saved to: $logfile"
 
   # On a bad outcome, show the tail of the capture so the failure is visible
@@ -427,17 +510,16 @@ _flashos_pi_capture() {
   esac
 
   local logfile="$_FLASHOS_DIR/boot.log"
-  local session="$_FLASHOS_CAPTURE_SESSION"
   local device result
 
   device="$(_flashos_capture_acquire "$mode")" || return 1
   rm -f -- "$logfile"
-  _flashos_capture_screen_start "$session" "$device" "$logfile" || return 1
+  _flashos_capture_worker_start "$mode" "$device" "$logfile" || return 1
 
   if [[ "$mode" == "mu" ]]; then
-    result="$(_flashos_capture_wait_mu "$logfile")"
+    result="$(_flashos_capture_wait_mu "$_FLASHOS_CAPTURE_PID" "$logfile")"
   else
-    result="$(_flashos_capture_wait_usb "$session" "$logfile")"
+    result="$(_flashos_capture_wait_usb "$_FLASHOS_CAPTURE_PID" "$logfile")"
   fi
 
   _flashos_capture_report "$mode" "$result" "$logfile"
@@ -451,7 +533,7 @@ _flashos_pi_usage() {
   print -- "  list                    list attached console devices"
   print -- "  log                     page the last boot.log capture"
   print -- "  tail [N]                live-tail the last boot.log (default: 40 lines)"
-  print -- "  quit                    kill the detached capture session"
+  print -- "  quit                    stop the serial capture process"
 }
 
 pi() {
@@ -492,8 +574,194 @@ piquit()    { _flashos_pi_quit "$@"; }
 _flashos_build_usage() {
   print -- "usage: build [args...]"
   print -- "  -d                  build and deploy to SD card (rpi4b only)"
+  print -- "  --board BOARD       select rpi4b or the frozen virt input"
   print -- "  help                show this usage information"
   print -- "  [xtask flags...]    passed to cargo xtask build/populate-syms"
+}
+
+# Run one build step in the background, with a compact TTY animation and full
+# output on failure. Successful diagnostics are preserved rather than hidden.
+_flashos_build_task() {
+  emulate -L zsh
+  # zsh otherwise tries to nice background jobs automatically. Restricted
+  # shells may reject that harmless priority change and pollute clean logs.
+  unsetopt bgnice
+  local task_name=$1 tmpdir=$2
+  shift 2
+  local logfile="$tmpdir/step.log"
+
+  "$@" > "$logfile" 2>&1 &
+  local pid=$!
+
+  if [[ -t 1 ]]; then
+    local -a dots=( ".  " ".. " "..." "   " )
+    local i=1
+    while kill -0 "$pid" 2>/dev/null; do
+      printf '\r\033[K[ %s%s%s ] %s' "$_YELLOW" "${dots[i]}" "$_NC" "$task_name"
+      i=$(( (i % 4) + 1 ))
+      sleep 0.2
+    done
+  fi
+
+  local exit_code=0
+  wait "$pid" || exit_code=$?
+  local clear_seq=""
+  [[ -t 1 ]] && clear_seq=$'\r\033[K'
+
+  if (( exit_code == 0 )); then
+    printf '%s[ %sOK%s ] %s\n' "$clear_seq" "$_GREEN" "$_NC" "$task_name"
+    [[ ! -s "$logfile" ]] || cat "$logfile"
+    return 0
+  fi
+
+  printf '%s[ %sERR%s ] %s\n' "$clear_seq" "$_RED" "$_NC" "$task_name"
+  cat "$logfile"
+  return "$exit_code"
+}
+
+_flashos_build_save_symbols() {
+  emulate -L zsh
+  setopt pipefail
+  local nm_bin=$1 kernel_elf=$2 output=$3
+  "$nm_bin" -n "$kernel_elf" | LC_ALL=C sort | grep -v '[$]' > "$output"
+}
+
+_flashos_build_compare_symbols() {
+  diff "$1" "$2"
+}
+
+_flashos_build_cleanup() {
+  local tmpdir=$1
+  [[ -z "$tmpdir" || ! -d "$tmpdir" ]] || rm -rf -- "$tmpdir"
+}
+
+_flashos_build_deploy() {
+  emulate -L zsh
+  local kernel_img=$1
+  local firmware="${FIRMWARE:-firmware}"
+
+  # The mount check is deliberately strict: deployment removes the contents
+  # of this one explicitly mounted FAT volume before copying the boot set.
+  if ! mount | grep -Fq " on $SD_BOOT (msdos"; then
+    _flashos_err "$SD_BOOT is not a mounted FAT32 volume — refusing to wipe it"
+    return 1
+  fi
+
+  local -a existing=("$SD_BOOT"/*(DN))
+  (( ${#existing[@]} == 0 )) || rm -rf -- "${existing[@]}"
+  cp "$kernel_img" rust-out/rpi4b/armstub8.bin config.txt "$SD_BOOT/"
+  cp "$firmware/bcm2711-rpi-4-b.dtb" "$SD_BOOT/"
+  cp "$firmware/start4.elf" "$SD_BOOT/"
+  cp "$firmware/fixup4.dat" "$SD_BOOT/"
+  mkdir -p "$SD_BOOT/overlays"
+  cp "$firmware/overlays/miniuart-bt.dtbo" "$SD_BOOT/overlays/"
+  dd if=/dev/zero of="$SD_BOOT/ROUNDTR.DAT" bs=4096 count=1 2>/dev/null
+  dd if=/dev/zero of="$SD_BOOT/ROUNDTR.MAG" bs=1 count=1 2>/dev/null
+  : > "$SD_BOOT/EMPTY.TXT"
+  cp rust-out/initramfs-stage/etc/shadow "$SD_BOOT/SHADOW"
+  cp rootfs/etc/perms.tab "$SD_BOOT/PERMS.TAB"
+  local -a metadata=(
+    "$SD_BOOT"/._ROUNDTR*(N)
+    "$SD_BOOT"/._EMPTY*(N)
+    "$SD_BOOT"/._SHADOW(N)
+    "$SD_BOOT"/._PERMS*(N)
+  )
+  (( ${#metadata[@]} == 0 )) || rm -f -- "${metadata[@]}"
+  sync
+  diskutil eject "$SD_BOOT"
+}
+
+_flashos_build_impl() {
+  emulate -L zsh
+  setopt errexit nounset pipefail
+
+  local board="${BOARD:-rpi4b}" deploy=0
+  local -a xtask_args=()
+  while (( $# > 0 )); do
+    case "$1" in
+      -d)
+        deploy=1
+        shift
+        ;;
+      -Dboard=*|--board=*)
+        board="${1#*=}"
+        shift
+        ;;
+      -Dboard|--board)
+        (( $# >= 2 )) || { _flashos_err "$1 requires rpi4b or virt"; return 1; }
+        board=$2
+        shift 2
+        ;;
+      *)
+        xtask_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  case "$board" in
+    rpi4b|virt) ;;
+    *) _flashos_err "build: unknown board '$board' (rpi4b|virt)"; return 1 ;;
+  esac
+  print -- "BOARD: $board"
+
+  [[ -f Cargo.toml && -f rust-toolchain.toml ]] || {
+    _flashos_err "Cargo.toml/rust-toolchain.toml not found — build must run from the project root"
+    return 1
+  }
+  _flashos_init_toolchain || return 1
+  export PATH="$_FLASHOS_TOOLCHAIN_BIN:$PATH"
+
+  local kernel_elf="rust-out/$board/kernel8.elf"
+  local kernel_img="rust-out/$board/kernel8.img"
+  local -a cargo=(rustup run "$_FLASHOS_RUST_CHANNEL" cargo)
+  local rust_sysroot host_triple nm_bin
+  rust_sysroot="$(rustup run "$_FLASHOS_RUST_CHANNEL" rustc --print sysroot)"
+  host_triple="$(rustup run "$_FLASHOS_RUST_CHANNEL" rustc -vV | awk '/^host:/ { print $2 }')"
+  nm_bin="${NM:-$rust_sysroot/lib/rustlib/$host_triple/bin/llvm-nm}"
+  if [[ "$nm_bin" == */* ]]; then
+    [[ -x "$nm_bin" ]] || { _flashos_err "$nm_bin is not executable (set \$NM to override)"; return 1; }
+  elif ! command -v "$nm_bin" >/dev/null 2>&1; then
+    _flashos_err "$nm_bin not found in PATH (set \$NM to override)"
+    return 1
+  fi
+
+  local tmpdir
+  tmpdir="$(mktemp -d -t flashos_build.XXXXXX)"
+  trap '_flashos_build_cleanup "$tmpdir"' EXIT
+
+  _flashos_build_task "check centralized versions" "$tmpdir" \
+    sh scripts/sync_versions.sh --check
+  _flashos_build_task "clean build cache" "$tmpdir" \
+    "${cargo[@]}" xtask clean
+  _flashos_build_task "check hygiene" "$tmpdir" \
+    "${cargo[@]}" xtask check-hygiene
+  _flashos_build_task "link kernel (pass 1: initial)" "$tmpdir" \
+    "${cargo[@]}" xtask build --board "$board" "${xtask_args[@]}"
+  _flashos_build_task "extract symbol table (pass 1)" "$tmpdir" \
+    _flashos_build_save_symbols "$nm_bin" "$kernel_elf" "$tmpdir/nmfirstpass"
+  _flashos_build_task "generate layout (src/symbol_area.S)" "$tmpdir" \
+    "${cargo[@]}" xtask populate-syms --board "$board" "${xtask_args[@]}"
+  _flashos_build_task "link kernel (pass 2: final)" "$tmpdir" \
+    "${cargo[@]}" xtask build --board "$board" "${xtask_args[@]}"
+  _flashos_build_task "extract symbol table (pass 2)" "$tmpdir" \
+    _flashos_build_save_symbols "$nm_bin" "$kernel_elf" "$tmpdir/nmsecondpass"
+  _flashos_build_task "verify symbol layout consistency" "$tmpdir" \
+    _flashos_build_compare_symbols "$tmpdir/nmfirstpass" "$tmpdir/nmsecondpass"
+  if [[ "$board" == "rpi4b" ]]; then
+    _flashos_build_task "build armstub" "$tmpdir" "${cargo[@]}" xtask armstub
+  fi
+
+  if [[ "$board" != "rpi4b" ]]; then
+    printf '[ %sSKIP%s ] deploy (board=%s, rpi4b-only)\n' "$_YELLOW" "$_NC" "$board"
+  elif (( deploy == 1 )); then
+    _flashos_build_task "deploy to SD card" "$tmpdir" \
+      _flashos_build_deploy "$kernel_img"
+  else
+    printf '[ %sSKIP%s ] deploy (run with -d to deploy)\n' "$_YELLOW" "$_NC"
+  fi
+
+  _flashos_ok "Build successful"
 }
 
 build() {
@@ -508,171 +776,7 @@ build() {
     return 0
   fi
 
-  _flashos_root zsh -c '
-    set -euo pipefail
-
-    local BOARD="${BOARD:-rpi4b}"
-    local DEPLOY=0
-    local -a XTASK_ARGS=()
-
-    # Keep the historical -Dboard= spelling as a compatibility alias while
-    # forwarding every other flag to the native xtask build.
-    for arg in "$@"; do
-      if [[ "$arg" == "-d" ]]; then
-        DEPLOY=1
-      elif [[ "$arg" == -Dboard=* ]]; then
-        BOARD="${arg#-Dboard=}"
-      elif [[ "$arg" == --board=* ]]; then
-        BOARD="${arg#--board=}"
-      else
-        XTASK_ARGS+=("$arg")
-      fi
-    done
-
-    print -- "BOARD: $BOARD"
-
-    local RED="\033[0;31m"
-    local GREEN="\033[0;32m"
-    local YELLOW="\033[1;33m"
-    local NC="\033[0m"
-
-    # rust-toolchain.toml is the pin; bypass any package-manager Rust earlier
-    # on PATH and run the exact channel through rustup.
-    local RUST_CHANNEL="$(awk -F\" "/^channel = / { print \$2; exit }" rust-toolchain.toml)"
-    if [[ -z "$RUST_CHANNEL" ]] || ! command -v rustup >/dev/null 2>&1; then
-      print -- "${RED}error: cannot resolve the pinned rustup toolchain.${NC}"
-      exit 1
-    fi
-    local RUSTC_BIN="$(rustup which --toolchain "$RUST_CHANNEL" rustc)"
-    export PATH="${RUSTC_BIN:h}:$PATH"
-
-    local KERNEL_ELF="rust-out/$BOARD/kernel8.elf"
-    local KERNEL_IMG="rust-out/$BOARD/kernel8.img"
-    local -a CARGO=(rustup run "$RUST_CHANNEL" cargo)
-    local RUST_SYSROOT="$(rustup run "$RUST_CHANNEL" rustc --print sysroot)"
-    local HOST_TRIPLE="$(rustup run "$RUST_CHANNEL" rustc -vV | awk "/^host:/ { print \$2 }")"
-    local NM_BIN="${NM:-$RUST_SYSROOT/lib/rustlib/$HOST_TRIPLE/bin/llvm-nm}"
-
-    # Pre-flight 1: Ensure nm (symbol extraction tool) is installed
-    if ! command -v "$NM_BIN" >/dev/null 2>&1; then
-      print -- "${RED}error: $NM_BIN not found in PATH (set \$NM to override).${NC}"
-      exit 1
-    fi
-
-    # Pre-flight 2: Verify execution from project root
-    if [[ ! -f Cargo.toml || ! -f rust-toolchain.toml ]]; then
-      print -- "${RED}error: Cargo.toml/rust-toolchain.toml not found — build must run from the project root.${NC}"
-      exit 1
-    fi
-
-    # Create a temporary directory for symbol diffs. Auto-cleaned on exit (even on failure).
-    local NM_TMPDIR=$(mktemp -d -t flashos_build.XXXXXX)
-    trap "rm -rf \"$NM_TMPDIR\"" EXIT
-
-    # Helper: Runs a command in the background, showing a loading animation
-    # and hiding output unless an error occurs.
-    run_task() {
-        local task_name="$1"
-        shift
-        local logfile="$NM_TMPDIR/step.log"
-
-        # Start command in background
-        "$@" > "$logfile" 2>&1 &
-        local pid=$!
-
-        if [[ -t 1 ]]; then
-            local -a dots=( ".  " ".. " "..." "   " )
-            local i=1
-
-            # Animate while the background process is running (tty only)
-            while kill -0 $pid 2>/dev/null; do
-                printf "\r\033[K[ ${YELLOW}%s${NC} ] %s" "${dots[i]}" "$task_name"
-                i=$(( (i % 4) + 1 ))
-                sleep 0.2
-            done
-        fi
-
-        # Wait for the exact exit code. || exit_code=$? prevents set -e from aborting the script.
-        local exit_code=0
-        wait $pid || exit_code=$?
-
-        # In a pipe/CI/editor (non-tty), emit plain result lines without the
-        # \r\033[K animation control codes that would otherwise garble logs.
-        local clear_seq=""
-        [[ -t 1 ]] && clear_seq="\r\033[K"
-
-        if (( exit_code == 0 )); then
-            # Use exactly "[ OK ]" as requested.
-            printf "${clear_seq}[ ${GREEN}OK${NC} ] %s\n" "$task_name"
-            if [[ -s "$logfile" ]]; then
-                cat "$logfile"
-            fi
-        else
-            printf "${clear_seq}[ ${RED}ERR${NC} ] %s\n" "$task_name"
-            cat "$logfile"
-            exit 1
-        fi
-    }
-
-    save_first_pass() {
-        "$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v "[\$]" > "$NM_TMPDIR/nmfirstpass"
-    }
-
-    save_second_pass() {
-        "$NM_BIN" -n "$KERNEL_ELF" | sort | grep -v "[\$]" > "$NM_TMPDIR/nmsecondpass"
-    }
-
-    check_diff() {
-        diff "$NM_TMPDIR/nmfirstpass" "$NM_TMPDIR/nmsecondpass"
-    }
-
-    deploy_to_sd() {
-        local FIRMWARE="${FIRMWARE:-firmware}"
-        # Refuse to wipe anything that is not the explicitly mounted FAT card.
-        if ! mount | grep -q " on $SD_BOOT (msdos"; then
-            print -u2 -- "error: $SD_BOOT is not a mounted FAT32 volume — refusing to wipe it"
-            return 1
-        fi
-        rm -rf "$SD_BOOT"/*
-        cp "$KERNEL_IMG" rust-out/rpi4b/armstub8.bin config.txt "$SD_BOOT/"
-        cp "$FIRMWARE/bcm2711-rpi-4-b.dtb" "$SD_BOOT/"
-        cp "$FIRMWARE/start4.elf" "$SD_BOOT/"
-        cp "$FIRMWARE/fixup4.dat" "$SD_BOOT/"
-        mkdir -p "$SD_BOOT/overlays"
-        cp "$FIRMWARE/overlays/miniuart-bt.dtbo" "$SD_BOOT/overlays/"
-        dd if=/dev/zero of="$SD_BOOT/ROUNDTR.DAT" bs=4096 count=1 2>/dev/null
-        dd if=/dev/zero of="$SD_BOOT/ROUNDTR.MAG" bs=1 count=1 2>/dev/null
-        : > "$SD_BOOT/EMPTY.TXT"
-        cp rust-out/initramfs-stage/etc/shadow "$SD_BOOT/SHADOW"
-        cp user_space/etc/perms.tab "$SD_BOOT/PERMS.TAB"
-        rm -f "$SD_BOOT"/._ROUNDTR* "$SD_BOOT"/._EMPTY* \
-              "$SD_BOOT"/._SHADOW "$SD_BOOT"/._PERMS* 2>/dev/null || true
-        sync
-        diskutil eject "$SD_BOOT"
-    }
-
-    # --- Core Two-Pass Build Pipeline ---
-    # 1. First pass linking -> 2. Symbol layout generation -> 3. Final linking -> 4. Verification
-    run_task "clean build cache" "${CARGO[@]}" xtask clean
-    run_task "check hygiene" "${CARGO[@]}" xtask check-hygiene
-    run_task "link kernel (pass 1: initial)" "${CARGO[@]}" xtask build --board "$BOARD" "${XTASK_ARGS[@]}"
-    run_task "extract symbol table (pass 1)" save_first_pass
-    run_task "generate layout (src/symbol_area.S)" "${CARGO[@]}" xtask populate-syms --board "$BOARD" "${XTASK_ARGS[@]}"
-    run_task "link kernel (pass 2: final)" "${CARGO[@]}" xtask build --board "$BOARD" "${XTASK_ARGS[@]}"
-    run_task "extract symbol table (pass 2)" save_second_pass
-    run_task "verify symbol layout consistency" check_diff
-    [[ "$BOARD" == "rpi4b" ]] && run_task "build armstub" "${CARGO[@]}" xtask armstub
-
-    if [[ "$BOARD" != "rpi4b" ]]; then
-        printf "[ ${YELLOW}SKIP${NC} ] deploy (board=$BOARD, rpi4b-only)\n"
-    elif (( DEPLOY == 1 )); then
-        run_task "deploy to SD card" deploy_to_sd
-    else
-        printf "[${YELLOW}SKIP${NC}] deploy (run with -d to deploy)\n"
-    fi
-
-    print -- "[ \033[0;32mOK\033[0m ] Build successful"
-  ' _ "$@"
+  _flashos_root _flashos_build_impl "$@"
 }
 
 # run <mode> — build-and-run a board in QEMU, run the boot-watchdog, or attach
@@ -691,11 +795,19 @@ run() {
   emulate -L zsh
   local mode="${1:-auto}"
   (( $# > 0 )) && shift
+
+  # Every path that compiles or tests code first rejects manifest drift. The
+  # hardware attachment and help paths intentionally remain available even if
+  # a checkout is mid-version-update.
+  case "$mode" in
+    qemu|auto|virt|test|watchdog|check) _flashos_versions_check || return 1 ;;
+  esac
+
   case "$mode" in
     qemu|auto)
       _flashos_cargo xtask build --board rpi4b "$@" || return 1
       _flashos_root sh scripts/make_test_disk.sh \
-        rust-out/initramfs-stage/etc/shadow user_space/etc/perms.tab || return 1
+        rust-out/initramfs-stage/etc/shadow rootfs/etc/perms.tab || return 1
       _flashos_root qemu-system-aarch64 \
         -M raspi4b -display none -serial null -serial stdio \
         -kernel rust-out/rpi4b/kernel8.img \
@@ -747,7 +859,7 @@ run() {
         --ci-login-seed --boot-selftest "$@" || return 1
       if [[ "$wb" == "rpi4b" ]]; then
         _flashos_root sh scripts/make_test_disk.sh \
-          rust-out/initramfs-stage/etc/shadow user_space/etc/perms.tab || return 1
+          rust-out/initramfs-stage/etc/shadow rootfs/etc/perms.tab || return 1
         _flashos_root scripts/run_qemu_test.sh "$timeout" qemu-system-aarch64 \
           -M raspi4b -display none -serial null -serial stdio \
           -kernel rust-out/rpi4b/kernel8.img \
@@ -790,11 +902,59 @@ run() {
   esac
 }
 
-# ── introspection ──────────────────────────────────────────────────────────
+# ── repository control and introspection ───────────────────────────────────
 
-# List the public shell helpers and the cargo xtask commands. Named `flashos` rather
-# than `help` so sourcing this file does not clobber a user's `help`/`run-help`.
-flashos() {
+_flashos_usage() {
+  print -- "usage: flashos [list|check|versions|help] [args]"
+  print -- "  list                         list shell helpers and cargo xtask commands"
+  print -- "  check [all|versions|docs|hygiene|shell]"
+  print -- "                               run maintained repository checks (default: all)"
+  print -- "  versions [show|check|sync]   show, validate, or propagate versions.env"
+}
+
+_flashos_versions_usage() {
+  print -- "usage: flashos versions [show|check|sync]"
+  print -- "  show     print the central FlashOS, Rust, and QEMU versions (default)"
+  print -- "  check    reject drift from versions.env"
+  print -- "  sync     propagate versions.env into generated version fields, then verify"
+}
+
+_flashos_check_usage() {
+  print -- "usage: flashos check [all|versions|docs|hygiene|shell]"
+  print -- "  all       run every check below plus git diff --check (default)"
+  print -- "  versions  reject drift from versions.env"
+  print -- "  docs      check active documentation paths, versions, and contracts"
+  print -- "  hygiene   run maintained whitespace and hex-literal gates"
+  print -- "  shell     parse-check flashos.zsh"
+}
+
+_flashos_check() {
+  emulate -L zsh
+  local scope="${1:-all}"
+  (( $# <= 1 )) || { _flashos_err "flashos check accepts one scope"; return 1; }
+  case "$scope" in
+    all)
+      _flashos_versions_check || return 1
+      _flashos_root zsh -n flashos.zsh || return 1
+      _flashos_cargo xtask check-hygiene || return 1
+      _flashos_root sh scripts/check_doc_drift.sh || return 1
+      _flashos_root git diff --check
+      ;;
+    versions) _flashos_versions_check ;;
+    docs)     _flashos_root sh scripts/check_doc_drift.sh ;;
+    hygiene)  _flashos_cargo xtask check-hygiene ;;
+    shell)    _flashos_root zsh -n flashos.zsh ;;
+    help|-h|--help) _flashos_check_usage ;;
+    *)
+      _flashos_err "flashos check: unknown scope '$scope'"
+      _flashos_check_usage >&2
+      return 1
+      ;;
+  esac
+}
+
+# List the public shell helpers and the cargo xtask commands.
+_flashos_list() {
   emulate -L zsh
   local project_file="$_FLASHOS_DIR/flashos.zsh"
   local cargo_file="$_FLASHOS_DIR/Cargo.toml"
@@ -815,6 +975,25 @@ flashos() {
   fi
 }
 
+# Named `flashos` rather than `help` so sourcing this file does not clobber a
+# user's existing help function.
+flashos() {
+  emulate -L zsh
+  local verb="${1:-list}"
+  (( $# > 0 )) && shift
+  case "$verb" in
+    list)             _flashos_list "$@" ;;
+    check)            _flashos_check "$@" ;;
+    versions|version) _flashos_versions "$@" ;;
+    help|-h|--help)   _flashos_usage ;;
+    *)
+      _flashos_err "flashos: unknown verb '$verb'"
+      _flashos_usage >&2
+      return 1
+      ;;
+  esac
+}
+
 # ── completion ──────────────────────────────────────────────────────────────
 # zsh tab-completion for the pi/run verb dispatchers. compinit runs from
 # ~/.zshrc before this file is sourced, so compdef is defined by the time we
@@ -827,7 +1006,7 @@ _flashos_pi_completion() {
     'list:list attached console devices'
     'log:page the last boot.log capture'
     'tail:live-tail the last boot.log'
-    'quit:kill the detached capture session'
+    'quit:stop the serial capture process'
     'help:usage'
   )
   if (( CURRENT == 2 )); then
@@ -870,8 +1049,26 @@ _flashos_build_completion() {
   fi
 }
 
+_flashos_completion() {
+  local -a verbs=(
+    'list:list shell helpers and cargo xtask commands'
+    'check:run repository checks'
+    'versions:show, validate, or propagate central versions'
+    'help:usage'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t verbs 'flashos verb' verbs
+  elif (( CURRENT == 3 )); then
+    case "${words[2]}" in
+      check)    _values 'scope' all versions docs hygiene shell ;;
+      versions) _values 'operation' show check sync ;;
+    esac
+  fi
+}
+
 if (( $+functions[compdef] )); then
   compdef _flashos_pi_completion pi
   compdef _flashos_run_completion run
   compdef _flashos_build_completion build
+  compdef _flashos_completion flashos
 fi

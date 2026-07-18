@@ -1,16 +1,15 @@
-// ==========================================================================
-// App State & DOM References
-// ==========================================================================
-let state = {
+// FlashOS Tour: static chapter reader and Rust source scratchpad.
+
+const state = {
     chapters: [],
     currentChapterIndex: 0,
-    themeMode: 'auto', // 'auto' | 'light' | 'dark' — what the user picked
-    theme: 'dark', // 'dark' | 'light' — resolved theme actually applied
-    layout: 'split', // 'split' | 'reader' | 'editor'
-    flashEditor: null,
-    zigEditor: null,
-    editorLoaded: false,
-    backend: true // false on static hosting (GitHub Pages) — no transpile API
+    currentExample: null,
+    themeMode: 'auto',
+    theme: 'dark',
+    layout: 'split',
+    sourceEditor: null,
+    contractEditor: null,
+    editorLoaded: false
 };
 
 const dom = {
@@ -20,17 +19,16 @@ const dom = {
     nextBtn: document.getElementById('next-btn'),
     themeToggle: document.getElementById('theme-toggle'),
     layoutToggle: document.getElementById('layout-toggle'),
-    transpileBtn: document.getElementById('transpile-btn'),
+    loadExampleBtn: document.getElementById('load-example-btn'),
     clearTerminal: document.getElementById('clear-terminal'),
     terminalBody: document.getElementById('terminal-body'),
     terminalStatus: document.getElementById('terminal-status'),
     workspacePane: document.querySelector('.workspace-pane'),
-    playgroundPanel: document.getElementById('playground-panel'),
     contentPanel: document.getElementById('content-panel'),
     tabButtons: document.querySelectorAll('.tab-btn'),
     tabContents: document.querySelectorAll('.tab-content'),
-    flashEditorContainer: document.getElementById('editor-container'),
-    zigEditorContainer: document.getElementById('output-container'),
+    sourceEditorContainer: document.getElementById('editor-container'),
+    contractEditorContainer: document.getElementById('output-container'),
     sidebar: document.getElementById('sidebar'),
     sidebarToggle: document.getElementById('sidebar-toggle'),
     sidebarBackdrop: document.getElementById('sidebar-backdrop'),
@@ -38,100 +36,55 @@ const dom = {
     terminalHeader: document.getElementById('terminal-header')
 };
 
-// Narrow screens get drawer navigation + touch-friendly editor defaults.
 const mobileQuery = window.matchMedia('(max-width: 992px)');
 const phoneQuery = window.matchMedia('(max-width: 600px)');
 
-// ==========================================================================
-// Off-canvas Sidebar (narrow screens)
-// ==========================================================================
+function layoutEditors() {
+    if (state.sourceEditor) state.sourceEditor.layout();
+    if (state.contractEditor) state.contractEditor.layout();
+}
+
 function setSidebarOpen(open) {
     dom.sidebar.classList.toggle('open', open);
     dom.sidebarBackdrop.classList.toggle('visible', open);
     dom.sidebarToggle.setAttribute('aria-expanded', String(open));
 }
 
-function initSidebarDrawer() {
+function setTerminalCollapsed(collapsed) {
+    dom.terminalDrawer.classList.toggle('collapsed', collapsed);
+    setTimeout(layoutEditors, 280);
+}
+
+function initDrawers() {
     dom.sidebarToggle.addEventListener('click', () => {
         setSidebarOpen(!dom.sidebar.classList.contains('open'));
     });
     dom.sidebarBackdrop.addEventListener('click', () => setSidebarOpen(false));
-
-    // Leaving the narrow layout: drop the drawer state so the static sidebar shows normally.
-    mobileQuery.addEventListener('change', (e) => {
-        if (!e.matches) setSidebarOpen(false);
+    mobileQuery.addEventListener('change', event => {
+        if (!event.matches) setSidebarOpen(false);
     });
-}
-
-// ==========================================================================
-// Collapsible Terminal Drawer
-// ==========================================================================
-function setTerminalCollapsed(collapsed) {
-    dom.terminalDrawer.classList.toggle('collapsed', collapsed);
-    // Monaco shares the column with the drawer — re-measure after the height transition.
-    setTimeout(() => {
-        if (state.flashEditor) state.flashEditor.layout();
-        if (state.zigEditor) state.zigEditor.layout();
-    }, 280);
-}
-
-function initTerminalDrawer() {
-    dom.terminalHeader.addEventListener('click', (e) => {
-        if (e.target.closest('#clear-terminal')) return; // clear button keeps its own action
-        setTerminalCollapsed(!dom.terminalDrawer.classList.contains('collapsed'));
+    dom.terminalHeader.addEventListener('click', event => {
+        if (!event.target.closest('#clear-terminal')) {
+            setTerminalCollapsed(!dom.terminalDrawer.classList.contains('collapsed'));
+        }
     });
-
-    // Phones: start collapsed so the editor gets the vertical space.
     if (phoneQuery.matches) setTerminalCollapsed(true);
 }
 
-// ==========================================================================
-// Theme and Layout Controls
-// ==========================================================================
-function initThemeAndLayout() {
-    // Theme: 'auto' follows the OS; 'light'/'dark' are manual overrides. Default 'auto'.
-    setThemeMode(localStorage.getItem('theme') || 'auto');
-
-    // Cycle auto -> light -> dark -> auto on each click.
-    dom.themeToggle.addEventListener('click', () => {
-        const cycle = ['auto', 'light', 'dark'];
-        const next = cycle[(cycle.indexOf(state.themeMode) + 1) % cycle.length];
-        setThemeMode(next);
-    });
-
-    // While in 'auto', live-follow the OS theme.
-    if (window.matchMedia) {
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-            if (state.themeMode === 'auto') applyResolvedTheme(getSystemTheme());
-        });
-    }
-
-    // Layout
-    const savedLayout = localStorage.getItem('layout') || 'split';
-    setLayout(savedLayout);
-
-    dom.layoutToggle.addEventListener('click', () => {
-        const layoutModes = ['split', 'reader', 'editor'];
-        const nextIndex = (layoutModes.indexOf(state.layout) + 1) % layoutModes.length;
-        setLayout(layoutModes[nextIndex]);
-    });
-
-    // Tab buttons for Editor/test-lowering switcher
-    dom.tabButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetTab = btn.getAttribute('data-tab');
-            switchTab(targetTab);
-        });
-    });
-}
-
 function getSystemTheme() {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
-        ? 'light'
-        : 'dark';
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
-// Set the user's chosen mode, persist it, update the button icon, and apply the result.
+function applyResolvedTheme(theme) {
+    state.theme = theme;
+    document.body.classList.toggle('dark-theme', theme === 'dark');
+    document.body.classList.toggle('light-theme', theme === 'light');
+    if (state.editorLoaded && window.monaco) {
+        monaco.editor.setTheme(theme === 'dark' ? 'atomo-one-dark' : 'atomo-one-light');
+        highlightRustBlocks(dom.chapterContent);
+    }
+}
+
 function setThemeMode(mode) {
     state.themeMode = mode;
     localStorage.setItem('theme', mode);
@@ -141,239 +94,100 @@ function setThemeMode(mode) {
     applyResolvedTheme(mode === 'auto' ? getSystemTheme() : mode);
 }
 
-// Apply a concrete 'dark'/'light' theme to the body and Monaco — no persistence.
-function applyResolvedTheme(theme) {
-    state.theme = theme;
-
-    if (theme === 'dark') {
-        document.body.classList.remove('light-theme');
-        document.body.classList.add('dark-theme');
-    } else {
-        document.body.classList.remove('dark-theme');
-        document.body.classList.add('light-theme');
-    }
-
-    // Update Monaco editor themes if loaded
-    if (state.editorLoaded && window.monaco) {
-        const monacoTheme = theme === 'dark' ? 'atomo-one-dark' : 'atomo-one-light';
-        monaco.editor.setTheme(monacoTheme);
-        // Re-colourise the reader's static blocks so they track the new theme.
-        highlightFlashBlocks(dom.chapterContent);
-    }
-}
-
 function setLayout(layout) {
     state.layout = layout;
     localStorage.setItem('layout', layout);
-
-    // Reset layout classes
     dom.workspacePane.classList.remove('reader-only', 'editor-only');
-
-    if (layout === 'reader') {
-        dom.workspacePane.classList.add('reader-only');
-    } else if (layout === 'editor') {
-        dom.workspacePane.classList.add('editor-only');
-    }
-
-    // Trigger monaco layout adjustment
-    setTimeout(() => {
-        if (state.flashEditor) state.flashEditor.layout();
-        if (state.zigEditor) state.zigEditor.layout();
-    }, 250);
+    if (layout === 'reader') dom.workspacePane.classList.add('reader-only');
+    if (layout === 'editor') dom.workspacePane.classList.add('editor-only');
+    setTimeout(layoutEditors, 250);
 }
 
 function switchTab(tabName) {
-    dom.tabButtons.forEach(btn => {
-        if (btn.getAttribute('data-tab') === tabName) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
+    dom.tabButtons.forEach(button => {
+        button.classList.toggle('active', button.dataset.tab === tabName);
     });
-
     dom.tabContents.forEach(content => {
-        if (content.id === `tab-${tabName}`) {
-            content.classList.add('active');
-        } else {
-            content.classList.remove('active');
-        }
+        content.classList.toggle('active', content.id === `tab-${tabName}`);
     });
-
-    // Trigger editor layout adjustments
-    setTimeout(() => {
-        if (tabName === 'editor' && state.flashEditor) state.flashEditor.layout();
-        if (tabName === 'output' && state.zigEditor) state.zigEditor.layout();
-    }, 50);
+    setTimeout(layoutEditors, 50);
 }
 
-// ==========================================================================
-// Monaco Editor Integration & Custom Highlight Definition
-// ==========================================================================
+function initControls() {
+    setThemeMode(localStorage.getItem('theme') || 'auto');
+    setLayout(localStorage.getItem('layout') || 'split');
+
+    dom.themeToggle.addEventListener('click', () => {
+        const modes = ['auto', 'light', 'dark'];
+        setThemeMode(modes[(modes.indexOf(state.themeMode) + 1) % modes.length]);
+    });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        if (state.themeMode === 'auto') applyResolvedTheme(getSystemTheme());
+    });
+    dom.layoutToggle.addEventListener('click', () => {
+        const layouts = ['split', 'reader', 'editor'];
+        setLayout(layouts[(layouts.indexOf(state.layout) + 1) % layouts.length]);
+    });
+    dom.tabButtons.forEach(button => {
+        button.addEventListener('click', () => switchTab(button.dataset.tab));
+    });
+}
+
 function initMonaco() {
     require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
-    
-    require(['vs/editor/editor.main'], function () {
-        // 1. Register a new custom language for Flash
-        monaco.languages.register({ id: 'flash' });
-
-        // 2. Define tokens for the Flash language
-        monaco.languages.setMonarchTokensProvider('flash', {
-            keywords: [
-                'use', 'link', 'fn', 'const', 'var', 'export', 'noreturn', 'orelse',
-                'try', 'catch', 'defer', 'errdefer', 'struct', 'enum', 'union',
-                'if', 'else', 'while', 'for', 'in', 'pub', 'as', 'break', 'continue', 'undefined'
-            ],
-            typeKeywords: [
-                'u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'usize', 'isize',
-                'cstr', 'argv', 'bool', 'void', 'f32', 'f64'
-            ],
-            operators: [
-                '=', '+=', '-=', '*=', '/=', '%=', '==', '!=', '<', '<=', '>', '>=',
-                '&&', '||', '!', '&', '|', '^', '<<', '>>', '->', ':=', ':', '::', '.'
-            ],
-            symbols: /[=><!~?:&|+\-*\/\^%]+/,
-            escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
-            tokenizer: {
-                root: [
-                    // Identifiers and keywords
-                    [/[a-zA-Z_]\w*/, {
-                        cases: {
-                            '@keywords': 'keyword',
-                            '@typeKeywords': 'type',
-                            '@default': 'identifier'
-                        }
-                    }],
-                    // Comments
-                    [/\/\/.*$/, 'comment'],
-                    // Numbers
-                    [/\d+/, 'number'],
-                    // Strings
-                    [/"([^"\\]|\\.)*"/, 'string'],
-                    // Operators and symbols
-                    [/@symbols/, {
-                        cases: {
-                            '@operators': 'operator',
-                            '@default': ''
-                        }
-                    }],
-                    // Bracket matches
-                    [/[{}()\[\]]/, '@brackets']
-                ]
-            }
-        });
-
-        // 3. Define custom editor themes
+    require(['vs/editor/editor.main'], () => {
         monaco.editor.defineTheme('atomo-one-dark', {
             base: 'vs-dark',
             inherit: true,
-            rules: [
-                { token: 'keyword', foreground: 'c678dd', fontStyle: 'bold' },
-                { token: 'type', foreground: 'e5c07b' },
-                { token: 'comment', foreground: '5c6370', fontStyle: 'italic' },
-                { token: 'string', foreground: '98c379' },
-                { token: 'number', foreground: 'd19a66' },
-                { token: 'operator', foreground: '56b6c2' },
-                { token: 'identifier', foreground: 'abb2bf' },
-                { token: 'delimiter', foreground: 'abb2bf' }
-            ],
+            rules: [],
             colors: {
                 'editor.background': '#282c34',
                 'editor.foreground': '#abb2bf',
                 'editor.lineHighlightBackground': '#2c313c',
                 'editorCursor.foreground': '#528bff',
-                'editor.selectionBackground': '#3e4451',
-                'editorLineNumber.foreground': '#4b5263',
-                'editorLineNumber.activeForeground': '#c8ccd4'
+                'editor.selectionBackground': '#3e4451'
             }
         });
-
         monaco.editor.defineTheme('atomo-one-light', {
             base: 'vs',
             inherit: true,
-            rules: [
-                { token: 'keyword', foreground: 'a626a4', fontStyle: 'bold' },
-                { token: 'type', foreground: 'c18401' },
-                { token: 'comment', foreground: 'a0a1a7', fontStyle: 'italic' },
-                { token: 'string', foreground: '50a14f' },
-                { token: 'number', foreground: '986801' },
-                { token: 'operator', foreground: '0184bc' },
-                { token: 'identifier', foreground: '383a42' },
-                { token: 'delimiter', foreground: '383a42' }
-            ],
+            rules: [],
             colors: {
                 'editor.background': '#fafafa',
                 'editor.foreground': '#383a42',
                 'editor.lineHighlightBackground': '#f0f0f0',
                 'editorCursor.foreground': '#526fff',
-                'editor.selectionBackground': '#e1e1e1',
-                'editorLineNumber.foreground': '#9d9d9f',
-                'editorLineNumber.activeForeground': '#383a42'
+                'editor.selectionBackground': '#e1e1e1'
             }
         });
 
-        // 4. Create Flash editor (editable)
-        state.flashEditor = monaco.editor.create(dom.flashEditorContainer, {
-            value: `// Select a chapter on the left to load examples\n// Or write your own Flash code here!\n\nuse flibc\n\nexport fn main(_ usize, _ argv) noreturn {\n    msg := "Hello World from Flash!\\n"\n    _ = flibc.sys.write_fd(1, msg.ptr, msg.len)\n    flibc.exit()\n}`,
-            language: 'flash',
-            theme: state.theme === 'dark' ? 'atomo-one-dark' : 'atomo-one-light',
+        const fontSize = phoneQuery.matches ? 16 : 13;
+        const lineHeight = phoneQuery.matches ? 24 : 20;
+        const theme = state.theme === 'dark' ? 'atomo-one-dark' : 'atomo-one-light';
+        state.sourceEditor = monaco.editor.create(dom.sourceEditorContainer, {
+            value: `#![no_std]\n\n// Load a Rust example from the selected chapter,\n// or use this pane as a source scratchpad.\n\n#[no_mangle]\npub extern "C" fn example() -> usize {\n    42\n}\n`,
+            language: 'rust',
+            theme,
             automaticLayout: true,
             fontFamily: 'JetBrains Mono, Fira Code, monospace',
-            // ≥16px on phones, or iOS auto-zooms the page when the editor gets focus
-            fontSize: phoneQuery.matches ? 16 : 13,
-            lineHeight: phoneQuery.matches ? 24 : 20,
-            minimap: { enabled: false },
-            scrollbar: {
-                vertical: 'auto',
-                horizontal: 'auto'
-            }
+            fontSize,
+            lineHeight,
+            minimap: { enabled: false }
         });
-
-        // 5. Create lowered-output editor (read-only)
-        state.zigEditor = monaco.editor.create(dom.zigEditorContainer, {
-            value: `// Click 'Check lab' to inspect the test-only compatibility lowering`,
-            language: 'rust', // Monaco doesn't have Zig built-in by default, Rust/C highlight matches Zig syntax tags fairly closely
-            theme: state.theme === 'dark' ? 'atomo-one-dark' : 'atomo-one-light',
+        state.contractEditor = monaco.editor.create(dom.contractEditorContainer, {
+            value: `# Native production and verification commands\n\ncargo xtask build --board rpi4b\ncargo xtask armstub\ncargo xtask test\ncargo xtask check-hygiene\n\n# Full unattended boot contract (after sourcing flashos.zsh)\nrun watchdog rpi4b\n`,
+            language: 'shell',
+            theme,
             readOnly: true,
             automaticLayout: true,
             fontFamily: 'JetBrains Mono, Fira Code, monospace',
-            fontSize: phoneQuery.matches ? 16 : 13,
-            lineHeight: phoneQuery.matches ? 24 : 20,
+            fontSize,
+            lineHeight,
             minimap: { enabled: false }
         });
-
         state.editorLoaded = true;
-        console.log("Monaco Editors initialized.");
-
-        // The first chapter may have rendered before Monaco was ready — colour
-        // its example blocks now that the Flash grammar exists.
-        highlightFlashBlocks(dom.chapterContent);
+        highlightRustBlocks(dom.chapterContent);
     });
-}
-
-// ==========================================================================
-// Chapters Loading & Navigation
-// ==========================================================================
-async function loadChapters() {
-    try {
-        // chapters.json is a plain static file (relative path), so the chapter
-        // list works identically on the dev server and on static hosting.
-        const response = await fetch('chapters.json');
-        state.chapters = await response.json();
-        renderChaptersSidebar();
-        
-        // Load initial chapter based on URL hash or default to first
-        const hash = window.location.hash.substring(1);
-        const activeChapterIndex = state.chapters.findIndex(c => c.id === hash);
-        
-        if (activeChapterIndex !== -1) {
-            await selectChapter(activeChapterIndex);
-        } else {
-            await selectChapter(0);
-        }
-    } catch (err) {
-        console.error("Failed to fetch chapters metadata:", err);
-        dom.chaptersList.innerHTML = `<div class="nav-loading">Error loading chapters. Check backend status.</div>`;
-    }
 }
 
 function renderChaptersSidebar() {
@@ -382,347 +196,126 @@ function renderChaptersSidebar() {
         const button = document.createElement('button');
         button.className = `nav-item ${index === state.currentChapterIndex ? 'active' : ''}`;
         button.textContent = chapter.title;
-        button.addEventListener('click', () => {
-            selectChapter(index);
-        });
+        button.addEventListener('click', () => selectChapter(index));
         dom.chaptersList.appendChild(button);
     });
 }
 
+function extractFirstRustExample(markdown) {
+    const match = markdown.match(/```rust\s*\n([\s\S]*?)```/i);
+    return match ? match[1].trimEnd() + '\n' : null;
+}
+
+function createMarkdownRenderer() {
+    const renderer = new marked.Renderer();
+    renderer.code = function (codeOrToken, language) {
+        const code = typeof codeOrToken === 'object' ? (codeOrToken.text || '') : (codeOrToken || '');
+        const lang = typeof codeOrToken === 'object' ? (codeOrToken.lang || '') : (language || '');
+        const escaped = code
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+        return `<pre><code class="language-${lang || 'text'}">${escaped}</code></pre>`;
+    };
+    renderer.blockquote = function (token) {
+        const text = typeof token === 'object' ? (token.text || '') : (token || '');
+        const html = typeof token === 'object' ? this.parser.parse(token.tokens) : token;
+        const match = text.match(/\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]/i);
+        if (!match) return `<blockquote>${html}</blockquote>`;
+        const title = match[1].toUpperCase();
+        const warning = title === 'WARNING' || title === 'CAUTION';
+        const cleaned = html.replace(/\[![A-Z]+\]/i, '');
+        return `<div class="callout ${warning ? 'callout-warning' : 'callout-note'}"><div class="callout-title">${title}</div>${cleaned}</div>`;
+    };
+    return renderer;
+}
+
+async function highlightRustBlocks(root) {
+    if (!state.editorLoaded || !window.monaco) return;
+    const blocks = (root || document).querySelectorAll('pre code.language-rust');
+    for (const block of blocks) {
+        if (block.dataset.raw === undefined) block.dataset.raw = block.textContent;
+        block.innerHTML = await monaco.editor.colorize(block.dataset.raw, 'rust', { tabSize: 4 });
+    }
+}
+
 async function selectChapter(index) {
     if (index < 0 || index >= state.chapters.length) return;
-    
     state.currentChapterIndex = index;
     const chapter = state.chapters[index];
-    
-    // Update active class on sidebar items
-    const navItems = dom.chaptersList.querySelectorAll('.nav-item');
-    navItems.forEach((item, i) => {
-        if (i === index) {
-            item.classList.add('active');
-        } else {
-            item.classList.remove('active');
-        }
+    dom.chaptersList.querySelectorAll('.nav-item').forEach((item, itemIndex) => {
+        item.classList.toggle('active', itemIndex === index);
     });
-
-    // Update Prev/Next buttons
     dom.prevBtn.disabled = index === 0;
     dom.nextBtn.disabled = index === state.chapters.length - 1;
-
-    // Narrow screens: picking a chapter closes the drawer so content is readable.
     if (mobileQuery.matches) setSidebarOpen(false);
-
-    // Update URL hash
     window.location.hash = chapter.id;
-
-    // Fetch and render markdown content
-    dom.chapterContent.innerHTML = `
-        <div class="content-loading">
-            <div class="spinner"></div>
-            <p>Loading chapter: ${chapter.title}...</p>
-        </div>
-    `;
-
+    dom.chapterContent.innerHTML = `<div class="content-loading"><div class="spinner"></div><p>Loading chapter: ${chapter.title}...</p></div>`;
     try {
         const response = await fetch(chapter.file);
         if (!response.ok) throw new Error(`Status: ${response.status}`);
         const markdown = await response.text();
-        
-        // Configure marked options
-        marked.setOptions({
-            gfm: true,
-            breaks: true
-        });
-
-        // Escape code blocks explicitly; chapter content is rendered as reading
-        // material and never injects source text as HTML.
-        const renderer = new marked.Renderer();
-        
-        renderer.code = function(codeOrToken, language) {
-            let codeText = "";
-            let lang = "";
-
-            // Handle token parameter as object (marked v11+) or string (marked <v11)
-            if (codeOrToken && typeof codeOrToken === 'object') {
-                codeText = codeOrToken.text || "";
-                lang = codeOrToken.lang || "";
-            } else {
-                codeText = codeOrToken || "";
-                lang = language || "";
-            }
-
-            const escapedCode = codeText
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#039;');
-            return `<pre><code class="language-${lang || 'text'}">${escapedCode}</code></pre>`;
-        };
-
-        renderer.blockquote = function(token) {
-            let text = "";
-            let htmlContent = "";
-
-            // Handle token parameter as object (marked v11+) or string (marked <v11)
-            if (token && typeof token === 'object') {
-                text = token.text || "";
-                htmlContent = this.parser.parse(token.tokens);
-            } else {
-                text = token || "";
-                htmlContent = token || "";
-            }
-
-            let quoteText = text.trim();
-
-            let alertType = null;
-            let titleText = 'NOTE';
-            let calloutClass = 'callout-note';
-
-            if (quoteText.includes('[!NOTE]')) {
-                alertType = 'note';
-                titleText = 'NOTE';
-                calloutClass = 'callout-note';
-            } else if (quoteText.includes('[!TIP]')) {
-                alertType = 'tip';
-                titleText = 'TIP';
-                calloutClass = 'callout-tip';
-            } else if (quoteText.includes('[!WARNING]')) {
-                alertType = 'warning';
-                titleText = 'WARNING';
-                calloutClass = 'callout-warning';
-            } else if (quoteText.includes('[!CAUTION]')) {
-                alertType = 'caution';
-                titleText = 'CAUTION';
-                calloutClass = 'callout-warning';
-            } else if (quoteText.includes('[!IMPORTANT]')) {
-                alertType = 'important';
-                titleText = 'IMPORTANT';
-                calloutClass = 'callout-note';
-            }
-
-            if (alertType) {
-                let innerHtml = htmlContent;
-                innerHtml = innerHtml.replace(/\[![A-Z]+\]/i, '');
-                innerHtml = innerHtml.replace(/<p>\s*(?:<br\s*\/?>)?\s*/i, '<p>');
-                return `
-                    <div class="callout ${calloutClass}">
-                        <div class="callout-title">${titleText}</div>
-                        ${innerHtml}
-                    </div>
-                `;
-            }
-
-            return `<blockquote>${htmlContent}</blockquote>`;
-        };
-
-        dom.chapterContent.innerHTML = marked.parse(markdown, { renderer });
-
-        // Re-run lucide icons rendering
+        state.currentExample = extractFirstRustExample(markdown);
+        marked.setOptions({ gfm: true, breaks: true });
+        dom.chapterContent.innerHTML = marked.parse(markdown, { renderer: createMarkdownRenderer() });
         lucide.createIcons();
-
-        // Syntax-highlight the static Flash example blocks (no-op until Monaco
-        // is ready; initMonaco re-runs this for the first-loaded chapter).
-        highlightFlashBlocks(dom.chapterContent);
-        
-        // Scroll reader panel back to top
+        await highlightRustBlocks(dom.chapterContent);
         dom.contentPanel.querySelector('.content-body').scrollTop = 0;
-
-    } catch (err) {
-        console.error("Failed to load chapter file:", err);
-        dom.chapterContent.innerHTML = `
-            <div class="callout callout-warning">
-                <div class="callout-title">Error Loading Content</div>
-                <p>Could not load the markdown documentation for this chapter. Make sure the file exists under <code>public/${chapter.file}</code>.</p>
-                <p style="font-size: 12px; color: var(--text-muted); margin-top: 10px;">Details: ${err.message}</p>
-            </div>
-        `;
+        dom.loadExampleBtn.disabled = !state.currentExample;
+        dom.loadExampleBtn.title = state.currentExample
+            ? 'Load the first Rust example from this chapter'
+            : 'This chapter has no Rust code block';
+    } catch (error) {
+        state.currentExample = null;
+        dom.loadExampleBtn.disabled = true;
+        dom.chapterContent.innerHTML = `<div class="callout callout-warning"><div class="callout-title">Error Loading Content</div><p>${error.message}</p></div>`;
     }
 }
 
-// ==========================================================================
-// Static Code-Block Highlighting (reader pane)
-// --------------------------------------------------------------------------
-// Reuse the Flash grammar already registered with Monaco (Monarch tokenizer +
-// the One Dark / One Light themes) to colourise the example <pre> blocks in
-// the reader, so reader and editor highlight identically — no extra grammar
-// or wasm in the browser. Re-run on theme switch so colours track the theme.
-async function highlightFlashBlocks(root) {
-    if (!(state.editorLoaded && window.monaco)) return;
-    const scope = root || document;
-    const blocks = scope.querySelectorAll('pre code.language-flash, pre code.language-go');
-    for (const code of blocks) {
-        // Stash the original source the first time so re-highlights start from
-        // plain text, not already-colourised markup.
-        if (code.dataset.raw === undefined) code.dataset.raw = code.textContent;
-        try {
-            code.innerHTML = await monaco.editor.colorize(code.dataset.raw, 'flash', { tabSize: 4 });
-        } catch (err) {
-            console.warn('Flash highlight failed:', err);
-        }
-    }
-}
-
-// ==========================================================================
-// Compiler API Pipeline Integration
-// ==========================================================================
-// One-line notice shown whenever the compile backend is absent (static build).
-function logStaticNotice() {
-    logTerminal(
-        "Static build — reading chapters and loading examples into the editor work, " +
-        "but live compilation needs the local dev server.\n" +
-        "Clone https://github.com/ajhahnde/FlashOS and run `npm install && npm start` in tutorial/. " +
-        "Build the pinned Flash compiler first as described in SETUP.md.",
-        "warning"
-    );
-}
-
-async function runTranspilation() {
-    if (!state.flashEditor) return;
-
-    if (!state.backend) {
-        updateTerminalStatus('idle', 'Static');
-        logStaticNotice();
-        return;
-    }
-
-    const code = state.flashEditor.getValue();
-    
-    updateTerminalStatus('transpiling', 'Compiling...');
-    logTerminal("Invoking compiler backend...", "info");
-
+async function loadChapters() {
     try {
-        const response = await fetch('/api/transpile', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ code })
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            // Update output editor
-            if (state.zigEditor) {
-                state.zigEditor.setValue(result.output || '// Empty output.');
-            }
-            
-            // Switch view to output
-            switchTab('output');
-            
-            // Log status
-            updateTerminalStatus('success', 'Success');
-            
-            let logMsg = "Lab passed the Zig compatibility lowering check.\n";
-            if (result.error) {
-                logMsg += `\nCompiler Warnings:\n${result.error}`;
-                logTerminal(logMsg, "warning");
-            } else {
-                logTerminal(logMsg + "No compiler errors or warnings.", "success");
-            }
-            
-        } else {
-            // Compilation failed (compiler returned non-zero code)
-            updateTerminalStatus('error', 'Compiler Error');
-            logTerminal(`Compiler Execution Failed:\n\n${result.error}`, "error");
-            
-            // Focus on terminal drawer if hidden/small
-            console.warn("Compilation failed. Visual logs added to terminal drawer.");
-        }
-
-    } catch (err) {
-        console.error("Compilation API call failed:", err);
-        updateTerminalStatus('error', 'Network Error');
-        logTerminal(`HTTP network error while communicating with backend: ${err.message}\nEnsure the local server is running on http://localhost:3000.`, "error");
+        const response = await fetch('chapters.json');
+        if (!response.ok) throw new Error(`Status: ${response.status}`);
+        state.chapters = await response.json();
+        renderChaptersSidebar();
+        const id = window.location.hash.substring(1);
+        const index = state.chapters.findIndex(chapter => chapter.id === id);
+        await selectChapter(index >= 0 ? index : 0);
+    } catch (error) {
+        dom.chaptersList.innerHTML = `<div class="nav-loading">Unable to load chapters: ${error.message}</div>`;
     }
 }
 
-// ==========================================================================
-// Terminal Drawer Logger Utilities
-// ==========================================================================
-function logTerminal(message, type = 'info') {
-    dom.terminalBody.classList.remove('log-error', 'log-success', 'log-warning');
-    
-    const timestamp = new Date().toLocaleTimeString();
-    const prefix = `[${timestamp}] `;
-    
-    dom.terminalBody.innerText = prefix + message;
-
-    if (type === 'error') {
-        dom.terminalBody.classList.add('log-error');
-    } else if (type === 'success') {
-        dom.terminalBody.classList.add('log-success');
-    } else if (type === 'warning') {
-        dom.terminalBody.classList.add('log-warning');
-    }
-
-    // Errors and warnings must be readable — pop the drawer open if collapsed.
-    if ((type === 'error' || type === 'warning') && dom.terminalDrawer.classList.contains('collapsed')) {
-        setTerminalCollapsed(false);
-    }
+function updateTerminal(message, status = 'Ready') {
+    dom.terminalBody.textContent = message;
+    dom.terminalStatus.className = 'status-indicator idle';
+    dom.terminalStatus.textContent = status;
 }
 
-function updateTerminalStatus(statusClass, label) {
-    dom.terminalStatus.className = `status-indicator ${statusClass}`;
-    dom.terminalStatus.textContent = label;
-}
-
-// ==========================================================================
-// Initialization
-// ==========================================================================
 document.addEventListener('DOMContentLoaded', () => {
-    // 0. Probe the compile backend once; static hosting (GitHub Pages) has none.
-    fetch('/api/chapters')
-        .then(r => { state.backend = r.ok; })
-        .catch(() => { state.backend = false; })
-        .finally(() => {
-            if (!state.backend) {
-                updateTerminalStatus('idle', 'Static');
-                logStaticNotice();
-            }
-        });
-
-    // 1. Initialize icons
     lucide.createIcons();
-
-    // 2. Initialize UI configuration (Themes & layout)
-    initThemeAndLayout();
-    initSidebarDrawer();
-    initTerminalDrawer();
-
-    // 3. Load Monaco Code Editors
+    initControls();
+    initDrawers();
     initMonaco();
-
-    // 4. Fetch chapters navigation list
     loadChapters();
 
-    // 5. Bind action buttons
-    dom.transpileBtn.addEventListener('click', runTranspilation);
-    
-    dom.clearTerminal.addEventListener('click', () => {
-        dom.terminalBody.innerHTML = 'Terminal cleared.';
-        updateTerminalStatus('idle', 'Idle');
+    dom.loadExampleBtn.addEventListener('click', () => {
+        if (!state.currentExample || !state.sourceEditor) return;
+        state.sourceEditor.setValue(state.currentExample);
+        switchTab('editor');
+        updateTerminal('Loaded the first Rust code block from the current chapter. Use the repository commands in “Build Contract” for real compilation and verification.', 'Loaded');
     });
-
-    dom.prevBtn.addEventListener('click', () => {
-        if (state.currentChapterIndex > 0) {
-            selectChapter(state.currentChapterIndex - 1);
-        }
+    dom.clearTerminal.addEventListener('click', event => {
+        event.stopPropagation();
+        updateTerminal('Tour notes cleared.', 'Idle');
     });
-
-    dom.nextBtn.addEventListener('click', () => {
-        if (state.currentChapterIndex < state.chapters.length - 1) {
-            selectChapter(state.currentChapterIndex + 1);
-        }
-    });
-
-    // Handle back/forward history navigation via hash change
+    dom.prevBtn.addEventListener('click', () => selectChapter(state.currentChapterIndex - 1));
+    dom.nextBtn.addEventListener('click', () => selectChapter(state.currentChapterIndex + 1));
     window.addEventListener('hashchange', () => {
-        const hash = window.location.hash.substring(1);
-        const activeChapterIndex = state.chapters.findIndex(c => c.id === hash);
-        if (activeChapterIndex !== -1 && activeChapterIndex !== state.currentChapterIndex) {
-            selectChapter(activeChapterIndex);
-        }
+        const id = window.location.hash.substring(1);
+        const index = state.chapters.findIndex(chapter => chapter.id === id);
+        if (index >= 0 && index !== state.currentChapterIndex) selectChapter(index);
     });
 });

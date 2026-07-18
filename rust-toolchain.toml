@@ -1,5 +1,6 @@
+# Synchronized from versions.env by scripts/sync_versions.sh.
 [toolchain]
-channel = "1.97.0"
+channel = "1.97.1"
 components = ["rustfmt", "clippy", "llvm-tools", "rust-src"]
 targets = ["aarch64-unknown-none-softfloat"]
 profile = "minimal"

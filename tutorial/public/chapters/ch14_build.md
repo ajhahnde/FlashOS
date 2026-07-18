@@ -1,127 +1,85 @@
-# Chapter 14: Native Compilation behind `zig build`
+# 14. The Native Rust Build Pipeline
 
-The command surface and the compiler pipeline are two different layers.
-Developers invoke `zig build`, and `build.zig` still owns targets, options,
-artifact paths, QEMU steps, and deployment. Inside that graph, however,
-shipping Flash source is compiled through `flashc`'s native LLVM path. The
-generated-Zig compatibility backend is reserved for tests and build tooling;
-it is never an input to a kernel, userland, or utility ELF.
+`xtask/src/main.rs` defines the command surface; `xtask/src/build.rs` owns the
+production graph. Cargo builds Rust crates, Clang assembles retained AArch64
+sources, `rust-lld` links, and pinned Rust LLVM tools inspect and convert the
+results.
 
-## The toolchain pin
-
-`flash-toolchain.lock` names the exact Flash compiler revision the tree uses.
-The pin matters because Flash and FlashOS move independently: rebuilding with
-an arbitrary compiler checkout could otherwise change native objects without
-any source change in this repository.
-
-The setup guide shows how to check out and build that revision. Bumping the
-pin is an isolated maintenance operation followed by the full host-test and
-boot-watchdog battery; it is never an incidental part of editing a kernel
-module.
-
-## Native production units
-
-For a production unit, `build.zig` invokes the compiler's unit-oriented LLVM
-emission, lowers that IR to an AArch64 object, and adds the object to the
-existing link graph. In outline:
+## Production graph
 
 ```text
-.flash source
-    -> flashc native unit / LLVM emission
-    -> AArch64 object
-    -> build.zig addObjectFile
-    -> kernel, userland, or tool ELF
+Rust kernel + user crates
+          ↓
+EL0 build and inspection
+          ↓
+deterministic shadow + initramfs
+          ↓
+Clang assembly of retained .S files
+          ↓
+rust-lld + board linker script
+          ↓
+kernel8.elf inspection
+          ↓
+llvm-objcopy → kernel8.img
 ```
 
-Named module mappings preserve the same import graph Flash source uses. A unit
-is compiled once for its target and optimization mode, then linked wherever
-that artifact belongs. No generated `.zig` source sits between a product
-module and its machine code.
+The bare-metal target is fixed as `aarch64-unknown-none-softfloat`. The
+repository pin selects Rust and its matching LLVM components.
 
-The distinction is observable, not just wording: the build's migration gate
-rejects compatibility-backend invocations outside the explicitly marked test
-helper, and release validation inspects the final ELF inputs.
+## Useful commands
 
-## Why tests retain a compatibility path
-
-Flash source contains host-side `test` blocks, while the native compiler path
-does not yet provide an equivalent test runner. `zig build test` therefore
-lowers test roots and their Flash stubs through the Zig compatibility backend,
-then runs those temporary test executables on the host.
-
-That is a narrow exception:
-
-- production helpers request native objects;
-- the host-test helper alone may request generated Zig;
-- in-kernel runtime tests execute inside the natively compiled kernel;
-- every maintained product, tool, stub, and generator source remains `.flash`.
-
-The tutorial playground follows the same non-shipping compatibility seam so it
-can display readable lowering output in a browser. Passing that check proves a
-lab parses and lowers; it does not claim to reproduce the production link.
-
-## What remains outside Flash source
-
-Only formats that serve a different role stay outside the Flash source census:
-
-- **AArch64 assembly and linker scripts** express early boot, exception
-  vectors, context switching, and section layout directly.
-- **`build.zig` and package metadata** are the host orchestration island. They
-  choose what to compile but are not linked into FlashOS.
-
-Kernel modules, userland, host tools, generators, test stubs, and tracing logic
-are authored in Flash. Any Zig visible in a test cache is generated output,
-not a second maintained implementation.
-
-## The two-pass symbol build
-
-The kernel carries a compact copy of its own symbol table for tracing and
-diagnostics. That creates a chicken-and-egg problem: the table needs final
-linked addresses, but it must also occupy space in the image whose addresses
-are being computed.
-
-The `build` helper from `flashos.zsh` resolves this with two passes:
-
-```text
-# pass 1: link against the fixed-size symbol-area placeholder
-zig build -Dboard="$BOARD" -Dskip-hygiene=true
-
-# extract addresses and populate src/symbol_area.S
-zig build populate-syms -Dboard="$BOARD" -Dskip-hygiene=true
-
-# pass 2: relink with the populated table
-zig build -Dboard="$BOARD" -Dskip-hygiene=true
-
-# compare first- and second-pass symbol addresses
-diff "$FIRST_PASS" "$SECOND_PASS"
+```bash
+cargo xtask build --board rpi4b
+cargo xtask armstub
+cargo xtask test
+cargo xtask build --board rpi4b --trace
+cargo xtask guard --board rpi4b --full
+cargo xtask clean
 ```
 
-Pass one determines every address while reserving the symbol area's full
-budget. `populate-syms` converts sorted `nm` output into fixed-size assembly
-records. Pass two replaces placeholder bytes with those records without
-changing the section size. If another symbol moves, the final diff is nonempty
-and the helper fails — the layout did not converge.
+`cargo xtask clean` removes both Cargo's `target/` cache and the assembled
+`rust-out/` product tree.
 
-The plain `zig build` command is enough for day-to-day compilation. The helper
-is the stronger release-style proof because it rebuilds, populates, rebuilds,
-and verifies in one operation.
+## Deterministic initramfs
 
-## Validation follows the artifact boundary
+Every user program is built and inspected before staging. The build generates
+the seed shadow database, adds the initramfs subset of checked-in `rootfs/`
+data, sorts entries, and encodes a deterministic newc archive. Equivalent
+inputs therefore produce the same archive bytes.
 
-The pipeline has three useful proof levels:
+## Two-pass symbols
 
-1. Compatibility host tests prove pure logic and keep every Flash `test` block
-   active.
-2. Native compilation and link inspection prove product ELFs contain only
-   native Flash objects plus assembly.
-3. The QEMU watchdog boots that linked AArch64 artifact and checks the runtime
-   contract, including page-accounting invariants and the final shell hand-off.
+The linked image reserves exactly 128 KiB for `_symbols`. The user-facing
+`build` helper:
 
-The last level catches errors that valid object files can still contain: an ABI
-mismatch, a bad link address, or a page leak visible only after real
-fork/exec/reap cycles.
+1. links once;
+2. runs `cargo xtask populate-syms --board rpi4b`;
+3. rewrites `src/symbol_area.S` from pinned `llvm-nm` output;
+4. links again;
+5. proves the symbol addresses converged.
 
-## What's next
+The fixed-size section prevents population from moving later sections.
 
-The final chapter moves the same kernel artifact from QEMU to a Raspberry Pi 4:
-SD-card deployment, physical serial channels, and the USB-C gadget console.
+## Guarding the toolchain boundary
+
+The full guard builds behind command shims that reject disallowed compilers or
+tools, then examines the subprocess trace. The production census independently
+checks that the maintained implementation contains zero retired-language
+source implementations.
+
+`FLASHOS_CLANG` can select the host Clang explicitly. Other linker, `nm`,
+`objcopy`, target, and component choices come from the repository-pinned Rust
+toolchain and build driver.
+
+## Board scope
+
+`--board rpi4b` is the supported production target. The retained `virt` inputs
+remain useful for archaeology and limited comparison, but are frozen and not
+part of the release qualification.
+
+> [!CAUTION]
+> Symbol regeneration changes a tracked generated assembly file. It belongs at
+> the stage-closing convergence point, not in every incidental documentation or
+> source edit.
+
+The final chapter separates what QEMU proves from what only the Pi can prove.

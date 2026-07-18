@@ -2,13 +2,13 @@
 # check_whitespace_hygiene: fail on whitespace regressions in shipped
 # sources.
 #
-# Read-only gate for CI and pre-commit. Scope: src, user_space, crates,
+# Read-only gate for CI and pre-commit. Scope: src, rootfs, crates,
 # user, xtask, tools, armstub/src, scripts, .github/workflows, top-level
 # docs, and German translations in docs/de. Checks three
 # regressions:
 #
 #   - trailing spaces on any line ('  $')
-#   - hard tabs in *.zig files (project uses 4-space indent)
+#   - hard tabs in maintained text/source files
 #   - CRLF line endings anywhere shipped
 #
 # src/symbol_area.S is generated and excluded; fix its generator if it
@@ -22,13 +22,14 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-PATHS="src user_space crates user xtask tools armstub/src scripts .github/workflows
+PATHS="src rootfs crates user xtask tools armstub/src scripts .github/workflows
 README.md DOCUMENTATION.md SETUP.md CHANGELOG.md LICENSE.md
 Cargo.toml config.txt docs/de"
 
-EXTS="--include=*.zig --include=*.S --include=*.inc \
-      --include=*.md --include=*.sh --include=*.zon \
-      --include=*.yml --include=*.txt --include=*.ld"
+EXTS="--include=*.rs --include=*.S --include=*.inc \
+      --include=*.md --include=*.sh --include=*.zsh \
+      --include=*.yml --include=*.yaml --include=*.txt \
+      --include=*.ld --include=*.toml"
 
 SELF_EXCLUDE='^(src/symbol_area\.S|scripts/check_whitespace_hygiene\.sh):'
 
@@ -44,7 +45,7 @@ TAB="$(printf '\t')"
 CR="$(printf '\r')"
 
 # shellcheck disable=SC2086
-tabs="$(grep -rn "$TAB" $PATHS --include='*.zig' 2>/dev/null \
+tabs="$(grep -rn "$TAB" $PATHS $EXTS 2>/dev/null \
     | grep -vE "$SELF_EXCLUDE" \
     || true)"
 
@@ -62,7 +63,7 @@ if [ -n "$trailing" ]; then
 fi
 
 if [ -n "$tabs" ]; then
-    echo "check_whitespace_hygiene: hard tabs in *.zig:" >&2
+    echo "check_whitespace_hygiene: hard tabs:" >&2
     printf '%s\n' "$tabs" >&2
     status=1
 fi
@@ -76,4 +77,3 @@ fi
 if [ "$status" -ne 0 ]; then
     exit 1
 fi
-

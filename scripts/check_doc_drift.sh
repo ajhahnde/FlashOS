@@ -8,13 +8,12 @@
 # stay with the human-in-the-loop reviewer — they false-positive too easily to
 # gate a push.
 #
-# Scope: the active public English docs only. README.md, DOCUMENTATION.md,
-# SETUP.md. CHANGELOG.md is FROZEN provenance — a path named
-# there (e.g. a since-deleted script) is honored lineage, not drift, and is
-# never scanned here.
+# The checks cover the active public English and German docs plus the tutorial.
+# CHANGELOG.md is FROZEN provenance — a historical version or path there is
+# honored lineage, not drift, and is never scanned.
 #
-#   FATAL (exit 1): a repo-relative path referenced in an active doc that does
-#                   not exist on disk. A dead reference is an unambiguous bug.
+#   FATAL (exit 1): a dead repo-relative path, or live version drift from the
+#                   central versions.env manifest.
 #   WARN  (exit 0): version badge vs the newest tag, retired build commands,
 #                   and the "N EL0 scenarios" count vs the boot contract.
 #                   Printed for visibility; never fails CI.
@@ -22,7 +21,7 @@
 # Usage: scripts/check_doc_drift.sh   (run from the repo root)
 set -uo pipefail
 
-DOCS="README.md DOCUMENTATION.md SETUP.md"
+DOCS="README.md DOCUMENTATION.md SETUP.md docs/de/README.md docs/de/DOCUMENTATION.md docs/de/SETUP.md tutorial/public/chapters/*.md"
 fatal=0
 
 note()  { printf '%s\n' "$*"; }
@@ -57,6 +56,15 @@ for p in $raw; do
   dead=$((dead+1))
 done
 [ "$dead" -eq 0 ] && note "ok: every referenced repo path exists"
+
+# --- FATAL: centralized live release/toolchain versions ---------------------
+note ""
+note "== centralized version manifest (FATAL) =="
+if scripts/sync_versions.sh --check; then
+  note "ok: live release and toolchain versions match versions.env"
+else
+  block "live versions drifted from versions.env"
+fi
 
 # --- WARN: version badge vs newest tag --------------------------------------
 note ""
@@ -106,7 +114,7 @@ fi
 
 note ""
 if [ "$fatal" -ne 0 ]; then
-  note "RESULT: FAIL — dead doc references above. Fix the path (or remove the reference)."
+  note "RESULT: FAIL — fix the fatal documentation drift above."
   exit 1
 fi
 note "RESULT: pass (FATAL checks clean; warnings above are advisory — run /doc-drift for the deep pass)."

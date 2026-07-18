@@ -37,10 +37,11 @@ members = [
 ]
 
 [workspace.package]
+# Synchronized from versions.env by scripts/sync_versions.sh.
 version = "0.8.0"
 edition = "2021"
 rust-version = "1.97"
-license = "MIT"
+license = "Apache-2.0"
 
 # Bare-metal profile shared by every target-side crate. panic=abort and
 # overflow-checks=off keep the panic path free of core::fmt: the handler emits a

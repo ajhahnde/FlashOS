@@ -8,10 +8,11 @@
 //! sentinels the EL0 side already depends on.
 //!
 //! Two conventions here are load-bearing rather than stylistic. The path and
-//! credential scratch are `static mut`, not locals: the per-task kernel stack
-//! shares its page with the task record, and a frame large enough to hold them
-//! would grow down into the credential tail. And a user pointer that does not
-//! resolve is a soft `-1` to the caller, never a fault that zombifies the task.
+//! credential scratch are `static mut`, not locals: each created task has a
+//! dedicated 4 KiB kernel stack, and frames large enough to hold those buffers
+//! would consume its syscall and nested-IRQ headroom. And a user pointer that
+//! does not resolve is a soft `-1` to the caller, never a fault that zombifies
+//! the task.
 
 use flashos_abi::syscall::{Dirent, CONSOLE_MODE_ECHO, CONSOLE_MODE_MASK, EACCES};
 use flashos_abi::task::{File, TaskStruct, CWD_SIZE, UTHREAD};
@@ -509,21 +510,18 @@ pub unsafe fn sys_kill(pid: i32) -> i32 {
     result
 }
 
-// sys_open_file + join_resolve form the deepest kernel-stack chain on the
-// syscall path. The two path scratch buffers live as preempt-guarded module
-// statics rather than ~1.3 KiB of stack locals: the kernel stack grows down
-// toward the TaskStruct credential tail in the same page, so a stack-heavy open
-// could descend into uid/gid/euid/egid, and a timer IRQ taken in that window
-// would save its register frame straight over the credentials. Keeping the
-// buffers off the stack bounds the frame well clear of the creds. The
-// preemption exclusion serialises the shared statics across the whole
-// resolve + open, and covers every early-return error path.
+// join_resolve is the largest single frame on the syscall path. The two path
+// scratch buffers live as preempt-guarded module statics rather than ~1.3 KiB
+// of stack locals: keeping them off each task's dedicated 4 KiB kernel stack
+// preserves room for the resolve chain and a nested timer-IRQ frame. The
+// preemption exclusion serialises the shared statics across the whole resolve
+// + open, and covers every early-return error path.
 static mut OPEN_PATH_BUF: [u8; PATH_BUF_SIZE] = [0; PATH_BUF_SIZE];
 static mut OPEN_JOIN_BUF: [u8; CWD_SIZE] = [0; CWD_SIZE];
 
 // Second path scratch for sys_rename — its two paths must be resolved and live
 // simultaneously, so the new-path copy/join cannot reuse the old-path buffers.
-// Off-stack for the same stack-tail reason.
+// Off-stack for the same kernel-stack headroom reason.
 static mut RENAME_NEW_BUF: [u8; PATH_BUF_SIZE] = [0; PATH_BUF_SIZE];
 static mut RENAME_NEW_JOIN: [u8; CWD_SIZE] = [0; CWD_SIZE];
 
@@ -533,7 +531,7 @@ static mut RENAME_NEW_JOIN: [u8; CWD_SIZE] = [0; CWD_SIZE];
 ///
 /// Returns the resolved span, or `None` on a copy fault or an over-long
 /// resolved path. Every buffer is caller-supplied and off-stack, which is what
-/// keeps these handlers' frames clear of the TaskStruct credential tail.
+/// keeps these handlers' frames within the dedicated kernel-stack budget.
 ///
 /// # Safety
 /// The caller holds preemption exclusion over the shared buffers, `task` is the
@@ -1457,7 +1455,7 @@ pub unsafe fn sys_dup2(oldfd: i32, newfd: i32) -> i32 {
 ///
 /// Unlike [`copy_resolve_path`] the callers here keep their scratch on the
 /// stack, matching the reference: these frames are far shallower than the
-/// open/create chain, so they stay clear of the credential tail without the
+/// buffers avoided above and fit the dedicated kernel-stack budget without
 /// shared statics — and avoiding the statics means they need no preemption
 /// exclusion for scratch ownership.
 ///
@@ -1808,16 +1806,15 @@ const MNT_SHADOW_PATH: &[u8] = b"/mnt/shadow";
 /// LIST is build-time-immutable; only passwords are mutable state.
 const PASSWD_PATH: &[u8] = b"/etc/passwd";
 
-// Auth working buffers — static, NOT stack. The per-task kernel stack shares its
-// 4 KiB page with TaskStruct (~2.4 KiB usable above KeRegs), and the
-// PBKDF2 / HMAC / SHA-256 call frames below already need a large share of that.
-// Carrying another ~1.4 KiB of credential / file / digest buffers in the auth
-// handler's own frame overflows the page and smashes the TaskStruct tail (fds
-// table -> wild vtable dispatch on the next write). Statics sidestep that,
-// exactly like the execve staging buffers. Same serialization argument too:
-// single core, and the only callers are PID-1's test scenarios, /bin/login, and
-// /bin/passwd — never concurrent. The password copy is overwritten by the next
-// call; nothing here persists secrets beyond the syscall that wrote them.
+// Auth working buffers — static, NOT stack. Created tasks have a dedicated 4 KiB
+// kernel-stack page, with a 272-byte KeRegs frame at its top, and the PBKDF2 /
+// HMAC / SHA-256 call chain already consumes a large share of the remaining
+// 3,824 bytes. Another ~1.4 KiB of credential / file / digest locals would leave
+// almost no room for a nested IRQ. Statics preserve that headroom, exactly like
+// the execve staging buffers. Same serialization argument too: single core, and
+// the only callers are PID-1's test scenarios, /bin/login, and /bin/passwd —
+// never concurrent. The password copy is overwritten by the next call; nothing
+// here persists secrets beyond the syscall that wrote them.
 static mut AUTH_USER: [u8; AUTH_USER_LEN] = [0; AUTH_USER_LEN];
 static mut AUTH_PASS: [u8; AUTH_PASS_LEN] = [0; AUTH_PASS_LEN];
 static mut AUTH_FBUF: [u8; AUTH_FBUF_LEN] = [0; AUTH_FBUF_LEN];
@@ -3431,8 +3428,8 @@ mod tests {
         }
     }
 
-    /// The scratch budget is the whole reason these buffers are statics: the
-    /// kernel stack shares its page with TaskStruct's credential tail.
+    /// The scratch budget is the whole reason these buffers are statics: they
+    /// preserve nested-IRQ headroom on the dedicated 4 KiB kernel stack.
     #[test]
     fn auth_scratch_matches_the_size_contract() {
         assert_eq!(AUTH_USER_LEN, 64);
@@ -3440,7 +3437,8 @@ mod tests {
         assert_eq!(AUTH_FBUF_LEN, 1024);
         assert_eq!(AUTH_DERIVED_LEN, 32);
         assert_eq!(PASSWD_PWBUF_LEN, 512);
-        // ~1.4 KiB of auth scratch alone — far past the ~2.4 KiB usable stack.
+        // ~1.4 KiB of auth scratch alone would consume most remaining headroom
+        // on top of the PBKDF2 call chain.
         assert_eq!(
             AUTH_USER_LEN
                 + AUTH_PASS_LEN
@@ -3575,10 +3573,11 @@ mod tests {
     }
 
     /// The scratch buffers are statics precisely because ~1.3 KiB of stack
-    /// locals here would descend into the TaskStruct credential tail. Nothing
-    /// at runtime can prove "not on the stack" — that is the `static mut`
-    /// declaration's job, and the stack-frame audit's. What is checkable is the
-    /// size contract those frames were budgeted against.
+    /// locals per path pair would exhaust the dedicated stack when combined
+    /// with `join_resolve`, syscall entry, and a nested IRQ. Nothing at runtime
+    /// can prove "not on the stack" — that is the `static mut` declaration's
+    /// job, and the stack-frame audit's. What is checkable is the size contract
+    /// those frames were budgeted against.
     #[test]
     fn path_scratch_matches_the_size_contract() {
         assert_eq!(PATH_BUF_SIZE, 1024);

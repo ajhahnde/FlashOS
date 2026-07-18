@@ -91,31 +91,31 @@
                 </div>
             </section>
 
-            <!-- Right Pane: Interactive Live Playground -->
+            <!-- Right Pane: Rust source scratchpad -->
             <section class="playground-panel" id="playground-panel">
                 <div class="playground-header">
                     <div class="tab-selectors">
                         <button class="tab-btn active" data-tab="editor">
-                            <i data-lucide="edit-3"></i> Flash Editor
+                            <i data-lucide="edit-3"></i> Rust Scratchpad
                         </button>
                         <button class="tab-btn" data-tab="output">
-                            <i data-lucide="file-code"></i> Test lowering
+                            <i data-lucide="file-code"></i> Build Contract
                         </button>
                     </div>
                     <div class="playground-actions">
-                        <button id="transpile-btn" class="action-btn primary" title="Check this lab through the test-only Zig compatibility backend">
-                            <i data-lucide="zap"></i> Check lab
+                        <button id="load-example-btn" class="action-btn primary" title="Load the first Rust example from this chapter">
+                            <i data-lucide="copy"></i> Load example
                         </button>
                     </div>
                 </div>
 
                 <div class="playground-body">
-                    <!-- Flash Code Editor Container -->
+                    <!-- Editable Rust source container -->
                     <div class="tab-content active" id="tab-editor">
                         <div id="editor-container"></div>
                     </div>
 
-                    <!-- Read-only compatibility-backend output -->
+                    <!-- Read-only native build contract -->
                     <div class="tab-content" id="tab-output">
                         <div id="output-container"></div>
                     </div>
@@ -125,7 +125,7 @@
                 <div class="playground-terminal" id="terminal-drawer">
                     <div class="terminal-header" id="terminal-header">
                         <span class="terminal-title">
-                            <i data-lucide="terminal"></i> Compiler Console
+                            <i data-lucide="terminal"></i> Tour Notes
                         </span>
                         <div class="terminal-controls">
                             <span id="terminal-status" class="status-indicator idle">Idle</span>
@@ -136,7 +136,7 @@
                         </div>
                     </div>
                     <div class="terminal-output" id="terminal-body">
-                        Welcome to the FlashOS tutorial environment. Write Flash code and click "Check lab". This readable Zig lowering mirrors the test-only compatibility path; FlashOS production artifacts are compiled natively.
+                        Welcome to the FlashOS tour. Load a Rust example from a chapter or use the editor as a scratchpad. Build and verification commands run in the repository, not in this static page.
                     </div>
                 </div>
             </section>

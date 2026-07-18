@@ -1,13 +1,10 @@
-//! The C-ABI seam between the remaining Flash kernel and the Rust modules.
+//! The unmangled ABI facade between Rust kernel logic and retained assembly.
 //!
-//! Every function here exists only because two languages currently share one
-//! kernel image. Flash cannot see Rust slices, so each entry point takes an
-//! explicit pointer/length pair, and each is re-wrapped on the Flash side into
-//! the slice-shaped signature its callers already use. When a Flash caller ports,
-//! its shim here goes with it; when the last one ports, this module is deleted.
-//!
-//! Rules for anything added here: `extern "C"`, `#[no_mangle]`, no panic may
-//! cross the boundary, and no Rust type without a fixed representation.
+//! Assembly and the linker address kernel services by stable symbol name. This
+//! module exports those names and converts raw pointer/length inputs into calls
+//! on the host-testable `flashos-kernel` library. Rules for additions:
+//! `extern "C"`, `#[no_mangle]`, no panic across the boundary, and no Rust type
+//! without a fixed representation.
 
 use flashos_abi::syscall::{
     NR_SYSCALLS, SYS_AUTHENTICATE, SYS_BRK, SYS_CHDIR, SYS_CLOSE, SYS_CLOSE_CONSOLE,
@@ -54,9 +51,8 @@ unsafe extern "C" {
 // ---- kernel console, byte movers, and the panic path ----
 //
 // The unmangled half of `flashos_kernel::utilc`. These names are what the
-// remaining Flash modules, the retained assembly, and the compiler's own
-// lowering of a struct copy all bind to, so they are spelled exactly as the
-// kernel has always exported them.
+// retained assembly, sibling kernel modules, and the compiler's own lowering
+// of a struct copy all bind to, so the names are part of the link ABI.
 
 /// Emit a NUL-terminated string on `interface`, teeing it into the kernel log.
 ///
@@ -404,10 +400,9 @@ pub unsafe extern "C" fn handle_irq(frame: *mut KeRegs) {
 
 // ---- scheduler state and task lifecycle ----
 //
-// The four globals remain defined by the transitional Zig adapter so surviving
-// Flash/Zig direct loads stay PC-relative in the high-half kernel. Function
-// bodies live in crates/kernel; these facades preserve the historical assembly
-// and mixed-language symbol surface.
+// The four globals are defined in `crates/kernel/src/sched.rs`. Function bodies
+// live in `crates/kernel`; these facades preserve the assembly-visible symbol
+// surface used by the retained context-switch and exception code.
 
 /// Increment the active task's preemption nesting count.
 ///

@@ -21,7 +21,7 @@ cd "$ROOT"
 # We'll just look for the pattern and exclude known false-positive paths.
 
 # Exclude .DS_Store, non-source files, and the generated symbol_area.S.
-hits="$(grep -rnE "0x[0-9a-f]*[a-f][0-9a-f]*" src/ --include="*.zig" --include="*.S" --include="*.inc" \
+hits="$(grep -rnE "0x[0-9a-f]*[a-f][0-9a-f]*" src/ --include="*.S" --include="*.inc" \
     | grep -vE "^src/symbol_area\.S:" \
     | grep -vE ":[[:space:]]*(\/\/|\*)" \
     || true)"
@@ -32,5 +32,4 @@ if [ -n "$hits" ]; then
     echo "-> Use UPPERCASE for hex constants (e.g., 0xFFFF instead of 0xffff)." >&2
     exit 1
 fi
-
 

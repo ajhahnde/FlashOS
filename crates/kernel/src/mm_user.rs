@@ -33,7 +33,7 @@ const TD_USER_TABLE_FLAGS: u64 = TD_TABLE | TD_VALID;
 
 const MU: i32 = 0;
 
-/// Retained kernel services used by the mixed-language bridge.
+/// Kernel services injected through the link facade or host-test seams.
 ///
 /// The callbacks are synchronous and retain none of their pointer arguments.
 #[derive(Clone, Copy)]

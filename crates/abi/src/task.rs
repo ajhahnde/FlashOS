@@ -1,7 +1,6 @@
 //! Task-side layouts shared by the kernel and the exception assembly.
 //!
-//! Ported from `src/task_layout.flash`, which holds the same structs and the
-//! same field order. `sched.S`, `entry.S`, and `irq.S` reach into `TaskStruct`
+//! `sched.S`, `entry.S`, and `irq.S` reach into `TaskStruct`
 //! by raw offset, so the field order here is an ABI, not a style choice: every
 //! field added since the .S files were written was appended at the end
 //! precisely so `core_context` stays at offset 0.
@@ -109,9 +108,8 @@ impl Default for FdSlot {
 /// Open-file handle. Layout-only: the lifetime helpers (alloc / ref / unref) and
 /// the `FType` tag live with the VFS and are ported in their own stage.
 ///
-/// `sb` is an opaque pointer, not a typed `*mut SuperBlock`, for the same reason
-/// the Flash original used `?*anyopaque`: the VFS depends on this record, so this
-/// record must not depend on the VFS.
+/// `sb` is an opaque pointer, not a typed `*mut SuperBlock`: the VFS depends on
+/// this record, so this record must not depend on the VFS.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct File {
@@ -197,10 +195,10 @@ pub struct TaskStruct {
     pub gid: u32,
     pub euid: u32,
     pub egid: u32,
-    /// Base of the task's own kernel-stack page. The stack lives in a page of its
-    /// own so a deep syscall plus a nested timer-IRQ save cannot descend out of
-    /// the stack into the credential tail above it. 0 = none (init_task and the
-    /// boot context run on the boot stack).
+    /// Base of the task's own kernel-stack page. Keeping it separate from the
+    /// task record prevents a deep syscall plus a nested timer-IRQ save from
+    /// reaching task metadata. 0 = none (init_task and the boot context run on
+    /// the boot stack).
     pub kstack: u64,
 }
 
@@ -296,7 +294,7 @@ const _: () = {
     assert!(offset_of!(TaskStruct, kstack) == 1608);
 
     // The exception frame must still fit in the kernel-stack page with room to
-    // spare — the syscall stack-tail constraint the port must not regress.
+    // spare — the syscall and nested-IRQ headroom the port must not regress.
     assert!(size_of::<KeRegs>() < THREAD_SIZE as usize);
 };
 

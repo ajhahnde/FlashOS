@@ -184,8 +184,9 @@ pub unsafe fn trace_sample(frame: *mut KeRegs) {
         }
 
         // Bound the walk to the current task's kernel-stack page. `kstack` is the
-        // page base when the task carries a dedicated kernel stack; older tasks
-        // run on the stack that shares the TaskStruct page, so fall back to it.
+        // page base when the task carries a dedicated kernel stack; init_task
+        // and the boot context have no such allocation, so fall back to the
+        // task page for their legacy frame location.
         // The FP-chain decode itself lives in fp_walk::walk_chain (host-tested);
         // here we just hand it a view of the page and emit the LRs it returns.
         //

@@ -1,9 +1,9 @@
 //! Overwrite-oldest byte ring backing the kernel log.
 //!
-//! The ring is shared with the remaining Flash kernel through a fixed C layout.
-//! Its raw-pointer operations deliberately avoid creating references: logging
+//! The ring has a fixed C layout shared by output, syscall, and IRQ paths. Its
+//! raw-pointer operations deliberately avoid creating references: logging
 //! may be interrupted and re-entered on the same core, so an outstanding Rust
-//! reference would claim aliasing guarantees that the bridge cannot provide.
+//! reference would claim aliasing guarantees that re-entrant logging cannot provide.
 
 use core::ptr::{addr_of, addr_of_mut, read_volatile, write_volatile};
 

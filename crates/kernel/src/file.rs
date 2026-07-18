@@ -2,8 +2,8 @@
 //!
 //! The fixed `File` record lives in `flashos-abi` because task and fd-table
 //! layouts embed pointers to it. This module owns the record's lifecycle and
-//! its type tag. During the mixed-language bridge, allocation and preemption
-//! primitives are supplied by the small C-ABI wrapper in `crates/klib`.
+//! its type tag. Allocation and preemption primitives are supplied through the
+//! small kernel ABI wrapper in `crates/klib`.
 
 pub use flashos_abi::task::{File, TaskStruct, FD_TABLE_SIZE};
 

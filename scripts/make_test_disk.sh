@@ -5,7 +5,7 @@
 #
 # Args (both optional, passed by the caller):
 #   $1 — generated shadow file (the shadow generator output) → seeded as ::/SHADOW
-#   $2 — permission-overlay seed (user_space/etc/perms.tab) → ::/PERMS.TAB
+#   $2 — permission-overlay seed (rootfs/etc/perms.tab) → ::/PERMS.TAB
 # Without them the identity seeds are skipped and the kernel runs the
 # initramfs-fallback path (auth works, [TEST] passwd SKIPs).
 #
@@ -33,7 +33,7 @@
 # CREATE-IF-ABSENT (NOT idempotent-overwrite). The Variant-B roundtrip
 # needs the disk to PERSIST across two consecutive QEMU runs
 # invocations (run 1 writes magic=1, run 2 verifies + resets). Because
-# make_test_disk.sh is a build dependency of every run/test-rpi4b, an
+# make_test_disk.sh is a dependency of every rpi4b run/watchdog invocation, so an
 # unconditional re-format would reset magic=0 every run and PASS_VERIFY
 # could never be reached. So: if a valid FAT32 image with every seed
 # file already exists, leave it untouched ([TEST] passwd is self-healing

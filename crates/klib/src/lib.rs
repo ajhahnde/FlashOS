@@ -1,11 +1,9 @@
-//! The kernel staticlib: the archive the Zig-linked `kernel8.elf` swallows.
+//! The kernel staticlib linked into `kernel8.elf`.
 //!
-//! Transitional by construction. It exists because two languages currently share
-//! one kernel image: `ffi` is the only surface the remaining Flash code sees, and
-//! the panic handler below is the one a bare-metal Rust archive must carry. The
-//! kernel's actual logic lives in `flashos-kernel`, which stays a plain host-
-//! testable library. When the last Flash module ports, the kernel links from Rust
-//! directly and this crate is deleted whole.
+//! It stays separate from the host-testable `flashos-kernel` rlib because a
+//! bare-metal staticlib must carry a panic handler and the unmangled symbols the
+//! retained assembly calls. Kernel logic remains in `flashos-kernel`; this crate
+//! contains only that link facade and panic path.
 //!
 //! `memcpy`/`memset` are the kernel's own, and `ffi` exports them from here.
 //! Their strong definitions override the weak ones `compiler_builtins` carries,

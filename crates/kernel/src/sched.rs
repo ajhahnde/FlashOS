@@ -4,7 +4,7 @@
 //! module owns task selection, state transitions, zombie teardown, and the
 //! scheduler's global-state discipline. All scheduler-visible objects are
 //! accessed through raw pointers: task records are also aliased by assembly,
-//! IRQ handlers, wait queues, and the remaining mixed-language consumers.
+//! IRQ handlers, wait queues, retained assembly, and sibling Rust modules.
 
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 

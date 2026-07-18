@@ -24,18 +24,29 @@ The project was founded on April 28th, 2026.
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-07-18
+
 ### Added
 
-- **Rust build skeleton alongside the existing one.** A Cargo workspace
-  (`cargo xtask`) now assembles the retained `.S` files, links them against
-  the real board linker scripts, and boots a bare-metal Rust canary to EL1 on
-  both `rpi4b` and `virt`. It needs no binutils — the linker, `objcopy`, and
-  `nm` all ship with the pinned Rust toolchain — and every canary build asserts
-  that `_start` sits at the image base and that the image carries no undefined
-  symbols, no formatting machinery, and no FP/SIMD instructions. A build guard
-  proves the Rust pipeline invokes neither `zig` nor `flashc`. The Zig build is
-  untouched and remains the production build; nothing about the shipped kernel
-  changes.
+- **Rust-only production build.** The Cargo workspace and `cargo xtask` now
+  build the shipping kernel, userland, initramfs, armstub, symbol table, and
+  Raspberry Pi image. Retained AArch64 `.S` files are assembled with Clang;
+  the linker and inspection tools come from the pinned Rust toolchain. The
+  clean-room guard rejects retired compiler invocations and verifies every
+  deployable ELF for undefined symbols, `core::fmt`, and FP/SIMD code.
+- **Complete Rust implementation cutover.** The kernel, PID 1, shell, tools,
+  user runtime, mini-libc, console UI, ABI records, password-file parser, and
+  native build driver are Rust-owned. The source census reports no retired
+  implementation files; retained assembly is limited to architecture, board,
+  linker, trace, and initramfs glue.
+- **Central version manifest.** `versions.env` is the authored source for the
+  FlashOS release, Rust toolchain, and CI QEMU contract. The sync script,
+  workflow, documentation gate, and `flashos.zsh` reject drift.
+- **Exact-artifact Raspberry Pi qualification.** The shipping default image
+  passed typed login, identity/password persistence, FlashShell, USB CDC,
+  editor, pager, monitoring, EMMC2, and FAT32 matrices. The separate trace
+  image passed sustained scheduling load with symbol-resolved frames; the
+  default image was then directly restored, re-hashed, and boot-checked.
 
 - **Canonical ABI and layout crate (`crates/abi`).** Syscall numbers, the user
   virtual layout, task and register-frame structures, ELF records, and the
@@ -62,7 +73,7 @@ The project was founded on April 28th, 2026.
   output are unchanged.
 
 - **`/bin/clear` is now a Rust ELF.** The first shipped user program built by
-  the Rust pipeline and embedded through the existing build; its Flash source
+  the Rust pipeline and embedded through the native build; its Flash source
   is retired. Program headers, entry point, and emitted bytes match the
   reference tool.
 - **The coreutils and the harness payloads are now Rust ELFs.** `/bin/echo`,
@@ -127,16 +138,19 @@ The project was founded on April 28th, 2026.
   kernel sits inside the pool, the boot checkpoints shift by the same 27 pages
   and the boot contract was re-measured accordingly.
 
-- Re-pinned the Flash toolchain to the currently installed `flashc`
-  revision (v1.2.0). The lock file had drifted stale relative to the
-  compiler actually used to build the tree.
-- Centralized all boot and test status tags in
-  `lib/console_ui/tags.flash` and standardized kernel bring-up messages.
-  Marker bytes used by the boot contract remain unchanged.
-- Moved subsystem status rendering into `kernel_main`; PID 1 now uses
-  the shared `console_ui` logger as well.
-- Updated the product wordmark to `.flashOS` across the shell banner
-  and boot demo.
+- Moved the maintained filesystem seeds from `user_space/` to `rootfs/` and
+  updated every build, CI, script, and documentation consumer. The permission
+  overlay's implementation-path comments now name the Rust owners; its parsed
+  permission rows are unchanged.
+- Reworked the English and German documentation and the public tour around the
+  live Cargo/xtask build, current source layout, Raspberry Pi requirements,
+  exact release gates, and the planned FlashSDK ABI → FlashShell → FlashUI
+  platform sequence.
+- Refactored `flashos.zsh` into structured build, run, Pi-console, version, and
+  repository-check helpers. Production build and test paths validate the
+  central version manifest before doing work.
+- The supported release target is Raspberry Pi 4B. The retained QEMU `virt`
+  input is frozen and outside the v0.8.0 release gate.
 
 ### Fixed
 
@@ -151,6 +165,10 @@ The project was founded on April 28th, 2026.
   builds still require the homescreen marker specifically (their
   scripted login scenario prints `login:` mid-run, which would
   otherwise truncate the capture early).
+- `pi capture usb` now owns one serial descriptor for the whole capture,
+  asserts DTR/RTS, and sends prompt probes through that descriptor. This avoids
+  detached-`screen` reconnects on macOS while leaving interactive `pi connect`
+  on `screen`.
 
 ### Removed
 
@@ -501,7 +519,8 @@ highlights are below.
 - **Kernel symbol table** generated from the linked ELF by a two-pass
   build step, so panics and the profiler can print real names.
 
-[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.8.0...HEAD
+[v0.8.0]: https://github.com/ajhahnde/FlashOS/compare/v0.7.3...v0.8.0
 [v0.7.3]: https://github.com/ajhahnde/FlashOS/compare/v0.7.2...v0.7.3
 [v0.7.2]: https://github.com/ajhahnde/FlashOS/compare/v0.7.1...v0.7.2
 [v0.7.1]: https://github.com/ajhahnde/FlashOS/compare/v0.7.0...v0.7.1

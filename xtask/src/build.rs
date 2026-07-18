@@ -82,12 +82,11 @@ impl Paths {
     }
 }
 
-/// Build the Rust kernel staticlib — the archive `kernel8.elf` links during the
-/// mixed-language bridge — and optionally copy it to `output`.
+/// Build the Rust kernel staticlib linked into `kernel8.elf`, and optionally
+/// copy it to `output`.
 ///
-/// Board-independent for now: every module Rust owns at this stage is pure compute.
-/// The first board-gated kernel module gives this a `--board` flag, exactly as the
-/// canary has one.
+/// The archive is built once without a board Cargo feature; the selected retained
+/// assembly and linker script provide the board-specific link inputs.
 ///
 /// The archive carries all of `compiler_builtins`, but an archive is not a link: the
 /// linker pulls only the members it needs, and the kernel's own strong `memcpy`/
@@ -921,15 +920,11 @@ const INITRAMFS: &[(&str, u32, ArcSource)] = &[
     ("bin/rm", 0o100755, ArcSource::User("rm")),
     ("bin/sysinfo", 0o100755, ArcSource::User("sysinfo")),
     ("bin/uptime", 0o100755, ArcSource::User("uptime")),
-    (
-        "etc/fshrc",
-        0o100644,
-        ArcSource::Static("user_space/fsh/fshrc"),
-    ),
+    ("etc/fshrc", 0o100644, ArcSource::Static("rootfs/fsh/fshrc")),
     (
         "etc/passwd",
         0o100644,
-        ArcSource::Static("user_space/etc/passwd"),
+        ArcSource::Static("rootfs/etc/passwd"),
     ),
     ("etc/shadow", 0o100600, ArcSource::Shadow),
     ("sbin/init", 0o100755, ArcSource::User("pid1")),

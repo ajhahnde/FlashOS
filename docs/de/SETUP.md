@@ -6,7 +6,7 @@
 
 <h1>Setup</h1>
 
-<p><i>Host-Toolchain, SD-Karten-Layout, serielle Konsole, QEMU und der Test-Runner.</i></p>
+<p><i>Host-Toolchain, SD-Karten-Layout, serielle Konsole, QEMU und Test-Runner.</i></p>
 
 <p>
     <a href="README.md"><b>README</b></a> ·
@@ -34,290 +34,267 @@ Referenz:
 3. [Ausführen unter QEMU](#3-ausführen-unter-qemu)
 4. [SD-Karten-Layout](#4-sd-karten-layout)
 5. [Serielle Konsole](#5-serielle-konsole)
-6. [Hilfs-Shell-Funktionen](#6-hilfs-shell-funktionen)
+6. [Shell-Helper](#6-shell-helper)
 7. [Host-seitige Unit-Tests](#7-host-seitige-unit-tests)
 
 ## 1. Host-Toolchain
 
-| Tool                     | Mindestversion | Zweck                                     |
-| :----------------------- | :-------------- | :---------------------------------------- |
-| Flash                    | 1.2.0           | Die von `build.zig` verwendeten Flash-Quellen transpilen |
-| Zig                      | 0.16.0          | Verbleibende Zig-Host-Tools kompilieren   |
-| `aarch64-elf-objcopy`    | 2.40+           | ELF → Roh-Binary                          |
-| `aarch64-elf-nm`         | 2.40+           | Symbol-Extraktion für `populate-syms`     |
-| `qemu-system-aarch64`    | 11.0.0+         | Den kernel unter QEMU ausführen           |
-| `screen` (oder Äquivalent) | –             | Serielle Konsole für den Pi               |
+| Werkzeug                 | Version / Quelle       | Zweck                                         |
+| :----------------------- | :--------------------- | :-------------------------------------------- |
+| Rust                     | Repository-Pin         | Kernel, Userland, Hostwerkzeuge und Tests      |
+| Clang                    | Host-LLVM              | verbliebene AArch64-`.S`-Quellen assemblieren  |
+| Rust `llvm-tools`        | Repository-Pin         | AArch64-Artefakte linken, prüfen und umwandeln |
+| `qemu-system-aarch64`    | Repository-Vertragspin | `raspi4b`-Bootvertrag ausführen                |
+| `mtools`                 | aktuell                | QEMU-FAT32-Testdisk erzeugen                   |
+| `screen` (oder ähnlich)  | –                      | serielle Konsole für den Pi                    |
+| Python 3                 | aktuell                | unbeaufsichtigtes Pi-Capture mit stabilem DTR  |
 
 Unter macOS:
 
 ```bash
-brew install zig aarch64-elf-binutils qemu
+brew install llvm qemu mtools
+rustup show
 ```
 
-### Flash-Compiler (`flashc`)
+`versions.env` ist die einzige redaktionelle Quelle für die laufenden
+FlashOS-, Rust- und QEMU-Versionen. `scripts/sync_versions.sh` synchronisiert
+daraus die von Cargo, rustup, CI und den öffentlichen Badges benötigten
+Konventionsdateien. `rust-toolchain.toml` definiert zusätzlich das Target
+`aarch64-unknown-none-softfloat` und die Komponenten `rustfmt`, `clippy`,
+`llvm-tools` sowie `rust-src`. `flashos.zsh` löst diese exakte Toolchain über
+`rustup` auf, auch wenn ein Paketmanager-Rust früher im `PATH` steht.
+`FLASHOS_CLANG=/pfad/zu/clang` überschreibt den verwendeten Assembler.
 
-FlashOS nutzt die gepinnte
-[Flash](https://github.com/ajhahnde/Flash)-Toolchain. Flash veröffentlicht
-keine vorgebauten Binaries; baue sie deshalb aus dem in
-`flash-toolchain.lock` festgelegten Source-Stand:
+### Systemanforderungen zur Laufzeit
 
-```bash
-git clone https://github.com/ajhahnde/Flash.git ~/Flash
-git -C ~/Flash checkout "$(grep -oE '[0-9a-f]{40}' flash-toolchain.lock)"
-( cd ~/Flash && zig build )   # → ~/Flash/zig-out/bin/flashc
-```
+| Komponente | Aktuelle Anforderung |
+| :--------- | :------------------- |
+| Board | Raspberry Pi 4 Model B (BCM2711) mit AArch64-Boot |
+| RAM | Release-qualifiziert ist das 4-GiB-Modell. Das 1-GiB-Modell wird nicht unterstützt, weil der physische Seitenpool bei 1 GiB beginnt; andere Kapazitäten gehören nicht zum v0.8.0-Hardware-Gate. |
+| Bootmedium | Eine FAT32-microSD-Partition. Das aktuelle Boot-Bundle belegt etwa 3,4 MiB; jede übliche Karte bietet damit ausreichend Platz. |
+| Kernel-Image | Das aktuelle Produktions-`kernel8.img` ist etwa 1,2 MiB groß und enthält ein Initramfs von ungefähr 87 KiB. Diese Größen können sich zwischen Builds ändern. |
+| Konsole | Eine datenfähige USB-C-Verbindung für die User-Konsole; ein 3,3-V-Mini-UART-Adapter ist für frühe Diagnose und Tracing optional. |
+| Emulation | `qemu-system-aarch64 -M raspi4b`; die EMMC2- und USB-Device-Hardwarepfade benötigen weiterhin einen echten Pi. |
 
 ## 2. Bauen
 
-Baue zuerst Flash (siehe §1) und starte anschließend den nativen Build:
+Direkter Produktions-Build:
 
 ```bash
-flash build                 # default: kernel8.img + armstub8.bin → flash-out/
+cargo xtask build --board rpi4b
+cargo xtask armstub
 ```
+
+Für den vollständigen zweiphasigen Symbol-Build werden die Shell-Helper
+eingebunden:
 
 ```bash
-source flashos.zsh    # stellt den `build`-Helper bereit
-build                     # vollständiger zweiphasiger Build
-build -d                  # zweiphasiger Build + Deploy auf die SD-Karte
+source flashos.zsh         # stellt den `build`-Helper bereit
+build                      # clean, Hygiene, zweiphasiger Build, Armstub
+build -d                   # derselbe Build, danach Deployment auf die SD-Karte
 ```
 
-Der `build`-Helper ruft `flash build`, `flash build populate-syms` und dann
-erneut `flash build` auf, prüft per Diff, dass das Symbol-Layout
-konvergiert ist, und führt — mit `-d` — `flash build deploy` aus. Es gibt
-keinen interaktiven Prompt; das `-d`-Flag ist die Deploy-Zustimmung.
+`build` führt `cargo xtask clean` und die Source-Hygieneprüfungen aus, linkt
+den Kernel zunächst einmal, regeneriert `src/symbol_area.S` mit
+`populate-syms`, linkt erneut und prüft, ob das Symbol-Layout konvergiert ist.
+Für `rpi4b` baut der Helper außerdem den Armstub. Es gibt keinen interaktiven
+Deploy-Prompt; `-d` ist die ausdrückliche Zustimmung zum Deployment.
 
 ### Build-Schritte
 
-| Kommando                                  | Ergebnis                                    |
-| :---------------------------------------- | :------------------------------------------ |
-| `flash build`                             | Pi-Kernel und Armstub                       |
-| `flash build -Dboard=virt`                | `virt`-Kernel ohne Armstub                  |
-| `flash build kernel`                      | Nur das Kernel-Image                        |
-| `flash build armstub`                     | Nur der Pi-Armstub                          |
-| `flash build populate-syms`               | `src/symbol_area.S` neu erzeugen            |
-| `flash build deploy`                      | Pi-Build und Firmware nach `$SD_BOOT` kopieren |
-| `flash build -Dboard=rpi4b run`           | QEMU `-M raspi4b` starten                   |
-| `flash build -Dboard=virt run-virt`       | QEMU `-M virt` starten                      |
-| `flash build -Dboard=rpi4b test-rpi4b`    | Einen `raspi4b`-Boot validieren             |
-| `flash build -Dboard=virt test-virt`      | Einen `virt`-Boot validieren                |
-| `flash build -Dboard=virt iso`            | GRUB-EFI-Rescue-ISO bauen                   |
-| `flash build test`                        | Host-Tests ausführen                        |
-| `flash build clean`                       | Cache und Build-Ausgabe entfernen           |
+| Befehl                                             | Ergebnis                                    |
+| :------------------------------------------------- | :------------------------------------------ |
+| `cargo xtask build --board rpi4b`                  | Pi-Kernel, Userland und Initramfs           |
+| `cargo xtask armstub`                              | Pi-EL3→EL1-Armstub                          |
+| `cargo xtask populate-syms --board rpi4b`          | `src/symbol_area.S` regenerieren            |
+| `cargo xtask test`                                 | Rust-Hosttests                              |
+| `cargo xtask guard --board rpi4b --full`           | vollständiger Clean-Room-Produktions-Build  |
+| `cargo xtask build --board rpi4b --trace`          | Kernel mit Trace-Feature                    |
+| `cargo xtask clean`                                | `target/` und `rust-out/` entfernen         |
+| `run qemu`                                         | QEMU `-M raspi4b` bauen und starten         |
+| `run watchdog rpi4b`                               | unbeaufsichtigten Bootvertrag ausführen     |
+| `build -d`                                         | zweiphasig bauen und nach `$SD_BOOT` deployen |
 
-Der Standard-Optimierungsmodus ist `ReleaseSmall`. Überschreibe ihn mit
-`-Doptimize=ReleaseSafe`, `Debug` oder `ReleaseFast`.
+Produktionsartefakte verwenden das Cargo-Profil `release`. Das Bare-Metal-
+Target und die Soft-Float-ABI werden vom Buildtreiber festgelegt und nicht
+interaktiv gewählt.
 
 ## 3. Ausführen unter QEMU
 
-Zwei QEMU-Maschinen sind verdrahtet; Auswahl über `-Dboard=`:
+Nach `source flashos.zsh` wird der gepflegte `raspi4b`-Pfad so gestartet:
 
 ```bash
-flash build -Dboard=rpi4b run        # Pi 4 model (raspi4b)
-flash build -Dboard=virt  run-virt   # generic ARMv8 (virt)
+run qemu
+run watchdog rpi4b
 ```
 
-`-Dboard=rpi4b` ist das validierte Board. `-M virt` ist seit
-[v0.5.0](https://github.com/ajhahnde/FlashOS/releases/tag/v0.5.0) nicht mehr
-CI-gegated — dem letzten Release, dessen Boot dort verifiziert wurde —, sodass
-spätere Releases regrediert sein könnten. Für einen bekanntermaßen stabilen
-`-M virt`-Build verwende v0.5.0.
+`rpi4b` ist das validierte Board und das Release-Gate. Der erhaltene
+`virt`-Build ist eingefroren und depriorisiert; `run virt` steht für
+historische Vergleiche bereit, ist aber kein aktuelles
+Kompatibilitätsversprechen.
 
-Für einen selbstvalidierenden Lauf, der mit 0 endet, wenn der Boot den
-interaktiven `fsh`-Prompt erreicht (die dritte Homescreen-Markierung
-`type 'help' for commands` — siehe unten) ohne `[FAIL]` / `ERROR CAUGHT` und mit
-den erwarteten Free-Page-Checkpoints, und mit 1 bei einem Fehler oder einem
-watchdog-Timeout (keine manuelle QEMU-Überwachung):
+Der unbeaufsichtigte Lauf prüft Testbilanz, Page-Checkpoints und den finalen
+`fsh`-Prompt:
 
 ```bash
-flash build -Dboard=rpi4b test-rpi4b  # (matches run); das CI-Boot-Gate
-flash build -Dboard=virt  test-virt   # depriorisiert, nicht CI-gegated
+run watchdog rpi4b
 ```
 
-Um die Byte-Identitäts-Baseline des Pi vor dem Flashen der SD-Karte zu
-verifizieren (legt `src/symbol_area.S` beiseite, säubert, baut neu, vergleicht
-per Diff gegen `scripts/pi_baseline.sha256`):
+Vor dem Flashen kann die Byte-Identität zur Pi-Baseline geprüft werden. Das
+Skript sichert `src/symbol_area.S` vorübergehend, bereinigt den Build, baut neu
+und vergleicht mit `scripts/pi_baseline.sha256`:
 
 ```bash
 scripts/verify_pi_baseline.sh
 ```
 
-`run` ruft
-`qemu-system-aarch64 -M raspi4b -serial null -serial stdio -kernel flash-out/kernel8.img`
-auf — die Mini-UART (UART1) wird auf das Host-stdio geleitet, sodass die
-Ausgabe des kernel und die `[TEST]/[PASS]/[FAIL]`-Zeilen des Test-Harness
-direkt im steuernden Terminal erscheinen. `run-virt` verwendet
-`-M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic`, mit der auf das
-Host-stdio geleiteten PL011.
+`run qemu` routet die `raspi4b`-Mini-UART auf Host-stdio. Der Watchdog baut mit
+`--boot-selftest` und `--ci-login-seed`, erzeugt die FAT32-Fixture und erzwingt
+den seriellen Ausgabevertrag innerhalb von 720 Sekunden.
 
-Ein grüner Lauf auf beiden Boards landet bei `30/30 passed`, 34
-Free-Page-Checkpoints pro Szenario (`0xbbff2` auf rpi4b, `0x3be45` auf virt)
-plus der passenden Boot-Baseline (`0xbc000` / `0x3be53`) und 0 `ERROR CAUGHT`.
-Der Boot übergibt dann an `/bin/login` → `/bin/fsh`; mit dem
-Login-Lifecycle erscheint die Homescreen-Markierung von fsh
-(`type 'help' for commands`) dreimal (zwei skriptgesteuerte
-`[TEST] login`-Sitzungen + der echte Boot-Login), und der CI-watchdog
-(`scripts/run_qemu_test.sh`) zählt genau das. Die Free-Page-Invarianten sind in
-[Dokumentation §8](DOCUMENTATION.md#free-page-invarianten) dokumentiert.
-
-QEMU ist das maßgebliche Signal der inneren Schleife. Der Boot-Pfad stimmt
-Byte für Byte mit echter Hardware überein, abgesehen vom Timing.
+Ein grüner Lauf meldet `30/30 passed`, weder `[FAIL]` noch `ERROR CAUGHT`, die
+erwarteten Page-Checkpoints und drei Shell-Homescreen-Marker. Die exakten
+Invarianten stehen in
+[Dokumentation §7](DOCUMENTATION.md#qemu-watchdog-vertrag). QEMU ist das
+maßgebliche Signal der inneren Entwicklungsschleife; auf echter Hardware läuft
+dasselbe Image, abgesehen vom Timing.
 
 ## 4. SD-Karten-Layout
 
-Der Raspberry Pi 4 bootet von einer FAT32-formatierten Karte, deren Root-Verzeichnis
-mindestens Folgendes enthalten muss:
+Der Raspberry Pi 4 bootet von einer FAT32-formatierten Karte. Ihr Root muss
+mindestens diese Dateien enthalten:
 
 ```text
-config.txt              # ships in this repo
-kernel8.img             # built by `flash build`
-armstub8.bin            # built by `flash build`
-bcm2711-rpi-4-b.dtb     # bundled in this repo
-start4.elf              # bundled in this repo
-fixup4.dat              # bundled in this repo
+config.txt              # Teil dieses Repositorys
+kernel8.img             # von `cargo xtask build --board rpi4b`
+armstub8.bin            # von `cargo xtask armstub`
+bcm2711-rpi-4-b.dtb     # im Repository gebündelt
+start4.elf              # im Repository gebündelt
+fixup4.dat              # im Repository gebündelt
 overlays/miniuart-bt.dtbo
 ```
 
-Die firmware-Blobs sind in diesem Repo unter `firmware/`
-(`bcm2711-rpi-4-b.dtb`, `start4.elf`, `fixup4.dat`,
-`overlays/miniuart-bt.dtbo`) gebündelt. Sie stammen aus dem offiziellen
-[raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)-Projekt
-und werden hier der Bequemlichkeit sowie der Lizenz-/Credit-Klarheit halber
-mitgeführt. Der Deploy-Schritt verweist standardmäßig auf dieses Verzeichnis:
+Die Firmware-Blobs liegen unter `firmware/`. Sie stammen aus dem offiziellen
+[raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)-
+Projekt und werden aus Komfort- sowie Lizenz-/Credit-Gründen mitgeführt. Der
+Deploy-Schritt verwendet dieses Verzeichnis standardmäßig:
 
 ```bash
-SD_BOOT=/Volumes/BOOT FIRMWARE=firmware flash build deploy
+SD_BOOT=/Volumes/BOOT FIRMWARE=firmware build -d
 ```
 
-Der Deploy-Schritt liest zwei Umgebungsvariablen:
-
-| Variable   | Default         | Zweck                                            |
-| :--------- | :-------------- | :----------------------------------------------- |
-| `SD_BOOT`  | `/Volumes/BOOT` | SD-Karten-Mountpunkt unter macOS                 |
-| `FIRMWARE` | `firmware`      | Verzeichnis mit den gebündelten RPi-firmware-Dateien |
+| Variable   | Standardwert    | Zweck                                  |
+| :--------- | :-------------- | :------------------------------------- |
+| `SD_BOOT`  | `/Volumes/BOOT` | SD-Karten-Mountpoint unter macOS       |
+| `FIRMWARE` | `firmware`      | Verzeichnis mit Pi-Firmwaredateien     |
 
 ## 5. Serielle Konsole
 
-Der kernel hat auf dem Pi drei Konsolen-/Debug-Kanäle:
+Der Kernel besitzt auf dem Pi drei Konsolen-/Debug-Kanäle:
 
-- **Mini-UART (UART1)** an GPIO 14 / 15 — Hauptkonsole (und Fallback,
-  wenn USB nicht enumeriert wird).
-- **PL011 (UART4)** an GPIO 8 / 9 — dedizierter Trace-Kanal.
-- **USB-C-Gadget-Konsole** — die interaktive `fsh`-Konsole über den
-  USB-C-Port des Pi; kein Adapter oder Jumper-Kabel (siehe unten).
+- **Mini-UART (UART1)** auf GPIO 14/15 – Hauptkonsole und Fallback, solange
+  USB nicht enumeriert ist.
+- **PL011 (UART4)** auf GPIO 8/9 – separater Trace-Kanal.
+- **USB-C-Gadget-Konsole** – interaktive `fsh`-Konsole über den USB-C-Port des
+  Pi, ohne Adapter oder Jumper-Kabel.
 
-GPIO 14/15 wird absichtlich mit der firmware geteilt. `config.txt`
-aktiviert `uart_2ndstage=1` und `dtoverlay=miniuart-bt`, was das PL011_0
-der firmware auf GPIO 14/15 leitet, sodass die `MESS:…`-Zeilen von
-`start4.elf` auf demselben Kabel sichtbar sind. Sobald der kernel läuft,
-konfiguriert `mini_uart_init` (`src/board/rpi4b/uart.flash`) die Pins auf alt5
-(Mini-UART) um — der letzte Schreibzugriff auf den GPIO-Funktionsselektor
-gewinnt, sodass das firmware-seitige PL011_0-Routing stillschweigend ersetzt
-wird. Dies ist eine sequentielle Übergabe, kein Konflikt.
+`config.txt` routet Firmware-Diagnostik auf GPIO 14/15. Beim Kernelstart
+schaltet `mini_uart_init` dieselben Pins auf Mini-UART und stellt so einen
+nahtlosen Firmware-zu-Kernel-Übergang auf demselben Kabel bereit.
 
 ### UART1-Pinout (RPi 4 → USB-TTL-Adapter)
 
-| RPi-Pin | Funktion      | USB-TTL-Pin |
-| :------ | :------------ | :---------- |
-| Pin 6   | GND           | GND         |
-| Pin 8   | TXD (GPIO 14) | RXD         |
-| Pin 10  | RXD (GPIO 15) | TXD         |
+| RPi-Pin | Funktion       | USB-TTL-Pin |
+| :------ | :------------- | :---------- |
+| Pin 6   | GND            | GND         |
+| Pin 8   | TXD (GPIO 14)  | RXD         |
+| Pin 10  | RXD (GPIO 15)  | TXD         |
 
-Verbinde **nicht** VCC, wenn der Pi unabhängig mit Strom versorgt wird.
+VCC **nicht** verbinden, wenn der Pi separat versorgt wird.
 
-### Verbinden unter macOS
+### Verbindung unter macOS
 
-Der PL2303G-Chip wird nativ unterstützt. Finde den Device-Node und
-öffne eine Sitzung mit 115200 Baud:
+Der PL2303G-Chip wird nativ unterstützt. Device-Node suchen und eine Session
+mit 115200 Baud öffnen:
 
 ```bash
 ls /dev/cu.usbserial-*
-```
-
-```bash
 screen /dev/cu.usbserial-XXXX 115200
 ```
 
-Beende `screen` mit `Ctrl-A`, dann `K`, bestätigt mit `y`. Um eine
-abgetrennte `picapture`-Sitzung von einem zweiten Terminal zu beenden,
-führe `piquit` aus (siehe §6).
+`screen` wird mit `Ctrl-A`, danach `K` und Bestätigung mit `y` beendet. Ein
+unbeaufsichtigtes Capture lässt sich aus einem zweiten Terminal mit `piquit`
+beenden (siehe §6).
 
-### USB-C-Konsole (einzelnes C-zu-C-Kabel)
+### USB-C-Konsole (ein C-zu-C-Kabel)
 
-Der eigene USB-C-Port des Pi dient zugleich als Konsole. Der kernel bringt
-den DWC2-OTG-Controller des BCM2711 als **CDC-ACM-USB-Gerät**
-(`src/board/rpi4b/usb.flash`) hoch, sodass ein USB-C-↔-USB-C-Kabel zum Mac
-sowohl **Strom als auch die interaktive `fsh`-Konsole** überträgt. macOS
-bindet seinen eingebauten `AppleUSBCDCACM`-Treiber — nichts zu installieren.
+Der USB-C-Port des Pi enumeriert als CDC-ACM-Gerät und führt Stromversorgung
+und interaktive `fsh`-Konsole. Unter macOS ist kein zusätzlicher Treiber nötig.
 
 ```bash
-ls /dev/cu.usbmodem*            # node appears once the gadget enumerates
+ls /dev/cu.usbmodem*            # erscheint nach der Enumeration
+screen /dev/cu.usbmodemDEVICE 115200
 ```
 
-```bash
-screen /dev/cu.usbmodem00011 115200
-```
+Nach der Enumeration wechselt die User-Ausgabe auf USB; Kernel-Diagnostik
+bleibt auf Mini-UART. Ohne USB-Enumeration – auch unter QEMU – greift der
+Konsolen-Fallback automatisch. Die Baudrate für `screen` ist beim USB-Gerät
+nur kosmetisch. Falls die Konsole nach erneutem Einstecken nicht zurückkehrt,
+den Pi aus- und wieder einschalten.
 
-Sobald enumeriert, wechselt die Ausgabe von user/`fsh` (der `# ` / `$ `-Prompt,
-Befehlsausgaben) automatisch von der Mini-UART zur USB-Konsole; die
-`[Debug]`-Ausgaben des kernel und der eigene Bring-up-Trace des USB-Treibers
-bleiben auf der Mini-UART. Wenn das Gadget nie enumeriert (kein Host
-angeschlossen, oder unter QEMU, das den DWC2-Gerätepfad nicht emuliert),
-fällt die Konsole auf die Mini-UART zurück, und der oben beschriebene
-GPIO-Ablauf funktioniert unverändert.
+## 6. Shell-Helper
 
-Die Baudrate ist kosmetisch — hinter dem USB-Gerät steckt keine physische
-UART; jede Rate funktioniert. In `screen` getippte Tastenanschläge erreichen
-`fsh` über USB-Bulk-OUT; die Härtung von Replug / Re-Enumeration ist ein
-bekannter Arbeitsposten; wenn die Konsole nach dem erneuten Einstecken des
-Kabels also hängt, mache einen Power-Cycle des Pi.
-
-## 6. Hilfs-Shell-Funktionen
-
-Lade [`flashos.zsh`](../../flashos.zsh) aus dem Repository oder über
-`~/.zshrc`:
+[`flashos.zsh`](../../flashos.zsh) aus dem Repository oder aus `~/.zshrc`
+einbinden:
 
 ```bash
 source ~/FlashOS/flashos.zsh
 ```
 
-| Helper | Zweck |
-| :----- | :---- |
-| `build [-d]` | Zweiphasiger Symbol-Build; `-d` deployt zusätzlich |
-| `run qemu` / `run virt` | Gewähltes QEMU-Board bauen und starten |
-| `run watchdog [rpi4b|virt]` | Unbeaufsichtigte Boot-Validierung |
-| `run test [--NAME]` | Alle oder gefilterte Host-Tests ausführen |
-| `run hw [--trace]` | Mit der Pi-Konsole verbinden |
-| `pi capture [usb|mu]` | Boot nach `boot.log` mitschneiden |
-| `pi connect [usb|mu]` | Interaktive Konsole öffnen |
-| `pi list` / `pi quit` | Geräte anzeigen oder Capture beenden |
-| `pi log` / `pi tail [N]` | Letzten Mitschnitt lesen oder verfolgen |
-| `flashos` | Helper und Build-Schritte auflisten |
+| Helper                         | Zweck                                              |
+| :----------------------------- | :------------------------------------------------- |
+| `build [-d]`                   | zweiphasiger Symbol-Build; `-d` deployt zusätzlich |
+| `run qemu` / `run virt`        | ausgewähltes QEMU-Board bauen und starten          |
+| `run watchdog [rpi4b \| virt]` | unbeaufsichtigte Bootvalidierung                    |
+| `run test [--NAME]`            | alle oder gefilterte Hosttests                     |
+| `run hw [--trace]`             | Verbindung zur Pi-Konsole                          |
+| `pi capture [usb \| mu]`       | Boot in `boot.log` aufzeichnen                     |
+| `pi connect [usb \| mu]`       | interaktive Konsole öffnen                         |
+| `pi list` / `pi quit`          | Devices auflisten oder Capture beenden             |
+| `pi log` / `pi tail [N]`       | neueste Aufzeichnung lesen oder verfolgen          |
+| `flashos` / `flashos list`     | Helper und native Build-Befehle auflisten          |
+| `flashos versions [show \| check \| sync]` | zentrales Versionsmanifest prüfen oder übertragen |
+| `flashos check [all \| versions \| docs \| hygiene \| shell]` | gepflegte Repository-Prüfungen ausführen |
 
-Die alten Namen `picapture`, `piconnect`, `piquit` und `pilist`
-bleiben Aliase. USB CDC wird als `/dev/cu.usbmodem*`, Mini-UART als
-`/dev/cu.usbserial-*` erkannt. Überschreibe die Erkennung mit
-`PI_USB_CONSOLE_DEVICE` oder `PI_SERIAL_DEVICE`; die Timeouts mit
-`PI_CAPTURE_TIMEOUT` und `PI_PROBE_TIMEOUT`.
+Die alten Namen `picapture`, `piconnect`, `piquit` und `pilist` bleiben
+Aliase. USB-CDC-Geräte werden als `/dev/cu.usbmodem*`, Mini-UART-Adapter als
+`/dev/cu.usbserial-*` erkannt. `PI_USB_CONSOLE_DEVICE` beziehungsweise
+`PI_SERIAL_DEVICE` überschreiben die Erkennung; `PI_CAPTURE_TIMEOUT` und
+`PI_PROBE_TIMEOUT` ändern die Timeouts.
+`pi capture usb` hält DTR/RTS gesetzt und sendet den Prompt-Probe über denselben
+offenen Deskriptor. Das vermeidet unter macOS Reconnects durch abgetrennte
+Terminal-Sessions. Das interaktive `pi connect` verwendet weiterhin `screen`.
 
-Mit `BOARD=virt` zielt `build` auf `virt`; `NM=llvm-nm` überschreibt
-das Symbol-Tool. Kernel-Fehler erscheinen nur auf Mini-UART, daher eignet
-sich `pi capture mu` zur Fehlerdiagnose.
+`BOARD=virt` richtet `build` auf den eingefrorenen `virt`-Input aus;
+`NM=/pfad/zu/llvm-nm` überschreibt das Symbolwerkzeug. Kernel-Faults erscheinen
+nur auf Mini-UART, deshalb für die Diagnose `pi capture mu` verwenden.
+
+`build`, `run qemu`, `run virt`, `run watchdog` und `run test` verwerfen
+Versionsdrift vor dem Kompilieren. Release-, Rust- oder QEMU-Versionen werden
+nur in `versions.env` geändert und danach mit `flashos versions sync` verteilt.
 
 ## 7. Host-seitige Unit-Tests
 
 ```bash
-flash build test
+cargo xtask test
 ```
 
-Führt die host-seitigen Unit-Tests gegen Pure-Logic-kernel-Module aus.
-Jedes Modul mit Tests bildet seinen eigenen Test-Root, gelinkt gegen
-`tests/host_stubs.zig` (Stubs für reine Assembly-Externs). Die aktuelle
-Suite deckt 41 Module ab (464 Host-Tests); sie ist weit unter einer Sekunde
-fertig und ist das schnellste Signal dafür, dass die Kernlogik des kernel
-weiterhin hält.
+Der Befehl führt die Rust-Hosttests des Workspace gegen Kernel-, ABI-,
+Userland- und Buildwerkzeug-Logik aus. Ausgeschlossen sind nur die zwei
+Bare-Metal-Static-Libraries, die nicht als Host-Testbinary gelinkt werden
+können. Die Ausgabe des Befehls ist die maßgebliche Testzahl und das schnellste
+Signal für die reine Logik.
 
 ---
 
-[← Zurück: Dokumentation](DOCUMENTATION.md) · [Als Nächstes: Changelog →](../../CHANGELOG.md)
-
-<!-- sync-ref: SETUP.md @ 8d306a79130b85ad3ba5502a83d80be45709d1f9 | synced 2026-07-01 -->
+[← Zurück: Dokumentation](DOCUMENTATION.md) · [Weiter: Changelog →](../../CHANGELOG.md)

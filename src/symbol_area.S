@@ -1191,7 +1191,7 @@
 .string "flashos_kernel::vfs::MOUNT_TABLE"
 .space 23
 .quad 0x00000000001831a8
-.string "_RNvNtCsheqi8Cvnx5k_14flashos_kernel3vfs11MOUNT_TABLE.1"
+.string "_RNvNtCslLenoelWSCo_14flashos_kernel3vfs11MOUNT_TABLE.1"
 .space 0
 .quad 0x00000000001831b0
 .string "flashos_kernel::fat32::DIR_SECTOR_SCRATCH"

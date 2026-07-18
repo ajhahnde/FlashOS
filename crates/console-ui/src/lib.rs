@@ -251,6 +251,7 @@ pub(crate) mod testing {
 mod tests {
     use super::testing::{cap_reset, cap_sink, captured};
     use super::*;
+    use std::format;
     use std::vec::Vec;
 
     /// Strip SGR escapes, so a test can assert the column geometry the
@@ -309,7 +310,7 @@ mod tests {
     #[test]
     fn the_homescreen_marker_survives_the_color_escapes_unspliced() {
         cap_reset();
-        homescreen(cap_sink, b"0.8.0", b"ajhahn");
+        homescreen(cap_sink, env!("CARGO_PKG_VERSION").as_bytes(), b"ajhahn");
         let out = captured();
         // The boot watchdog greps the raw marker with grep -F: it must appear in
         // the byte stream with no escape spliced into it, color on or off.
@@ -317,10 +318,11 @@ mod tests {
             out.windows(MARKER_READY.len()).any(|w| w == MARKER_READY),
             "boot-success marker was broken by an ANSI escape"
         );
-        assert_eq!(
-            uncolored(&out),
-            b"FlashOS [v0.8.0] by ajhahn - type 'help' for commands\n\n".to_vec()
+        let expected = format!(
+            "FlashOS [v{}] by ajhahn - type 'help' for commands\n\n",
+            env!("CARGO_PKG_VERSION")
         );
+        assert_eq!(uncolored(&out), expected.as_bytes());
     }
 
     #[test]

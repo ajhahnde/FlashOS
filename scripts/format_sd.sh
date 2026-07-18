@@ -36,7 +36,7 @@ set -eu
 
 if [ -z "$1" ]; then
     echo "usage: $0 <device>" >&2
-    echo "  e.g. $0 /dev/disk4         # macOS" >&2
+    echo "  e.g. $0 /dev/diskN         # macOS; replace N after diskutil list" >&2
     echo "       $0 /dev/mmcblk0       # Linux" >&2
     exit 2
 fi

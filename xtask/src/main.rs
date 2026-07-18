@@ -39,7 +39,7 @@ Commands:
   user <name> [--output <path>] [--feature <name>]...
                                Build a Rust EL0 payload (hello, clear, pid1, ...)
   klib [--output <path>] [--feature <name>]...
-                               Build the Rust kernel staticlib the Zig kernel links
+                               Build the Rust kernel staticlib linked into kernel8.elf
   populate-syms --board <..> [gate flags]
                                Relink the kernel, then regenerate src/symbol_area.S
                                from its symbol table. Re-run `build` to relink with it.

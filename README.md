@@ -7,11 +7,11 @@
 <h3>A UNIX-like bare-metal OS for AArch64, built for the Raspberry Pi 4B and QEMU</h3>
 
 <p>
-    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/test.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/rust.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/rust.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
     <img src="https://img.shields.io/badge/version-v0.8.0-f59e0b?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/rust-v1.97.0-dea584?style=flat-square" alt="Rust">
-    <img src="https://img.shields.io/badge/target-aarch64--elf-lightgrey?style=flat-square" alt="aarch64-elf">
+    <img src="https://img.shields.io/badge/rust-toolchain--pinned-dea584?style=flat-square" alt="Repository-pinned Rust toolchain">
+    <img src="https://img.shields.io/badge/target-aarch64--unknown--none--softfloat-lightgrey?style=flat-square" alt="aarch64-unknown-none-softfloat">
     <img src="https://img.shields.io/badge/license-apache--2.0-lightgrey?style=flat-square" alt="License">
   </p>
 
@@ -56,10 +56,12 @@ console setup are documented in **[Setup](SETUP.md)**.
 ## Specs
 
 **Hardware**: Raspberry Pi 4 Model B (BCM2711)
+**Qualified RAM**: 4 GiB configuration
 **Architecture**: AArch64 (ARMv8-A)
-**Languages**: Rust 1.97.0 & AArch64 assembly
-**Toolchain**: Cargo _and_ `aarch64-elf` binutils
+**Languages**: Rust & AArch64 assembly
+**Toolchain**: Cargo, Clang, _and_ the pinned Rust LLVM tools
 **Targets**: RPi 4B hardware _and_ `qemu-system-aarch64 -M raspi4b`
+**Release image**: about 1.2 MiB for the current `kernel8.img`
 
 ## Features
 
@@ -81,8 +83,14 @@ console setup are documented in **[Setup](SETUP.md)**.
   they corrupt memory.
 - **Unified file descriptors**. Console, pipe, and file descriptors share
   one API with inherited and redirectable standard I/O.
-- **[FlashShell](https://github.com/ajhahnde/FlashShell)**. A command shell and scripting language, written
-  in Rust — built to become the shell of FlashOS.
+- **Future platform stack.** After the Rust-port release, **FlashSDK** will
+  define the narrow public syscall/userspace ABI, EL0 runtime, base library,
+  and target-and-link contract.
+  **[FlashShell](https://github.com/ajhahnde/FlashShell)** will be its first
+  product consumer. **[FlashUI](https://ajhahn.de/repos/FlashUI/)** will follow
+  as a native TUI that embeds FlashShell and becomes the post-login default;
+  the current `/bin/fsh` remains a tested recovery shell. These contracts
+  remain pre-1.0 until the FlashOS v1.0 stability cut.
 - **Users, login, and permissions**. UID/GID identity, Unix-style file
   modes, privilege dropping, PBKDF2-HMAC-SHA256 authentication, and
   protected password storage with a read-only fallback.
@@ -94,7 +102,7 @@ console setup are documented in **[Setup](SETUP.md)**.
 - **Kernel symbol table**. A two-pass build generates symbols for the
   function-entry tracer.
 - **Test suites**. An in-kernel `[TEST]`/`[PASS]`/`[FAIL]` harness plus
-  427 host tests across 38 modules.
+  crate-local Rust host tests.
 
 A deeper walk-through of each subsystem is in [Documentation](DOCUMENTATION.md).
 
@@ -102,23 +110,21 @@ A deeper walk-through of each subsystem is in [Documentation](DOCUMENTATION.md).
 
 ```text
 arch/aarch64/               AArch64 ISA core (boot, vectors, context switch)
-src/                        kernel core (modules + drivers)
-src/board/<name>/           per-board driver bag (rpi4b / virt) + linker script
-user/pid1/                  Rust PID 1 image + in-kernel test harness
+src/                        board/linker glue, trace assembly, generated symbols
+src/board/<name>/           per-board assembly definitions + linker script
+crates/abi/                 shared kernel/user/assembly layouts and syscall IDs
+crates/kernel/              Rust kernel implementation
 crates/flibc/               Rust userland mini-libc for ELF programs
-lib/                        shared kernel↔user constants (syscall IDs)
 crates/user-rt/             Rust EL0 entry, syscall, panic, and memory runtime
-user/hello/                 Rust /test/hello.elf exec fixture
-tools/                      hand-rolled ELF programs (stackbomb, UNIX utils etc.)
-tests/                      host-side unit tests
+user/                       Rust PID 1, shell, tools, and test executables
+rootfs/                     static initramfs and FAT32 seed files
+tools/                      retained ELF linker scripts + initramfs embed assembly
 armstub/                    EL3 → EL1 bootstrap shim (Pi only)
-scripts/                    symbol-table generation, iso, QEMU test watchdog,
-                            Pi-baseline verifier
+xtask/                      native build, inspection, generation, and guard tasks
+scripts/                    QEMU watchdog, SD fixture, hygiene, baseline verifier
 assets/                     logo and visual assets
-build.zig                   production build graph (Flash/Zig/Rust bridge)
 Cargo.toml                  Rust workspace
 flashos.zsh                 shell helpers incl. the two-pass `build` orchestrator
-flash-toolchain.lock        pinned flashc revision (the Flash compiler)
 config.txt                  RPi 4 firmware configuration
 ```
 
@@ -126,6 +132,9 @@ config.txt                  RPi 4 firmware configuration
 
 - **[FlashOS Tour →](https://ajhahn.de/flashos/)**
 - **[ajhahn.de →](https://ajhahn.de/)**
+- **[FlashSDK →](https://github.com/ajhahnde/FlashSDK)**
+- **[FlashShell →](https://ajhahn.de/repos/FlashShell/)**
+- **[FlashUI →](https://ajhahn.de/repos/FlashUI/)**
 
 ---
 

@@ -1,6 +1,6 @@
 //! User-space virtual address layout.
 //!
-//! Ported from `src/user_layout.flash`. Single source of truth for the regions
+//! Single source of truth for the regions
 //! the ELF loader populates and the page-fault path classifies:
 //!
 //! ```text

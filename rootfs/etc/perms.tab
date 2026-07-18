@@ -5,13 +5,13 @@
 #   MODE — octal permission word (low 9 bits)
 #   UID / GID — decimal owner ids
 #
-# Parsed once at mount time by the kernel (src/overlay.zig wired through
-# src/fat32_backend.zig). Un-annotated files keep the 0666 root:root
-# default; the shadow file floors at 0600 even without this overlay.
-# This file protects itself through its own entry.
+# Parsed once at mount time by the kernel (crates/kernel/src/overlay.rs
+# wired through crates/kernel/src/fat32_backend.rs). Unannotated files keep
+# the 0666 root:root default; the shadow file floors at 0600 even without
+# this overlay. This file protects itself through its own entry.
 #
 # Seeded onto the QEMU SD image by scripts/make_test_disk.sh and onto a
-# real card by `zig build deploy`.
+# real card by `flash build -d`.
 PERMS.TAB 0600 0 0
 SHADOW 0600 0 0
 ROUNDTR.DAT 0666 0 0

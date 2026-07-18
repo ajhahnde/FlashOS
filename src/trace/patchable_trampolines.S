@@ -1,8 +1,8 @@
 /*
  * Naked trampolines for hand-rolled patchable-function-entry tracing.
  *
- * Zig has no -fpatchable-function-entry; the two-NOP prologue the
- * trace pipeline expects is synthesised in hand-written assembly. Each
+ * The two-NOP prologue the trace pipeline expects is synthesised in
+ * hand-written assembly. Each
  * traced function's canonical name lives on the trampoline; the real
  * implementation is renamed to <name>_impl. Callers see no change.
  *

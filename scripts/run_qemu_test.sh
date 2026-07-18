@@ -15,8 +15,8 @@
 #
 # Args: TIMEOUT_SECS QEMU_BINARY [QEMU_ARG ...]
 #
-# REQUIRES the kernel be built with `-Dci-login-seed=true` (the test-virt /
-# test-rpi4b steps and CI pass it). That flag makes PID-1 seed `flash\nflash\n`
+# REQUIRES the kernel be built with `--ci-login-seed` (the `flash run watchdog`
+# helper and CI pass it). That flag makes PID-1 seed `flash\nflash\n`
 # into the console before /bin/login so the unattended boot authenticates with
 # no typist and reaches the 3rd homescreen marker. Without it the boot
 # stops at the real `login:` prompt (correct for a hardware deploy) and this
@@ -58,12 +58,13 @@
 # match exactly. Net: 34 × {bbff1, 3be4f} + 1 × {bc000, 3be5e}.
 #
 # FROZEN (2026-06-17): the virt board is deprioritized — rpi4b + real
-# HW are the live gates and CI now boots rpi4b (test-rpi4b), not virt.
-# The virt values above (0x3be35 / 0x3be44 + the drift history) were
+# HW are the live gates and CI now boots rpi4b, not virt.
+# The virt values above (0x3be4f / 0x3be5e + the drift history) were
 # refreshed at the v0.8.0 Rust PID-1 change (see drift history) and are
 # otherwise NOT re-checked while virt is on ice. Detection of the virt
-# pattern is kept so `-Dboard=virt test-virt` still works for the
-# eventual revive — at which point re-validate and refresh these values.
+# pattern is kept so an explicit `cargo xtask build --board virt` plus this
+# runner still works for the eventual revive — at which point re-validate and
+# refresh these values.
 #
 # Drift history (legitimate free-page baseline shifts, newest first):
 #   * v0.8.0 — virt 0x3be50→0x3be4f (per-scenario), 0x3be5f→0x3be5e
@@ -224,7 +225,7 @@ fails=$(grep -cF "[FAIL]" "$LOG" || true)
 
 # Board-specific baseline pair (see header). rpi4b: bbff1 / bc000;
 # virt: 3be4f / 3be5e. Pick the board whose checkpoint pattern is
-# present, then require its exact pair (32 checkpoints + 1 boot
+# present, then require its exact pair (34 checkpoints + 1 boot
 # baseline). Detecting by content keeps this script board-arg-free.
 rpi_chk=$(grep -cF "free_pages: 00000000000bbff1" "$LOG" || true)
 virt_chk=$(grep -cF "free_pages: 000000000003be4f" "$LOG" || true)

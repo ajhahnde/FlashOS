@@ -6,12 +6,12 @@
   },
   {
     "id": "build_boot",
-    "title": "2. Build & First Boot (QEMU)",
+    "title": "2. Build & First Boot",
     "file": "chapters/ch2_build_boot.md"
   },
   {
     "id": "poweron",
-    "title": "3. Power-on: Firmware to start.S",
+    "title": "3. Power-on to kernel_main",
     "file": "chapters/ch3_poweron.md"
   },
   {
@@ -21,7 +21,7 @@
   },
   {
     "id": "console",
-    "title": "5. The Console: UART & console_ui",
+    "title": "5. Console I/O",
     "file": "chapters/ch5_console.md"
   },
   {
@@ -46,7 +46,7 @@
   },
   {
     "id": "fsh",
-    "title": "10. fsh — the Shell",
+    "title": "10. fsh — Current Shell",
     "file": "chapters/ch10_fsh.md"
   },
   {
@@ -66,7 +66,7 @@
   },
   {
     "id": "build",
-    "title": "14. Native Compilation behind zig build",
+    "title": "14. Native Rust Build",
     "file": "chapters/ch14_build.md"
   },
   {

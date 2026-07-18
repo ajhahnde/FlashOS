@@ -157,7 +157,7 @@ serror_invalid_el0_32:
 handle_irq_el1h:
     kernel_entry 1
 #ifdef FLASHOS_TRACE
-    mov x0, sp              /* hand the saved KeRegs frame to the -Dtrace sampler */
+    mov x0, sp              /* hand the saved KeRegs frame to the --trace sampler */
 #endif
     bl handle_irq
     kernel_exit 1
@@ -165,7 +165,7 @@ handle_irq_el1h:
 handle_irq_el0_64:
     kernel_entry 0
 #ifdef FLASHOS_TRACE
-    mov x0, sp              /* hand the saved KeRegs frame to the -Dtrace sampler */
+    mov x0, sp              /* hand the saved KeRegs frame to the --trace sampler */
 #endif
     bl handle_irq
     kernel_exit 0

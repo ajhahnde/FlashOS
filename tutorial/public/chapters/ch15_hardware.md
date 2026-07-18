@@ -1,131 +1,94 @@
-# Chapter 15: On Real Hardware (Pi 4)
+# 15. Raspberry Pi Hardware Acceptance
 
-Every chapter so far has been agnostic about whether the kernel this
-tour describes is running under QEMU or on a physical Raspberry Pi 4 —
-deliberately, since the same image, the same boot contract, and the
-same `[TEST]` harness apply to both. This closing chapter is about the
-places that genuinely differ: how the image gets onto a real SD card,
-how a real serial console differs from QEMU's virtual one, and the
-USB-C console that makes Pi hardware need no extra adapter at all.
+QEMU gives FlashOS a fast, deterministic inner loop, but it does not model
+every BCM2711 path used by the system. The Rust-port release therefore uses a
+feature-enabled `rpi4b` watchdog image under QEMU and separately qualifies the
+exact default and trace artefacts on a Raspberry Pi 4B.
 
-## The SD card layout
+## What the Pi firmware loads
 
-The Pi's firmware boots from a FAT32-formatted card whose root must
-hold, at minimum:
+A FAT32 boot partition contains at least:
 
 ```text
-config.txt              # ships in this repo
-kernel8.img             # built by `zig build`
-armstub8.bin             # built by `zig build`
-bcm2711-rpi-4-b.dtb      # bundled in this repo
-start4.elf               # bundled in this repo
-fixup4.dat                # bundled in this repo
+config.txt
+kernel8.img
+armstub8.bin
+bcm2711-rpi-4-b.dtb
+start4.elf
+fixup4.dat
 overlays/miniuart-bt.dtbo
 ```
 
-The firmware blobs — the device tree, `start4.elf`, `fixup4.dat`, and
-the mini-UART overlay — are vendored under `firmware/` in this
-repository, taken directly from the official Raspberry Pi firmware
-project, so a checkout has everything it needs without a separate
-download step. `zig build deploy` writes the two files this repo
-actually builds (`kernel8.img`, `armstub8.bin`) onto a mounted card,
-reading its target mount point and firmware directory from environment
-variables (`SD_BOOT`, defaulting to `/Volumes/BOOT`; `FIRMWARE`,
-defaulting to `firmware`) rather than a hardcoded path.
+The repository bundles the required firmware inputs. After the complete
+two-pass build, deployment is an explicit operator action:
 
-## Three console channels, one purpose split
-
-A running Pi actually exposes three separate serial-ish channels, each
-with a distinct job:
-
-- **Mini-UART (UART1)**, on GPIO 14/15 — the main console, and the
-  fallback whenever USB is not enumerated.
-- **PL011 (UART4)**, on GPIO 8/9 — a channel dedicated to the tracing
-  subsystem chapter 5 mentioned only in passing, kept separate so trace
-  output never interleaves with interactive console bytes.
-- **The USB-C gadget console** — described below.
-
-GPIO 14/15 carries an interesting sequential hand-off before the kernel
-even starts: the firmware's own boot messages route over PL011_0 on
-those same pins (`config.txt`'s `dtoverlay=miniuart-bt` arranges this),
-so the earliest `MESS:…` lines are visible on the same physical cable a
-developer will use for the kernel's own console. Once `mini_uart_init`
-runs, it reconfigures those pins to the mini-UART function — last write
-to the GPIO function selector wins — silently taking over from the
-firmware. Nothing conflicts; it's a clean relay race with no shared
-state between the two owners.
-
-## The USB-C console: one cable, no adapter
-
-The more distinctive path is the Pi's own USB-C port doubling as a full
-interactive console. `src/board/rpi4b/usb.flash` brings the BCM2711's
-DWC2 USB-OTG controller up as a Full-Speed USB *device*, enumerating as
-a standard CDC-ACM serial function — the same class of device a USB
-modem or Arduino-style board presents. macOS binds its built-in
-`AppleUSBCDCACM` driver automatically; nothing to install, and a single
-USB-C-to-USB-C cable carries both power and the console simultaneously.
-
-```text
-ls /dev/cu.usbmodem*            # node appears once the gadget enumerates
-screen /dev/cu.usbmodem00011 115200
+```bash
+source flashos.zsh
+SD_BOOT=/Volumes/BOOT FIRMWARE=firmware build -d
 ```
 
-Getting from "controller powered up" to "host sees a serial device" is
-not instantaneous, and the driver is deliberately careful about the
-timing. A USB bus reset electrically disarms the endpoint, and the host
-doesn't send its first `SETUP` packet until roughly 20 ms after the
-reset ends — which only works if something is polling the controller
-at microsecond granularity the whole time. There's no IRQ line wired
-for this controller; instead, the idle loop that already runs on core 0
-between other work calls `board.usb.poll()` on every pass, right next
-to the UART RX backstop. To avoid macOS's habit of permanently
-disabling a port after a few failed enumeration attempts, the gadget
-stays electrically detached — pull-up held low — until the poll loop
-has run gap-free for a full two seconds of sustained idle, measured off
-the hardware cycle counter, and only then asserts the pull-up that
-makes it visible to the host. If enumeration ever stalls for ten
-seconds without completing `SET_CONFIGURATION`, the driver self-heals
-with a one-second detach pulse — electrically indistinguishable from
-unplugging and replugging the cable, which resets the host's port state
-too.
+Without `-d`, the build does not write to the SD card.
 
-Once enumerated, the switch is transparent to everything above it:
-`fsh`'s prompt and command output redirect from the Mini-UART to the
-USB console automatically, because the write path is a **mux, not a
-tee** — `board.usb.cdc_tx` when enumerated, the Mini-UART otherwise,
-never both at once. Kernel `[Debug]` prints and the USB driver's own
-bring-up trace stay on the Mini-UART unconditionally regardless of
-enumeration state, so a developer watching the mini-UART adapter always
-sees boot diagnostics even while a second person is typing commands
-over the USB-C cable. Under QEMU, which does not emulate DWC2's
-device-mode data path, `usb_init()` simply fails soft and the console
-falls back to the Mini-UART — the same fallback behavior a real board
-shows with no cable attached, which is exactly why the CI boot
-watchdog stays green without ever touching USB.
+## Serial and USB paths
 
-## QEMU vs. hardware: what actually differs
+Mini-UART on GPIO 14/15 carries firmware diagnostics, kernel diagnostics, and
+fallback user I/O. PL011 on GPIO 8/9 carries the trace stream. The Pi USB-C
+port enumerates as CDC-ACM for the preferred interactive user console while
+also powering the board.
 
-Across this whole tour, the QEMU-versus-hardware gap has been narrow
-and explicit rather than pervasive:
+On macOS, typical device nodes are:
 
-- **FAT32 writes** (chapter 11) — QEMU's `raspi4b` machine cannot
-  complete the SD card's `CMD8` initialization sequence, so `/mnt`
-  never mounts under either QEMU board; every write-path scenario is
-  Pi-only, taking the explicit SKIP branch under emulation.
-- **The USB-C console** (this chapter) — falls back to the Mini-UART
-  under QEMU rather than failing the boot.
-- **Everything else** — the scheduler, the syscall boundary, the
-  memory manager, the login flow, fsh itself — runs identically on
-  both, which is precisely what lets a green QEMU boot stand in as
-  meaningful evidence before a change ever reaches real silicon.
+```bash
+/dev/cu.usbserial-*   # USB-TTL adapter for Mini-UART
+/dev/cu.usbmodem*     # USB-C CDC-ACM gadget
+```
 
-## The tour, end to end
+## Hardware-only evidence
 
-Fifteen chapters ago this tour started at the moment a Raspberry Pi's
-firmware hands control to `start.S`. It has now walked every layer
-between that instant and a `$` prompt running real commands against a
-real filesystem: the MMU, the console, the scheduler, the syscall
-boundary, ELF loading, login and identity, the shell, the filesystem,
-full-screen tools, the test harness that proves all of it, the build
-pipeline that produces it, and finally the hardware it actually runs
-on. That is the whole path — power-on to prompt.
+Real-Pi acceptance covers:
+
+- boot through login to the shell;
+- EMMC2 single-block reads and writes;
+- FAT32 persistence across two boots;
+- create, write, read, rename, and unlink on physical media;
+- USB-C enumeration, fallback, and reconnect behavior;
+- optional PL011 trace capture for a trace-feature image.
+
+QEMU's Raspberry Pi model does not provide the usable EMMC2 path required by
+the driver and does not emulate the DWC2 device-mode data path. Runtime tests
+skip those legs explicitly under QEMU instead of pretending they passed.
+
+## Capturing a boot
+
+After sourcing `flashos.zsh`, the helper surface includes:
+
+```bash
+pi capture mu       # Mini-UART diagnostics
+pi capture usb      # USB user console
+pi log
+pi tail 100
+pi quit
+flashos versions check
+flashos check all
+```
+
+The unattended USB capture keeps DTR/RTS asserted on one open descriptor;
+`pi connect` uses `screen` for interactive work.
+
+Use the Mini-UART path for kernel faults. USB user output can disappear during
+enumeration or reconnect, while kernel diagnostics intentionally remain on the
+dedicated fallback channel.
+
+## Release identity
+
+Hardware acceptance must use the exact `kernel8.img` and `armstub8.bin`
+qualified for release. Rebuilding with different inputs and testing only that
+new image does not prove the released bytes.
+
+> [!NOTE]
+> The supported release target is `rpi4b`. The preserved `virt` board is
+> frozen, outside the current gate, and should not be presented as equivalent
+> hardware support.
+
+You have now followed FlashOS from the pinned Rust build through firmware,
+memory, scheduling, syscalls, userland, filesystems, tests, and real hardware.

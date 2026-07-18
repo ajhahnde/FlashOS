@@ -79,8 +79,8 @@ fn kind_of(s: FdSlot) -> Kind {
     Kind::from_u8(s.kind)
 }
 
-/// Complete file ref: the kernel-crate mirror of klib's `fos_file_ref`, which
-/// serves the remaining Flash consumers of the same record.
+/// Complete file ref: the kernel-crate mirror of klib's assembly-visible
+/// `fos_file_ref` facade.
 #[inline]
 unsafe fn file_take_ref(f: *mut File) {
     // SAFETY: `f` is a live file; the preempt window is the exclusion `add_ref`

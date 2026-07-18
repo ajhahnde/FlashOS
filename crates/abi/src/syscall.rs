@@ -1,8 +1,8 @@
 //! Syscall IDs, the errno surface, and the types that cross the user/kernel
 //! boundary by pointer.
 //!
-//! Ported from `lib/syscall_defs.flash`. The IDs index the kernel dispatch table
-//! and are loaded into x8 by the EL0 wrappers; `NR_SYSCALLS` caps the dispatch
+//! The IDs index the kernel dispatch table and are loaded into x8 by the EL0
+//! wrappers; `NR_SYSCALLS` caps the dispatch
 //! range via the `b.hs` in `entry.S`, so it must stay one past the highest slot.
 //!
 //! Retired slots — 0 (write_str), 5 (exec), 8 (readFile), 9 (writeFile),

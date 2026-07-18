@@ -1,9 +1,8 @@
 //! Dynamic kernel tracing — patches `bl hook` into the `mov x9, lr` slots at the
 //! entry of every function compiled with `-fpatchable-function-entry=2`.
 //!
-//! The patchable-function-entries section is currently empty, so `trace_init` is
-//! effectively a no-op at runtime; the machinery stays compiled so it lights up
-//! the moment entries appear.
+//! The patchable-function-entries section contains the four hand-written
+//! trampolines in `src/trace/patchable_trampolines.S`.
 
 use crate::trace::ksyms;
 use crate::trace::utils::{trace_output, trace_output_insn, trace_output_u64, PL};

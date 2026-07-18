@@ -3,13 +3,14 @@
 The CPU-architecture core for AArch64 (ARMv8-A). Everything in this directory
 is ISA-specific: it touches system registers, the exception model, the MMU
 translation regime, the generic timer, and the register-save layout that a
-context switch depends on. Nothing here knows which board it runs on — that
-boundary is owned by `src/board/<board>/`.
+context switch depends on. Nothing here owns a device driver: board-specific
+assembly and linker inputs live in `src/board/<board>/`, while the active Pi
+drivers are the `rpi4b_*.rs` modules in `crates/kernel/src/`.
 
 The rest of the kernel reaches this code by symbol, never by path. That makes
 the set of symbols below a contract: a second architecture port would live in a
 sibling `arch/<isa>/` directory and provide the same surface, leaving the
-kernel core (`src/`) and the board layer (`src/board/`) unchanged.
+kernel core (`crates/kernel/`) and board-specific layers unchanged.
 
 ## Files
 
@@ -40,15 +41,16 @@ The symbols this directory exports, grouped by concern:
 ## Required interface
 
 The boot and exception paths call outward by symbol. These are supplied by the
-machine-independent kernel (`src/`) and the board layer (`src/board/<board>/`):
+machine-independent Rust kernel (`crates/kernel/`) and the selected board
+implementation:
 
 - **Kernel entry** — `kernel_main` (first kernel code after MMU enable)
 - **Memory** — `mem_map_init`, `mem_map_reserve_below`, `mem_map_reserve_above`,
   and the linker-emitted `_kernel_pa_end` marker
 - **Scheduler** — `schedule`, `sched_init`, `current`, `copy_process`
 - **Syscalls** — the syscall table and its relocation hook
-- **Board bring-up** — interrupt controller init and per-board quirks, reached
-  through the board trampolines
+- **Board integration** — IRQ dispatch and fault reporting selected by the
+  active kernel/board link
 
 `board_asm_defs.inc`, included via the `asm_defs.inc` bridge, is the one
 per-board input the assembly sources take at build time.

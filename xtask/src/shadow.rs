@@ -13,7 +13,7 @@
 //! clean builds are byte-identical — required for the Pi kernel-image hash
 //! baseline.
 //!
-//! Keep `ACCOUNTS` in lockstep with `user_space/etc/passwd`, the PID-1
+//! Keep `ACCOUNTS` in lockstep with `rootfs/etc/passwd`, the PID-1
 //! boot-injection credentials, and the `[TEST] authenticate` scenario.
 
 use std::fmt::Write as _;

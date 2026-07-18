@@ -1,70 +1,63 @@
-# Chapter 1: What is FlashOS
+# 1. Welcome to FlashOS
 
-FlashOS is a hobby AArch64 operating system. It boots on real Raspberry
-Pi 4 Model B hardware and under QEMU's `-M raspi4b` and `-M virt`
-machines, running everything from the boot trampoline to an interactive
-login shell without a Linux host underneath it — FlashOS *is* the
-kernel and the userland.
+FlashOS is a small UNIX-like operating system for AArch64. Its maintained
+implementation is Rust, with a deliberately small set of AArch64 assembly and
+linker scripts where the processor or firmware contract requires them.
 
-The kernel core, the board drivers, and the userland (including the
-`fsh` shell and its coreutils) are written in
-[Flash](https://github.com/ajhahnde/Flash), a systems language whose
-compiler, `flashc`, targets LLVM. The repository keeps `zig build` as its
-command surface, but product modules are compiled to native objects by
-`flashc`; generated Zig is confined to compatibility tests and tooling.
-FlashOS did not start this way — it began as a C kernel, was rewritten in
-pure Zig and AArch64 assembly, and later had its OS-image modules ported
-from Zig to Flash module by module. Hand-written AArch64 assembly and linker scripts
-remain where those formats are the right tool; `build.zig` is the host-side
-orchestrator rather than part of the operating-system image.
+This tour follows the real production path used by the Rust-port release:
 
-## What this tour shows
-
-This guided tour follows FlashOS's real boot order — power-on to
-prompt — one layer at a time. It starts at the earliest boot code the
-CPU executes, then walks up through memory management, the console
-drivers, the scheduler, the syscall boundary, and the userland C
-library, before turning to how a session actually starts: login,
-identity, the interactive shell, and the filesystem it operates on. From
-there the tour looks at the coreutils and demo programs that ride on
-top, the in-kernel self-test harness that keeps the kernel honest across
-changes, and the build pipeline that turns `.flash` source into a
-bootable image. The tour closes on real Raspberry Pi 4 hardware, where
-everything covered along the way is running outside of QEMU.
-
-Each chapter pairs a short read with a hands-on lab: a real piece of
-Flash source you can load into the editor and check through the readable
-test-compatibility lowering. That view is useful for learning and syntax
-feedback; shipped kernel and userland objects use the native compiler path.
-
-## Lab: Hello, World!
-
-Every Flash program that talks to the outside world does it through
-`flibc`, FlashOS's userland mini-libc — the same library the shipped
-`/bin` coreutils link against. This is the smallest complete FlashOS
-userland program: it writes one line to standard output through the
-`write_fd` syscall wrapper, then exits.
-
-```flash
-// hello.flash - the smallest Flash program: write a line, then exit.
-use flibc
-
-link "flibc_start"
-link "flibc_mem"
-
-export fn main(_ usize, _ argv) noreturn {
-    msg := "Hello from FlashOS!\n"
-    _ = flibc.sys.write_fd(1, msg.ptr, msg.len)
-    flibc.exit()
-}
+```text
+Pi firmware
+    ↓
+EL3 armstub
+    ↓
+EL1 Rust kernel
+    ↓
+EL0 PID 1 → login → /bin/fsh
 ```
 
-> [!NOTE]
-> The two `_` parameters on `main` stand in for the argument count and
-> vector; this program ignores both. `flibc.sys.write_fd` is a thin
-> wrapper over the `write` syscall, and `flibc.exit()` wraps `exit` —
-> the same syscalls a shell like `fsh` or a coreutil like `cat` uses.
+The Raspberry Pi 4B is the supported release target. QEMU's `raspi4b` machine
+is the fast inner-loop boot environment and boots a feature-enabled selftest
+image from the production graph. The exact default and trace artefacts are
+qualified separately on real Pi hardware. The retained `virt` input is frozen
+and is not part of the current release gate.
 
-Copy it into the Flash Editor, choose **Check lab**, and read the output: a
-`main` with C calling convention, wired to the same `flibc` module the
-rest of FlashOS's userland imports.
+## What is in the system?
+
+- a four-level MMU and physical-page allocator;
+- preemptive, priority-weighted task scheduling;
+- `fork`, `execve`, `wait`, `exit`, and `kill`;
+- a VFS with read-only initramfs and a mutable FAT32 mount;
+- unified console, pipe, and file descriptors;
+- users, login, permissions, and password authentication;
+- a shell, pager, editor, and core utilities in EL0;
+- kernel tracing, host tests, and a 30-scenario runtime harness.
+
+The repository mirrors those boundaries. `crates/kernel/` owns the Rust kernel,
+`crates/abi/` owns layouts shared with userland and assembly, `user/` contains
+EL0 executables, and `rootfs/` contains checked-in filesystem seeds. The root
+`src/` directory now contains only retained assembly, linker, trace, and symbol
+glue—not the kernel implementation.
+
+## How to use this tour
+
+Each chapter connects one concept to the current source tree. Code fragments
+are teaching-sized excerpts or close simplifications; follow the linked path
+for the authoritative implementation. The right-hand editor is a Rust
+scratchpad for loading and modifying examples. It does not replace the native
+bare-metal build or its target-specific checks.
+
+> [!NOTE]
+> FlashOS is pre-1.0. Internal layouts and syscall details may change between
+> releases. The current `crates/abi/` crate is an internal contract, not yet a
+> stable public SDK.
+
+## What comes after the Rust-port release?
+
+The planned order is explicit: first FlashSDK establishes a narrow public
+syscall/userspace ABI and runtime; FlashShell becomes its first product
+consumer; then FlashUI becomes the second consumer and embeds FlashShell as a
+native TUI. Only after those steps is the default post-login session intended
+to change. `/bin/fsh` remains a tested recovery shell.
+
+Next, we build the current system and watch its boot contract complete.

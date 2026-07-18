@@ -12,7 +12,7 @@
 //! Line format: `user:uid:gid:home:shell` (exactly five colon-delimited fields).
 //! `/etc/passwd` itself stays an initramfs file -- the account LIST is
 //! build-time-immutable; only passwords (`/etc/shadow`, `/mnt/shadow`) are mutable
-//! state. The tests below pin the format against `user_space/etc/passwd`.
+//! state. The tests below pin the format against `rootfs/etc/passwd`.
 
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
@@ -107,7 +107,7 @@ fn parse_decimal_u32(s: &[u8]) -> Option<u32> {
 mod tests {
     use super::*;
 
-    /// Mirrors `user_space/etc/passwd`.
+    /// Mirrors `rootfs/etc/passwd`.
     const FIXTURE: &[u8] = b"root:0:0:/root:/bin/fsh\nflash:1000:1000:/home/flash:/bin/fsh\n";
 
     #[test]

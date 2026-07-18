@@ -5,20 +5,30 @@
 target/
 rust-out/
 
-# Private notes and tools
-ajhahnde/
+# Private notes, management, and local session state
+/ajhahnde/
+/management/
+
+# Local secrets and signing material (versions.env is intentionally public)
+.env
+.env.*
+*.env
+!versions.env
+*.key
+*.pem
+*.p12
+*.pfx
 
 # Python bytecode cache (boot-demo replay script)
-scripts/__pycache__
+/scripts/__pycache__/
 
-# Logs
-stdbuf_test.log
-boot.log
-qemu_output.log
+# Logs, serial captures, and hardware evidence
+*.log
+*.raw
+*.capture
 screenlog.*
 
 # tutorial web app — keep source, drop deps & scratch
-tutorial/node_modules/
-tutorial/temp/
-tutorial/SETUP.md
-.superpowers/
+/tutorial/node_modules/
+/tutorial/temp/
+/tutorial/SETUP.md

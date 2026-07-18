@@ -706,7 +706,7 @@ button {
     letter-spacing: 0.02em;
 }
 .status-indicator.idle { background-color: var(--bg-panel-hover); color: var(--text-secondary); }
-.status-indicator.transpiling { background-color: var(--accent-glow); color: var(--accent); }
+.status-indicator.loading { background-color: var(--accent-glow); color: var(--accent); }
 .status-indicator.success { background-color: var(--success-bg); color: var(--success); }
 .status-indicator.error { background-color: var(--error-bg); color: var(--error); }
 
