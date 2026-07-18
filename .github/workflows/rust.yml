@@ -63,8 +63,13 @@ jobs:
       - name: armstub link
         run: cargo xtask armstub
 
-      - name: clean-room guard (rpi4b)
-        run: cargo xtask guard --board rpi4b
+      - name: retired-language source census
+        run: cargo xtask census
+
+      # Build the production artefact under rejecting PATH shims and inspect the
+      # complete subprocess trace for retired compiler invocations.
+      - name: clean-room guard (full rpi4b production build)
+        run: cargo xtask guard --board rpi4b --full
 
       # mtools builds the FAT32 test disk. Hosted runners ship QEMU 8.2, but the
       # raspi4b machine requires QEMU >= 9.0, so build the contract-pinned 11.0.1
