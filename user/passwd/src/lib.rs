@@ -16,9 +16,9 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[cfg(target_os = "none")]
-use flashsdk_abi::syscall::EACCES;
-#[cfg(target_os = "none")]
 use flashos_flibc::{console_input, console_sink, err_sink, sys};
+#[cfg(target_os = "none")]
+use flashsdk_abi::syscall::EACCES;
 #[cfg(target_os = "none")]
 use flashsdk_rt::{arg, entry, Argv};
 

@@ -8,9 +8,9 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[cfg(target_os = "none")]
-use flashsdk_abi::syscall::{Dirent, DT_DIR};
-#[cfg(target_os = "none")]
 use flashos_flibc::{console_sink, sys};
+#[cfg(target_os = "none")]
+use flashsdk_abi::syscall::{Dirent, DT_DIR};
 #[cfg(target_os = "none")]
 use flashsdk_rt::{arg_ptr, entry, Argv};
 

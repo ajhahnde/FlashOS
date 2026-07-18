@@ -20,8 +20,8 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use flashsdk_abi::syscall::NR_SYSCALLS;
 use flashos_abi::task::{KeRegs, TaskStruct};
+use flashsdk_abi::syscall::NR_SYSCALLS;
 
 /// The one include the .S files read the three facts from today.
 const REFERENCE_INC: &str = "arch/aarch64/asm_defs_common.inc";
