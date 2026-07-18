@@ -19,7 +19,7 @@
 login: flash
 Password: *****
 
-.flashOS [v{{VERSION}}] by ajhahnde - type 'help' for commands
+FlashOS [v{{VERSION}}] by ajhahnde - type 'help' for commands
 
 $ help
 Commands:
