@@ -2,9 +2,9 @@
 # check_whitespace_hygiene: fail on whitespace regressions in shipped
 # sources.
 #
-# Read-only gate for CI and pre-commit. Scope: src, lib, user_space,
-# tools, tests, armstub/src, scripts, .github/workflows, top-level
-# docs, German translations in docs/de, build files. Checks three
+# Read-only gate for CI and pre-commit. Scope: src, user_space, crates,
+# user, xtask, tools, armstub/src, scripts, .github/workflows, top-level
+# docs, and German translations in docs/de. Checks three
 # regressions:
 #
 #   - trailing spaces on any line ('  $')
@@ -22,9 +22,9 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-PATHS="src lib user_space tools tests armstub/src scripts .github/workflows
+PATHS="src user_space crates user xtask tools armstub/src scripts .github/workflows
 README.md DOCUMENTATION.md SETUP.md CHANGELOG.md LICENSE.md
-build.zig build.zig.zon config.txt docs/de"
+Cargo.toml config.txt docs/de"
 
 EXTS="--include=*.zig --include=*.S --include=*.inc \
       --include=*.md --include=*.sh --include=*.zon \
@@ -76,5 +76,4 @@ fi
 if [ "$status" -ne 0 ]; then
     exit 1
 fi
-
 

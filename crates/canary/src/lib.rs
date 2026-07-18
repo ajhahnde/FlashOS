@@ -28,7 +28,7 @@ unsafe fn mmio_read(addr: usize) -> u32 {
 }
 
 // ---------------------------------------------------------------------------
-// rpi4b: AUX mini-UART on GPIO14/15, mirroring src/board/rpi4b/uart.flash.
+// rpi4b: AUX mini-UART on GPIO14/15, matching the native board driver.
 // ---------------------------------------------------------------------------
 
 #[cfg(not(feature = "virt"))]
@@ -83,7 +83,7 @@ mod uart {
 
 // ---------------------------------------------------------------------------
 // virt: QEMU's PL011 is already programmed at kernel entry, so writing DR is
-// the whole driver. Mirrors src/board/virt/uart.flash.
+// the whole driver. Matches the native virt board setup.
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "virt")]

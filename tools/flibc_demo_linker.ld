@@ -1,5 +1,5 @@
 /*
- * Linker script for tools/flibc_demo_elf.zig — same single-PT_LOAD
+ * Linker script for the Rust flibc_demo payload — same single-PT_LOAD
  * shape as tools/hello_linker.ld, extended to capture `.rodata*` (printf
  * format strings, the "flibc malloc ok" message) and any `.data*` /
  * `.bss*` the compiler may emit. flibc's bump allocator stores no state

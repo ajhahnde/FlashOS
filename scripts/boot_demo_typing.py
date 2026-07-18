@@ -26,10 +26,10 @@
 # not in boot.log: boot.log is gitignored and gets overwritten/truncated by
 # each `picapture` run, which silently drops the reconstructed tail.
 
-import sys, time, re, os
+import sys, time, re, os, tomllib
 
 SESSION = os.path.join(os.path.dirname(__file__), "boot_demo_session.txt")
-ZON = os.path.join(os.path.dirname(__file__), "..", "build.zig.zon")
+CARGO_TOML = os.path.join(os.path.dirname(__file__), "..", "Cargo.toml")
 
 BOOT_LINE = 0.16        # pause after a printed boot/handshake line
 AFTER_PROMPT = 0.30     # pause after a prompt prints, before typing starts
@@ -111,13 +111,12 @@ SHELL_PROMPT = (BOLD + YELLOW + "flash" + RESET + DIM + " @ " + RESET +
 TYPED = re.compile(r'^(login: |Password: |\$ )(\S.*)$')
 
 
-def zon_version():
-    # Single-source the banner version from build.zig.zon (the one truth, the
-    # same field fsh derives its homescreen version from via build_options) so
-    # the demo's `FlashOS [v…]` line never drifts from the shipped release.
-    with open(ZON, "r", encoding="utf-8") as f:
-        m = re.search(r'\.version\s*=\s*"([^"]+)"', f.read())
-    return m.group(1) if m else "?"
+def cargo_version():
+    # Single-source the banner version from the Cargo workspace, the same value
+    # fsh receives as CARGO_PKG_VERSION.
+    with open(CARGO_TOML, "rb") as f:
+        manifest = tomllib.load(f)
+    return manifest.get("workspace", {}).get("package", {}).get("version", "?")
 
 
 def out(s):
@@ -153,7 +152,7 @@ def main():
                  f.read().decode("utf-8", "replace").split("\n")]
     if lines and lines[-1] == "":
         lines.pop()
-    version = zon_version()
+    version = cargo_version()
     lines = [ln.replace("{{VERSION}}", version) for ln in lines]
     # Tint the emit-ready lines once (boot `OK`, banner, `help` output). Typed
     # command lines are left untouched, so TYPED still matches their raw text.

@@ -8,17 +8,20 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# The OS-image modules compile through flashc (the Flash compiler), so a
-# baseline run needs the pinned toolchain. Resolution mirrors what build.zig's
-# -Dflashc default does: $FLASHC if set, else the pinned binary in the
-# Flash checkout.
-FLASHC="${FLASHC:-${FLASH_DIR:-$HOME/Flash}/zig-out/bin/flashc}"
-
 BASELINE="scripts/pi_baseline.sha256"
 if [ ! -f "$BASELINE" ]; then
     echo "missing $BASELINE" >&2
     exit 2
 fi
+
+TOOLCHAIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml | head -1)
+if [ -z "$TOOLCHAIN" ] || ! command -v rustup >/dev/null 2>&1; then
+    echo "cannot resolve the pinned rustup toolchain" >&2
+    exit 2
+fi
+RUSTC_BIN=$(rustup which --toolchain "$TOOLCHAIN" rustc)
+RUST_BIN=$(dirname "$RUSTC_BIN")
+CARGO=(env "PATH=$RUST_BIN:$PATH" rustup run "$TOOLCHAIN" cargo)
 
 STASHED=0
 if ! git diff --quiet HEAD -- src/symbol_area.S; then
@@ -32,12 +35,13 @@ restore_stash() {
 }
 trap restore_stash EXIT
 
-zig build clean -Dflashc="$FLASHC" >/dev/null
-zig build -Dboard=rpi4b -Dflashc="$FLASHC" >/dev/null
+"${CARGO[@]}" xtask clean >/dev/null
+"${CARGO[@]}" xtask build --board rpi4b >/dev/null
+"${CARGO[@]}" xtask armstub >/dev/null
 
 ACTUAL=$(mktemp -t flashos_pi_check.XXXXXX)
 trap 'rm -f "$ACTUAL"; restore_stash' EXIT
-shasum -a 256 zig-out/kernel8.img zig-out/armstub8.bin > "$ACTUAL"
+shasum -a 256 rust-out/rpi4b/kernel8.img rust-out/rpi4b/armstub8.bin > "$ACTUAL"
 
 if diff -u "$BASELINE" "$ACTUAL"; then
     echo "Pi baseline OK"

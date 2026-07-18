@@ -22,8 +22,7 @@ use flashos_flibc::{console_sink, sys, Buf};
 #[cfg(target_os = "none")]
 use flashos_user_rt::{entry, Argv};
 
-/// The one version string in the Rust tree. It is the workspace version, which the
-/// host test below pins to `build.zig.zon` -- the project's single source of truth.
+/// The one version string in the Rust tree, inherited from the Cargo workspace.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(target_os = "none")]
@@ -166,20 +165,24 @@ entry!(main);
 mod tests {
     use super::VERSION;
 
-    /// The `version` row is the one place the OS prints its own version, and the
-    /// project's single source of truth for it is `build.zig.zon`. The Rust workspace
-    /// carries its own copy, so this pins the two together: a release that bumps one
-    /// and forgets the other ships a lying homescreen.
+    /// Cargo supplies the package version from `[workspace.package]`. Pin the
+    /// inherited value against that source so a manifest edit cannot silently
+    /// ship a stale sysinfo row.
     #[test]
-    fn the_printed_version_matches_build_zig_zon() {
-        let zon =
-            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../build.zig.zon"))
-                .expect("build.zig.zon is readable from the sysinfo package");
-        let declared = zon
+    fn the_printed_version_matches_the_workspace_manifest() {
+        let manifest =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml"))
+                .expect("workspace Cargo.toml is readable from the sysinfo package");
+        let workspace_package = manifest
+            .split_once("[workspace.package]")
+            .map(|(_, tail)| tail)
+            .expect("Cargo.toml declares [workspace.package]")
             .lines()
-            .find_map(|l| l.trim().strip_prefix(".version = \""))
-            .and_then(|rest| rest.split('"').next())
-            .expect("build.zig.zon declares a .version");
-        assert_eq!(declared, VERSION);
+            .take_while(|line| !line.starts_with('['));
+        let declared = workspace_package
+            .filter_map(|line| line.trim().strip_prefix("version = \""))
+            .find_map(|value| value.strip_suffix('"'))
+            .expect("[workspace.package] declares version");
+        assert_eq!(VERSION, declared);
     }
 }

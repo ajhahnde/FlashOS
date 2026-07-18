@@ -1,11 +1,6 @@
 # macOS clutter
 .DS_Store
 
-# Zig build artefacts
-.zig-cache/
-zig-out/
-.build_history/
-
 # Rust build artefacts (Cargo.lock is tracked: the toolchain is pinned)
 target/
 rust-out/

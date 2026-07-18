@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::build::{Board, Paths};
 use crate::toolchain::Cmd;
 
-/// The QEMU argv per board, byte-for-byte what build.zig's run steps use.
+/// The QEMU argv per board, preserving the retired build graph's machine setup.
 /// raspi4b exposes two serial ports: the first is the PL011, the second the
 /// mini-UART — which is the one FlashOS (and the canary) drives, hence
 /// `-serial null -serial stdio`.

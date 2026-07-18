@@ -1,11 +1,11 @@
 /*
- * Linker script for user_space/init_main.zig — produces the
+ * Linker script for the Rust PID-1 payload — produces the
  * standalone pid1.elf that the kernel ELF-loads as PID 1.
  * Same single-PT_LOAD shape as
  * tools/flibc_demo_linker.ld: .text / .rodata / .data / .bss all fold
  * into one R+X LOAD segment at the page-aligned base 0x100000.
  *
- * pid1.elf carries the whole user_space/kernel_tests.zig harness, so
+ * pid1.elf carries the whole native kernel-test harness, so
  * it is the largest of the staged ELFs. Folding rodata/data/bss into
  * the single LOAD keeps it to one segment, which the FlashOS ELF
  * loader (page-grain mapper, rejects non-page-aligned p_vaddr, does

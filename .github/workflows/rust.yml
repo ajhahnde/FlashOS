@@ -60,11 +60,6 @@ jobs:
       - name: assembly layout facts
         run: cargo xtask asm-defs --check
 
-      # The retained console-look source remains the frozen comparison oracle
-      # until source retirement; no compiler is needed to compare its literals.
-      - name: console look facts
-        run: cargo xtask ui-defs --check
-
       - name: armstub link
         run: cargo xtask armstub
 
@@ -117,4 +112,4 @@ jobs:
           scripts/run_qemu_test.sh 720 qemu-system-aarch64 \
             -M raspi4b -display none -serial null -serial stdio \
             -kernel rust-out/rpi4b/kernel8.img \
-            -drive if=sd,file=zig-out/test_sd.img,format=raw
+            -drive if=sd,file=rust-out/test_sd.img,format=raw

@@ -107,7 +107,7 @@ echo
 echo "Repartition done. Next steps (operator):"
 echo "  1. Copy RPi firmware blobs (start4.elf, fixup4.dat, bcm2711-rpi-4-b.dtb,"
 echo "     config.txt) to the BOOT partition."
-echo "  2. Run 'zig build deploy' (or the 'build -d' helper) and copy zig-out/kernel8.img + zig-out/armstub8.bin"
+echo "  2. Run the 'build -d' helper, or copy rust-out/rpi4b/kernel8.img + rust-out/rpi4b/armstub8.bin"
 echo "     to the BOOT partition."
 echo "  3. Seed the two [TEST] fs-roundtrip files into the FAT32 root"
 echo "     (8.3 short names are mandatory):"

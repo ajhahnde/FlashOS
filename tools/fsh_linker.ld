@@ -1,5 +1,5 @@
 /*
- * Linker script for user_space/fsh/fsh.zig — the FlashOS shell. Same
+ * Linker script for the native FlashOS shell. Same
  * single-PT_LOAD shape as tools/argv_echo_linker.ld, minus the 4 KiB
  * .rodata PAD: fsh does not need to cross a page (it is not proving the
  * sys_execve streaming path), so it folds straight into one R+X LOAD.

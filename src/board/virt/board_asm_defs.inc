@@ -1,7 +1,7 @@
 /*
  * Board-specific memory layout for QEMU's `-M virt` machine
- * (AArch64). Picked up via the per-board include path set in
- * build.zig.
+ * (AArch64). Picked up via the per-board include path set by the
+ * native build.
  *
  * QEMU virt physical map (the slice we care about):
  *   0x00000000–0x40000000  device window — PL011, GIC, RTC,
@@ -191,8 +191,8 @@
 /* Enable FP+SIMD access at EL0/EL1 by setting CPACR_EL1.FPEN
  * (bits 21:20) to 0b11. virt enters at EL1 directly (QEMU `-kernel`)
  * or via UEFI handoff, neither of which configures CPACR like
- * armstub8 does on Pi 4. Zig's std.mem (pulled in by dtb.zig)
- * lowers to NEON instructions in ReleaseSmall, so without this
+ * armstub8 does on Pi 4. The frozen virt path may use FP/SIMD memory
+ * operations, so without this
  * write the very first NEON `movi`/`stp q*` faults with EC=0x07
  * (Trapped FP/SIMD). Pi's macro is empty — armstub already wrote
  * the same bits at EL3 and Pi's binary contains zero NEON. */

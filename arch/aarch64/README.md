@@ -55,7 +55,7 @@ per-board input the assembly sources take at build time.
 
 ## Build wiring
 
-`build.zig` assembles these sources for the kernel and adds this directory to
+`cargo xtask build` assembles these sources for the kernel and adds this directory to
 the assembler include path so the `asm_defs.inc` bridge resolves alongside the
 active board's directory. The board-independent assembly that is *not* part of
 the ISA core — the generated symbol table and the trace stubs — stays under

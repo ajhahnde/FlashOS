@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Create the 64 MiB SD-card backing image for QEMU raspi4b runs
-# (-drive if=sd,file=zig-out/test_sd.img,format=raw). Used by build.zig
-# as a prerequisite of the rpi4b `run` and `test-rpi4b` steps.
+# (-drive if=sd,file=rust-out/test_sd.img,format=raw). Used by the native
+# rpi4b run/watchdog helpers.
 #
-# Args (both optional, passed by build.zig):
+# Args (both optional, passed by the caller):
 #   $1 — generated shadow file (the shadow generator output) → seeded as ::/SHADOW
 #   $2 — permission-overlay seed (user_space/etc/perms.tab) → ::/PERMS.TAB
 # Without them the identity seeds are skipped and the kernel runs the
@@ -11,7 +11,7 @@
 #
 # The image is a real FAT32 volume, not a zero fill. Layout matches
 # scripts/format_sd.sh (MBR, one FAT32 partition at LBA 2048 = the
-# 1 MiB alignment offset), so src/fat32_backend.zig
+# 1 MiB alignment offset), so the native FAT32 backend
 # (FAT32_PARTITION_LBA = 2048) mounts it. Two seed files are
 # pre-created in the FAT32 root for [TEST] fs-roundtrip (Variant B,
 # magic-file): ROUNDTR.DAT (4 KiB zero) + ROUNDTR.MAG (1 byte zero).
@@ -28,17 +28,17 @@
 # (not 8): at 64 MiB only -c 1 yields ≥65525 data clusters, the FAT32
 # spec minimum that newer mtools enforces (older builds let an
 # undersized "FAT32" slide). The kernel reads SecPerClus from the BPB
-# (src/fat32.flash mount), so cluster size is not wired in anywhere.
+# at mount time, so cluster size is not wired in anywhere.
 #
 # CREATE-IF-ABSENT (NOT idempotent-overwrite). The Variant-B roundtrip
-# needs the disk to PERSIST across two consecutive `zig build run`
+# needs the disk to PERSIST across two consecutive QEMU runs
 # invocations (run 1 writes magic=1, run 2 verifies + resets). Because
 # make_test_disk.sh is a build dependency of every run/test-rpi4b, an
 # unconditional re-format would reset magic=0 every run and PASS_VERIFY
 # could never be reached. So: if a valid FAT32 image with every seed
 # file already exists, leave it untouched ([TEST] passwd is self-healing
 # against the password drift this allows — it root-resets the flash
-# record first). `zig build clean` removes zig-out and starts a fresh
+# record first). Removing rust-out/test_sd.img starts a fresh
 # cycle (magic=0 → PASS_WRITE). An image missing SHADOW/PERMS.TAB
 # fails the probe and is regenerated automatically.
 #
@@ -47,13 +47,13 @@
 # SOURCE_DATE_EPOCH=0 and fixed seed-file mtimes so mtools writes
 # stable directory timestamps (the shadow generator output is itself a
 # pure function of its constants). Verify with:
-#   rm -f zig-out/test_sd.img && scripts/make_test_disk.sh && \
-#     shasum zig-out/test_sd.img && rm -f zig-out/test_sd.img && \
-#     scripts/make_test_disk.sh && shasum zig-out/test_sd.img
+#   rm -f rust-out/test_sd.img && scripts/make_test_disk.sh && \
+#     shasum rust-out/test_sd.img && rm -f rust-out/test_sd.img && \
+#     scripts/make_test_disk.sh && shasum rust-out/test_sd.img
 set -eu
 
-# $0 (not ${BASH_SOURCE[0]}): build.zig invokes this via `sh …`, so the
-# shebang is bypassed and on Ubuntu CI the interpreter is dash, which has
+# $0 (not ${BASH_SOURCE[0]}): CI invokes this via `sh …`, so the shebang is
+# bypassed and on Ubuntu CI the interpreter is dash, which has
 # no BASH_SOURCE array — ${BASH_SOURCE[0]} is a "Bad substitution" there.
 # $0 is POSIX and resolves the same under both dash and bash.
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -62,7 +62,7 @@ cd "$REPO_ROOT"
 SHADOW_SRC="${1:-}"
 PERMS_SRC="${2:-}"
 
-IMG=zig-out/test_sd.img
+IMG=rust-out/test_sd.img
 TOTAL_SECTORS=131072         # 64 MiB / 512
 PART_LBA=2048                # 1 MiB MBR offset (matches format_sd.sh)
 PART_SECTORS=$((TOTAL_SECTORS - PART_LBA))   # 129024 = 0x1F800
@@ -70,7 +70,7 @@ PART_SECTORS=$((TOTAL_SECTORS - PART_LBA))   # 129024 = 0x1F800
 export MTOOLS_SKIP_CHECK=1
 export SOURCE_DATE_EPOCH=0
 
-mkdir -p zig-out
+mkdir -p rust-out
 
 # ---- create-if-absent guard ----
 # Preserve an existing populated image so the two-run roundtrip can

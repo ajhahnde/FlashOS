@@ -13,7 +13,7 @@ crate-type = ["staticlib"]
 # The two build-time gates the boot contract keys off. Both default OFF: a
 # hardware deploy boots clean to the real `login:` prompt, and the harness runs
 # only where a watchdog is watching. `cargo xtask user pid1 --feature ...` turns
-# them on; build.zig passes them through from -Dboot-selftest / -Dci-login-seed.
+# them on; `cargo xtask build` passes the matching feature flags through.
 boot-selftest = []
 ci-login-seed = []
 

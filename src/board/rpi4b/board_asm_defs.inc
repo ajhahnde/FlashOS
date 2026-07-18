@@ -1,6 +1,6 @@
 /*
  * Board-specific memory layout for RPi4 (BCM2711).
- * Picked up via the per-board include path set in build.zig.
+ * Picked up via the per-board include path set by xtask.
  */
 
 #ifndef BOARD_ASM_DEFS_INC

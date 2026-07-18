@@ -1,11 +1,11 @@
 /*
- * Embed initramfs.cpio (built at compile time by build.zig from the
+ * Embed initramfs.cpio (built by cargo xtask from the
  * staged initramfs tree) into the kernel image between two globals
- * the kernel's src/initramfs.zig parser reads via TTBR1.
+ * the kernel's native initramfs parser reads via TTBR1.
  *
  * .incbin's path is resolved against the assembler's include path —
- * see build.zig where the staged initramfs.cpio directory is added
- * via kernel_mod.addIncludePath(...). Without that include-path wiring
+ * see xtask/src/build.rs where the staged initramfs.cpio directory is added
+ * to clang's include path. Without that include-path wiring
  * the relative "initramfs.cpio" lookup would fail.
  *
  * Section name `.initramfs` matches the linker.ld output section on

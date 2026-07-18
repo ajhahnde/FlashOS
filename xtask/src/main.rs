@@ -1,9 +1,7 @@
-//! `cargo xtask` — the host orchestrator for the Rust side of FlashOS.
+//! `cargo xtask` — the host orchestrator for FlashOS.
 //!
-//! During the port this coexists with `zig build`, which stays the production
-//! oracle: xtask builds and boots the Rust canary and nothing else yet. The
-//! command surface grows toward the one build.zig offers today (kernel, deploy,
-//! populate-syms, iso, …) as the stages that own those artefacts land.
+//! It owns the native Rust production build, retained assembly, generated
+//! artefacts, host tests, and clean-room checks.
 
 mod asm_defs;
 mod build;
@@ -13,7 +11,6 @@ mod qemu;
 mod shadow;
 mod syms;
 mod toolchain;
-mod ui_defs;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -38,8 +35,6 @@ Commands:
   nm     --board <rpi4b|virt>   Dump the canary's symbol table
   asm-defs [--check]            Generate the assembly-visible layout facts from crates/abi;
                                 --check diffs them against arch/aarch64/asm_defs_common.inc
-  ui-defs [--check]             Diff the console look in crates/console-ui against the
-                                Flash copy the kernel still compiles (lib/console_ui/)
   user <name> [--output <path>] [--feature <name>]...
                                Build a Rust EL0 payload (hello, clear, pid1, ...)
   klib [--output <path>] [--feature <name>]...
@@ -55,7 +50,7 @@ Commands:
   clean                         Remove rust-out/ and the cargo target dir
   help                          This text
 
-The Zig build is untouched: `zig build …` remains the production build.";
+";
 
 fn main() -> ExitCode {
     match dispatch() {
@@ -172,7 +167,6 @@ fn dispatch() -> Result<(), String> {
             Ok(())
         }
         "asm-defs" => asm_defs::run(&root, rest.iter().any(|a| a == "--check")),
-        "ui-defs" => ui_defs::run(&root, rest.iter().any(|a| a == "--check")),
         "user" => {
             let name = rest
                 .first()
@@ -278,7 +272,7 @@ fn user_args_of(args: &[String]) -> Result<(Option<PathBuf>, Vec<String>), Strin
 }
 
 /// The build-time gate flags for `build`/`kernel`, mirroring the `-D…` options
-/// build.zig threads through. Unknown `--flags` are the board/other options the
+/// The native build threads these through. Unknown `--flags` are board/other options the
 /// caller already parsed, so only the four gates are recognised here; anything
 /// that looks like a gate but is misspelt is rejected rather than silently off,
 /// the same fail-loud rule `user_args_of` follows.

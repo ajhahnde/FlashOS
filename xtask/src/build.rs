@@ -1,8 +1,7 @@
 //! The Rust-side kernel build pipeline: cargo → clang → rust-lld → objcopy.
 //!
-//! It reproduces the artefact contract of the current `zig build` (kernel8.elf +
-//! kernel8.img, board linker script, the retained `.S` files) for the canary
-//! image only. The Zig build remains the production oracle until the kernel itself is ported.
+//! It owns the production artefact contract: kernel8.elf + kernel8.img, the
+//! board linker script, retained `.S` files, EL0 payloads, and initramfs.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,7 +35,7 @@ impl Board {
     }
 
     /// Board-specific assembly, appended after the common files. Mirrors the
-    /// board switch in build.zig's `asm_files`.
+    /// board switch in the retired build graph's assembly list.
     fn board_asm(self) -> &'static [&'static str] {
         match self {
             Board::Rpi4b => &["boot_quirks.S"],
@@ -161,7 +160,7 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
         return Err(format!("cargo produced no {}", staticlib.display()));
     }
 
-    // 2. Assemble the retained .S files. Same three include dirs build.zig uses:
+    // 2. Assemble the retained .S files with the established three include dirs:
     //    arch/aarch64 (asm_defs.inc), src, and the board's board_asm_defs.inc.
     let board_dir = root.join("src/board").join(board.name());
     let mut objs: Vec<PathBuf> = Vec::new();
@@ -197,7 +196,7 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
     }
 
     // 3. Link against the real board linker script. `--no-gc-sections` and the
-    //    4 KiB max page size match build.zig; the entry point comes from the
+    //    4 KiB max page size preserve the retired link contract; the entry point comes from the
     //    script + boot.S, not from a linker default.
     let script = board_dir.join("linker.ld");
     Cmd::new(tc.lld.clone(), &p.trace)
@@ -234,7 +233,7 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
 /// before the kernel. Asm-only (the "root" is `armstub8.S`; there is no Rust or
 /// Zig half), rpi4b-only, and self-contained: its `asm_defs.inc` lives beside it
 /// in `armstub/src`, so a single include dir suffices — no `arch/aarch64`. No
-/// `-DBCM2711`/`-DHIGH_PERI` is passed, matching build.zig, so the `#if BCM2711`
+/// `-DBCM2711`/`-DHIGH_PERI` is passed, preserving the retired build, so `#if BCM2711`
 /// path assembles with BCM2711 undefined (0) and HIGH_PERI absent.
 ///
 /// Returns the path to the raw `armstub8.bin`.
@@ -265,7 +264,7 @@ pub fn armstub(root: &Path, tc: &Toolchain) -> Result<PathBuf, String> {
         .run()?;
 
     // 2. Link with armstub's script (ENTRY(_start), .text at 0). `--no-gc-sections`
-    //    and the 4 KiB max page size match build.zig.
+    //    and the 4 KiB max page size preserve the retired link contract.
     let script = src_dir.join("linker.ld");
     Cmd::new(tc.lld.clone(), &p.trace)
         .args([
@@ -846,7 +845,7 @@ const KERNEL_EXTRA_ASM: &[&str] = &[
 ];
 
 /// Build-time gates that flip cargo features on the kernel staticlib and PID 1.
-/// Mirrors the `-D…` options build.zig threads into `cargo xtask klib`/`user`.
+/// Maps native build flags to the kernel and PID-1 Cargo features.
 #[derive(Clone, Copy, Default)]
 pub struct KernelFeatures {
     /// Boot-as-test harness (the pre-PID-1 EMMC2 smoke + free-page baseline).
@@ -901,7 +900,7 @@ enum ArcSource {
 /// The initramfs contents: (archive path, newc mode, source). Kept sorted by
 /// archive path — the encoder writes entries in this order, so the list is the
 /// single source of truth for the archive's entry order and therefore its
-/// sha256. Mirrors build.zig's `initramfs_arcs` + `cpio_stage` exactly.
+/// sha256. Preserves the retired graph's archive list + staging contract exactly.
 const INITRAMFS: &[(&str, u32, ArcSource)] = &[
     ("bin/cat", 0o100755, ArcSource::User("cat")),
     ("bin/clear", 0o100755, ArcSource::User("clear")),
@@ -946,8 +945,7 @@ const INITRAMFS: &[(&str, u32, ArcSource)] = &[
 
 /// Build the complete production kernel image natively: every Rust EL0 payload,
 /// the deterministic initramfs, and the kernel link against the retained `.S`
-/// files and board linker script. This is the artefact `zig build` produces
-/// today; the two differ in link mechanics, not in observable behaviour.
+/// files and board linker script.
 pub fn build(
     root: &Path,
     board: Board,

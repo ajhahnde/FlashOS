@@ -15,9 +15,9 @@
 #
 #   FATAL (exit 1): a repo-relative path referenced in an active doc that does
 #                   not exist on disk. A dead reference is an unambiguous bug.
-#   WARN  (exit 0): version badge vs the newest tag, documented `zig build`
-#                   targets vs build.zig, and the "N EL0 scenarios" count vs
-#                   the boot contract. Printed for visibility; never fails CI.
+#   WARN  (exit 0): version badge vs the newest tag, retired build commands,
+#                   and the "N EL0 scenarios" count vs the boot contract.
+#                   Printed for visibility; never fails CI.
 #
 # Usage: scripts/check_doc_drift.sh   (run from the repo root)
 set -uo pipefail
@@ -50,7 +50,7 @@ for p in $raw; do
   # (e.g. a path drawn nested inside an ASCII tree diagram), not a dead one.
   # Only a segment sequence that appears NOWHERE in the repo is a true
   # rename/deletion worth failing on.
-  find . -path "*/$p" -not -path './.zig-cache/*' -not -path './zig-out/*' 2>/dev/null | grep -q . && continue
+  find . -path "*/$p" -not -path './target/*' -not -path './rust-out/*' 2>/dev/null | grep -q . && continue
   hits=$(grep -rnF "$p" $DOCS 2>/dev/null | head -3 | sed 's/^/    /')
   block "dead path: $p"
   printf '%s\n' "$hits"
@@ -79,17 +79,14 @@ else
   fi
 fi
 
-# --- WARN: documented build targets resolve to build.zig steps --------------
+# --- WARN: retired build commands remain in active docs ---------------------
 note ""
-note "== documented zig build targets (WARN) =="
-targets=$(grep -rhoE 'zig build [a-z][a-z0-9-]+' $DOCS 2>/dev/null | awk '{print $3}' | sort -u)
-miss=0
-for t in $targets; do
-  grep -qE "b\.step\(\"$t\"" build.zig 2>/dev/null && continue
-  warn "doc names \`zig build $t\` but build.zig has no b.step(\"$t\") — board-gated/conditional, or stale. Confirm."
-  miss=$((miss+1))
-done
-[ "$miss" -eq 0 ] && note "ok: every documented zig build target resolves to a build.zig step"
+note "== retired build command references (WARN) =="
+if grep -qE 'zig build([[:space:]]|`)' $DOCS 2>/dev/null; then
+  warn "active docs still name the retired zig build command surface; synchronize them during the scheduled public-doc refresh."
+else
+  note "ok: active docs no longer name the retired zig build command surface"
+fi
 
 # --- WARN: "N EL0 scenarios" count vs the boot contract ---------------------
 note ""

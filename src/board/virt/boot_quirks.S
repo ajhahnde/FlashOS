@@ -15,9 +15,9 @@ wake_up_cores:
     ret
 
 /* DTB physical address handed off in x0 at kernel entry. Written by
- * the `save_dtb_pa` macro from boot.S `master`; read by
- * src/board/virt/dtb.zig at runtime. Lives in .bss so it doesn't
- * inflate kernel8.img. */
+ * the `save_dtb_pa` macro from boot.S `master`; reserved for the
+ * frozen virt DTB handoff. Lives in .bss so it doesn't inflate
+ * kernel8.img. */
 .section ".bss"
 .balign 8
 .globl dtb_pa

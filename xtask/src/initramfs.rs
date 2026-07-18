@@ -1,6 +1,6 @@
 //! Deterministic newc cpio encoder — the Rust owner of the initramfs image.
 //!
-//! Ports `scripts/build_initramfs.zig` byte-for-byte. The archive bytes are a
+//! Reproduces the retired Zig encoder byte-for-byte. The archive bytes are a
 //! pure function of the entry list (name, mode, contents), never of host
 //! filesystem state: mtime, uid, gid, nlink, dev, and the check field are all
 //! fixed, and the inode counter is derived from list position. Two clean builds
@@ -9,7 +9,7 @@
 //! entry), which is why the encoder is owned in-tree.
 //!
 //! Each entry's archive name is `./<arc>` so it matches the cpio(1)
-//! `find . -type f` layout the kernel's `src/initramfs.zig` parser already
+//! `find . -type f` layout the kernel's native parser
 //! canonicalises via its `./`-strip — `locate("/sbin/init")` then resolves.
 
 const MAGIC: &[u8] = b"070701";
@@ -103,7 +103,7 @@ fn pad_to_4(out: &mut Vec<u8>, n: usize) {
 mod tests {
     use super::*;
 
-    // Pin the byte offsets the kernel parser (src/initramfs.zig) reads: mode at
+    // Pin the byte offsets the kernel parser reads: mode at
     // 14, uid at 22, gid at 30. A drift between this encoder and that parser is a
     // silent permission bypass, so the offsets are asserted against literal hex —
     // the same assertions the ported zig encoder carried.

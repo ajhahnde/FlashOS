@@ -4,7 +4,6 @@
 # Public interface — two verb dispatchers plus a build wrapper:
 #   pi    connect|capture|list|quit|log|tail   serial-console helpers (Raspberry Pi)
 #   run   qemu|virt|test|watchdog|hw|auto       build-and-run a board, the boot-watchdog, or attach to HW
-#   port  check|diff|gates|pin                  legacy Flash-port inspection helpers
 #   build                                       two-pass kernel build orchestrator
 #   flashos                                     list shell helpers + cargo xtask commands
 # Legacy flat names (piconnect/picapture/pilist/piquit) stay as thin aliases.
@@ -487,21 +486,12 @@ piquit()    { _flashos_pi_quit "$@"; }
 # Two-pass kernel build orchestrator.
 #   build               rpi4b build (two-pass)
 #   build -d            build and deploy to SD card
-#   build -clean-stack  clear the build history stack
-#   build -t            show both stacks (img, elf) as a tree
-#   build -s <stack> <id>     show stats (creation date, etc.) for a specific build ID in a stack (img/elf)
 #   build help          show usage information
 #   BOARD=virt build    virt build (deploy skipped)
 #   NM=llvm-nm build    override the nm binary
-#
-# NOTE on caching: this wrapper manages the rotating .build_history stack.
-# `cargo xtask clean` clears the Rust build outputs before the two-pass build.
 _flashos_build_usage() {
   print -- "usage: build [args...]"
   print -- "  -d                  build and deploy to SD card (rpi4b only)"
-  print -- "  -clean-stack        clear the build history stack (.build_history)"
-  print -- "  -t                  show both stacks (img, elf) as a tree"
-  print -- "  -s <stack> <id>     show stats (creation date, etc.) for a specific build ID in a stack (img/elf)"
   print -- "  help                show this usage information"
   print -- "  [xtask flags...]    passed to cargo xtask build/populate-syms"
 }
@@ -515,62 +505,6 @@ build() {
     print -- ""
     print -- "--- cargo xtask options ---"
     _flashos_cargo xtask help
-    return 0
-  fi
-
-  # Check if -clean-stack is present anywhere in the arguments
-  if (( ${@[(I)-clean-stack]} )); then
-    _flashos_root zsh -c '
-      rm -rf .build_history
-      print -- "[ \033[0;32mOK\033[0m ] Build history stack cleared"
-    '
-    return 0
-  fi
-
-  if (( ${@[(I)-t]} )); then
-    _flashos_root zsh -c '
-      if command -v tree >/dev/null 2>&1; then
-        tree .build_history
-      else
-        print -- "tree command not found, falling back to ls:"
-        ls -R -lh .build_history
-      fi
-    '
-    return 0
-  fi
-
-  local idx_s=${@[(I)-s]}
-  if (( idx_s > 0 )); then
-    local stack="${@[$((idx_s + 1))]}"
-    local id="${@[$((idx_s + 2))]}"
-    if [[ -z "$stack" || -z "$id" ]]; then
-      print -- "usage: build -s <img|elf> <id>"
-      return 1
-    fi
-    _flashos_root zsh -c '
-      local s=$1
-      local i=$2
-      local search_dir
-      case "$s" in
-        img) search_dir="img" ;;
-        elf) search_dir="elf" ;;
-        *) print -- "Unknown stack: $s (must be img or elf)"; return 1 ;;
-      esac
-
-      local target=(.build_history/*/$search_dir/*${i}*(N))
-      if (( ${#target[@]} > 0 )); then
-        print -- "--- Stats for $s (ID: $i) ---"
-        for t in "${target[@]}"; do
-          print -- "Board: ${t:h:h:t}"
-          # macOS stat -x provides detailed creation/modification output
-          stat -x "$t" 2>/dev/null || stat "$t" 2>/dev/null || ls -lhd "$t"
-          print -- ""
-        done
-      else
-        print -- "Not found: No entry for ID $i in .build_history/*/$search_dir"
-        return 1
-      fi
-    ' _ "$stack" "$id"
     return 0
   fi
 
@@ -737,43 +671,7 @@ build() {
         printf "[${YELLOW}SKIP${NC}] deploy (run with -d to deploy)\n"
     fi
 
-    local hist=".build_history/$BOARD"
-    mkdir -p "$hist/img" "$hist/elf"
-
-    # 2. Check if artifacts are identical to the previous build.
-    # 2a. Boards that emit kernel8.img (rpi4b): dedup on the image.
-    if [[ -f "$KERNEL_IMG" ]] && [[ -f "$hist/img/kernel8_1.img" ]] && cmp -s "$KERNEL_IMG" "$hist/img/kernel8_1.img"; then
-      # Refresh slot-1 .elf so its debug symbols always match the current source code,
-      # even if the compiled binary instructions (.img) did not change (e.g. comment changes).
-      [[ -f "$KERNEL_ELF" ]] && cp "$KERNEL_ELF" "$hist/elf/kernel8_1.elf"
-      print -- "[ \033[0;32mOK\033[0m ] Build successful (Artifacts identical to previous, history unchanged)"
-      return 0
-    fi
-
-    # 2b. Boards without a kernel8.img (virt): dedup on the .elf instead, so an
-    # unchanged build does not rotate history on every invocation.
-    if [[ ! -f "$KERNEL_IMG" ]] && [[ -f "$KERNEL_ELF" ]] && [[ -f "$hist/elf/kernel8_1.elf" ]] && cmp -s "$KERNEL_ELF" "$hist/elf/kernel8_1.elf"; then
-      cp "$KERNEL_ELF" "$hist/elf/kernel8_1.elf"
-      print -- "[ \033[0;32mOK\033[0m ] Build successful (Artifacts identical to previous, history unchanged)"
-      return 0
-    fi
-
-    # 3. Rotate and save build history
-    # Drop oldest entry (ID 5)
-    rm -f "$hist/img"/kernel8_5.img "$hist/elf"/kernel8_5.elf 2>/dev/null
-
-    # Rotate remaining entries (4->5, 3->4, 2->3, 1->2)
-    for i in {4..1}; do
-      local next=$((i+1))
-      [[ -f "$hist/img/kernel8_$i.img" ]] && mv "$hist/img/kernel8_$i.img" "$hist/img/kernel8_$next.img"
-      [[ -f "$hist/elf/kernel8_$i.elf" ]] && mv "$hist/elf/kernel8_$i.elf" "$hist/elf/kernel8_$next.elf"
-    done
-
-    # Save the new build as ID 1
-    [[ -f "$KERNEL_IMG" ]] && cp "$KERNEL_IMG" "$hist/img/kernel8_1.img"
-    [[ -f "$KERNEL_ELF" ]] && cp "$KERNEL_ELF" "$hist/elf/kernel8_1.elf"
-
-    print -- "[ \033[0;32mOK\033[0m ] Build successful. Artifacts saved to stack ($hist/*_1)"
+    print -- "[ \033[0;32mOK\033[0m ] Build successful"
   ' _ "$@"
 }
 
@@ -801,7 +699,7 @@ run() {
       _flashos_root qemu-system-aarch64 \
         -M raspi4b -display none -serial null -serial stdio \
         -kernel rust-out/rpi4b/kernel8.img \
-        -drive if=sd,file=zig-out/test_sd.img,format=raw
+        -drive if=sd,file=rust-out/test_sd.img,format=raw
       ;;
     virt)
       _flashos_warn "virt is FROZEN (deprioritized); rpi4b + HW are the live gates"
@@ -853,7 +751,7 @@ run() {
         _flashos_root scripts/run_qemu_test.sh "$timeout" qemu-system-aarch64 \
           -M raspi4b -display none -serial null -serial stdio \
           -kernel rust-out/rpi4b/kernel8.img \
-          -drive if=sd,file=zig-out/test_sd.img,format=raw
+          -drive if=sd,file=rust-out/test_sd.img,format=raw
       else
         _flashos_root scripts/run_qemu_test.sh "$timeout" qemu-system-aarch64 \
           -M virt,gic-version=3 -cpu cortex-a72 -m 1G -nographic \
@@ -887,139 +785,6 @@ run() {
     *)
       _flashos_err "run: unknown mode '$mode'"
       _flashos_run_usage >&2
-      return 1
-      ;;
-  esac
-}
-
-# ── flash port ──────────────────────────────────────────────────────────────
-# Helpers for porting modules to Flash (*.flash transpiled to Zig at build
-# time). A module counts as ported only when it transpiles clean, its
-# generated Zig review-diffs against the original down to mechanical lowering
-# noise, and the full gate battery is green. The flashc binary resolves like
-# build.zig's -Dflashc default: $FLASHC if set, else
-# $HOME/Flash/zig-out/bin/flashc-stage1 (override the checkout location with
-# $FLASH_DIR). The pinned compiler revision lives in flash-toolchain.lock.
-
-_flashos_flashc() {
-  local bin="${FLASHC:-${FLASH_DIR:-$HOME/Flash}/zig-out/bin/flashc-stage1}"
-  if [[ ! -x "$bin" ]]; then
-    _flashos_err "flashc not found: $bin (set \$FLASHC, or build the Flash checkout with 'zig build')"
-    return 1
-  fi
-  print -- "$bin"
-}
-
-_flashos_port_check() {
-  local src="$1"
-  [[ -n "$src" ]] || { _flashos_err "usage: port check <module.flash>"; return 1; }
-  local bin; bin="$(_flashos_flashc)" || return 1
-  local tmpd; tmpd="$(mktemp -d "${TMPDIR:-/tmp}/flashport.XXXXXX")" || return 1
-  if "$bin" "$src" -o "$tmpd/out.zig"; then
-    _flashos_ok "transpile clean: $src"
-    rm -rf "$tmpd"
-  else
-    rm -rf "$tmpd"
-    return 1
-  fi
-}
-
-_flashos_port_diff() {
-  local src="$1" orig="${2:-}"
-  [[ -n "$src" ]] || { _flashos_err "usage: port diff <module.flash> [original.zig]"; return 1; }
-  # Default original: same directory, same stem, .zig extension. Keep the
-  # explicit second argument for sources whose retained original has another
-  # name or directory.
-  [[ -n "$orig" ]] || orig="${src:r}.zig"
-  if [[ ! -f "$orig" ]]; then
-    _flashos_err "port diff: original not found: $orig (pass it explicitly)"
-    return 1
-  fi
-  local bin; bin="$(_flashos_flashc)" || return 1
-  local tmpd; tmpd="$(mktemp -d "${TMPDIR:-/tmp}/flashport.XXXXXX")" || return 1
-  local gen="$tmpd/${src:t:r}.zig"
-  if ! "$bin" "$src" -o "$gen"; then
-    rm -rf "$tmpd"
-    return 1
-  fi
-  # Lowering drops comments, so hunks are expected; the review bar is that
-  # every hunk is mechanical (comments, formatting), never semantic.
-  if diff -u "$orig" "$gen"; then
-    _flashos_ok "port diff: generated Zig is identical to $orig"
-  else
-    _flashos_warn "port diff: review the hunks above — only mechanical lowering differences are acceptable"
-  fi
-  rm -rf "$tmpd"
-}
-
-_flashos_port_gates() {
-  # The per-module gate battery: host tests, then the boot watchdog(s).
-  # Fail-fast — a red gate stops the run so the log tail is the culprit's.
-  local board="${1:-all}"
-  case "$board" in
-    virt|rpi4b|all) ;;
-    *) _flashos_err "port gates: unknown board '$board' (virt|rpi4b|all)"; return 1 ;;
-  esac
-  run test || { _flashos_err "port gates: host tests FAILED"; return 1; }
-  if [[ "$board" == virt || "$board" == all ]]; then
-    run watchdog virt || return 1
-  fi
-  if [[ "$board" == rpi4b || "$board" == all ]]; then
-    run watchdog rpi4b || return 1
-  fi
-  _flashos_ok "port gates: all green ($board)"
-}
-
-_flashos_port_pin() {
-  # Compare flash-toolchain.lock against the live Flash checkout. The port
-  # must never ride a moving compiler: drift means rebuild at the pin, or
-  # bump the lock as its own deliberate commit.
-  local lock="$_FLASHOS_DIR/flash-toolchain.lock"
-  [[ -f "$lock" ]] || { _flashos_err "port pin: no flash-toolchain.lock in the tree (not on the port branch?)"; return 1; }
-  local flash_dir="${FLASH_DIR:-$HOME/Flash}"
-  local pinned live
-  pinned="$(grep -E '^flash-commit' "$lock" | sed 's/.*= *//')"
-  live="$(git -C "$flash_dir" rev-parse HEAD 2>/dev/null)" || {
-    _flashos_err "port pin: no Flash checkout at $flash_dir (set \$FLASH_DIR)"
-    return 1
-  }
-  if [[ "$pinned" != "$live" ]]; then
-    _flashos_warn "port pin: DRIFT — lock $pinned, live $live"
-    _flashos_warn "  rebuild the Flash checkout at the pin, or bump the lock in its own commit"
-    return 1
-  fi
-  if [[ -n "$(git -C "$flash_dir" status --porcelain 2>/dev/null)" ]]; then
-    _flashos_warn "port pin: commit matches but the Flash tree is DIRTY — flashc may not match the pin"
-    return 1
-  fi
-  _flashos_ok "port pin: OK ($pinned)"
-}
-
-_flashos_port_usage() {
-  print -- "usage: port [check|diff|gates|pin]"
-  print -- "  check <module.flash>          transpile-only; show flashc diagnostics"
-  print -- "  diff  <module.flash> [orig.zig]"
-  print -- "                                transpile and diff the generated Zig against"
-  print -- "                                the original (default: <stem>.zig next to it)"
-  print -- "  gates [virt|rpi4b|all]        per-module gate battery: host tests, then the"
-  print -- "                                boot watchdog(s); fail-fast (default: all)"
-  print -- "  pin                           verify flash-toolchain.lock against the live"
-  print -- "                                Flash checkout (\$FLASH_DIR, default ~/Flash)"
-}
-
-port() {
-  emulate -L zsh
-  local verb="${1:-help}"
-  (( $# > 0 )) && shift
-  case "$verb" in
-    check) _flashos_port_check "$@" ;;
-    diff)  _flashos_port_diff "$@" ;;
-    gates) _flashos_port_gates "$@" ;;
-    pin)   _flashos_port_pin "$@" ;;
-    help|-h|--help) _flashos_port_usage ;;
-    *)
-      _flashos_err "port: unknown verb '$verb'"
-      _flashos_port_usage >&2
       return 1
       ;;
   esac
@@ -1095,50 +860,18 @@ _flashos_run_completion() {
   fi
 }
 
-_flashos_port_completion() {
-  local -a verbs=(
-    'check:transpile-only, show flashc diagnostics'
-    'diff:diff generated Zig against the original'
-    'gates:host tests + boot watchdog(s), fail-fast'
-    'pin:verify flash-toolchain.lock against the live checkout'
-    'help:usage'
-  )
-  if (( CURRENT == 2 )); then
-    _describe -t verbs 'port verb' verbs
-  elif (( CURRENT == 3 )); then
-    case "${words[2]}" in
-      check|diff) _files -g '*.flash' ;;
-      gates)      _values 'board' virt rpi4b all ;;
-    esac
-  elif (( CURRENT == 4 )); then
-    case "${words[2]}" in
-      diff) _files -g '*.zig' ;;
-    esac
-  fi
-}
-
 _flashos_build_completion() {
   local -a args=(
     '-d:build and deploy to SD card'
-    '-clean-stack:clear the build history stack'
-    '-t:show both build-history stacks (img, elf) as a tree'
-    '-s:show stats (creation date, etc.) for a specific build ID'
     'help:usage'
   )
   if (( CURRENT == 2 )); then
     _describe -t args 'build flag' args
-  elif (( CURRENT == 3 )) && [[ "${words[2]}" == "-s" ]]; then
-    local -a stacks=(img elf)
-    _describe -t stacks 'stack' stacks
-  elif (( CURRENT == 4 )) && [[ "${words[2]}" == "-s" ]]; then
-    local -a ids=(1 2 3 4 5)
-    _describe -t ids 'build ID' ids
   fi
 }
 
 if (( $+functions[compdef] )); then
   compdef _flashos_pi_completion pi
   compdef _flashos_run_completion run
-  compdef _flashos_port_completion port
   compdef _flashos_build_completion build
 fi

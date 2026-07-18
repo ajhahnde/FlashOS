@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Self-validating QEMU runner for `zig build test-virt` / `test-rpi4b`.
+# Self-validating QEMU runner for the native board watchdogs.
 #
 # Boot success is reaching the interactive fsh prompt. With the
-# login lifecycle, fsh's homescreen marker (user_space/fsh/fsh.zig — the
+# login lifecycle, fsh's homescreen marker (user/fsh/src/lib.rs — the
 # stable `type 'help' for commands` tail) appears THREE times per boot: twice
 # from [TEST] login's console-scripted sessions and once from the real boot
 # login's shell — only the third one means the boot is done, so the early-exit
@@ -246,9 +246,8 @@ fi
 # The kernel entropy source must announce a healthy bring-up.
 # Both QEMU targets take the weak timer-mix fallback (QEMU emulates no
 # BCM2711 RNG200); the announce must be the healthy "ok" form and the
-# failed-self-test form must never appear. Wording per src/hwrng.zig
-# ("HWRNG init" / "HWRNG: self-test failed" since the v0.7.4 boot-log
-# restyle — see src/hwrng.flash).
+# failed-self-test form must never appear. Wording per the native hwrng module
+# ("HWRNG init" / "HWRNG: self-test failed" since the v0.7.4 boot-log restyle).
 hwrng_ok=$(grep -cF "HWRNG init" "$LOG" || true)
 hwrng_bad=$(grep -cF "HWRNG: self-test failed" "$LOG" || true)
 

@@ -859,7 +859,7 @@ pub unsafe extern "C" fn fos_initramfs_locate(
 /// Wire the Rust-owned initramfs root backend during kernel bring-up.
 #[no_mangle]
 pub extern "C" fn fos_initramfs_backend_init() {
-    // SAFETY: kernel.flash calls this exactly once during single-core bring-up.
+    // SAFETY: the kernel root calls this exactly once during single-core bring-up.
     unsafe { initramfs_backend::init() };
 }
 

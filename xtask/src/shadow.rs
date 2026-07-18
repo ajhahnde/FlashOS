@@ -63,7 +63,7 @@ pub fn run(out_path: &Path) -> Result<(), String> {
     fs::write(out_path, text).map_err(|e| format!("write {}: {e}", out_path.display()))
 }
 
-/// Lowercase hex, the encoding `src/shadow.flash` parses back.
+/// Lowercase hex, the encoding the native shadow parser reads back.
 fn push_hex(out: &mut String, bytes: &[u8]) {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     for b in bytes {

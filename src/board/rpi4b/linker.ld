@@ -66,10 +66,10 @@ SECTIONS
 
     /* Embedded initramfs. Placed between bss_end and
      * id_pg_dir; the kernel reads it through a TTBR1 linear-map
-     * alias in src/initramfs.zig. Size shifts everything past it
+     * alias in the native initramfs parser. Size shifts everything past it
      * (id_pg_dir, high_pg_dir), so the cpio bytes must be a
      * deterministic function of the source tree (see
-     * scripts/build_initramfs.zig for the deterministic encoder). */
+     * xtask/src/initramfs.rs for the deterministic encoder). */
     . = ALIGN(0x4);
     .initramfs : {
         KEEP(*(.initramfs))

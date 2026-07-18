@@ -18,10 +18,8 @@
 //! [`Sink`], so the same renderers serve the kernel and userland with neither side
 //! leaking in.
 //!
-//! While the kernel is still Flash it keeps its own copy of this look in
-//! `lib/console_ui/`. The two are held byte-identical by `cargo xtask ui-defs
-//! --check`, which parses the Flash source and diffs every tag, palette entry, and
-//! marker against the constants here; the Flash copy retires with the kernel.
+//! This crate is the single source of truth for the console look across the
+//! kernel and userland.
 
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]

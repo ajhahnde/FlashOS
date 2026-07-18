@@ -1,6 +1,6 @@
 /*
- * Shared linker script for the minimal coreutils (tools/echo_elf.zig,
- * tools/cat_elf.zig). Identical single-PT_LOAD shape to
+ * Shared linker script for the minimal Rust coreutils. Identical
+ * single-PT_LOAD shape to
  * tools/fsh_linker.ld: one R+X LOAD at base 0, _start shim entry, no
  * page-crossing PAD. echo and cat have the same link needs, so one
  * script serves both rather than two byte-identical forks.

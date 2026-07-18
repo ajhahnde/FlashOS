@@ -84,8 +84,8 @@ SECTIONS
      * (`_kernel_size_le` in arch/arm64/kernel/vmlinux.lds.S). */
     _image_size = _end - _image_start;
 
-    /* virt-only memory-backed SD scratch (src/board/virt/emmc2.zig's
-     * 64 MiB `scratch`). NOLOAD, and placed LAST — after `_end` and
+    /* virt-only 64 MiB memory-backed SD scratch. NOLOAD, and placed
+     * LAST — after `_end` and
      * after `_image_size` is computed — so it shifts nothing the boot
      * path depends on: not bss_begin/bss_end (boot.S clears bss via
      * `adr x1, bss_end`, ±1 MiB PC-relative; a 64 MiB `.bss` member

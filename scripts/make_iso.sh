@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build a GRUB-EFI rescue ISO that boots zig-out/kernel8.img on a
+# Build a GRUB-EFI rescue ISO that boots the native rpi4b kernel image on a
 # UEFI arm64 system (VMware Fusion, qemu-system-aarch64 + edk2-aarch64,
 # real arm64 hardware with UEFI firmware).
 #
@@ -33,8 +33,8 @@
 #
 # Output
 # ------
-#   zig-out/iso/         staging tree (boot/flashos, boot/grub/grub.cfg)
-#   zig-out/flashos.iso  the resulting bootable ISO9660 image
+#   rust-out/iso/         staging tree (boot/flashos, boot/grub/grub.cfg)
+#   rust-out/flashos.iso  the resulting bootable ISO9660 image
 #
 # Override the GRUB install location with FLASHOS_GRUB_PREFIX if it is
 # installed elsewhere than $HOME/.local/grub-aarch64-efi.
@@ -42,9 +42,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-KERNEL="$ROOT/zig-out/kernel8.img"
-STAGE="$ROOT/zig-out/iso"
-ISO_OUT="$ROOT/zig-out/flashos.iso"
+KERNEL="${FLASHOS_KERNEL:-$ROOT/rust-out/rpi4b/kernel8.img}"
+STAGE="$ROOT/rust-out/iso"
+ISO_OUT="$ROOT/rust-out/flashos.iso"
 
 GRUB_PREFIX="${FLASHOS_GRUB_PREFIX:-$HOME/.local/grub-aarch64-efi}"
 GRUB_MKRESCUE="$GRUB_PREFIX/bin/grub-mkrescue"
@@ -63,7 +63,7 @@ for tool in xorriso mformat mcopy; do
     fi
 done
 if [ ! -f "$KERNEL" ]; then
-    echo "make_iso.sh: $KERNEL missing — run \`zig build -Dboard=virt\` first." >&2
+    echo "make_iso.sh: $KERNEL missing — run \`cargo xtask build --board rpi4b\` first." >&2
     exit 1
 fi
 

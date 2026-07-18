@@ -144,9 +144,9 @@
 #define SYSCALL_ERROR           17
 #define DATA_ABORT_ERROR        18
 
-/* EL1 exception-frame size. MUST equal @sizeOf(KeRegs) in
-   src/task_layout.zig — a comptime assert there pins the reciprocal, so
-   bump both together if the saved-register frame layout changes. */
+/* EL1 exception-frame size. MUST equal size_of::<KeRegs>() in
+   crates/abi; `cargo xtask asm-defs --check` pins the reciprocal, so
+   regenerate/check both when the saved-register frame layout changes. */
 #define S_FRAME_SIZE            272
 
 /* ---- syscalls ---- */
@@ -164,7 +164,7 @@
  * hardware-monitoring ABI then appends SYS_MEMTOTAL/UPTIME/CPU_TEMP/
  * CPU_FREQ at 49..52, and the FAT32 metadata ABI SYS_CREATE/UNLINK/
  * RENAME at 53..55, so the cap is now 56.
- * See lib/syscall_defs.flash. */
+ * See crates/abi/src/syscall.rs. */
 #define NR_SYSCALLS  56
 
 /* ---- sched ---- */
