@@ -1629,11 +1629,6 @@ pub static mut sys_call_table: [*const (); NR_SYSCALLS] = {
     t
 };
 
-// Build-time guard: `arch/aarch64/asm_defs_common.inc` must declare
-// `#define NR_SYSCALLS 56` to match. If the highest SYS_* constant moves, bump
-// the asm-side literal too, then update this check.
-const _: () = assert!(NR_SYSCALLS == 56);
-
 /// Map each syscall function pointer to its high-mem (TTBR1) alias so `el0_svc`
 /// can `blr` through the table after the user pgd has been installed in TTBR0.
 ///

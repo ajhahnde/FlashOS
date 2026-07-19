@@ -159,8 +159,10 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
         return Err(format!("cargo produced no {}", staticlib.display()));
     }
 
-    // 2. Assemble the retained .S files with the established three include dirs:
-    //    arch/aarch64 (asm_defs.inc), src, and the board's board_asm_defs.inc.
+    // 2. Assemble the retained .S files. Regenerate the ABI-derived layout facts
+    //    first: `asm_defs_common.inc` `#include`s `rust-out/asm_defs_abi.inc`, so
+    //    the file must exist and be current before the assembler reads it.
+    crate::asm_defs::run(root, false)?;
     let board_dir = root.join("src/board").join(board.name());
     let mut objs: Vec<PathBuf> = Vec::new();
     let sources: Vec<PathBuf> = COMMON_ASM
@@ -177,6 +179,8 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
             .out
             .join("obj")
             .join(format!("{}.o", stem.to_string_lossy()));
+        // Four include dirs: arch/aarch64 (asm_defs.inc), src, the board's
+        // board_asm_defs.inc, and rust-out for the generated asm_defs_abi.inc.
         Cmd::new(tc.clang.clone(), &p.trace)
             .args([
                 "--target=aarch64-unknown-none-elf".into(),
@@ -186,6 +190,7 @@ pub fn canary(root: &Path, board: Board, tc: &Toolchain) -> Result<Paths, String
                 format!("-I{}", root.join("arch/aarch64").display()),
                 format!("-I{}", root.join("src").display()),
                 format!("-I{}", board_dir.display()),
+                format!("-I{}", root.join("rust-out").display()),
                 "-o".into(),
                 obj.display().to_string(),
                 src.display().to_string(),
@@ -1025,6 +1030,11 @@ fn kernel_link(
 ) -> Result<(), String> {
     let board_dir = root.join("src/board").join(board.name());
 
+    // Regenerate the ABI-derived layout facts before assembling: the retained
+    // `.S` files pull them in through `asm_defs_common.inc`, which `#include`s
+    // `rust-out/asm_defs_abi.inc`. The file must exist and be current first.
+    crate::asm_defs::run(root, false)?;
+
     // (source path, extra include dir). initramfs.S resolves `.incbin
     // "initramfs.cpio"` against the staged cpio directory; nothing else needs it.
     let mut sources: Vec<(PathBuf, Option<PathBuf>)> = COMMON_ASM
@@ -1052,6 +1062,7 @@ fn kernel_link(
             format!("-I{}", root.join("arch/aarch64").display()),
             format!("-I{}", root.join("src").display()),
             format!("-I{}", board_dir.display()),
+            format!("-I{}", root.join("rust-out").display()),
         ]);
         // The trace cargo feature only reaches Rust; entry.S gates the
         // `mov x0, sp` that hands the exception frame to the sampler behind

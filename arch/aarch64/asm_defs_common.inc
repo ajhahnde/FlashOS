@@ -144,30 +144,19 @@
 #define SYSCALL_ERROR           17
 #define DATA_ABORT_ERROR        18
 
-/* EL1 exception-frame size. MUST equal size_of::<KeRegs>() in
-   crates/abi; `cargo xtask asm-defs --check` pins the reciprocal, so
-   regenerate/check both when the saved-register frame layout changes. */
-#define S_FRAME_SIZE            272
-
-/* ---- syscalls ---- */
-/* Highest user-facing slot id +1 (entry.S `b.hs` cap). Slots 7..11 are
- * reserved file stubs that fall inside the dispatch range but return
- * immediately; brk/sbrk live at 12/13. The pipe ABI
- * lives at 18 + 27..29; the console ABI fills
- * slots 23..26, the debug-only SYS_CONSOLE_INJECT lives at 30, and
- * SYS_EXECVE = 31 lands the path-resolved ELF loader. The
- * unified fd-table ABI appends SYS_READ/WRITE/CLOSE/DUP2 at
- * 32..35, SYS_CHDIR at 36 and SYS_READDIR at 37.
- * SYS_KLOG_READ at 38, then the process-credential ABI
- * SYS_GETUID..SYS_SETGID at 39..44, SYS_AUTHENTICATE at 45,
- * SYS_PASSWD at 46, SYS_REBOOT at 47, and SYS_GETCWD at 48. The
- * hardware-monitoring ABI then appends SYS_MEMTOTAL/UPTIME/CPU_TEMP/
- * CPU_FREQ at 49..52, and the FAT32 metadata ABI SYS_CREATE/UNLINK/
- * RENAME at 53..55, so the cap is now 56.
- * See crates/abi/src/syscall.rs. */
-#define NR_SYSCALLS  56
-
-/* ---- sched ---- */
-#define CORE_CONTEXT_OFFSET 0
+/* ---- ABI-derived layout facts ---- */
+/* Three numbers the .S files consume by raw value are not arch constants but
+ * layout facts owned by Rust records, so they are generated rather than
+ * hand-written here:
+ *
+ *   S_FRAME_SIZE        = size_of::<KeRegs>()            (exception-frame size)
+ *   NR_SYSCALLS         = flashsdk_abi::syscall::NR_SYSCALLS  (dispatch cap)
+ *   CORE_CONTEXT_OFFSET = offset_of!(TaskStruct, core_context)
+ *
+ * `cargo xtask asm-defs` renders them into rust-out/asm_defs_abi.inc from the
+ * live records; the kernel/canary build regenerates it before assembling and
+ * puts rust-out on the include path. Editing the frame layout or appending a
+ * syscall updates these with no change here — the single source is the record. */
+#include "asm_defs_abi.inc"
 
 #endif /* ASM_DEFS_COMMON_INC */

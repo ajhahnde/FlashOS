@@ -34,8 +34,8 @@ Commands:
                                Build under the clean-room guard (no zig/flashc): the
                                canary by default, or the full production kernel with --full
   nm     --board <rpi4b|virt>   Dump the canary's symbol table
-  asm-defs [--check]            Generate the assembly-visible layout facts from crates/abi;
-                                --check diffs them against arch/aarch64/asm_defs_common.inc
+  asm-defs [--check]            Generate rust-out/asm_defs_abi.inc from the ABI records;
+                                --check proves asm_defs_common.inc still #includes it, no copies
   user <name> [--output <path>] [--feature <name>]...
                                Build a Rust EL0 payload (hello, clear, pid1, ...)
   klib [--output <path>] [--feature <name>]...
