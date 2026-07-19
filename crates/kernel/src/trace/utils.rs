@@ -304,14 +304,11 @@ mod tests {
         seam, trace_output, trace_output_char, trace_output_process, trace_output_u64, trace_recv,
         PL,
     };
+    use crate::trace::CAPTURE_LOCK;
     use flashos_abi::task::TaskStruct;
-    use std::sync::Mutex;
-
-    /// The capture buffer is a shared static; the suite runs tests in parallel.
-    static LOCK: Mutex<()> = Mutex::new(());
 
     fn emitted(body: impl FnOnce()) -> std::string::String {
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = CAPTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: the lock serializes access to the capture buffer.
         unsafe {
             seam::reset_output();

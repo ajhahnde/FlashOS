@@ -256,13 +256,13 @@ mod tests {
         seam, trace_calculate_offset, trace_enable, trace_generate_bl, trace_relocate,
         trace_setup_movx9lr, BL_OP, LINEAR_MAP_BASE, MOV_X9_LR,
     };
-    use std::sync::Mutex;
-
-    /// The patch log is a shared static; the suite runs tests in parallel.
-    static LOCK: Mutex<()> = Mutex::new(());
+    use crate::trace::CAPTURE_LOCK;
 
     fn patched(body: impl FnOnce()) -> std::vec::Vec<(u64, u32)> {
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // The shared lock: `trace_setup_movx9lr` / `trace_enable` emit into the
+        // output-capture buffer `utils` tests read, so this must serialize
+        // against them, not just against other `trace_main` tests.
+        let _guard = CAPTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: the lock serializes access to the patch log.
         unsafe {
             seam::reset_patches();
