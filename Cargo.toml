@@ -45,6 +45,8 @@ license = "Apache-2.0"
 # FlashSDK: the public userspace foundation, pinned to one exact revision. The
 # kernel, flibc, xtask, and every user program consume these instead of local
 # copies of the syscall ABI, EL0 runtime, and base library.
+# The rev is synced from FLASHSDK_REV in versions.env by scripts/sync_versions.sh;
+# bump it there, run --write, and commit the manifest with these lines.
 [workspace.dependencies]
 flashsdk-abi = { git = "https://github.com/ajhahnde/FlashSDK", rev = "20e71ca35ce265a7c13876284ae72b3f26ea1e7b" }
 flashsdk-rt = { git = "https://github.com/ajhahnde/FlashSDK", rev = "20e71ca35ce265a7c13876284ae72b3f26ea1e7b" }

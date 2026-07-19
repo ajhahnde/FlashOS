@@ -64,8 +64,9 @@ jobs:
             cargo xtask user "$payload"
           done
 
-      # The .S files hardcode three layout facts (exception-frame size, syscall
-      # dispatch cap, core_context offset). Prove they still match the records.
+      # The .S files read three layout facts (exception-frame size, syscall
+      # dispatch cap, core_context offset) from a generated include. Prove the
+      # include is still wired in and nobody re-added a hand-written copy.
       - name: assembly layout facts
         run: cargo xtask asm-defs --check
 
