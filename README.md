@@ -84,10 +84,11 @@ console setup are documented in **[Setup](SETUP.md)**.
   they corrupt memory.
 - **Unified file descriptors**. Console, pipe, and file descriptors share
   one API with inherited and redirectable standard I/O.
-- **Platform stack.** **FlashSDK** — the `crates/flashsdk-*` crates in this
-  workspace — defines the narrow public syscall/userspace ABI, EL0 runtime, base
-  library, and target-and-link contract; the kernel and every user program
-  consume it in-tree as path dependencies.
+- **Platform stack.** **FlashSDK** — the `flashsdk-abi`, `flashsdk-rt`, and
+  `flashsdk-base` crates in this workspace — defines the narrow public
+  syscall/userspace ABI, EL0 runtime, base library, and target-and-link
+  contract; the kernel and every user program consume it in-tree as path
+  dependencies.
   **FlashShell**, vendored in-tree as a nested consumer workspace
   (`components/flashshell/`) with its own pinned toolchain and CI job, is its
   first product consumer. **FlashUI** will follow as a native TUI that embeds
