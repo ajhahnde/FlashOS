@@ -180,9 +180,6 @@ flowchart TD
 
 - **[FlashOS Tour →](https://ajhahn.de/flashos/)**
 - **[ajhahn.de →](https://ajhahn.de/)**
-- **[FlashSDK →](https://github.com/ajhahnde/FlashSDK)**
-- **[FlashShell →](https://ajhahn.de/repos/FlashShell/)**
-- **[FlashUI →](https://ajhahn.de/repos/FlashUI/)**
 
 ---
 
