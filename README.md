@@ -176,10 +176,6 @@ flowchart TD
   Dependabot, dependency review on pull requests, and a reviewed `cargo-deny`
   policy (advisories, licenses, bans, sources).
 
-Details: **[CI/CD architecture](docs/ci-cd-architecture.md)** ·
-**[Release process](docs/release-process.md)** ·
-**[Supply-chain security](docs/supply-chain-security.md)**.
-
 ## See also
 
 - **[FlashOS Tour →](https://ajhahn.de/flashos/)**
