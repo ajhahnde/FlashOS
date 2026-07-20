@@ -7,7 +7,9 @@
 <h3>UNIX-artiges Bare-Metal-Betriebssystem für AArch64, entwickelt für Raspberry Pi 4B und QEMU</h3>
 
 <p>
-    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/rust.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/rust.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/ci.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/security.yml?branch=main&style=flat-square&label=security" alt="Security"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/releases/latest"><img src="https://img.shields.io/github/v/release/ajhahnde/FlashOS?style=flat-square&label=release" alt="Neuestes Release"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
     <img src="https://img.shields.io/badge/version-v0.8.0-f59e0b?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/rust-toolchain--pinned-dea584?style=flat-square" alt="Repository-gepinnte Rust-Toolchain">

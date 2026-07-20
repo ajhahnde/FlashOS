@@ -7,7 +7,9 @@
 <h3>A UNIX-like bare-metal OS for AArch64, built for the Raspberry Pi 4B and QEMU</h3>
 
 <p>
-    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/rust.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/rust.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/ci.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/security.yml?branch=main&style=flat-square&label=security" alt="Security"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/releases/latest"><img src="https://img.shields.io/github/v/release/ajhahnde/FlashOS?style=flat-square&label=release" alt="Latest release"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
     <img src="https://img.shields.io/badge/version-v0.8.0-f59e0b?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/rust-toolchain--pinned-dea584?style=flat-square" alt="Repository-pinned Rust toolchain">
@@ -127,6 +129,56 @@ Cargo.toml                  Rust workspace
 flashos.zsh                 shell helpers incl. the two-pass `build` orchestrator
 config.txt                  RPi 4 firmware configuration
 ```
+
+## CI/CD and release engineering
+
+FlashOS is built and qualified by a multi-stage GitHub Actions pipeline for a
+Rust/AArch64 bare-metal target. Cheap quality gates fan out in parallel, funnel
+into a single clean-room production build, promote one immutable boot artifact,
+and boot that exact artifact on an emulated Raspberry Pi 4B before a final
+aggregate status.
+
+```mermaid
+flowchart TD
+    M[metadata] --> Q[quality]
+    M --> H[host-tests]
+    M --> C[contracts]
+    M --> P[payloads matrix]
+    M --> F[flashshell]
+    Q --> B[clean-room-build]
+    H --> B
+    C --> B
+    P --> B
+    F --> B
+    B --> I[qemu-test-image]
+    I -->|immutable artifact| T[qemu-boot-test]
+    T --> R[CI / required]
+```
+
+- **Parallel gates** — formatting, Clippy (`-D warnings`), host tests, the
+  architecture contracts (hygiene, generated ASM layout, armstub, source
+  census), a sharded EL0-payload link matrix, and the FlashShell consumer
+  workspace under its own pinned toolchain.
+- **Clean-room build** — the production image is built under rejecting `PATH`
+  shims with subprocess tracing, proving no retired compiler is invoked.
+- **Immutable promotion** — the boot job never rebuilds; it downloads the
+  checksummed artifact from the build job and verifies its SHA-256 sums before
+  powering on a pinned, source-built QEMU (`raspi4b`).
+- **CI vs. production artifacts** — the CI boot image carries `--ci-login-seed`
+  and `--boot-selftest` (an auto-authenticated login and the in-kernel test
+  harness). The **release** bundle is a separate, rebuilt-from-tag artifact that
+  omits both flags and boots to the real `login:` prompt.
+- **Releases** — tag-driven and reproducible (pinned `mtime`, sorted archives),
+  shipping the flashable bundle plus `SHA256SUMS`, a CycloneDX SBOM, a
+  provenance attestation, and a `build-info.json` manifest. A manual dry run
+  packages every asset without publishing.
+- **Supply chain** — pinned Rust and QEMU, SHA-pinned actions kept fresh by
+  Dependabot, dependency review on pull requests, and a reviewed `cargo-deny`
+  policy (advisories, licenses, bans, sources).
+
+Details: **[CI/CD architecture](docs/ci-cd-architecture.md)** ·
+**[Release process](docs/release-process.md)** ·
+**[Supply-chain security](docs/supply-chain-security.md)**.
 
 ## See also
 
