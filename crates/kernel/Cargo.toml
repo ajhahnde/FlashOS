@@ -33,6 +33,6 @@ flashos-pwfile = { path = "../pwfile" }
 # symbol lands in the archive. They stand in for the std.crypto differentials the
 # Flash module carried, one for one.
 [dev-dependencies]
-sha2 = "=0.10.9"
+sha2 = "=0.11.0"
 hmac = "=0.12.1"
 pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
