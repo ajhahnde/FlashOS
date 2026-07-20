@@ -1,0 +1,43 @@
+# cargo-deny policy for the FlashOS workspace.
+#
+# The dependency surface is deliberately tiny: the RustCrypto stack that backs
+# /etc/shadow PBKDF2 (sha2, hmac, pbkdf2, digest, block-buffer, crypto-common,
+# generic-array, typenum, cpufeatures, subtle) plus libc/cfg-if/version_check.
+# Every allowance below is scoped to what that set actually needs; widen it only
+# after reviewing the crate that forces the change.
+
+[advisories]
+version = 2
+# RUSTSEC advisories are fetched fresh on every run; fail on any that match.
+# No ignores today — an entry here must carry a comment justifying the exception.
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses only. FlashOS itself ships Apache-2.0; every dependency in
+# the tree is MIT / Apache-2.0 / BSD-3-Clause (subtle) or Unicode (typenum data).
+allow = [
+    "Apache-2.0",  # FlashOS itself + every workspace crate
+    "MIT",         # libc, cfg-if, RustCrypto dual-licensed half
+    "BSD-3-Clause", # subtle
+]
+
+[bans]
+# A duplicate version is a warning, not a failure: it flags supply-chain bloat
+# for review without blocking a legitimate transitive diamond.
+multiple-versions = "warn"
+# Every wildcard in this tree is an intra-workspace path / `workspace = true`
+# dependency of an OS that is never published to crates.io — not a supply-chain
+# surface. External crates are all exact-pinned through Cargo.lock. cargo-deny's
+# allow-wildcard-paths exemption only covers publish=false crates, which these
+# are not marked as, so this is a warning rather than a hard failure. There are
+# no external wildcard requirements to catch here.
+wildcards = "warn"
+
+[sources]
+# Crates may come only from crates.io. No git or private-registry sources today;
+# adding one is a supply-chain decision that must be made explicitly here.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

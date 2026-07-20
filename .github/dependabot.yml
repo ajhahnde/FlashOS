@@ -1,0 +1,26 @@
+# Keeps the SHA-pinned GitHub Actions and Cargo dependencies maintainable:
+# Dependabot proposes updates as PRs, which then run through ci.yml + security.yml
+# like any other change. Pinning to a SHA freezes the action; this keeps it fresh.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+
+  # FlashShell is a separate, nested workspace with its own lockfile.
+  - package-ecosystem: cargo
+    directory: "/components/flashshell"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build

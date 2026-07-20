@@ -1,0 +1,49 @@
+# Supply-chain and dependency-policy automation, kept separate from ci.yml so
+# it can run on a weekly schedule (catching newly disclosed advisories against
+# an unchanged tree) as well as per pull request.
+name: security
+
+on:
+  pull_request:
+  schedule:
+    # Mondays 06:00 UTC — re-audit dependencies against fresh advisory data.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # GitHub's native dependency review: on a PR, diff the dependency manifests and
+  # block newly introduced dependencies carrying known high-severity advisories.
+  dependency-review:
+    name: dependency-review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Dependency review
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+        with:
+          # Only fail on newly introduced high/critical advisories — a documented
+          # policy, not an arbitrary block on every transitive version bump.
+          fail-on-severity: high
+
+  # cargo-deny enforces the reviewed policy in deny.toml (advisories, licenses,
+  # banned crates, duplicate versions, allowed sources). The action pins its own
+  # stable Rust, isolated from the FlashOS production compiler in rust-toolchain.toml.
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: cargo-deny (advisories, bans, licenses, sources)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          command: check advisories bans licenses sources
