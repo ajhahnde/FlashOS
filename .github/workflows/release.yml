@@ -1,0 +1,169 @@
+# Tag-driven production release, with a non-publishing manual dry run.
+#
+#   push tag v*            → build, package, and publish a GitHub Release
+#   workflow_dispatch      → build + package + upload workflow artifacts only
+#                            (publish only when dispatched ON a tag with publish=true)
+#
+# The release is rebuilt from the tagged commit — never copied from a CI run —
+# and deliberately OMITS the CI-only --ci-login-seed / --boot-selftest flags.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a GitHub Release (only takes effect on a tag ref)."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Always runs: validates, rebuilds, packages, checksums, SBOMs, and uploads the
+  # bundle as a workflow artifact. This is the entire dry run.
+  package:
+    name: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: ./.github/actions/setup-flashos
+        with:
+          check-versions: "true"
+
+      - name: Validate tag / version consistency
+        id: ver
+        run: |
+          set -euo pipefail
+          . ./versions.env
+          v="$FLASHOS_RELEASE_VERSION"
+          # sync_versions --check already ran in setup-flashos; here we bind the
+          # git tag to the manifest so a tag can never ship the wrong version.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] || [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "v${v}" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match versions.env (expected v${v})"
+              exit 1
+            fi
+          fi
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+
+      - name: Reproducible build timestamp
+        run: |
+          set -euo pipefail
+          # Pin every archive mtime to the commit time so the bundle is byte-stable.
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - name: Build production kernel + armstub (no CI flags)
+        run: |
+          set -euo pipefail
+          cargo xtask guard --board rpi4b --full
+          cargo xtask armstub
+
+      - name: Stage and package release bundle
+        id: pack
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          scripts/stage_release_bundle.sh "$VERSION" dist/release
+          dir="FlashOS-${VERSION}-rpi4b"
+          cd dist/release
+          # Deterministic tar: sorted, zero uid/gid, pinned mtime.
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+              --mtime="@${SOURCE_DATE_EPOCH}" -czf "${dir}.tar.gz" "$dir"
+          ( cd "$dir" && zip -X -r -q "../${dir}.zip" . )
+          sha256sum "${dir}.tar.gz" "${dir}.zip" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - name: Generate CycloneDX SBOM from Cargo metadata
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/release/FlashOS-${{ steps.ver.outputs.version }}.cdx.json
+          upload-artifact: false
+
+      - name: Upload release bundle (dry-run + handoff to publish)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-bundle-${{ steps.ver.outputs.version }}
+          path: dist/release/
+          retention-days: 14
+          if-no-files-found: error
+
+  # Publishes only on a tag ref. A manual dispatch on a branch never reaches here,
+  # so the dry run cannot create a release.
+  publish:
+    name: publish
+    needs: package
+    if: >-
+      github.ref_type == 'tag' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # OIDC token for provenance attestation
+      attestations: write # record the provenance attestation
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Download release bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-bundle-${{ needs.package.outputs.version }}
+          path: dist/release
+
+      - name: Verify checksums and required assets
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist/release
+          sha256sum -c SHA256SUMS
+          for f in "FlashOS-${VERSION}-rpi4b.tar.gz" \
+                   "FlashOS-${VERSION}-rpi4b.zip" \
+                   "SHA256SUMS" "FlashOS-${VERSION}.cdx.json"; do
+            [ -f "$f" ] || { echo "::error::missing release asset $f"; exit 1; }
+          done
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: |
+            dist/release/FlashOS-${{ needs.package.outputs.version }}-rpi4b.tar.gz
+            dist/release/FlashOS-${{ needs.package.outputs.version }}-rpi4b.zip
+            dist/release/SHA256SUMS
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.package.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist/release
+          assets=( \
+            "FlashOS-${VERSION}-rpi4b.tar.gz" \
+            "FlashOS-${VERSION}-rpi4b.zip" \
+            "SHA256SUMS" \
+            "FlashOS-${VERSION}.cdx.json" \
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --title "FlashOS ${TAG}" --generate-notes --verify-tag
+          fi
