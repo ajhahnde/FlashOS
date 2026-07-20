@@ -28,7 +28,7 @@ jobs:
     outputs:
       qemu-version: ${{ steps.flashos.outputs.qemu-version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: flashos
         uses: ./.github/actions/setup-flashos
         with:
@@ -42,7 +42,7 @@ jobs:
     needs: metadata
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-flashos
         with:
           check-versions: "false"
@@ -58,7 +58,7 @@ jobs:
     needs: metadata
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-flashos
         with:
           check-versions: "false"
@@ -72,7 +72,7 @@ jobs:
     needs: metadata
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-flashos
         with:
           check-versions: "false"
@@ -98,7 +98,7 @@ jobs:
           - "meminfo dmesg uptime cpuinfo"
           - "forkbomb argv_echo flibc_demo stackbomb"
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-flashos
         with:
           check-versions: "false"
@@ -124,7 +124,7 @@ jobs:
       run:
         working-directory: components/flashshell
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Activate FlashShell's pinned toolchain
         run: |
           set -euo pipefail
@@ -144,7 +144,7 @@ jobs:
     needs: [quality, host-tests, contracts, payloads, flashshell]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-flashos
         with:
           check-versions: "false"
@@ -171,7 +171,7 @@ jobs:
     needs: clean-room-build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: flashos
         uses: ./.github/actions/setup-flashos
         with:
@@ -208,7 +208,7 @@ jobs:
     env:
       FLASHOS_QEMU_VERSION: ${{ needs.metadata.outputs.qemu-version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up pinned QEMU
         uses: ./.github/actions/setup-qemu
       - name: Download boot artifact
