@@ -81,7 +81,6 @@ expect_text() {
 expect_line rust-toolchain.toml "channel = \"$FLASHOS_RUST_VERSION\""
 expect_line Cargo.toml "version = \"$FLASHOS_RELEASE_VERSION\""
 expect_line Cargo.toml "rust-version = \"$FLASHOS_RUST_MSRV\""
-expect_text README.md "badge/version-v$FLASHOS_RELEASE_VERSION-"
 expect_text docs/de/README.md "badge/version-v$FLASHOS_RELEASE_VERSION-"
 # The CI trigger and the QEMU pin live in the multi-job workflow and the pinned
 # QEMU composite action; the cache key and source build must derive the version

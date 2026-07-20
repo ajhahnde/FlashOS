@@ -84,16 +84,16 @@ console setup are documented in **[Setup](SETUP.md)**.
   they corrupt memory.
 - **Unified file descriptors**. Console, pipe, and file descriptors share
   one API with inherited and redirectable standard I/O.
-- **Platform stack.** **[FlashSDK](https://github.com/ajhahnde/FlashSDK)**
-  defines the narrow public syscall/userspace ABI, EL0 runtime, base library,
-  and target-and-link contract; the kernel and every user program consume it at
-  one pinned revision.
-  **FlashShell**, now vendored in-tree as a nested consumer workspace
-  (`components/flashshell/`) with its own pinned toolchain and CI job, will be
-  its first product consumer. **[FlashUI](https://ajhahn.de/repos/FlashUI/)**
-  will follow as a native TUI that embeds FlashShell and becomes the post-login default;
-  the current `/bin/fsh` remains a tested recovery shell. These contracts
-  remain pre-1.0 until the FlashOS v1.0 stability cut.
+- **Platform stack.** **FlashSDK** — the `crates/flashsdk-*` crates in this
+  workspace — defines the narrow public syscall/userspace ABI, EL0 runtime, base
+  library, and target-and-link contract; the kernel and every user program
+  consume it in-tree as path dependencies.
+  **FlashShell**, vendored in-tree as a nested consumer workspace
+  (`components/flashshell/`) with its own pinned toolchain and CI job, is its
+  first product consumer. **FlashUI** will follow as a native TUI that embeds
+  FlashShell and becomes the post-login default; the current `/bin/fsh` remains
+  a tested recovery shell. These contracts remain pre-1.0 until the FlashOS v1.0
+  stability cut.
 - **Users, login, and permissions**. UID/GID identity, Unix-style file
   modes, privilege dropping, PBKDF2-HMAC-SHA256 authentication, and
   protected password storage with a read-only fallback.

@@ -336,7 +336,7 @@ check. There are no ACLs, supplementary groups, setuid bits, `chmod`,
 
 The FlashSDK `flashsdk-rt` crate provides the EL0 entry and SVC transport, and
 `flashsdk-base` the formatted output, process wrappers, and bump heap; both are
-consumed at one pinned revision. `crates/flibc/` adds the userland engines on
+consumed in-tree as path dependencies. `crates/flibc/` adds the userland engines on
 top: readline/history/completion, key decoding, pager and gap-buffer cores, and
 TUI rendering.
 
@@ -392,7 +392,7 @@ The active syscall groups are:
 Slots 0, 5, 8, 9, 11, 23, 24, and 27–29 are retired and permanently return
 an error. Slots 14–17 and 19–22 are reserved stubs. The ABI definitions,
 `NR_SYSCALLS = 56`, `Dirent`, and `EACCES = 13` live in the FlashSDK
-`flashsdk-abi` crate, consumed at one pinned revision.
+`flashsdk-abi` crate, consumed in-tree as a path dependency.
 
 Synchronous faults decode ESR and the fault address in the board IRQ/exception
 path. Recoverable user translation faults are handled by
