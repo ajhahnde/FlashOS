@@ -35,4 +35,4 @@ flashos-pwfile = { path = "../pwfile" }
 [dev-dependencies]
 sha2 = "=0.10.9"
 hmac = "=0.12.1"
-pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
+pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] }
