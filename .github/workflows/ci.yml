@@ -1,0 +1,302 @@
+# FlashOS continuous integration — a multi-stage pipeline that fans cheap,
+# independent quality gates out in parallel, funnels them into a single
+# clean-room production build, promotes ONE immutable boot artifact, and boots
+# that exact artifact on an emulated Raspberry Pi 4B before a final aggregate
+# gate. Domain logic lives in xtask and scripts/; this file only orchestrates.
+name: CI
+
+on:
+  push:
+    branches: [main, "v*"]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# One in-flight run per branch / PR; a newer push cancels the stale run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Stage 1: cheap repository-wide validation, and the version fan-out ──────
+  metadata:
+    name: metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      qemu-version: ${{ steps.flashos.outputs.qemu-version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - id: flashos
+        uses: ./.github/actions/setup-flashos
+        with:
+          check-versions: "true"
+      - name: Public documentation drift
+        run: scripts/check_doc_drift.sh
+
+  # ── Stage 2: parallel quality gates, each depending only on metadata ───────
+  quality:
+    name: quality
+    needs: metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-flashos
+        with:
+          check-versions: "false"
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy (deny warnings)
+        run: >-
+          cargo clippy --workspace --exclude flashos-canary
+          --exclude flashos-klib --all-targets -- -D warnings
+
+  host-tests:
+    name: host-tests
+    needs: metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-flashos
+        with:
+          check-versions: "false"
+      - name: Host unit + integration tests
+        run: >-
+          cargo test --workspace --exclude flashos-canary
+          --exclude flashos-klib
+
+  contracts:
+    name: contracts
+    needs: metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-flashos
+        with:
+          check-versions: "false"
+      - name: Repository hygiene
+        run: cargo xtask check-hygiene
+      - name: Generated Rust/assembly layout contract
+        run: cargo xtask asm-defs --check
+      - name: Armstub link
+        run: cargo xtask armstub
+      - name: Retired-language source census
+        run: cargo xtask census
+
+  payloads:
+    name: payloads (${{ matrix.shard }})
+    needs: metadata
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - "hello clear echo cat ls"
+          - "rm cp mv grep"
+          - "meminfo dmesg uptime cpuinfo"
+          - "forkbomb argv_echo flibc_demo stackbomb"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-flashos
+        with:
+          check-versions: "false"
+      - name: EL0 payload link + artefact checks
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          # `cargo xtask user` performs the real checks (undefined symbols,
+          # core::fmt, FP/SIMD, duplicate mem providers); the loop only shards them.
+          for payload in $SHARD; do
+            cargo xtask user "$payload"
+          done
+
+  # FlashShell is a separate consumer workspace (edition 2024, resolver 3, its
+  # own pinned 1.96.1 toolchain) excluded from the root workspace, so the gates
+  # above never touch it. Give it its own toolchain and its own quality gate.
+  flashshell:
+    name: flashshell
+    needs: metadata
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: components/flashshell
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Activate FlashShell's pinned toolchain
+        run: |
+          set -euo pipefail
+          # rustup honours components/flashshell/rust-toolchain.toml (1.96.1).
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  # ── Stage 3: the production build-chain gate ───────────────────────────────
+  clean-room-build:
+    name: clean-room-build
+    needs: [quality, host-tests, contracts, payloads, flashshell]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-flashos
+        with:
+          check-versions: "false"
+      - name: Clean-room full rpi4b production build
+        # Builds under rejecting PATH shims + subprocess tracing: proves no
+        # retired compiler (zig/flashc) is invoked anywhere in the chain.
+        run: cargo xtask guard --board rpi4b --full
+      - name: Stage production build for inspection
+        run: |
+          set -euo pipefail
+          mkdir -p dist/production
+          cp rust-out/rpi4b/kernel8.img dist/production/kernel8.img
+      - name: Upload production build (inspection only)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flashos-rpi4b-production-${{ github.sha }}
+          path: dist/production/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ── Stage 4: build the CI boot artifact, once, and promote it ──────────────
+  qemu-test-image:
+    name: qemu-test-image
+    needs: clean-room-build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - id: flashos
+        uses: ./.github/actions/setup-flashos
+        with:
+          check-versions: "false"
+      - name: Install mtools (FAT32 test disk)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mtools
+      - name: Build seeded rpi4b kernel + FAT32 test disk
+        # BOTH flags are mandatory: --boot-selftest runs the in-kernel scenarios,
+        # --ci-login-seed authenticates the unattended login so the third shell
+        # marker appears. These are CI-only; the production release omits them.
+        run: |
+          set -euo pipefail
+          cargo xtask build --board rpi4b --ci-login-seed --boot-selftest
+          sh scripts/make_test_disk.sh \
+            rust-out/initramfs-stage/etc/shadow rootfs/etc/perms.tab
+      - name: Stage immutable, checksummed boot artifact
+        run: |
+          set -euo pipefail
+          scripts/ci_stage_boot_artifact.sh dist/ci-rpi4b \
+            rust-out/rpi4b/kernel8.img rust-out/test_sd.img
+      - name: Upload boot artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flashos-rpi4b-ci-${{ github.sha }}
+          path: dist/ci-rpi4b/
+          retention-days: 7
+          if-no-files-found: error
+
+  # ── Stage 5: boot the EXACT artifact from the previous job — never rebuild ──
+  qemu-boot-test:
+    name: qemu-boot-test
+    needs: [metadata, qemu-test-image]
+    runs-on: ubuntu-24.04
+    env:
+      FLASHOS_QEMU_VERSION: ${{ needs.metadata.outputs.qemu-version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Set up pinned QEMU
+        uses: ./.github/actions/setup-qemu
+      - name: Download boot artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flashos-rpi4b-ci-${{ github.sha }}
+          path: dist/ci-rpi4b
+      - name: Verify artifact checksums
+        run: |
+          set -euo pipefail
+          # Fail before powering on QEMU if the promoted bytes changed in transit.
+          ( cd dist/ci-rpi4b && sha256sum -c SHA256SUMS )
+      - name: Boot rpi4b under the watchdog
+        # The watchdog owns the boot contract (30 scenarios, 34 checkpoints,
+        # 3 homescreen markers, free-page baselines). It tests the downloaded
+        # files directly; nothing here rebuilds the kernel or SD image.
+        run: |
+          set -euo pipefail
+          scripts/run_qemu_test.sh 720 qemu-system-aarch64 \
+            -M raspi4b -display none -serial null -serial stdio \
+            -kernel dist/ci-rpi4b/kernel8.img \
+            -drive if=sd,file=dist/ci-rpi4b/test_sd.img,format=raw
+      - name: Upload serial log + diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: qemu-boot-failure-${{ github.sha }}
+          path: |
+            rust-out/**/*.log
+            dist/ci-rpi4b/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ── Final gate: one stable required status branch protection can pin ───────
+  required:
+    name: required
+    if: always()
+    needs:
+      - metadata
+      - quality
+      - host-tests
+      - contracts
+      - payloads
+      - flashshell
+      - clean-room-build
+      - qemu-test-image
+      - qemu-boot-test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Summarize and gate on every required job
+        env:
+          R_METADATA: ${{ needs.metadata.result }}
+          R_QUALITY: ${{ needs.quality.result }}
+          R_HOST: ${{ needs.host-tests.result }}
+          R_CONTRACTS: ${{ needs.contracts.result }}
+          R_PAYLOADS: ${{ needs.payloads.result }}
+          R_FLASHSHELL: ${{ needs.flashshell.result }}
+          R_CLEANROOM: ${{ needs.clean-room-build.result }}
+          R_IMAGE: ${{ needs.qemu-test-image.result }}
+          R_BOOT: ${{ needs.qemu-boot-test.result }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## CI / required"
+            echo ""
+            echo "| job | result |"
+            echo "|-----|--------|"
+            echo "| metadata | $R_METADATA |"
+            echo "| quality | $R_QUALITY |"
+            echo "| host-tests | $R_HOST |"
+            echo "| contracts | $R_CONTRACTS |"
+            echo "| payloads | $R_PAYLOADS |"
+            echo "| flashshell | $R_FLASHSHELL |"
+            echo "| clean-room-build | $R_CLEANROOM |"
+            echo "| qemu-test-image | $R_IMAGE |"
+            echo "| qemu-boot-test | $R_BOOT |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          rc=0
+          for r in "$R_METADATA" "$R_QUALITY" "$R_HOST" "$R_CONTRACTS" \
+                   "$R_PAYLOADS" "$R_FLASHSHELL" "$R_CLEANROOM" \
+                   "$R_IMAGE" "$R_BOOT"; do
+            if [ "$r" != "success" ]; then
+              rc=1
+            fi
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::one or more required CI jobs did not succeed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."

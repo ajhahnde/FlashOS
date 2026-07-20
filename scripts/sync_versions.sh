@@ -83,9 +83,12 @@ expect_line Cargo.toml "version = \"$FLASHOS_RELEASE_VERSION\""
 expect_line Cargo.toml "rust-version = \"$FLASHOS_RUST_MSRV\""
 expect_text README.md "badge/version-v$FLASHOS_RELEASE_VERSION-"
 expect_text docs/de/README.md "badge/version-v$FLASHOS_RELEASE_VERSION-"
-expect_text .github/workflows/rust.yml 'branches: [main, "v*"]'
-expect_text .github/workflows/rust.yml 'qemu-aarch64-${{ env.FLASHOS_QEMU_VERSION }}-${{ runner.os }}'
-expect_text .github/workflows/rust.yml 'ver="$FLASHOS_QEMU_VERSION"'
+# The CI trigger and the QEMU pin live in the multi-job workflow and the pinned
+# QEMU composite action; the cache key and source build must derive the version
+# from versions.env, never a hardcoded number.
+expect_text .github/workflows/ci.yml 'branches: [main, "v*"]'
+expect_text .github/actions/setup-qemu/action.yml '${{ env.FLASHOS_QEMU_VERSION }}'
+expect_text .github/actions/setup-qemu/action.yml 'ver="$FLASHOS_QEMU_VERSION"'
 
 if ! awk -v expected="$FLASHOS_RELEASE_VERSION" '
   function flush() {
@@ -111,7 +114,7 @@ if [ -n "$copied_toolchains" ]; then
   failed=1
 fi
 
-workflow_qemu=$(grep -nE 'QEMU.*[0-9]+\.[0-9]+\.[0-9]+|qemu.*[0-9]+\.[0-9]+\.[0-9]+' .github/workflows/rust.yml || true)
+workflow_qemu=$(grep -nE 'QEMU.*[0-9]+\.[0-9]+\.[0-9]+|qemu.*[0-9]+\.[0-9]+\.[0-9]+' .github/actions/setup-qemu/action.yml || true)
 if [ -n "$workflow_qemu" ]; then
   printf 'version drift: workflow hardcodes QEMU instead of using versions.env:\n%s\n' "$workflow_qemu" >&2
   failed=1
