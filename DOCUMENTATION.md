@@ -356,7 +356,9 @@ integration order is:
 
 1. create and activate FlashSDK as the narrow public syscall/userspace ABI,
    EL0 runtime, base library, and target-and-link contract;
-2. make FlashShell the first real FlashSDK product consumer;
+2. make FlashShell the first real FlashSDK product consumer; its source is
+   already vendored in-tree as a nested workspace under `components/flashshell/`,
+   built and tested by its own CI job under a pinned toolchain;
 3. build FlashUI as the second consumer, a native TUI that embeds FlashShell;
 4. cut the default session over to `PID 1 -> login -> flashui`, while retaining
    `/bin/fsh` as a tested recovery shell.

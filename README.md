@@ -9,9 +9,8 @@
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/ci.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/security.yml?branch=main&style=flat-square&label=security" alt="Security"></a>
-    <a href="https://github.com/ajhahnde/FlashOS/releases/latest"><img src="https://img.shields.io/github/v/release/ajhahnde/FlashOS?style=flat-square&label=release" alt="Latest release"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <img src="https://img.shields.io/badge/version-v0.8.0-f59e0b?style=flat-square" alt="Version">
+    <a href="https://github.com/ajhahnde/FlashOS/releases/latest"><img src="https://img.shields.io/github/v/release/ajhahnde/FlashOS?style=flat-square&label=version" alt="Version"></a>
     <img src="https://img.shields.io/badge/rust-toolchain--pinned-dea584?style=flat-square" alt="Repository-pinned Rust toolchain">
     <img src="https://img.shields.io/badge/target-aarch64--unknown--none--softfloat-lightgrey?style=flat-square" alt="aarch64-unknown-none-softfloat">
     <img src="https://img.shields.io/badge/license-apache--2.0-lightgrey?style=flat-square" alt="License">
@@ -89,9 +88,10 @@ console setup are documented in **[Setup](SETUP.md)**.
   defines the narrow public syscall/userspace ABI, EL0 runtime, base library,
   and target-and-link contract; the kernel and every user program consume it at
   one pinned revision.
-  **[FlashShell](https://github.com/ajhahnde/FlashShell)** will be its first
-  product consumer. **[FlashUI](https://ajhahn.de/repos/FlashUI/)** will follow
-  as a native TUI that embeds FlashShell and becomes the post-login default;
+  **FlashShell**, now vendored in-tree as a nested consumer workspace
+  (`components/flashshell/`) with its own pinned toolchain and CI job, will be
+  its first product consumer. **[FlashUI](https://ajhahn.de/repos/FlashUI/)**
+  will follow as a native TUI that embeds FlashShell and becomes the post-login default;
   the current `/bin/fsh` remains a tested recovery shell. These contracts
   remain pre-1.0 until the FlashOS v1.0 stability cut.
 - **Users, login, and permissions**. UID/GID identity, Unix-style file
@@ -119,6 +119,7 @@ crates/abi/                 kernel-private task, ELF, and page-descriptor layout
 crates/kernel/              Rust kernel implementation
 crates/flibc/               Rust userland engines (readline, pager, TUI) for ELF programs
 user/                       Rust PID 1, shell, tools, and test executables
+components/flashshell/       FlashShell — nested consumer workspace (own toolchain + CI)
 rootfs/                     static initramfs and FAT32 seed files
 tools/                      retained ELF linker scripts + initramfs embed assembly
 armstub/                    EL3 → EL1 bootstrap shim (Pi only)
