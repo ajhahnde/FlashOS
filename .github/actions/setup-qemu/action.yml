@@ -1,0 +1,84 @@
+name: Set up pinned QEMU
+description: >-
+  Restore or build qemu-system-aarch64 at the version pinned in versions.env.
+  Hosted runners ship a different QEMU, so the contract-pinned release is built
+  once from source and cached by version. Requires FLASHOS_QEMU_VERSION in the
+  environment (setup-flashos exports it).
+
+outputs:
+  cache-hit:
+    description: "true when qemu-prefix was restored from cache."
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Require QEMU version
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "${FLASHOS_QEMU_VERSION:-}" ]; then
+          echo "::error::FLASHOS_QEMU_VERSION not set — run setup-flashos first" >&2
+          exit 1
+        fi
+
+    - name: Install mtools + QEMU build dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          mtools ninja-build pkg-config python3-pip python3-venv \
+          libglib2.0-dev libpixman-1-dev flex bison
+
+    - name: Configure-flag fingerprint
+      id: cfg
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The configure flags are part of the cache identity: change them and the
+        # cached prefix is no longer the artifact this action would produce today.
+        flags="--target-list=aarch64-softmmu --disable-docs --disable-tools \
+               --disable-gtk --disable-sdl --disable-vnc --disable-curses --disable-werror"
+        hash=$(printf '%s' "$flags" | sha256sum | cut -c1-12)
+        printf 'flags=%s\n' "$flags" >> "$GITHUB_OUTPUT"
+        printf 'hash=%s\n'  "$hash"  >> "$GITHUB_OUTPUT"
+
+    - name: Restore pinned QEMU
+      id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/qemu-prefix
+        key: >-
+          qemu-aarch64-${{ runner.os }}-${{ runner.arch }}-${{ env.FLASHOS_QEMU_VERSION }}-${{ steps.cfg.outputs.hash }}
+
+    - name: Build pinned QEMU from source
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        ver="$FLASHOS_QEMU_VERSION"
+        # Strict transport: --fail turns any HTTP error into a non-zero exit
+        # instead of a saved error page; https/TLS is enforced explicitly.
+        curl --fail --show-error --silent --location \
+          --proto '=https' --tlsv1.2 \
+          -o /tmp/qemu.tar.xz "https://download.qemu.org/qemu-${ver}.tar.xz"
+        mkdir -p /tmp/qemu-src
+        tar -xJf /tmp/qemu.tar.xz -C /tmp/qemu-src --strip-components=1
+        cd /tmp/qemu-src
+        # Word-split the shared flag string on purpose (configure wants argv items).
+        # shellcheck disable=SC2086
+        ./configure --prefix="$HOME/qemu-prefix" ${{ steps.cfg.outputs.flags }}
+        make -j"$(nproc)"
+        make install
+
+    - name: Put pinned QEMU on PATH and verify
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "$HOME/qemu-prefix/bin" >> "$GITHUB_PATH"
+        qemu="$HOME/qemu-prefix/bin/qemu-system-aarch64"
+        "$qemu" --version
+        # The raspi4b machine model is the whole point of the pinned build; fail
+        # loudly if this QEMU cannot instantiate the board.
+        "$qemu" -machine help | grep -iq raspi4b

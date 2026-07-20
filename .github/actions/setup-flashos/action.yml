@@ -1,0 +1,96 @@
+name: Set up FlashOS toolchain
+description: >-
+  Activate the pinned Rust toolchain and centralized versions for a FlashOS
+  native build. Assumes the repository is already checked out. Reads every
+  version from versions.env / rust-toolchain.toml so no constant is duplicated
+  here.
+
+inputs:
+  check-versions:
+    description: Run scripts/sync_versions.sh --check to reject manifest drift.
+    required: false
+    default: "true"
+  cache-cargo:
+    description: Cache the Cargo registry and git dependency downloads.
+    required: false
+    default: "true"
+
+outputs:
+  qemu-version:
+    description: FLASHOS_QEMU_VERSION as read from versions.env.
+    value: ${{ steps.versions.outputs.qemu-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Require checkout
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ ! -f versions.env ]; then
+          echo "::error::versions.env not found — run actions/checkout before setup-flashos" >&2
+          exit 1
+        fi
+
+    - name: Centralized version manifest
+      if: inputs.check-versions == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        scripts/sync_versions.sh --check
+
+    - name: Load versions.env
+      id: versions
+      shell: bash
+      run: |
+        set -euo pipefail
+        # versions.env is the single source of truth; export the QEMU version to
+        # the job environment (for the setup-qemu cache key) and as an output.
+        . ./versions.env
+        printf 'FLASHOS_QEMU_VERSION=%s\n'    "$FLASHOS_QEMU_VERSION"    >> "$GITHUB_ENV"
+        printf 'FLASHOS_RUST_VERSION=%s\n'    "$FLASHOS_RUST_VERSION"    >> "$GITHUB_ENV"
+        printf 'FLASHOS_RELEASE_VERSION=%s\n' "$FLASHOS_RELEASE_VERSION" >> "$GITHUB_ENV"
+        printf 'qemu-version=%s\n'            "$FLASHOS_QEMU_VERSION"    >> "$GITHUB_OUTPUT"
+
+    - name: Cargo dependency cache
+      if: inputs.cache-cargo == 'true'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        # Only the fetched crates, never target/: the clean-room guard must
+        # rebuild from source so a cached object can never mask a build regression.
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          cargo-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Activate the pinned Rust toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        # rustup honours rust-toolchain.toml: the pinned release, the
+        # aarch64-unknown-none-softfloat target, and llvm-tools all install from
+        # that one file. rust-lld / llvm-objcopy / llvm-nm / llvm-objdump ship with it.
+        rustup show active-toolchain || rustup toolchain install
+        rustc --version
+
+    - name: Confirm AArch64 bare-metal target
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Informational diagnostic (never blocking): prove the softfloat ABI is
+        # what the kernel links against. `|| true` is deliberate and documented —
+        # target-spec-json is an unstable interface and must not gate a build.
+        rustc --print target-spec-json -Z unstable-options \
+          --target aarch64-unknown-none-softfloat 2>/dev/null \
+          | grep -E '"features"|"abi"' || true
+
+    - name: Assembler
+      shell: bash
+      run: |
+        set -euo pipefail
+        # clang assembles the retained .S files — the only compiler outside the
+        # Rust toolchain in the production build.
+        clang --version
