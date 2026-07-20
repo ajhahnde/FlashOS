@@ -158,7 +158,7 @@ jobs:
           mkdir -p dist/production
           cp rust-out/rpi4b/kernel8.img dist/production/kernel8.img
       - name: Upload production build (inspection only)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flashos-rpi4b-production-${{ github.sha }}
           path: dist/production/
@@ -193,7 +193,7 @@ jobs:
           scripts/ci_stage_boot_artifact.sh dist/ci-rpi4b \
             rust-out/rpi4b/kernel8.img rust-out/test_sd.img
       - name: Upload boot artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flashos-rpi4b-ci-${{ github.sha }}
           path: dist/ci-rpi4b/
@@ -233,7 +233,7 @@ jobs:
             -drive if=sd,file=dist/ci-rpi4b/test_sd.img,format=raw
       - name: Upload serial log + diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: qemu-boot-failure-${{ github.sha }}
           path: |
