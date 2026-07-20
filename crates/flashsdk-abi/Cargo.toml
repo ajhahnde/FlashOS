@@ -1,0 +1,9 @@
+[package]
+name = "flashsdk-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashsdk_abi"

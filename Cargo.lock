@@ -306,21 +306,18 @@ dependencies = [
 
 [[package]]
 name = "flashsdk-abi"
-version = "0.1.0"
-source = "git+https://github.com/ajhahnde/FlashSDK?rev=20e71ca35ce265a7c13876284ae72b3f26ea1e7b#20e71ca35ce265a7c13876284ae72b3f26ea1e7b"
+version = "0.8.0"
 
 [[package]]
 name = "flashsdk-base"
-version = "0.1.0"
-source = "git+https://github.com/ajhahnde/FlashSDK?rev=20e71ca35ce265a7c13876284ae72b3f26ea1e7b#20e71ca35ce265a7c13876284ae72b3f26ea1e7b"
+version = "0.8.0"
 dependencies = [
  "flashsdk-rt",
 ]
 
 [[package]]
 name = "flashsdk-rt"
-version = "0.1.0"
-source = "git+https://github.com/ajhahnde/FlashSDK?rev=20e71ca35ce265a7c13876284ae72b3f26ea1e7b#20e71ca35ce265a7c13876284ae72b3f26ea1e7b"
+version = "0.8.0"
 dependencies = [
  "flashsdk-abi",
 ]

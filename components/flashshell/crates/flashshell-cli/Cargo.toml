@@ -1,0 +1,19 @@
+[package]
+name = "flashshell-cli"
+description = "Command-line and interactive client for FlashShell"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fsh"
+path = "src/main.rs"
+
+[dependencies]
+flashshell-platform-posix = { path = "../flashshell-platform-posix" }
+flashshell-runtime = { path = "../flashshell-runtime" }
+
+[lints]
+workspace = true

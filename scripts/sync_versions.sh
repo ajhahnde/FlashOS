@@ -34,13 +34,9 @@ case "$FLASHOS_QEMU_VERSION" in
   [0-9]*.[0-9]*.[0-9]*) ;;
   *) printf 'invalid FLASHOS_QEMU_VERSION: %s\n' "$FLASHOS_QEMU_VERSION" >&2; exit 2 ;;
 esac
-if ! printf '%s' "${FLASHSDK_REV:-}" | grep -Eq '^[0-9a-f]{40}$'; then
-  printf 'invalid FLASHSDK_REV (want a 40-hex commit): %s\n' "${FLASHSDK_REV:-}" >&2
-  exit 2
-fi
 
 FLASHOS_RUST_MSRV=${FLASHOS_RUST_VERSION%.*}
-export FLASHOS_RELEASE_VERSION FLASHOS_RUST_VERSION FLASHOS_RUST_MSRV FLASHSDK_REV
+export FLASHOS_RELEASE_VERSION FLASHOS_RUST_VERSION FLASHOS_RUST_MSRV
 
 if [ "$mode" = write ]; then
   command -v perl >/dev/null 2>&1 || {
@@ -54,10 +50,8 @@ if [ "$mode" = write ]; then
     } elsif ($ARGV eq "Cargo.toml") {
       s{(\[workspace\.package\][^\[]*?^version = ")[^"]+("\n)}{$1 . $ENV{FLASHOS_RELEASE_VERSION} . $2}em;
       s{(\[workspace\.package\][^\[]*?^rust-version = ")[^"]+("\n)}{$1 . $ENV{FLASHOS_RUST_MSRV} . $2}em;
-      s{(FlashSDK", rev = ")[0-9a-f]{40}(")}{$1 . $ENV{FLASHSDK_REV} . $2}ge;
     } elsif ($ARGV eq "Cargo.lock") {
       s{(\[\[package\]\]\nname = "flashos-[^"]+"\nversion = ")[^"]+("\n)}{$1 . $ENV{FLASHOS_RELEASE_VERSION} . $2}ge;
-      s{(FlashSDK\?rev=)[0-9a-f]{40}(#)[0-9a-f]{40}}{$1 . $ENV{FLASHSDK_REV} . $2 . $ENV{FLASHSDK_REV}}ge;
     } elsif ($ARGV eq "README.md" || $ARGV eq "docs/de/README.md") {
       s{badge/version-v[0-9]+\.[0-9]+\.[0-9]+}{badge/version-v$ENV{FLASHOS_RELEASE_VERSION}}g;
     }
@@ -92,16 +86,6 @@ expect_text docs/de/README.md "badge/version-v$FLASHOS_RELEASE_VERSION-"
 expect_text .github/workflows/rust.yml 'branches: [main, "v*"]'
 expect_text .github/workflows/rust.yml 'qemu-aarch64-${{ env.FLASHOS_QEMU_VERSION }}-${{ runner.os }}'
 expect_text .github/workflows/rust.yml 'ver="$FLASHOS_QEMU_VERSION"'
-
-# All three FlashSDK workspace deps must pin the manifest's rev, and the lock
-# must resolve to it — a bump that misses any one silently splits the ABI.
-sdk_pins=$(grep -Fc "FlashSDK\", rev = \"$FLASHSDK_REV\"" Cargo.toml || true)
-if [ "${sdk_pins:-0}" -ne 3 ]; then
-  printf 'version drift: Cargo.toml has %s FlashSDK pins at %s, expected 3\n' \
-    "${sdk_pins:-0}" "$FLASHSDK_REV" >&2
-  failed=1
-fi
-expect_text Cargo.lock "FlashSDK?rev=$FLASHSDK_REV#$FLASHSDK_REV"
 
 if ! awk -v expected="$FLASHOS_RELEASE_VERSION" '
   function flush() {
@@ -138,6 +122,6 @@ if [ "$failed" -ne 0 ]; then
   exit 1
 fi
 
-printf 'versions OK: FlashOS %s, Rust %s (MSRV %s), QEMU %s, FlashSDK %s\n' \
+printf 'versions OK: FlashOS %s, Rust %s (MSRV %s), QEMU %s\n' \
   "$FLASHOS_RELEASE_VERSION" "$FLASHOS_RUST_VERSION" "$FLASHOS_RUST_MSRV" \
-  "$FLASHOS_QEMU_VERSION" "${FLASHSDK_REV:0:12}"
+  "$FLASHOS_QEMU_VERSION"
