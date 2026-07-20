@@ -34,5 +34,5 @@ flashos-pwfile = { path = "../pwfile" }
 # Flash module carried, one for one.
 [dev-dependencies]
 sha2 = "=0.10.9"
-hmac = "=0.12.1"
+hmac = "=0.13.0"
 pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
