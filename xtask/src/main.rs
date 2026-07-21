@@ -39,6 +39,8 @@ Commands:
                                 --check proves asm_defs_common.inc still #includes it, no copies
   user <name> [--output <path>] [--feature <name>]...
                                Build a Rust EL0 payload (hello, clear, pid1, ...)
+  user --list                   Print every payload name, one per line (CI derives
+                               its shard matrix from this, so it can never drift)
   klib [--output <path>] [--feature <name>]...
                                Build the Rust kernel staticlib linked into kernel8.elf
   populate-syms --board <..> [gate flags]
@@ -173,6 +175,15 @@ fn dispatch() -> Result<(), String> {
         }
         "asm-defs" => asm_defs::run(&root, rest.iter().any(|a| a == "--check")),
         "user" => {
+            // Machine-readable census of USER_ELFS: the CI workflow computes its
+            // payload shard matrix from this output instead of hand-maintaining a
+            // copy of the table in YAML that would silently miss new payloads.
+            if rest.first().is_some_and(|a| a == "--list") {
+                for u in build::USER_ELFS {
+                    println!("{}", u.elf.trim_end_matches(".elf"));
+                }
+                return Ok(());
+            }
             let name = rest
                 .first()
                 .filter(|a| !a.starts_with("--"))

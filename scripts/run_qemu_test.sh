@@ -166,7 +166,17 @@ TIMEOUT_SECS=$1; shift
 QEMU=$1; shift
 
 LOG=$(mktemp -t flashos_qemu_test.XXXXXX)
-trap 'rm -f "$LOG"' EXIT
+# FLASHOS_LOG_COPY (optional): preserve the full serial log at this path on
+# exit. The boot log is the only evidence for a class of layout bugs the image
+# diff and host tests cannot catch, so CI exports this and uploads the copy as
+# a failure diagnostic; without it the tmpfile — and the evidence — is gone.
+preserve_log() {
+    if [ -n "${FLASHOS_LOG_COPY:-}" ]; then
+        cp -f "$LOG" "$FLASHOS_LOG_COPY" 2>/dev/null || true
+    fi
+    rm -f "$LOG"
+}
+trap preserve_log EXIT
 
 # QEMU's serial stdio is normally line-buffered, but pipe-redirection can
 # trigger libc block-buffering on the host side. Force line-buffering when

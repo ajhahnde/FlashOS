@@ -4,6 +4,11 @@
 name: security
 
 on:
+  # Direct pushes to main must hit the dependency policy too — without this
+  # trigger a lockfile change landed outside a pull request would only be
+  # audited by the following Monday's scheduled run.
+  push:
+    branches: [main]
   pull_request:
   schedule:
     # Mondays 06:00 UTC — re-audit dependencies against fresh advisory data.
@@ -24,6 +29,7 @@ jobs:
     name: dependency-review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -41,9 +47,19 @@ jobs:
   cargo-deny:
     name: cargo-deny
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: cargo-deny (advisories, bans, licenses, sources)
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
+          command: check advisories bans licenses sources
+      # FlashShell is a nested workspace excluded from the root one, with its
+      # own Cargo.lock — the root check above never reads it. Audit it against
+      # its own policy (components/flashshell/deny.toml) so its first external
+      # dependency is reviewed instead of slipping in unseen.
+      - name: cargo-deny — FlashShell nested workspace
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          manifest-path: components/flashshell/Cargo.toml
           command: check advisories bans licenses sources

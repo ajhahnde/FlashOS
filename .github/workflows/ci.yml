@@ -25,8 +25,10 @@ jobs:
   metadata:
     name: metadata
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       qemu-version: ${{ steps.flashos.outputs.qemu-version }}
+      payload-shards: ${{ steps.payloads.outputs.shards }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: flashos
@@ -35,12 +37,25 @@ jobs:
           check-versions: "true"
       - name: Public documentation drift
         run: scripts/check_doc_drift.sh
+      - name: Compute EL0 payload shard matrix
+        id: payloads
+        # Derive the shard matrix from xtask's payload table instead of keeping
+        # a copy of it in this file: a new payload joins CI the moment it joins
+        # USER_ELFS, and can never be silently missing from the fan-out.
+        run: |
+          set -euo pipefail
+          cargo xtask user --list \
+            | jq -cnR '[inputs] as $p
+                       | [range(0; $p | length; 6) as $i
+                          | $p[$i:$i+6] | join(" ")]' \
+            | sed 's/^/shards=/' >> "$GITHUB_OUTPUT"
 
   # ── Stage 2: parallel quality gates, each depending only on metadata ───────
   quality:
     name: quality
     needs: metadata
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-flashos
@@ -57,6 +72,7 @@ jobs:
     name: host-tests
     needs: metadata
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-flashos
@@ -71,12 +87,15 @@ jobs:
     name: contracts
     needs: metadata
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-flashos
         with:
           check-versions: "false"
-      - name: Repository hygiene
+      - name: Repository hygiene (whitespace, hex literals, layout contract)
+        # check-hygiene chains the whitespace + hex gates and ends with
+        # `cargo xtask check-layout`, so the layout guard runs here too.
         run: cargo xtask check-hygiene
       - name: Generated Rust/assembly layout contract
         run: cargo xtask asm-defs --check
@@ -89,14 +108,15 @@ jobs:
     name: payloads (${{ matrix.shard }})
     needs: metadata
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard:
-          - "hello clear echo cat ls"
-          - "rm cp mv grep"
-          - "meminfo dmesg uptime cpuinfo"
-          - "forkbomb argv_echo flibc_demo stackbomb"
+        # Computed by the metadata job from xtask's USER_ELFS table — every
+        # payload the tree owns, chunked six to a runner. clean-room-build
+        # rebuilds them all anyway; this fan-out exists for early, per-payload
+        # feedback while the expensive stages are still queued.
+        shard: ${{ fromJSON(needs.metadata.outputs.payload-shards) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-flashos
@@ -120,6 +140,7 @@ jobs:
     name: flashshell
     needs: metadata
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: components/flashshell
@@ -143,6 +164,7 @@ jobs:
     name: clean-room-build
     needs: [quality, host-tests, contracts, payloads, flashshell]
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-flashos
@@ -170,6 +192,7 @@ jobs:
     name: qemu-test-image
     needs: clean-room-build
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: flashos
@@ -205,6 +228,9 @@ jobs:
     name: qemu-boot-test
     needs: [metadata, qemu-test-image]
     runs-on: ubuntu-24.04
+    # Generous: a QEMU cache miss rebuilds the pinned release from source
+    # before the 720 s boot watchdog even starts.
+    timeout-minutes: 90
     env:
       FLASHOS_QEMU_VERSION: ${{ needs.metadata.outputs.qemu-version }}
     steps:
@@ -222,11 +248,18 @@ jobs:
           # Fail before powering on QEMU if the promoted bytes changed in transit.
           ( cd dist/ci-rpi4b && sha256sum -c SHA256SUMS )
       - name: Boot rpi4b under the watchdog
-        # The watchdog owns the boot contract (30 scenarios, 34 checkpoints,
-        # 3 homescreen markers, free-page baselines). It tests the downloaded
-        # files directly; nothing here rebuilds the kernel or SD image.
+        # The watchdog owns the boot contract — scenario tally, checkpoint
+        # counts, homescreen markers, free-page baselines all live in
+        # scripts/run_qemu_test.sh, never here. It tests the downloaded files
+        # directly; nothing in this job rebuilds the kernel or SD image.
+        # FLASHOS_LOG_COPY preserves the full serial log for the failure
+        # artifact — the boot log is the only evidence for a class of layout
+        # bugs that host tests and image diffs cannot catch.
+        env:
+          FLASHOS_LOG_COPY: rust-out/qemu-boot-serial.log
         run: |
           set -euo pipefail
+          mkdir -p rust-out
           scripts/run_qemu_test.sh 720 qemu-system-aarch64 \
             -M raspi4b -display none -serial null -serial stdio \
             -kernel dist/ci-rpi4b/kernel8.img \
@@ -246,6 +279,7 @@ jobs:
   required:
     name: required
     if: always()
+    timeout-minutes: 5
     needs:
       - metadata
       - quality
