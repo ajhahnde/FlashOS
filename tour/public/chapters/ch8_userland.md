@@ -25,7 +25,7 @@ user/* tools        → /bin/* and /test/*
 FAT32 volume as `PERMS.TAB`, not embedded in the read-only initramfs.
 
 Programs are staged as mode `0755`, public configuration as `0644`, and shadow
-as `0600`, owned by root. The archive is embedded by `tools/initramfs.S` and
+as `0600`, owned by root. The archive is embedded by `link/initramfs.S` and
 served read-only by `crates/kernel/src/initramfs_backend.rs`.
 
 ## The runtime boundary

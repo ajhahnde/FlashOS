@@ -11,7 +11,7 @@
 #   - hard tabs in maintained text/source files
 #   - CRLF line endings anywhere shipped
 #
-# src/symbol_area.S is generated and excluded; fix its generator if it
+# generated/symbol_area.S is generated and excluded; fix its generator if it
 # ever carries a hit. This script self-excludes because it must name
 # the forbidden patterns to match them.
 #
@@ -31,7 +31,7 @@ EXTS="--include=*.rs --include=*.S --include=*.inc \
       --include=*.yml --include=*.yaml --include=*.txt \
       --include=*.ld --include=*.toml"
 
-SELF_EXCLUDE='^(src/symbol_area\.S|scripts/check_whitespace_hygiene\.sh):'
+SELF_EXCLUDE='^(generated/symbol_area\.S|scripts/check_whitespace_hygiene\.sh):'
 
 # shellcheck disable=SC2086
 trailing="$(grep -rnE ' +$' $PATHS $EXTS 2>/dev/null \

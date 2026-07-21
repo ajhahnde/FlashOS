@@ -1,6 +1,6 @@
 /*
  * Linker script for the Rust argv_echo payload — same single-PT_LOAD shape
- * as tools/flibc_demo_linker.ld. argv_echo links the user runtime _start shim
+ * as link/flibc_demo_linker.ld. argv_echo links the user runtime _start shim
  * as its entry, walks argv, printf's each arg, and exits. The forked script
  * folds `.rodata*` / `.data*` /
  * `.bss*` into the one R+X LOAD; unlike flibc_demo this demo carries a

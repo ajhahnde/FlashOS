@@ -4,7 +4,7 @@ The CPU-architecture core for AArch64 (ARMv8-A). Everything in this directory
 is ISA-specific: it touches system registers, the exception model, the MMU
 translation regime, the generic timer, and the register-save layout that a
 context switch depends on. Nothing here owns a device driver: board-specific
-assembly and linker inputs live in `src/board/<board>/`, while the active Pi
+assembly and linker inputs live in `board/<board>/`, while the active Pi
 drivers are the `rpi4b_*.rs` modules in `crates/kernel/src/`.
 
 The rest of the kernel reaches this code by symbol, never by path. That makes

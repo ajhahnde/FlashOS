@@ -70,7 +70,7 @@
  * expands to a single instruction — byte-identical to the
  * pre-macro inline form. virt's larger LOW_MEMORY (0x40800000)
  * needs an explicit `ldr` first, hence the second template lives
- * in src/board/virt/board_asm_defs.inc. */
+ * in board/virt/board_asm_defs.inc. */
 .macro mov_sp_low_memory tmp
     mov sp, #LOW_MEMORY
 .endm

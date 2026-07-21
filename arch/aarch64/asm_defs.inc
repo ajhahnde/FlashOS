@@ -2,7 +2,7 @@
  * Bridge include for boot.S, entry.S, sched.S etc.: pulls in the
  * board-independent macros plus the active board's memory-layout
  * constants. The board file is found via the per-board include
- * path set by xtask (src/board/<board>/).
+ * path set by xtask (board/<board>/).
  */
 
 #ifndef ASM_DEFS_INC

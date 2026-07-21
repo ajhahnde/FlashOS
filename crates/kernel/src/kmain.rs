@@ -1,7 +1,7 @@
 //! Kernel bring-up and the idle loop -- the kernel root.
 //!
 //! `_start` (arch/aarch64/boot.S) enters `kernel_main`, the patchable trampoline
-//! in src/trace/patchable_trampolines.S, which reaches [`kernel_main_impl`] here
+//! in arch/aarch64/trace/patchable_trampolines.S, which reaches [`kernel_main_impl`] here
 //! through the C-ABI export in `crates/klib`. Core 0 walks the bring-up sequence
 //! and falls into the PID-0 idle loop; the secondary cores park at the `id != 0`
 //! gate and never run any of it.
@@ -104,7 +104,7 @@ mod target {
             pub fn get_el() -> u32;
             pub fn irq_init_vectors();
             pub fn irq_enable();
-            /// The patchable trampoline in src/trace/patchable_trampolines.S,
+            /// The patchable trampoline in arch/aarch64/trace/patchable_trampolines.S,
             /// which reaches `copy_process_impl`.
             pub fn copy_process(clone_flags: u64, fn_ptr: u64, arg: u64) -> i32;
             pub fn generic_timer_init();

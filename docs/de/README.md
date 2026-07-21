@@ -116,27 +116,6 @@ unter **[Setup](SETUP.md)** beschrieben.
 Eine ausführliche Tour durch die Subsysteme steht in der
 [Dokumentation](DOCUMENTATION.md).
 
-## Repository-Layout
-
-```text
-arch/aarch64/               AArch64-ISA-Core (Boot, Vektoren, Context Switch)
-src/                        Board-/Linker-Glue, Trace-Assembly, generierte Symbole
-src/board/<name>/           Board-spezifische Assembly-Definitionen + Linker-Skript
-crates/abi/                 kernelprivate Task-, ELF- und Page-Deskriptor-Layouts
-crates/kernel/              Rust-Kernelimplementierung
-crates/flibc/               Rust-Userland-Engines (Readline, Pager, TUI) für ELF-Programme
-user/                       Rust-PID-1, Shell, Tools und Testprogramme
-rootfs/                     statische Initramfs- und FAT32-Seed-Dateien
-tools/                      verbliebene ELF-Linker-Skripte + Initramfs-Embed-Assembly
-armstub/                    EL3→EL1-Bootstrap-Shim (nur Pi)
-xtask/                      nativer Build-, Prüf-, Generator- und Guard-Treiber
-scripts/                    QEMU-Watchdog, SD-Fixture, Hygiene, Baseline-Prüfung
-assets/                     Logo und visuelle Assets
-Cargo.toml                  Rust-Workspace
-flashos.zsh                 Shell-Helper einschließlich zweiphasigem `build`
-config.txt                  Raspberry-Pi-Firmwarekonfiguration
-```
-
 ## Siehe auch
 
 - **[FlashOS Tour →](https://ajhahn.de/flashos/)**

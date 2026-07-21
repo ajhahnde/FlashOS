@@ -42,11 +42,13 @@ arch/aarch64/                           AArch64 boot, vectors, IRQ entry, and sw
   sched.S                               context-switch primitive
   irq.S, generic_timer.S                architectural IRQ/timer helpers
   asm_defs*.inc                         assembly-visible ABI constants
-
-src/                                    retained low-level link inputs
-  board/rpi4b/                          Pi assembly definitions and linker script
-  board/virt/                           frozen virt assembly/linker inputs
   trace/                                function-entry trace trampolines and hook
+
+board/                                  per-board assembly and linker inputs
+  rpi4b/                                Pi assembly definitions and linker script
+  virt/                                 frozen virt assembly/linker inputs
+
+generated/                              checked-in build-generated sources
   symbol_area.S                         generated fixed-size kernel symbol table
 
 crates/abi/                             shared task, syscall, ELF, and EL0 layout ABI
@@ -83,7 +85,7 @@ rootfs/                                 checked-in filesystem seeds
   fsh/fshrc                             shell startup file
 
 xtask/                                  native build, generation, and inspection driver
-tools/                                  ELF linker scripts and initramfs embed assembly
+link/                                   ELF linker scripts and initramfs embed assembly
 armstub/                                Pi EL3-to-EL1 bootstrap
 scripts/                                watchdog, disk image, hygiene, and baseline tools
 firmware/                               bundled Raspberry Pi firmware inputs
@@ -93,10 +95,11 @@ rust-toolchain.toml                     synchronized compiler pin, target, compo
 flashos.zsh                             build/run/deploy and Pi-console helpers
 ```
 
-`src/` is not the kernel core. It contains the assembly and linker inputs that
-remain outside Rust. The machine-independent kernel lives in `crates/kernel/`;
-the shared assembly contract lives in `crates/abi/` and is checked by
-`cargo xtask asm-defs --check`.
+The assembly and linker inputs that remain outside Rust live next to what they
+describe: ISA code in `arch/aarch64/`, per-board link inputs in `board/`, and the
+build-generated symbol table in `generated/`. The machine-independent kernel
+lives in `crates/kernel/`; the shared assembly contract lives in `crates/abi/`
+and is checked by `cargo xtask asm-defs --check`.
 
 ## 2. Build and boot path
 
@@ -404,7 +407,7 @@ The user-facing `build` helper performs:
 1. a kernel link with the current placeholder or table;
 2. `cargo xtask populate-syms --board rpi4b`, which relinks, reads
    `kernel8.elf` with the pinned `llvm-nm`, filters mapping and runtime
-   aliases, and rewrites `src/symbol_area.S`;
+   aliases, and rewrites `generated/symbol_area.S`;
 3. a final link;
 4. an `nm` comparison proving symbol addresses converged.
 
@@ -412,7 +415,7 @@ Keeping the section fixed-size means population cannot move later sections.
 
 ### Function-entry tracing
 
-`src/trace/patchable_trampolines.S` provides two patchable NOPs for four
+`arch/aarch64/trace/patchable_trampolines.S` provides two patchable NOPs for four
 canonical entries: `kernel_main`, `_schedule`, `do_wait`, and
 `copy_process`. Bring-up relocates their linker table and patches the first
 slot to preserve LR and the second to branch to `hook`. The hook resolves the

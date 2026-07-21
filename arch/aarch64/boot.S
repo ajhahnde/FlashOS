@@ -183,7 +183,7 @@ el1_entry:
     ret
 
 /* Board-specific wake_up_cores lives in
- * src/board/<board>/boot_quirks.S; the linker concatenates its
+ * board/<board>/boot_quirks.S; the linker concatenates its
  * ".text.boot" between this file's ".text.boot" and
  * ".text.boot.late" below, preserving the original layout. */
 
@@ -201,7 +201,7 @@ map_identity:
     add x1, x0, #PAGE_SIZE
 
     /* Board-specific PUD/PMD setup. `.macro map_identity_regions` is
-     * defined in src/board/<board>/board_asm_defs.inc — Pi maps PA
+     * defined in board/<board>/board_asm_defs.inc — Pi maps PA
      * 0..0x1000000 via PUD index 0; virt maps PA
      * 0x40000000..0x41000000 via PUD index 1 so the kernel image at
      * PA 0x40080000 stays addressable across the MMU-enable point.
@@ -232,7 +232,7 @@ map_high:
 
     /* Board-specific PUD/PMD setup + create_block_map calls.
      * `.macro map_high_regions` is defined in
-     * src/board/<board>/board_asm_defs.inc — Pi 4 fans out to four
+     * board/<board>/board_asm_defs.inc — Pi 4 fans out to four
      * 1 GiB PUD slots with a 64 MiB device window in the last PMD;
      * other boards adapt freely.  The macro expands inline, so the
      * emitted bytes for rpi4b stay byte-identical to the previous

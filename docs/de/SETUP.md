@@ -95,7 +95,7 @@ build -d                   # derselbe Build, danach Deployment auf die SD-Karte
 ```
 
 `build` führt `cargo xtask clean` und die Source-Hygieneprüfungen aus, linkt
-den Kernel zunächst einmal, regeneriert `src/symbol_area.S` mit
+den Kernel zunächst einmal, regeneriert `generated/symbol_area.S` mit
 `populate-syms`, linkt erneut und prüft, ob das Symbol-Layout konvergiert ist.
 Für `rpi4b` baut der Helper außerdem den Armstub. Es gibt keinen interaktiven
 Deploy-Prompt; `-d` ist die ausdrückliche Zustimmung zum Deployment.
@@ -106,7 +106,7 @@ Deploy-Prompt; `-d` ist die ausdrückliche Zustimmung zum Deployment.
 | :------------------------------------------------- | :------------------------------------------ |
 | `cargo xtask build --board rpi4b`                  | Pi-Kernel, Userland und Initramfs           |
 | `cargo xtask armstub`                              | Pi-EL3→EL1-Armstub                          |
-| `cargo xtask populate-syms --board rpi4b`          | `src/symbol_area.S` regenerieren            |
+| `cargo xtask populate-syms --board rpi4b`          | `generated/symbol_area.S` regenerieren            |
 | `cargo xtask test`                                 | Rust-Hosttests                              |
 | `cargo xtask guard --board rpi4b --full`           | vollständiger Clean-Room-Produktions-Build  |
 | `cargo xtask build --board rpi4b --trace`          | Kernel mit Trace-Feature                    |
@@ -141,7 +141,7 @@ run watchdog rpi4b
 ```
 
 Vor dem Flashen kann die Byte-Identität zur Pi-Baseline geprüft werden. Das
-Skript sichert `src/symbol_area.S` vorübergehend, bereinigt den Build, baut neu
+Skript sichert `generated/symbol_area.S` vorübergehend, bereinigt den Build, baut neu
 und vergleicht mit `scripts/pi_baseline.sha256`:
 
 ```bash

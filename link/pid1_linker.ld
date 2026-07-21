@@ -2,7 +2,7 @@
  * Linker script for the Rust PID-1 payload — produces the
  * standalone pid1.elf that the kernel ELF-loads as PID 1.
  * Same single-PT_LOAD shape as
- * tools/flibc_demo_linker.ld: .text / .rodata / .data / .bss all fold
+ * link/flibc_demo_linker.ld: .text / .rodata / .data / .bss all fold
  * into one R+X LOAD segment at the page-aligned base 0x100000.
  *
  * pid1.elf carries the whole native kernel-test harness, so

@@ -179,7 +179,7 @@
 
 /* QEMU `-kernel` and UEFI / GRUB chain hand off the DTB physical
  * address in x0 per the Linux arm64 boot protocol. Save it before
- * the first `bl` in boot.S `master` clobbers it; src/board/virt/
+ * the first `bl` in boot.S `master` clobbers it; board/virt/
  * boot_quirks.S declares `dtb_pa` as a `.bss` quad. adrp+:lo12: pair
  * gives ±4 GiB reach (a plain `adr` would not survive once the .bss
  * landed far from .text). */

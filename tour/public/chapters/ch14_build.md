@@ -54,7 +54,7 @@ The linked image reserves exactly 128 KiB for `_symbols`. The user-facing
 
 1. links once;
 2. runs `cargo xtask populate-syms --board rpi4b`;
-3. rewrites `src/symbol_area.S` from pinned `llvm-nm` output;
+3. rewrites `generated/symbol_area.S` from pinned `llvm-nm` output;
 4. links again;
 5. proves the symbol addresses converged.
 

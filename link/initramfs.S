@@ -9,7 +9,7 @@
  * the relative "initramfs.cpio" lookup would fail.
  *
  * Section name `.initramfs` matches the linker.ld output section on
- * both boards (src/board/rpi4b/linker.ld, src/board/virt/linker.ld),
+ * both boards (board/rpi4b/linker.ld, board/virt/linker.ld),
  * which place the section between bss_end and id_pg_dir.
  */
 

@@ -9,7 +9,7 @@
 //! Entry is the runtime's `_start` argc/argv shim; `main` ignores argv. Every buffer
 //! is a stack local or a literal — no allocator, and no module-level mutable state: a
 //! `static mut` would land in `.bss`, which the single R+X PT_LOAD
-//! (`tools/fsh_linker.ld`) cannot write. The line, argv, scratch, history, and fshrc
+//! (`link/fsh_linker.ld`) cannot write. The line, argv, scratch, history, and fshrc
 //! buffers all live on the 64 KiB user stack.
 //!
 //! The tokenizer is pure and host-tested next door in [`tokenize`]; this file is the

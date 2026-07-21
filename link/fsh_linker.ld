@@ -1,6 +1,6 @@
 /*
  * Linker script for the native FlashOS shell. Same
- * single-PT_LOAD shape as tools/argv_echo_linker.ld, minus the 4 KiB
+ * single-PT_LOAD shape as link/argv_echo_linker.ld, minus the 4 KiB
  * .rodata PAD: fsh does not need to cross a page (it is not proving the
  * sys_execve streaming path), so it folds straight into one R+X LOAD.
  * Entry is the flibc _start argc/argv shim, selected via ENTRY(_start).

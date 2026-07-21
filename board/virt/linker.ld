@@ -1,6 +1,6 @@
 /*
  * Kernel link script for QEMU's `-M virt` (AArch64).
- * Mirrors src/board/rpi4b/linker.ld; the only structural change
+ * Mirrors board/rpi4b/linker.ld; the only structural change
  * is the load base. PID 1 is ELF-loaded from the embedded initramfs
  * — the `user_init.o` blob and its
  * `user_start` / `user_end` wrapper are retired, same as on Pi.
@@ -60,7 +60,7 @@ SECTIONS
     }
     bss_end = .;
 
-    /* Embedded initramfs — mirror of src/board/rpi4b/linker.ld. See
+    /* Embedded initramfs — mirror of board/rpi4b/linker.ld. See
      * that file's comment for the symbol-area convergence rationale. */
     . = ALIGN(0x4);
     .initramfs : {

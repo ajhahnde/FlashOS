@@ -2,7 +2,7 @@
 //! entry of every function compiled with `-fpatchable-function-entry=2`.
 //!
 //! The patchable-function-entries section contains the four hand-written
-//! trampolines in `src/trace/patchable_trampolines.S`.
+//! trampolines in `arch/aarch64/trace/patchable_trampolines.S`.
 
 use crate::trace::ksyms;
 use crate::trace::utils::{trace_output, trace_output_insn, trace_output_u64, PL};

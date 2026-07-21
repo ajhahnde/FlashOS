@@ -1923,7 +1923,7 @@ pub unsafe extern "C" fn traced(real_func_entry: u64) {
 // ---- Kernel root ----
 
 /// The kernel root, reached from the `kernel_main` trampoline in
-/// src/trace/patchable_trampolines.S, which `_start` (arch/aarch64/boot.S) calls.
+/// arch/aarch64/trace/patchable_trampolines.S, which `_start` (arch/aarch64/boot.S) calls.
 ///
 /// Unlike the rest of this module, this export is not a language bridge: the
 /// caller is assembler, so it outlives the Flash seam. It lives here because only

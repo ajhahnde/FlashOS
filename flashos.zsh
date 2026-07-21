@@ -740,7 +740,7 @@ _flashos_build_impl() {
     "${cargo[@]}" xtask build --board "$board" "${xtask_args[@]}"
   _flashos_build_task "extract symbol table (pass 1)" "$tmpdir" \
     _flashos_build_save_symbols "$nm_bin" "$kernel_elf" "$tmpdir/nmfirstpass"
-  _flashos_build_task "generate layout (src/symbol_area.S)" "$tmpdir" \
+  _flashos_build_task "generate layout (generated/symbol_area.S)" "$tmpdir" \
     "${cargo[@]}" xtask populate-syms --board "$board" "${xtask_args[@]}"
   _flashos_build_task "link kernel (pass 2: final)" "$tmpdir" \
     "${cargo[@]}" xtask build --board "$board" "${xtask_args[@]}"

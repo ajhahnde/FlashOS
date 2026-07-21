@@ -22,7 +22,7 @@ cd "$ROOT"
 
 # Exclude .DS_Store, non-source files, and the generated symbol_area.S.
 hits="$(grep -rnE "0x[0-9a-f]*[a-f][0-9a-f]*" src/ --include="*.S" --include="*.inc" \
-    | grep -vE "^src/symbol_area\.S:" \
+    | grep -vE "^generated/symbol_area\.S:" \
     | grep -vE ":[[:space:]]*(\/\/|\*)" \
     || true)"
 

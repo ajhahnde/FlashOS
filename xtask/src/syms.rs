@@ -1,4 +1,4 @@
-//! The kernel symbol table generator — the Rust owner of `src/symbol_area.S`.
+//! The kernel symbol table generator — the Rust owner of `generated/symbol_area.S`.
 //!
 //! `populate-syms` runs `nm -n` over the linked kernel, drops the mapping symbols
 //! and long compiler aliases the way the old shell pipeline did, and regenerates
