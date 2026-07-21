@@ -85,7 +85,7 @@ rootfs/                                 checked-in filesystem seeds
   fsh/fshrc                             shell startup file
 
 xtask/                                  native build, generation, and inspection driver
-link/                                   ELF linker scripts and initramfs embed assembly
+userland/link/                          userland ELF linker scripts
 armstub/                                Pi EL3-to-EL1 bootstrap
 scripts/                                watchdog, disk image, hygiene, and baseline tools
 vendor/raspberrypi-firmware/rpi4b/      bundled Raspberry Pi firmware inputs

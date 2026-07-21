@@ -394,103 +394,103 @@ pub const USER_ELFS: &[UserElf] = &[
         elf: "hello.elf",
         package: "flashos-hello",
         archive: "libflashos_hello.a",
-        linker_script: "link/hello_linker.ld",
+        linker_script: "userland/link/hello_linker.ld",
     },
     UserElf {
         elf: "clear.elf",
         package: "flashos-clear",
         archive: "libflashos_clear.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "cat.elf",
         package: "flashos-cat",
         archive: "libflashos_cat.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "cp.elf",
         package: "flashos-cp",
         archive: "libflashos_cp.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "cpuinfo.elf",
         package: "flashos-cpuinfo",
         archive: "libflashos_cpuinfo.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "dmesg.elf",
         package: "flashos-dmesg",
         archive: "libflashos_dmesg.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "echo.elf",
         package: "flashos-echo",
         archive: "libflashos_echo.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "forkbomb.elf",
         package: "flashos-forkbomb",
         archive: "libflashos_forkbomb.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "grep.elf",
         package: "flashos-grep",
         archive: "libflashos_grep.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "login.elf",
         package: "flashos-login",
         archive: "libflashos_login.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "ls.elf",
         package: "flashos-ls",
         archive: "libflashos_ls.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "meminfo.elf",
         package: "flashos-meminfo",
         archive: "libflashos_meminfo.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "mv.elf",
         package: "flashos-mv",
         archive: "libflashos_mv.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "passwd.elf",
         package: "flashos-passwd",
         archive: "libflashos_passwd.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "rm.elf",
         package: "flashos-rm",
         archive: "libflashos_rm.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "sysinfo.elf",
         package: "flashos-sysinfo",
         archive: "libflashos_sysinfo.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "uptime.elf",
         package: "flashos-uptime",
         archive: "libflashos_uptime.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     // The two full-screen tools. Both drive the TUI render core and both take the same
     // single-PT_LOAD layout as the coreutils -- the interactive half needs no linker
@@ -499,13 +499,13 @@ pub const USER_ELFS: &[UserElf] = &[
         elf: "less.elf",
         package: "flashos-less",
         archive: "libflashos_less.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     UserElf {
         elf: "edit.elf",
         package: "flashos-edit",
         archive: "libflashos_edit.a",
-        linker_script: "link/coreutil_linker.ld",
+        linker_script: "userland/link/coreutil_linker.ld",
     },
     // The shell. It keeps its own script rather than joining the coreutils: fsh needs a
     // single R+X PT_LOAD with no page-crossing pad, which is what fsh_linker.ld lays out.
@@ -513,7 +513,7 @@ pub const USER_ELFS: &[UserElf] = &[
         elf: "fsh.elf",
         package: "flashos-fsh",
         archive: "libflashos_fsh.a",
-        linker_script: "link/fsh_linker.ld",
+        linker_script: "userland/link/fsh_linker.ld",
     },
     // PID 1. The largest staged ELF, because it carries the whole boot self-test harness,
     // and the only one the kernel loads directly rather than through an exec -- so it is
@@ -523,7 +523,7 @@ pub const USER_ELFS: &[UserElf] = &[
         elf: "pid1.elf",
         package: "flashos-pid1",
         archive: "libflashos_pid1.a",
-        linker_script: "link/pid1_linker.ld",
+        linker_script: "userland/link/pid1_linker.ld",
     },
     // The harness payloads. Each keeps the retained script its old counterpart used:
     // argv_echo's own (it carries the over-a-page padding), flibc_demo's folded
@@ -532,19 +532,19 @@ pub const USER_ELFS: &[UserElf] = &[
         elf: "argv_echo.elf",
         package: "flashos-argv-echo",
         archive: "libflashos_argv_echo.a",
-        linker_script: "link/argv_echo_linker.ld",
+        linker_script: "userland/link/argv_echo_linker.ld",
     },
     UserElf {
         elf: "flibc_demo.elf",
         package: "flashos-flibc-demo",
         archive: "libflashos_flibc_demo.a",
-        linker_script: "link/flibc_demo_linker.ld",
+        linker_script: "userland/link/flibc_demo_linker.ld",
     },
     UserElf {
         elf: "stackbomb.elf",
         package: "flashos-stackbomb",
         archive: "libflashos_stackbomb.a",
-        linker_script: "link/hello_linker.ld",
+        linker_script: "userland/link/hello_linker.ld",
     },
 ];
 
@@ -839,7 +839,7 @@ fn inspect(p: &Paths, tc: &Toolchain) -> Result<(), String> {
 
 /// The kernel-only assembly the canary does not link: the symbol table, the two
 /// trace `.S` files, appended after `COMMON_ASM` and before the board's own and
-/// `link/initramfs.S`. Order within `.text` does not matter for these — only
+/// `crates/kernel/link/initramfs.S`. Order within `.text` does not matter for these — only
 /// boot.S's position in `.text.boot` is load-bearing, and that is `COMMON_ASM[0]`.
 const KERNEL_EXTRA_ASM: &[&str] = &[
     "crates/kernel/generated/symbol_area.S",
@@ -970,7 +970,7 @@ pub fn build(
 
 /// Stage every initramfs entry and encode the newc archive. Returns the path to
 /// a directory containing `initramfs.cpio`, ready to hand the assembler as an
-/// `-I` include dir for `link/initramfs.S`'s `.incbin`.
+/// `-I` include dir for `crates/kernel/link/initramfs.S`'s `.incbin`.
 fn build_initramfs(root: &Path, tc: &Toolchain, feats: KernelFeatures) -> Result<PathBuf, String> {
     let stage = root.join("rust-out/initramfs-stage");
     fs::create_dir_all(&stage).map_err(|e| format!("mkdir {}: {e}", stage.display()))?;
@@ -1042,7 +1042,7 @@ fn kernel_link(
         .map(|s| (root.join(s), None))
         .chain(board.board_asm().iter().map(|s| (board_dir.join(s), None)))
         .collect();
-    sources.push((root.join("link/initramfs.S"), Some(cpio_dir.to_path_buf())));
+    sources.push((root.join("crates/kernel/link/initramfs.S"), Some(cpio_dir.to_path_buf())));
 
     let mut objs: Vec<PathBuf> = Vec::new();
     for (src, extra_inc) in &sources {

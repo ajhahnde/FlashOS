@@ -101,7 +101,7 @@ rootfs/                             eingecheckte Dateisystem-Seeds
   fsh/fshrc                         Shell-Startdatei
 
 xtask/                              nativer Build-, Generator- und Prüftreiber
-link/                               ELF-Linker-Skripte und Initramfs-Embed-Assembly
+userland/link/                      userland ELF-Linker-Skripte
 armstub/                            Pi-EL3→EL1-Bootstrap
 scripts/                            Watchdog, Disk-Image, Hygiene und Baseline
 vendor/raspberrypi-firmware/rpi4b/  gebündelte Raspberry-Pi-Firmware-Inputs
