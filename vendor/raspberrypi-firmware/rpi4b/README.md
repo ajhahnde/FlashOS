@@ -68,5 +68,3 @@ shasum -a 256 -c SHA256SUMS
 
 4. Update the Provenance section above with the tag/commit you fetched.
 5. Reboot on hardware to confirm the new firmware still hands off to the kernel.
-</content>
-</invoke>

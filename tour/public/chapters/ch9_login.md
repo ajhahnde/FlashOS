@@ -53,7 +53,7 @@ will remain a tested recovery path.
 
 ## Permission model
 
-`crates/kernel/src/perm.rs` applies classic owner/group/other bits to open,
+`crates/kernel/src/fs/perm.rs` applies classic owner/group/other bits to open,
 write, and exec. Effective UID 0 bypasses the check. There are no ACLs,
 supplementary groups, setuid bits, `chmod`, or `chown` yet.
 

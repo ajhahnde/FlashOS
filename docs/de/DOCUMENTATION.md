@@ -57,27 +57,18 @@ board/                              Per-Board-Assembly und Linker-Inputs
   rpi4b/                            Pi-Assembly-Definitionen und Linker-Skript
   virt/                             eingefrorene virt-Assembly-/Linker-Inputs
 
-generated/                          eingecheckte build-generierte Quellen
-  symbol_area.S                     generierte Kernel-Symboltabelle fester Größe
-
 crates/kernel-abi/                  gemeinsame Task-, Syscall-, ELF- und EL0-ABI
 crates/kernel/                      aktive Rust-Kernelimplementierung
-  crates/kernel/src/kmain.rs        Bring-up, PID 0 und Start von PID 1
-  crates/kernel/src/page_alloc.rs
-  crates/kernel/src/mm_user.rs      physischer und virtueller User-Speicher
-  crates/kernel/src/sched.rs
-  crates/kernel/src/fork.rs
-  crates/kernel/src/execve.rs       Task-Lebenszyklus und ELF-Laden
-  crates/kernel/src/sys.rs          Syscall-Handler und Dispatch-Tabelle
-  crates/kernel/src/vfs.rs
-  crates/kernel/src/file.rs
-  crates/kernel/src/fdtable.rs      VFS, offene Dateien, Descriptor-Ownership
-  crates/kernel/src/initramfs.rs
-  crates/kernel/src/initramfs_backend.rs schreibgeschütztes Root-Dateisystem
-  crates/kernel/src/fat32.rs
-  crates/kernel/src/fat32_backend.rs FAT32-Parser und veränderbares /mnt-Backend
-  crates/kernel/src/rpi4b_emmc2.rs, rpi4b_usb.rs  repräsentative Pi-Treiber
-  crates/kernel/src/trace/          Symbollookup, Entry-Tracing und Sampling
+  src/kmain.rs                      Bring-up, PID 0 und Start von PID 1
+  src/mm/                           physischer und virtueller User-Speicher
+  src/process/                      Task-Lebenszyklus und ELF-Laden
+  src/syscall/                      Syscall-Handler und Dispatch-Tabelle
+  src/fs/                           VFS, offene Dateien, Descriptors, initramfs, FAT32
+  src/drivers/                      Konsole, USB-Gadget und Pi-Plattform-Treiber
+  src/diagnostics/                  Symbollookup, Entry-Tracing und Sampling
+  src/security/                     Hashing, Entropie und Shadow-Authentifizierung
+  src/util/                         Mailbox und Low-Level-Helper
+  generated/symbol_area.S           generierte Kernel-Symboltabelle fester Größe
 crates/klib/                        Static-Link- und C-ABI-Export-Seam
 crates/flibc/                       Userland-Engines (Readline, Pager, TUI)
 crates/console-ui/                  gemeinsame Boot-/Statusdarstellung
@@ -95,12 +86,11 @@ userland/                           Rust-EL0-Programme
   link/                             beibehaltene EL0-Linker-Skripte
 
 rootfs/                             eingecheckte Dateisystem-Seeds
+  etc/fshrc                         Shell-Startdatei
   etc/passwd                        Account-Datenbank
   etc/perms.tab                     FAT32-Berechtigungs-Overlay
-  etc/fshrc                         Shell-Startdatei
 
 xtask/                              nativer Build-, Generator- und Prüftreiber
-userland/link/                      userland ELF-Linker-Skripte
 armstub/                            Pi-EL3→EL1-Bootstrap
 scripts/                            Watchdog, Disk-Image, Hygiene und Baseline
 vendor/raspberrypi-firmware/rpi4b/  gebündelte Raspberry-Pi-Firmware-Inputs
@@ -112,7 +102,7 @@ flashos.zsh                         Build-/Run-/Deploy- und Pi-Konsolen-Helper
 
 Die außerhalb von Rust verbleibenden Assembly- und Linker-Inputs liegen neben
 dem, was sie beschreiben: ISA-Code in `arch/aarch64/`, Per-Board-Link-Inputs in
-`board/` und die build-generierte Symboltabelle in `generated/`. Der
+`board/` und die build-generierte Symboltabelle in `crates/kernel/generated/`. Der
 maschinenunabhängige Kernel liegt in `crates/kernel/`; der gemeinsame
 Assembly-Vertrag in `crates/kernel-abi/` wird mit `cargo xtask asm-defs --check` geprüft.
 
@@ -181,10 +171,10 @@ qualifiziert.
 
 FlashOS verwendet 4-KiB-Pages und eine vierstufige AArch64-Übersetzung. Die
 Boot-Assembly erzeugt ein frühes Identity-Mapping und das lineare High-Mapping
-ab `0xffff000000000000`. Die Helper in `crates/kernel/src/mm_user.rs`
+ab `0xffff000000000000`. Die Helper in `crates/kernel/src/mm/user.rs`
 übersetzen zwischen physischer Adresse und High-Alias.
 
-Der Page-Allocator in `crates/kernel/src/page_alloc.rs` besitzt auf dem Pi den
+Der Page-Allocator in `crates/kernel/src/mm/page_alloc.rs` besitzt auf dem Pi den
 Bereich `0x40000000..0xfc000000`: 770.048 mögliche 4-KiB-Pages. Der Bring-up
 reserviert Pages unterhalb des gelinkten Kernelendes und oberhalb des
 Board-RAM-Limits. Beim aktuellen 4-GiB-Pi-Layout sind diese Reservierungen ein
@@ -248,7 +238,7 @@ beendet ein OOM beim Laden den Task, statt das alte Image wiederherzustellen.
 
 ### Scheduler und Prozesslebenszyklus
 
-`crates/kernel/src/sched.rs` verwaltet eine feste Tabelle von 64
+`crates/kernel/src/process/sched.rs` verwaltet eine feste Tabelle von 64
 Task-Pointern. Der Scheduler ist uniprozessor-, präemptiv und
 prioritätsgewichtet: Runnable Tasks verbrauchen einen Counter; nach einer
 erschöpften Runde werden die Counter aus den Prioritäten neu gefüllt.
@@ -280,14 +270,14 @@ Backing-Page frei. Pipe- und Konsolen-Reads blockieren auf Wait Queues statt
 im Userland zu pollen.
 
 Mini-UART-RX-Interrupts speisen den 256-Byte-Ring aus
-`crates/kernel/src/console.rs`; das USB-CDC-ACM-Gadget speist denselben Ring.
+`crates/kernel/src/drivers/console/console.rs`; das USB-CDC-ACM-Gadget speist denselben Ring.
 User-Ausgabe wechselt bei konfiguriertem Gadget zu USB und verwendet sonst
 Mini-UART. Kernel-Diagnostik bleibt auf Mini-UART; Function-Entry-Traces laufen
 über PL011 auf GPIO 8/9.
 
 ### VFS und Initramfs
 
-`crates/kernel/src/vfs.rs` besitzt zwei Mount-Slots:
+`crates/kernel/src/fs/vfs.rs` besitzt zwei Mount-Slots:
 
 | Pfad | Backend |
 | :--- | :------ |
@@ -311,9 +301,9 @@ Der newc-Encoder und die Mode-Policy pro Eintrag liegen in
 
 ### FAT32
 
-`crates/kernel/src/rpi4b_emmc2.rs` bietet polled Single-Block-I/O für den
-BCM2711-Arasan-Controller. `crates/kernel/src/fat32.rs` parst MBR, BPB, FAT und
-Directory Entries; `crates/kernel/src/fat32_backend.rs` stellt die
+`crates/kernel/src/drivers/platform/rpi4b/emmc2.rs` bietet polled Single-Block-I/O für den
+BCM2711-Arasan-Controller. `crates/kernel/src/fs/fat32.rs` parst MBR, BPB, FAT und
+Directory Entries; `crates/kernel/src/fs/fat32_backend.rs` stellt die
 VFS-Operationen bereit.
 
 Die veränderbare Oberfläche unterstützt Open, Read, Write, Seek, Create,
@@ -350,7 +340,7 @@ praktikabel bleibt. Der aktuelle Entropieprovider ist ein timer-gemischter
 Fallback und meldet diese Einschränkung; ein BCM2711-RNG200-Treiber ist nicht
 implementiert.
 
-Die Berechtigungsprüfung in `crates/kernel/src/perm.rs` wendet klassische
+Die Berechtigungsprüfung in `crates/kernel/src/fs/perm.rs` wendet klassische
 Owner-/Group-/Other-Bits auf Open, Write und Exec an. Effektive UID 0 umgeht
 die Prüfung. ACLs, Supplementary Groups, Setuid-Bits, `chmod`, `chown` und
 Open-Mode-Flags fehlen noch.
@@ -394,7 +384,7 @@ FlashOS-v1.0-Stabilitätsschnitt ist ein dauerhaftes ABI-Versprechen.
 EL0-Wrapper legen die Syscall-Nummer in `x8`, Argumente in `x0..x5` und führen
 `svc #0` aus. `arch/aarch64/entry.S` speichert einen 272 Byte großen
 `KeRegs`-Frame, weist `x8 >= 56` ab und verzweigt durch die relocierte Tabelle
-aus `crates/kernel/src/sys.rs`.
+aus `crates/kernel/src/syscall/sys.rs`.
 
 | Slots | Oberfläche |
 | :---- | :--------- |
@@ -415,7 +405,7 @@ dauerhaft einen Fehler; 14–17 und 19–22 sind reservierte Stubs. ABI-Definiti
 
 Synchrone Faults dekodieren ESR und Fault-Adresse im Board-IRQ-/Exception-Pfad.
 Behandelbare User-Translation-Faults übernimmt
-`crates/kernel/src/mm_user.rs`; terminale ungültige Entries drucken
+`crates/kernel/src/mm/user.rs`; terminale ungültige Entries drucken
 `ERROR CAUGHT`, was der Watchdog als harten Fehler wertet.
 
 Der Kernel-Log ist ein 16-KiB-Overwrite-Oldest-Byte-Ring. `main_output` spiegelt

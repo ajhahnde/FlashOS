@@ -6,7 +6,7 @@ code creates an early identity map and a linear kernel mapping beginning at
 
 ## Physical-page allocation
 
-`crates/kernel/src/page_alloc.rs` manages the Pi range
+`crates/kernel/src/mm/page_alloc.rs` manages the Pi range
 `0x40000000..0xfc000000`, which contains 770,048 possible pages. A byte-per-page
 bitmap records ownership. Allocation returns a physical address; zero means
 OOM and must never be mapped.
@@ -35,7 +35,7 @@ W^X enforcement is therefore future work, not a current property.
 ## Demand mapping
 
 The ELF loader eagerly maps the top stack page and writes `argc`, `argv`, and
-the argument strings there. `crates/kernel/src/mm_user.rs` handles later
+the argument strings there. `crates/kernel/src/mm/user.rs` handles later
 translation faults:
 
 ```text

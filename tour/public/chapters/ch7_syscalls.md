@@ -5,7 +5,7 @@ syscall number in `x8`, arguments in `x0` through `x5`, and executes `svc #0`.
 
 The raw wrappers live in the FlashSDK `flashsdk-rt` crate (`syscall.rs`).
 Exception entry lives in `arch/aarch64/entry.S`; handler logic and the relocated
-dispatch table live in `crates/kernel/src/sys.rs`.
+dispatch table live in `crates/kernel/src/syscall/sys.rs`.
 
 ## Entry frame
 

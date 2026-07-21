@@ -148,15 +148,57 @@ fn package_name(manifest: &str) -> Option<String> {
 }
 
 /// Rule 3: every vendored payload has a `SHA256SUMS` line and every vendor drop
-/// carries a `README.md`. A vendor drop is a directory under `vendor/` that owns a
-/// `SHA256SUMS`; its checksum manifest and README are its provenance record.
+/// carries a `README.md`. A vendor drop is a directory under `vendor/` that holds
+/// vendored files; its checksum manifest and README are its provenance record.
+///
+/// The manifest check anchors on directories that hold non-meta files rather than on
+/// existing `SHA256SUMS` files, so a fresh drop that ships with neither a manifest nor
+/// a README is caught instead of passing silently. A directory is covered when it, or
+/// an ancestor up to `vendor/`, owns a `SHA256SUMS` — that lets a manifest at the drop
+/// root vouch for files in its subdirectories (e.g. `overlays/`) without demanding a
+/// second manifest there.
 fn check_vendor_checksums_and_readme(root: &Path, out: &mut Vec<String>) {
     let vendor = root.join("vendor");
     if !vendor.is_dir() {
         return;
     }
-    for sums in walk_files(&vendor)
-        .into_iter()
+    let all_files = walk_files(&vendor);
+
+    // Every directory that holds a vendored (non-meta) file must be covered by a
+    // SHA256SUMS in itself or an ancestor. Report each uncovered drop root once, and
+    // demand its README in the same breath.
+    let mut flagged: Vec<PathBuf> = Vec::new();
+    for file in &all_files {
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
+        if VENDOR_META_FILES.contains(&name.as_ref()) {
+            continue;
+        }
+        let dir = file.parent().unwrap_or(&vendor);
+        let mut covered = false;
+        let mut cur = Some(dir);
+        while let Some(d) = cur {
+            if d.join("SHA256SUMS").is_file() {
+                covered = true;
+                break;
+            }
+            if d == vendor {
+                break;
+            }
+            cur = d.parent();
+        }
+        if covered || flagged.iter().any(|f| f == dir) {
+            continue;
+        }
+        flagged.push(dir.to_path_buf());
+        let display = dir.strip_prefix(root).unwrap_or(dir).display().to_string();
+        out.push(format!("vendor drop {display} has no SHA256SUMS"));
+        if !dir.join("README.md").is_file() {
+            out.push(format!("vendor drop {display} has no README.md"));
+        }
+    }
+
+    for sums in all_files
+        .iter()
         .filter(|p| p.file_name().is_some_and(|n| n == "SHA256SUMS"))
     {
         let drop = sums.parent().unwrap_or(&vendor).to_path_buf();
@@ -170,7 +212,7 @@ fn check_vendor_checksums_and_readme(root: &Path, out: &mut Vec<String>) {
             out.push(format!("vendor drop {display} has no README.md"));
         }
 
-        let Ok(text) = std::fs::read_to_string(&sums) else {
+        let Ok(text) = std::fs::read_to_string(sums) else {
             out.push(format!("cannot read {}", sums.display()));
             continue;
         };
@@ -377,5 +419,78 @@ exclude = [\"components/flashshell\"]
         let mut out = Vec::new();
         collect_quoted("    \"a\", \"b/c\",", &mut out);
         assert_eq!(out, vec!["a", "b/c"]);
+    }
+
+    /// A private scratch tree that removes itself when the test ends.
+    struct TempTree(PathBuf);
+    impl TempTree {
+        fn new(tag: &str) -> Self {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static SEQ: AtomicU32 = AtomicU32::new(0);
+            let n = SEQ.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir()
+                .join(format!("flashos-layout-{tag}-{}-{n}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempTree(dir)
+        }
+        fn write(&self, rel: &str, body: &str) {
+            let p = self.0.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+    }
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn vendor_check_flags_a_drop_with_no_manifest_or_readme() {
+        let t = TempTree::new("nomanifest");
+        // A well-formed drop: manifest + README + a listed payload.
+        t.write("vendor/covered/README.md", "ok\n");
+        t.write("vendor/covered/data.bin", "x");
+        t.write("vendor/covered/SHA256SUMS", "deadbeef  ./data.bin\n");
+        // A bare new drop with a payload but neither manifest nor README.
+        t.write("vendor/uncovered/blob.bin", "y");
+
+        let mut out = Vec::new();
+        check_vendor_checksums_and_readme(&t.0, &mut out);
+
+        assert!(
+            out.iter()
+                .any(|v| v == "vendor drop vendor/uncovered has no SHA256SUMS"),
+            "expected the uncovered drop to be flagged, got {out:?}"
+        );
+        assert!(
+            out.iter()
+                .any(|v| v == "vendor drop vendor/uncovered has no README.md"),
+            "expected the missing README to be flagged, got {out:?}"
+        );
+        assert!(
+            !out.iter().any(|v| v.contains("vendor/covered")),
+            "the well-formed drop must not be flagged, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn vendor_check_accepts_subdir_files_covered_by_a_root_manifest() {
+        let t = TempTree::new("subdir");
+        t.write("vendor/fw/README.md", "ok\n");
+        t.write("vendor/fw/data.bin", "x");
+        t.write("vendor/fw/overlays/extra.bin", "z");
+        t.write(
+            "vendor/fw/SHA256SUMS",
+            "aa  ./data.bin\nbb  ./overlays/extra.bin\n",
+        );
+
+        let mut out = Vec::new();
+        check_vendor_checksums_and_readme(&t.0, &mut out);
+
+        assert!(
+            out.is_empty(),
+            "a root manifest should cover subdir files, got {out:?}"
+        );
     }
 }

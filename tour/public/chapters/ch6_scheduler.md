@@ -1,6 +1,6 @@
 # 6. Scheduler and Process Lifecycle
 
-`crates/kernel/src/sched.rs` owns a fixed table of 64 task pointers. The
+`crates/kernel/src/process/sched.rs` owns a fixed table of 64 task pointers. The
 scheduler is uniprocessor, preemptive, and priority-weighted.
 
 ## Counters and priorities
@@ -43,7 +43,7 @@ dying task.
 
 ## `execve` is not a new process
 
-`crates/kernel/src/execve.rs` resolves an ELF through the VFS, copies the image
+`crates/kernel/src/process/execve.rs` resolves an ELF through the VFS, copies the image
 and arguments into bounded kernel scratch space, creates a fresh address space,
 and enters at the ELF entry point. PID, credentials, CWD, and open descriptors
 survive.

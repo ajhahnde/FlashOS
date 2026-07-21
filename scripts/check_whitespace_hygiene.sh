@@ -22,7 +22,7 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-PATHS="src rootfs crates user xtask tools armstub/src scripts .github/workflows
+PATHS="src rootfs crates userland xtask tools armstub/src scripts .github/workflows
 README.md DOCUMENTATION.md SETUP.md CHANGELOG.md LICENSE.md
 Cargo.toml config.txt docs/de"
 

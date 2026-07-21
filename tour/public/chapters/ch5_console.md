@@ -13,7 +13,7 @@ play.
 ## One input ring
 
 Mini-UART RX interrupts and the USB gadget both feed the 256-byte input ring in
-`crates/kernel/src/console.rs`. A process reading a console descriptor blocks
+`crates/kernel/src/drivers/console/console.rs`. A process reading a console descriptor blocks
 on a wait queue when no byte is ready. The IRQ/device path wakes the reader
 after inserting input.
 
@@ -28,8 +28,8 @@ disconnect therefore cannot hide a kernel panic or bring-up message.
 
 The console is represented by the same tagged descriptor table used for pipes
 and files. Unified `read`, `write`, `close`, and `dup2` syscalls dispatch by
-descriptor kind in `crates/kernel/src/fdtable.rs` and
-`crates/kernel/src/sys.rs`.
+descriptor kind in `crates/kernel/src/fs/fdtable.rs` and
+`crates/kernel/src/syscall/sys.rs`.
 
 ## Raw and cooked interaction
 
