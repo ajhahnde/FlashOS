@@ -7,9 +7,9 @@
 
 use core::ffi::c_void;
 
-pub use flashos_abi::task::TaskStruct;
-use flashos_abi::task::{UserPage, MAX_PAGE_COUNT};
-use flashos_abi::user::{TD_USER_PAGE_FLAGS_DEFAULT, TD_USER_XN};
+pub use flashos_kernel_abi::task::TaskStruct;
+use flashos_kernel_abi::task::{UserPage, MAX_PAGE_COUNT};
+use flashos_kernel_abi::user::{TD_USER_PAGE_FLAGS_DEFAULT, TD_USER_XN};
 use flashsdk_abi::user;
 
 const PAGE_SHIFT: u32 = 12;

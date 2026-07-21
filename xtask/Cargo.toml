@@ -13,7 +13,7 @@ publish = false
 # offset) and from the pinned FlashSDK ABI (the syscall dispatch cap), so the
 # numbers it checks cannot be a stale copy.
 [dependencies]
-flashos-abi = { path = "../crates/abi" }
+flashos-kernel-abi = { path = "../crates/kernel-abi" }
 flashsdk-abi = { workspace = true }
 flashos-console-ui = { path = "../crates/console-ui" }
 # `gen-shadow` runs the kernel's own PBKDF2 to bake /etc/shadow, so the verifier

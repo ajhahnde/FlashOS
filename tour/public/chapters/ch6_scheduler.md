@@ -15,7 +15,7 @@ The split is deliberate:
 - Rust decides task state, counters, priority, ownership, and the next task;
 - assembly swaps callee-saved registers, SP, FP, LR, and the translation base.
 
-Assembly-visible offsets are generated from `crates/abi/`, so the switch code
+Assembly-visible offsets are generated from `crates/kernel-abi/`, so the switch code
 does not maintain a handwritten mirror of `TaskStruct`.
 
 ## The lifecycle

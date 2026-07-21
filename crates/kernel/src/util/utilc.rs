@@ -13,7 +13,7 @@
 //! implementation would fault against `SCTLR_EL1.A` on the odd addresses the
 //! cpio and path scanners hand them.
 
-use flashos_abi::task::{KeRegs, TaskStruct};
+use flashos_kernel_abi::task::{KeRegs, TaskStruct};
 
 use crate::klog_ring;
 

@@ -6,7 +6,7 @@
 //! `extern "C"`, `#[no_mangle]`, no panic across the boundary, and no Rust type
 //! without a fixed representation.
 
-use flashos_abi::task::KeRegs;
+use flashos_kernel_abi::task::KeRegs;
 use flashos_kernel::{
     block_dev, console, execve, fat32_backend, fdtable, file, fork, generic_timer, hwrng,
     initramfs_backend, klog_ring, kmain, mailbox, mm_user, page_alloc, path, perm, pipe,

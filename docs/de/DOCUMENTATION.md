@@ -60,7 +60,7 @@ board/                              Per-Board-Assembly und Linker-Inputs
 generated/                          eingecheckte build-generierte Quellen
   symbol_area.S                     generierte Kernel-Symboltabelle fester Größe
 
-crates/abi/                         gemeinsame Task-, Syscall-, ELF- und EL0-ABI
+crates/kernel-abi/                  gemeinsame Task-, Syscall-, ELF- und EL0-ABI
 crates/kernel/                      aktive Rust-Kernelimplementierung
   crates/kernel/src/kmain.rs        Bring-up, PID 0 und Start von PID 1
   crates/kernel/src/page_alloc.rs
@@ -115,7 +115,7 @@ Die außerhalb von Rust verbleibenden Assembly- und Linker-Inputs liegen neben
 dem, was sie beschreiben: ISA-Code in `arch/aarch64/`, Per-Board-Link-Inputs in
 `board/` und die build-generierte Symboltabelle in `generated/`. Der
 maschinenunabhängige Kernel liegt in `crates/kernel/`; der gemeinsame
-Assembly-Vertrag in `crates/abi/` wird mit `cargo xtask asm-defs --check` geprüft.
+Assembly-Vertrag in `crates/kernel-abi/` wird mit `cargo xtask asm-defs --check` geprüft.
 
 ## 2. Build- und Boot-Pfad
 
@@ -199,7 +199,7 @@ verfolgt.
 
 ### Virtuelles EL0-Layout
 
-`crates/abi/src/user.rs` ist die einzige Quelle der Wahrheit:
+`crates/kernel-abi/src/user.rs` ist die einzige Quelle der Wahrheit:
 
 | Region | Beginn / Umfang | Aktuelle Mapping-Policy |
 | :----- | :-------------- | :---------------------- |
@@ -239,7 +239,7 @@ verhindert, dass ein tiefer Syscall-Stack Credential-Felder erreicht. `KeRegs`,
 der 272 Byte große gespeicherte Exception-Frame, liegt oben in der dedizierten
 Stack-Page und lässt 3.824 Byte für die aktive Call-Chain; ein verschachtelter
 IRQ verbraucht einen Teil dieses Budgets. Für Assembly sichtbare Größen und
-Offsets werden aus `crates/abi/` generiert.
+Offsets werden aus `crates/kernel-abi/` generiert.
 
 Teilweise Fork-, Page-Table-, Pipe-, File- und Exec-Allokationen besitzen
 explizite Rollback-Pfade. Hat Exec seinen Point of no Return überschritten,
@@ -375,7 +375,7 @@ Neuschreiben, weil der aktuelle FAT32-Write-Pfad eine vorhandene Datei nicht
 truncaten kann.
 
 Das aktuelle Produktionsimage enthält `fsh`, die genannten Textprogramme und
-eine interne Rust-ABI in `crates/abi/`. Nach dem Rust-Port-Release ist diese
+eine interne Rust-ABI in `crates/kernel-abi/`. Nach dem Rust-Port-Release ist diese
 Reihenfolge geplant:
 
 1. FlashSDK als schmalen öffentlichen Syscall-/Userspace-ABI-, EL0-Runtime-,
@@ -387,7 +387,7 @@ Reihenfolge geplant:
 
 Kernel-private Records wie `TaskStruct`, Registerframes und VFS-/fd-Interna
 werden nicht öffentlich, nur weil sie heute neben Syscall-Typen in
-`crates/abi/` liegen. FlashSDK versioniert unabhängig als 0.x-Vertrag; erst der
+`crates/kernel-abi/` liegen. FlashSDK versioniert unabhängig als 0.x-Vertrag; erst der
 FlashOS-v1.0-Stabilitätsschnitt ist ein dauerhaftes ABI-Versprechen.
 
 ## 5. Syscalls und Exceptions

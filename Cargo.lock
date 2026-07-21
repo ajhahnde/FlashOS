@@ -48,10 +48,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flashos-abi"
-version = "0.8.0"
-
-[[package]]
 name = "flashos-argv-echo"
 version = "0.8.0"
 dependencies = [
@@ -184,8 +180,8 @@ dependencies = [
 name = "flashos-kernel"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-console-ui",
+ "flashos-kernel-abi",
  "flashos-pwfile",
  "flashsdk-abi",
  "hmac",
@@ -194,11 +190,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "flashos-kernel-abi"
+version = "0.8.0"
+
+[[package]]
 name = "flashos-klib"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-kernel",
+ "flashos-kernel-abi",
  "flashsdk-abi",
 ]
 
@@ -390,8 +390,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "xtask"
 version = "0.8.0"
 dependencies = [
- "flashos-abi",
  "flashos-console-ui",
  "flashos-kernel",
+ "flashos-kernel-abi",
  "flashsdk-abi",
 ]

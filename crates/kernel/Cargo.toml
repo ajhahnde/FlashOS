@@ -21,7 +21,7 @@ trace = []
 boot-selftest = []
 
 [dependencies]
-flashos-abi = { path = "../abi" }
+flashos-kernel-abi = { path = "../kernel-abi" }
 flashsdk-abi = { workspace = true }
 # Workspace-internal no_std crates, not third-party runtime: the syscall layer
 # needs the frozen boot-marker bytes and the account-file lookup.

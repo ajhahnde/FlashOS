@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "xtask",
-    "crates/abi",
+    "crates/kernel-abi",
     "crates/canary",
     "crates/flashsdk-abi",
     "crates/flashsdk-base",

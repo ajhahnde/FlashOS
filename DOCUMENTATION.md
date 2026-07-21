@@ -51,7 +51,7 @@ board/                                  per-board assembly and linker inputs
 generated/                              checked-in build-generated sources
   symbol_area.S                         generated fixed-size kernel symbol table
 
-crates/abi/                             shared task, syscall, ELF, and EL0 layout ABI
+crates/kernel-abi/                      shared task, syscall, ELF, and EL0 layout ABI
 crates/kernel/                          active Rust kernel implementation
   src/kmain.rs                          bring-up, PID 0, and PID 1 launch
   src/page_alloc.rs, mm_user.rs         physical and user virtual memory
@@ -98,7 +98,7 @@ flashos.zsh                             build/run/deploy and Pi-console helpers
 The assembly and linker inputs that remain outside Rust live next to what they
 describe: ISA code in `arch/aarch64/`, per-board link inputs in `board/`, and the
 build-generated symbol table in `generated/`. The machine-independent kernel
-lives in `crates/kernel/`; the shared assembly contract lives in `crates/abi/`
+lives in `crates/kernel/`; the shared assembly contract lives in `crates/kernel-abi/`
 and is checked by `cargo xtask asm-defs --check`.
 
 ## 2. Build and boot path
@@ -179,7 +179,7 @@ spaces track at most 32 user pages and 32 page-table pages per task.
 
 ### EL0 virtual layout
 
-`crates/abi/src/user.rs` is the single source of truth:
+`crates/kernel-abi/src/user.rs` is the single source of truth:
 
 | Region | Start / extent                        | Current mapping policy       |
 | :----- | :------------------------------------ | :--------------------------- |
@@ -217,7 +217,7 @@ created task's kernel stack separate from `TaskStruct` prevents a deep syscall
 stack from reaching the credential fields. `KeRegs`, the 272-byte saved
 exception frame, sits at the top of the dedicated stack page, leaving 3,824
 bytes for the active call chain; a nested IRQ consumes part of that same budget.
-Assembly-visible sizes and offsets are generated from `crates/abi/`.
+Assembly-visible sizes and offsets are generated from `crates/kernel-abi/`.
 
 Partial fork, page-table, pipe, file, and exec allocations have explicit
 rollback paths. After exec has passed its point of no return, a load-time OOM
@@ -352,11 +352,11 @@ and rewriting the destination because the current FAT32 write path does not
 truncate an existing file.
 
 The current production image ships `fsh`, the text-mode programs above, and
-an internal Rust ABI in `crates/abi/`.
+an internal Rust ABI in `crates/kernel-abi/`.
 
 Kernel-private records such as `TaskStruct`, register frames, and VFS/fd
 internals do not become public merely because they currently live beside
-syscall types in `crates/abi/`.
+syscall types in `crates/kernel-abi/`.
 
 ## 5. Syscalls and exceptions
 

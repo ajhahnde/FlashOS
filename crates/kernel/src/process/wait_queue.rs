@@ -6,7 +6,7 @@
 //! * The wait-side links the running task at the head, flips its state to
 //!   `INTERRUPTIBLE`, drops preempt, then schedules. The wake-side reverses
 //!   both (pop + flip to `RUNNING` + clear `wq_next`).
-//! * `wq_next` lives in `TaskStruct` (crates/abi) — a task can only be on one
+//! * `wq_next` lives in `TaskStruct` (crates/kernel-abi) — a task can only be on one
 //!   queue at a time, mirroring Linux's `wq_node`.
 //! * `preempt_disable` around the head mutation is enough on single core
 //!   because no two callers can race on the same queue. IRQ callers (mini-UART
@@ -19,7 +19,7 @@
 
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 
-use flashos_abi::task::{TaskStruct, TASK_INTERRUPTIBLE, TASK_RUNNING};
+use flashos_kernel_abi::task::{TaskStruct, TASK_INTERRUPTIBLE, TASK_RUNNING};
 
 /// Intrusive singly-linked wait queue head. The list threads through each
 /// task's `wq_next`; an empty queue is a null head.

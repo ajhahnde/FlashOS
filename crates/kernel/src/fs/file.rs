@@ -1,11 +1,11 @@
 //! Open-file lifetime helpers.
 //!
-//! The fixed `File` record lives in `flashos-abi` because task and fd-table
+//! The fixed `File` record lives in `flashos-kernel-abi` because task and fd-table
 //! layouts embed pointers to it. This module owns the record's lifecycle and
 //! its type tag. Allocation and preemption primitives are supplied through the
 //! small kernel ABI wrapper in `crates/klib`.
 
-pub use flashos_abi::task::{File, TaskStruct, FD_TABLE_SIZE};
+pub use flashos_kernel_abi::task::{File, TaskStruct, FD_TABLE_SIZE};
 
 /// `File.ftype` tag values. Only the initramfs backend has a distinct tag
 /// today; FAT32 uses the same generic file dispatch through `File.sb`.

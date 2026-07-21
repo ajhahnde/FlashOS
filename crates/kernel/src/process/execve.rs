@@ -13,7 +13,7 @@ use crate::{
     vfs,
 };
 use core::ptr::{addr_of, addr_of_mut};
-use flashos_abi::task::{TaskStruct, UserPage, CWD_SIZE, MAX_PAGE_COUNT};
+use flashos_kernel_abi::task::{TaskStruct, UserPage, CWD_SIZE, MAX_PAGE_COUNT};
 use flashsdk_abi::{syscall::EACCES, user::STACK_TOP};
 
 /// Largest executable image accepted by the path loader.

@@ -15,7 +15,7 @@
 //! This is a *statistical* profiler — leaf frames and hand-written-asm frames
 //! that carry no standard AAPCS64 frame record are simply skipped.
 
-use flashos_abi::task::KeRegs;
+use flashos_kernel_abi::task::KeRegs;
 
 use crate::trace::{fp_walk, ksyms};
 use crate::utilc;
@@ -28,7 +28,7 @@ const MAX_DEPTH: usize = 32;
 
 #[cfg(target_os = "none")]
 mod seam {
-    use flashos_abi::task::TaskStruct;
+    use flashos_kernel_abi::task::TaskStruct;
 
     unsafe extern "C" {
         /// The same global `timer_tick` reads; reachable from IRQ context.
@@ -71,7 +71,7 @@ mod seam {
 
 #[cfg(not(target_os = "none"))]
 mod seam {
-    use flashos_abi::task::TaskStruct;
+    use flashos_kernel_abi::task::TaskStruct;
 
     /// Host builds have no scheduler. Tests stage the task the sampler will see.
     pub static mut CURRENT: *mut TaskStruct = core::ptr::null_mut();

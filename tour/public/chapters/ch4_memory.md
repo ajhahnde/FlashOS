@@ -18,7 +18,7 @@ reaching process credentials stored in `TaskStruct`.
 
 ## EL0 address-space layout
 
-`crates/abi/src/user.rs` is the source of truth:
+`crates/kernel-abi/src/user.rs` is the source of truth:
 
 | Region | Address policy |
 | :----- | :------------- |

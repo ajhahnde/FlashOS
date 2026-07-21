@@ -7,13 +7,13 @@
 
 use crate::{elf, execve::ArgvBlock, fdtable};
 use core::ptr::{addr_of, addr_of_mut};
-use flashos_abi::{
+use flashos_kernel_abi::{
     task::{CoreContext, KTHREAD, TASK_RUNNING, THREAD_SIZE},
     user::{TD_USER_PAGE_FLAGS_DEFAULT, TD_USER_XN},
 };
 use flashsdk_abi::user::{HEAP_BASE, PAGE_SIZE, STACK_TOP};
 
-pub use flashos_abi::task::{KeRegs, TaskStruct};
+pub use flashos_kernel_abi::task::{KeRegs, TaskStruct};
 
 use crate::sched::NR_TASKS;
 

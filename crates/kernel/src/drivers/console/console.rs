@@ -216,7 +216,7 @@ pub unsafe fn console_test_push(byte: u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flashos_abi::task::{TaskStruct, TASK_INTERRUPTIBLE, TASK_RUNNING};
+    use flashos_kernel_abi::task::{TaskStruct, TASK_INTERRUPTIBLE, TASK_RUNNING};
 
     fn ring() -> ConsoleRx {
         ConsoleRx::new()

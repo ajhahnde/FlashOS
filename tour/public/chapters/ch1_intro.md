@@ -34,7 +34,7 @@ and is not part of the current release gate.
 - kernel tracing, host tests, and a 30-scenario runtime harness.
 
 The repository mirrors those boundaries. `crates/kernel/` owns the Rust kernel,
-`crates/abi/` owns layouts shared with userland and assembly, `user/` contains
+`crates/kernel-abi/` owns layouts shared with userland and assembly, `user/` contains
 EL0 executables, and `rootfs/` contains checked-in filesystem seeds. The root
 `src/` directory now contains only retained assembly, linker, trace, and symbol
 glue—not the kernel implementation.
@@ -49,7 +49,7 @@ bare-metal build or its target-specific checks.
 
 > [!NOTE]
 > FlashOS is pre-1.0. Internal layouts and syscall details may change between
-> releases. The current `crates/abi/` crate is an internal contract, not yet a
+> releases. The current `crates/kernel-abi/` crate is an internal contract, not yet a
 > stable public SDK.
 
 ## What comes after the Rust-port release?

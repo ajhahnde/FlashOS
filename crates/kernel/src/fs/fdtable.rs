@@ -14,7 +14,7 @@
 use core::ffi::c_void;
 use core::ptr::{addr_of_mut, null_mut};
 
-pub use flashos_abi::task::{FdSlot, TaskStruct, FD_TABLE_SIZE};
+pub use flashos_kernel_abi::task::{FdSlot, TaskStruct, FD_TABLE_SIZE};
 
 use crate::file::{self, File};
 use crate::pipe::{self, Pipe};
@@ -308,7 +308,7 @@ pub unsafe fn close_all(task: *mut TaskStruct) {
 mod tests {
     use super::*;
     use core::ptr::addr_of;
-    use flashos_abi::task::File as AbiFile;
+    use flashos_kernel_abi::task::File as AbiFile;
 
     fn file_with_refs(refs: u32) -> AbiFile {
         AbiFile {

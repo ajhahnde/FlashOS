@@ -1,9 +1,9 @@
 [package]
-name = "flashos-abi"
+name = "flashos-kernel-abi"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [lib]
-name = "flashos_abi"
+name = "flashos_kernel_abi"

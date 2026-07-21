@@ -7,8 +7,8 @@
 //!   * `NR_SYSCALLS`         = the dispatch cap        — entry.S caps `b.hs` on it
 //!   * `CORE_CONTEXT_OFFSET` = `offset_of!(TaskStruct, core_context)` — sched.S
 //!
-//! `S_FRAME_SIZE` and `CORE_CONTEXT_OFFSET` come from `flashos-abi` (the
-//! kernel-private `crates/abi`); `NR_SYSCALLS` from the public
+//! `S_FRAME_SIZE` and `CORE_CONTEXT_OFFSET` come from `flashos-kernel-abi` (the
+//! kernel-private `crates/kernel-abi`); `NR_SYSCALLS` from the public
 //! `flashsdk-abi::syscall`. This module renders all three into
 //! `rust-out/asm_defs_abi.inc`, which `arch/aarch64/asm_defs_common.inc`
 //! `#include`s — so the assembly reads the live value instead of a hand-copied
@@ -24,7 +24,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use flashos_abi::task::{KeRegs, TaskStruct};
+use flashos_kernel_abi::task::{KeRegs, TaskStruct};
 use flashsdk_abi::syscall::NR_SYSCALLS;
 
 /// The include that pulls the generated facts into the assembly.

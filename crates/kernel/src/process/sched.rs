@@ -8,12 +8,12 @@
 
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 
-use flashos_abi::task::{
+use flashos_kernel_abi::task::{
     CoreContext, FdSlot, MmStruct, UserPage, CWD_SIZE, FD_TABLE_SIZE, KTHREAD, MAX_PAGE_COUNT,
     TASK_INTERRUPTIBLE, TASK_RUNNING, TASK_ZOMBIE,
 };
 
-pub use flashos_abi::task::TaskStruct;
+pub use flashos_kernel_abi::task::TaskStruct;
 
 use crate::fdtable;
 

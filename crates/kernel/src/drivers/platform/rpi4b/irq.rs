@@ -2,7 +2,7 @@
 
 use crate::{console, rpi4b_timer, rpi4b_uart, utilc};
 use core::ptr::{read_volatile, write_volatile};
-use flashos_abi::task::KeRegs;
+use flashos_kernel_abi::task::KeRegs;
 
 const LINEAR_MAP_BASE: usize = 0xFFFF_0000_0000_0000;
 const GIC_BASE: usize = 0xFF84_0000 + LINEAR_MAP_BASE;

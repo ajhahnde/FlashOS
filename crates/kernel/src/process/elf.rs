@@ -1,9 +1,9 @@
 //! ELF64 header and program-header validation for the EL0 loader.
 //!
-//! Record layouts and constants live in `flashos-abi`; this module owns the
+//! Record layouts and constants live in `flashos-kernel-abi`; this module owns the
 //! safe byte decoding and the loader-specific address-range policy.
 
-pub use flashos_abi::elf::{
+pub use flashos_kernel_abi::elf::{
     Ehdr, Phdr, ELFCLASS64, ELFDATA2LSB, ELF_MAGIC, EM_AARCH64, ET_EXEC, EV_CURRENT, MAX_PHDRS,
     PF_R, PF_W, PF_X, PT_LOAD,
 };

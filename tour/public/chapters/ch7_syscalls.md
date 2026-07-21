@@ -31,7 +31,7 @@ such as `Dirent`; the kernel and every user program consume it at one pinned
 revision. FlashSDK is the narrow public syscall/userspace ABI, runtime, base
 library, and target-and-link contract. Private task records, saved frames, VFS
 objects, descriptor internals, and the user-page descriptor bits stay private in
-the repository's own `crates/abi`.
+the repository's own `crates/kernel-abi`.
 
 ## Current syscall groups
 

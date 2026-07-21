@@ -14,7 +14,7 @@
 //! does not resolve is a soft `-1` to the caller, never a fault that zombifies
 //! the task.
 
-use flashos_abi::task::{File, TaskStruct, CWD_SIZE, UTHREAD};
+use flashos_kernel_abi::task::{File, TaskStruct, CWD_SIZE, UTHREAD};
 use flashsdk_abi::syscall::{Dirent, CONSOLE_MODE_ECHO, CONSOLE_MODE_MASK, EACCES};
 use flashsdk_abi::user::{HEAP_BASE, PAGE_SIZE, STACK_BUDGET, STACK_TOP};
 
@@ -2477,7 +2477,7 @@ pub unsafe fn sys_cpu_freq() -> u64 {
 mod tests {
     use super::*;
     use core::ptr::null_mut;
-    use flashos_abi::task::{TASK_RUNNING, TASK_ZOMBIE};
+    use flashos_kernel_abi::task::{TASK_RUNNING, TASK_ZOMBIE};
     use std::sync::{Mutex, MutexGuard};
 
     /// The kill tests publish the scheduler's `current`/`task` globals, which

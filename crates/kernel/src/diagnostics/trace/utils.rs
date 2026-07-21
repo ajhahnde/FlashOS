@@ -1,6 +1,6 @@
 //! Trace I/O helpers — rendering and output over the PL011 trace UART.
 
-use flashos_abi::task::TaskStruct;
+use flashos_kernel_abi::task::TaskStruct;
 
 /// PL011 interface id — the only interface the trace side speaks.
 pub const PL: i32 = 1;
@@ -305,7 +305,7 @@ mod tests {
         PL,
     };
     use crate::trace::CAPTURE_LOCK;
-    use flashos_abi::task::TaskStruct;
+    use flashos_kernel_abi::task::TaskStruct;
 
     fn emitted(body: impl FnOnce()) -> std::string::String {
         let _guard = CAPTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());

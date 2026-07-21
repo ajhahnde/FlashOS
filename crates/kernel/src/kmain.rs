@@ -87,7 +87,7 @@ mod target {
     const NS_PHYS_TIMER_IRQ: u32 = 30;
 
     mod seam {
-        use flashos_abi::task::TaskStruct;
+        use flashos_kernel_abi::task::TaskStruct;
 
         unsafe extern "C" {
             /// Published by the scheduler. Read here only from the PID-1 kernel
