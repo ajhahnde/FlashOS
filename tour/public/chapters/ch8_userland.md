@@ -14,7 +14,7 @@ Checked-in seed files come from `rootfs/`:
 
 ```text
 rootfs/etc/passwd   → /etc/passwd
-rootfs/fsh/fshrc    → /etc/fshrc
+rootfs/etc/fshrc    → /etc/fshrc
 generated shadow    → /etc/shadow
 userland/init/pid1   → /sbin/init
 userland/shells/fsh  → /bin/fsh

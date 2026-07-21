@@ -97,7 +97,7 @@ userland/                           Rust-EL0-Programme
 rootfs/                             eingecheckte Dateisystem-Seeds
   etc/passwd                        Account-Datenbank
   etc/perms.tab                     FAT32-Berechtigungs-Overlay
-  fsh/fshrc                         Shell-Startdatei
+  etc/fshrc                         Shell-Startdatei
 
 xtask/                              nativer Build-, Generator- und Prüftreiber
 userland/link/                      userland ELF-Linker-Skripte

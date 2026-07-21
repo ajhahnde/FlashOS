@@ -924,7 +924,7 @@ const INITRAMFS: &[(&str, u32, ArcSource)] = &[
     ("bin/rm", 0o100755, ArcSource::User("rm")),
     ("bin/sysinfo", 0o100755, ArcSource::User("sysinfo")),
     ("bin/uptime", 0o100755, ArcSource::User("uptime")),
-    ("etc/fshrc", 0o100644, ArcSource::Static("rootfs/fsh/fshrc")),
+    ("etc/fshrc", 0o100644, ArcSource::Static("rootfs/etc/fshrc")),
     (
         "etc/passwd",
         0o100644,

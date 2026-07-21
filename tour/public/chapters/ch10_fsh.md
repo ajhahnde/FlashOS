@@ -38,7 +38,7 @@ last reference closes.
 
 ## Startup configuration
 
-The checked-in startup seed is `rootfs/fsh/fshrc`; the build stages it as
+The checked-in startup seed is `rootfs/etc/fshrc`; the build stages it as
 `/etc/fshrc`. It is data, not a source directory. User programs themselves
 live under `userland/`.
 

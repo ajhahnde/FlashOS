@@ -81,7 +81,7 @@ userland/                               Rust EL0 executables
 rootfs/                                 checked-in filesystem seeds
   etc/passwd                            account database
   etc/perms.tab                         FAT32 permission overlay
-  fsh/fshrc                             shell startup file
+  etc/fshrc                             shell startup file
 
 xtask/                                  native build, generation, and inspection driver
 userland/link/                          userland ELF linker scripts
