@@ -37,7 +37,11 @@ fn workspace_crates_follow_the_ratified_dependency_direction() {
         ("flashshell-platform-posix", &["flashshell-platform"]),
         (
             "flashshell-cli",
-            &["flashshell-platform-posix", "flashshell-runtime"],
+            &[
+                "flashshell-platform-posix",
+                "flashshell-runtime",
+                "flashshell-syntax",
+            ],
         ),
     ];
 

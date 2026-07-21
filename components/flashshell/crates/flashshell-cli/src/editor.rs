@@ -1,11 +1,20 @@
 use std::error::Error;
 use std::fmt;
 
+pub const DEFAULT_PRIMARY_PROMPT: &str = "fsh> ";
+pub const DEFAULT_CONTINUATION_PROMPT: &str = "...> ";
+
 /// Text rendered around one interactive edit buffer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditorPrompt {
     primary: String,
     continuation: String,
+}
+
+impl Default for EditorPrompt {
+    fn default() -> Self {
+        Self::new(DEFAULT_PRIMARY_PROMPT, DEFAULT_CONTINUATION_PROMPT)
+    }
 }
 
 impl EditorPrompt {

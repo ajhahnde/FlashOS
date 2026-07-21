@@ -35,6 +35,7 @@ doc = false
 [dependencies]
 flashshell-platform-posix = { path = "../flashshell-platform-posix" }
 flashshell-runtime = { path = "../flashshell-runtime" }
+flashshell-syntax = { path = "../flashshell-syntax" }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 reedline = { version = "=0.49.0", default-features = false }

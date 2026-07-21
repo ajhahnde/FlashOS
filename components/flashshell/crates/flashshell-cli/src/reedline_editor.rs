@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal};
+use flashshell_syntax::{ParseOutcome, SourceFile, SourceId, parse};
+use reedline::{
+    Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal, ValidationResult, Validator,
+};
 
 use crate::editor::{EditorError, EditorEvent, EditorPrompt, LineEditor};
 
@@ -13,7 +16,7 @@ impl ReedlineEditor {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: Reedline::create(),
+            inner: Reedline::create().with_validator(Box::new(FlashShellValidator)),
         }
     }
 }
@@ -31,6 +34,18 @@ impl LineEditor for ReedlineEditor {
             .read_line(&prompt)
             .map_err(|error| EditorError::with_source("line editor failed", error))
             .and_then(map_signal)
+    }
+}
+
+struct FlashShellValidator;
+
+impl Validator for FlashShellValidator {
+    fn validate(&self, line: &str) -> ValidationResult {
+        let source = SourceFile::new(SourceId::new(0), "<interactive>", line);
+        match parse(&source) {
+            ParseOutcome::Incomplete(_) => ValidationResult::Incomplete,
+            ParseOutcome::Complete(_) | ParseOutcome::Invalid(_) => ValidationResult::Complete,
+        }
     }
 }
 
@@ -114,5 +129,31 @@ mod tests {
 
         assert_eq!(bridge.render_prompt_left(), "fsh> ");
         assert_eq!(bridge.render_prompt_multiline_indicator(), "...> ");
+    }
+
+    #[test]
+    fn parser_validation_continues_only_structurally_incomplete_input() {
+        let validator = FlashShellValidator;
+
+        for complete in ["", "echo hello", "if true {\n    echo yes\n}"] {
+            assert!(matches!(
+                validator.validate(complete),
+                ValidationResult::Complete
+            ));
+        }
+
+        let invalid = SourceFile::new(SourceId::new(7), "<test-invalid>", "else");
+        assert!(matches!(parse(&invalid), ParseOutcome::Invalid(_)));
+        assert!(matches!(
+            validator.validate(invalid.text()),
+            ValidationResult::Complete
+        ));
+
+        for incomplete in ["echo hello |", "echo >", "echo \"unterminated", "if true {"] {
+            assert!(matches!(
+                validator.validate(incomplete),
+                ValidationResult::Incomplete
+            ));
+        }
     }
 }

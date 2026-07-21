@@ -173,6 +173,7 @@ version = "0.1.0"
 dependencies = [
  "flashshell-platform-posix",
  "flashshell-runtime",
+ "flashshell-syntax",
  "reedline",
 ]
 

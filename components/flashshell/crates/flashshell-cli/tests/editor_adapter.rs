@@ -35,6 +35,14 @@ fn session_code_consumes_editor_owned_events_without_a_terminal() {
     assert_eq!(editor.prompts, vec![prompt]);
 }
 
+#[test]
+fn default_prompt_has_stable_primary_and_continuation_text() {
+    let prompt = EditorPrompt::default();
+
+    assert_eq!(prompt.primary(), "fsh> ");
+    assert_eq!(prompt.continuation(), "...> ");
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn reedline_is_constructed_behind_the_line_editor_contract() {
