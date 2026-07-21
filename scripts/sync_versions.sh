@@ -44,18 +44,29 @@ if [ "$mode" = write ]; then
     exit 2
   }
 
+  # Sub-projects (components/*) share the toolchain version from versions.env but
+  # keep their own product release version, so their branches rewrite only the
+  # Rust channel/MSRV and never the workspace `version`.
   perl -0pi -e '
-    if ($ARGV eq "rust-toolchain.toml") {
+    if ($ARGV eq "rust-toolchain.toml"
+        || $ARGV eq "components/flashshell/rust-toolchain.toml") {
       s{^channel = "[^"]+"$}{channel = "$ENV{FLASHOS_RUST_VERSION}"}m;
     } elsif ($ARGV eq "Cargo.toml") {
       s{(\[workspace\.package\][^\[]*?^version = ")[^"]+("\n)}{$1 . $ENV{FLASHOS_RELEASE_VERSION} . $2}em;
+      s{(\[workspace\.package\][^\[]*?^rust-version = ")[^"]+("\n)}{$1 . $ENV{FLASHOS_RUST_MSRV} . $2}em;
+    } elsif ($ARGV eq "components/flashshell/Cargo.toml") {
       s{(\[workspace\.package\][^\[]*?^rust-version = ")[^"]+("\n)}{$1 . $ENV{FLASHOS_RUST_MSRV} . $2}em;
     } elsif ($ARGV eq "Cargo.lock") {
       s{(\[\[package\]\]\nname = "flashos-[^"]+"\nversion = ")[^"]+("\n)}{$1 . $ENV{FLASHOS_RELEASE_VERSION} . $2}ge;
     } elsif ($ARGV eq "README.md" || $ARGV eq "docs/de/README.md") {
       s{badge/version-v[0-9]+\.[0-9]+\.[0-9]+}{badge/version-v$ENV{FLASHOS_RELEASE_VERSION}}g;
+    } elsif ($ARGV eq "components/flashshell/README.md") {
+      s{badge/rust-[0-9]+(?:\.[0-9]+)*}{badge/rust-$ENV{FLASHOS_RUST_MSRV}}g;
+      s{alt="Rust [0-9]+(?:\.[0-9]+)*"}{alt="Rust $ENV{FLASHOS_RUST_MSRV}"}g;
     }
-  ' rust-toolchain.toml Cargo.toml Cargo.lock README.md docs/de/README.md
+  ' rust-toolchain.toml Cargo.toml Cargo.lock README.md docs/de/README.md \
+    components/flashshell/rust-toolchain.toml components/flashshell/Cargo.toml \
+    components/flashshell/README.md
 fi
 
 failed=0
@@ -82,6 +93,10 @@ expect_line rust-toolchain.toml "channel = \"$FLASHOS_RUST_VERSION\""
 expect_line Cargo.toml "version = \"$FLASHOS_RELEASE_VERSION\""
 expect_line Cargo.toml "rust-version = \"$FLASHOS_RUST_MSRV\""
 expect_text docs/de/README.md "badge/version-v$FLASHOS_RELEASE_VERSION-"
+# Sub-projects share the toolchain version but keep their own product version.
+expect_line components/flashshell/rust-toolchain.toml "channel = \"$FLASHOS_RUST_VERSION\""
+expect_line components/flashshell/Cargo.toml "rust-version = \"$FLASHOS_RUST_MSRV\""
+expect_text components/flashshell/README.md "badge/rust-$FLASHOS_RUST_MSRV-"
 # The CI trigger and the QEMU pin live in the multi-job workflow and the pinned
 # QEMU composite action; the cache key and source build must derive the version
 # from versions.env, never a hardcoded number.
