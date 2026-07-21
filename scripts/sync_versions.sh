@@ -60,13 +60,11 @@ if [ "$mode" = write ]; then
       s{(\[\[package\]\]\nname = "flashos-[^"]+"\nversion = ")[^"]+("\n)}{$1 . $ENV{FLASHOS_RELEASE_VERSION} . $2}ge;
     } elsif ($ARGV eq "README.md" || $ARGV eq "docs/de/README.md") {
       s{badge/version-v[0-9]+\.[0-9]+\.[0-9]+}{badge/version-v$ENV{FLASHOS_RELEASE_VERSION}}g;
-    } elsif ($ARGV eq "components/flashshell/README.md") {
-      s{badge/rust-[0-9]+(?:\.[0-9]+)*}{badge/rust-$ENV{FLASHOS_RUST_MSRV}}g;
-      s{alt="Rust [0-9]+(?:\.[0-9]+)*"}{alt="Rust $ENV{FLASHOS_RUST_MSRV}"}g;
+      s{badge/rust-[0-9]+(?:\.[0-9]+)*}{badge/rust-$ENV{FLASHOS_RUST_VERSION}}g;
+      s{alt="Rust [0-9]+(?:\.[0-9]+)*"}{alt="Rust $ENV{FLASHOS_RUST_VERSION}"}g;
     }
   ' rust-toolchain.toml Cargo.toml Cargo.lock README.md docs/de/README.md \
-    components/flashshell/rust-toolchain.toml components/flashshell/Cargo.toml \
-    components/flashshell/README.md
+    components/flashshell/rust-toolchain.toml components/flashshell/Cargo.toml
 fi
 
 failed=0
@@ -93,10 +91,15 @@ expect_line rust-toolchain.toml "channel = \"$FLASHOS_RUST_VERSION\""
 expect_line Cargo.toml "version = \"$FLASHOS_RELEASE_VERSION\""
 expect_line Cargo.toml "rust-version = \"$FLASHOS_RUST_MSRV\""
 expect_text docs/de/README.md "badge/version-v$FLASHOS_RELEASE_VERSION-"
+# The Rust badge shows the exact pinned toolchain version, still driven from
+# versions.env so a bump + --write keeps every badge in lockstep with the root.
+expect_text README.md "badge/rust-$FLASHOS_RUST_VERSION-"
+expect_text docs/de/README.md "badge/rust-$FLASHOS_RUST_VERSION-"
 # Sub-projects share the toolchain version but keep their own product version.
+# Their READMEs no longer carry a Rust badge — the root README owns the single
+# version citation; here we only pin the sub-project's toolchain files.
 expect_line components/flashshell/rust-toolchain.toml "channel = \"$FLASHOS_RUST_VERSION\""
 expect_line components/flashshell/Cargo.toml "rust-version = \"$FLASHOS_RUST_MSRV\""
-expect_text components/flashshell/README.md "badge/rust-$FLASHOS_RUST_MSRV-"
 # The CI trigger and the QEMU pin live in the multi-job workflow and the pinned
 # QEMU composite action; the cache key and source build must derive the version
 # from versions.env, never a hardcoded number.
@@ -120,9 +123,13 @@ if ! awk -v expected="$FLASHOS_RELEASE_VERSION" '
 fi
 
 live_docs="README.md DOCUMENTATION.md SETUP.md arch/aarch64/README.md docs/de tutorial/public"
+# The Rust version badge is the one sanctioned patch-version citation: it shows
+# the exact pinned toolchain and is regenerated from versions.env by --write, so
+# exclude its `alt="Rust <version>"` form. Prose and any mismatched/stale patch
+# version stay flagged as drift.
 copied_toolchains=$(grep -rInE \
   'Rust v?[0-9]+\.[0-9]+\.[0-9]+|rust-v[0-9]+\.[0-9]+\.[0-9]+|LLVM [0-9]+\.[0-9]+\.[0-9]+|qemu-system-aarch64[^0-9]*[0-9]+\.[0-9]+\.[0-9]+' \
-  $live_docs 2>/dev/null || true)
+  $live_docs 2>/dev/null | grep -vF "alt=\"Rust $FLASHOS_RUST_VERSION\"" || true)
 if [ -n "$copied_toolchains" ]; then
   printf 'version drift: live docs copy a toolchain patch version instead of referring to versions.env:\n%s\n' "$copied_toolchains" >&2
   failed=1
