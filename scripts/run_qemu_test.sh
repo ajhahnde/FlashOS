@@ -2,7 +2,7 @@
 # Self-validating QEMU runner for the native board watchdogs.
 #
 # Boot success is reaching the interactive fsh prompt. With the
-# login lifecycle, fsh's homescreen marker (user/fsh/src/lib.rs — the
+# login lifecycle, fsh's homescreen marker (userland/shells/fsh/src/lib.rs — the
 # stable `type 'help' for commands` tail) appears THREE times per boot: twice
 # from [TEST] login's console-scripted sessions and once from the real boot
 # login's shell — only the third one means the boot is done, so the early-exit

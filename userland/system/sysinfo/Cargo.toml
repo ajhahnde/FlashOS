@@ -1,0 +1,16 @@
+[package]
+name = "flashos-sysinfo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashos_sysinfo"
+crate-type = ["staticlib"]
+
+[dependencies]
+flashos-console-ui = { path = "../../../crates/console-ui" }
+flashos-flibc = { path = "../../../crates/flibc" }
+flashos-pwfile = { path = "../../../crates/pwfile" }
+flashsdk-rt = { workspace = true }

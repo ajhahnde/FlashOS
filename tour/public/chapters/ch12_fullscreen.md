@@ -1,6 +1,6 @@
 # 12. Full-Screen User Programs
 
-`/bin/less` and `/bin/edit` are Rust EL0 programs under `user/`. They do not
+`/bin/less` and `/bin/edit` are Rust EL0 programs under `userland/`. They do not
 draw through a framebuffer driver. They use terminal control sequences, raw
 key decoding, and the alternate screen over the same console descriptors as
 the shell.
@@ -22,13 +22,13 @@ program crates connect them to file descriptors and syscalls.
 
 ## Pager flow
 
-`user/less/` reads a file into bounded user memory, indexes line starts, enters
+`userland/interactive/less/` reads a file into bounded user memory, indexes line starts, enters
 the alternate screen, renders the visible range, and changes the viewport in
 response to decoded keys. On exit it restores the normal screen.
 
 ## Editor flow
 
-`user/edit/` is the main heap consumer. It loads text into a gap buffer, moves
+`userland/interactive/edit/` is the main heap consumer. It loads text into a gap buffer, moves
 the gap to make insertion and deletion local, renders the viewport, and saves
 through the current FAT32 mutation surface.
 

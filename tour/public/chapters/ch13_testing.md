@@ -20,7 +20,7 @@ link as host test binaries are excluded.
 
 ## Runtime harness
 
-With `--boot-selftest`, `user/pid1/src/harness.rs` runs exactly **30 EL0
+With `--boot-selftest`, `userland/init/pid1/src/harness.rs` runs exactly **30 EL0
 scenarios**. They cover process/memory faults, ELF and ABI behavior, pipes,
 console and filesystems, hardware-data parsing, credentials, login, and
 password changes.

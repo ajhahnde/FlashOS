@@ -67,17 +67,16 @@ crates/flibc/                           userland engines (readline, pager, TUI)
 crates/console-ui/                      shared boot/status rendering
 crates/pwfile/                          shared /etc/passwd parser
 
-user/                                   Rust EL0 executables
-  pid1/                                 PID 1 and the 30-scenario runtime harness
-  fsh/                                  interactive shell
-  login/, passwd/                       authentication programs
-  edit/, less/                          full-screen programs
-  cat/, clear/, cp/, echo/, grep/
-  ls/, mv/, rm/                         core utilities
-  cpuinfo/, dmesg/, meminfo/
-  sysinfo/, uptime/                     system-information tools
-  argv-echo/, flibc-demo/, hello/
-  forkbomb/, stackbomb/                 ABI, stress, and fault fixtures
+userland/                               Rust EL0 executables
+  init/pid1/                            PID 1 and the 30-scenario runtime harness
+  shells/fsh/                           interactive shell
+  auth/login/, auth/passwd/             authentication programs
+  interactive/edit/, interactive/less/  full-screen programs
+  coreutils/                            cat, clear, cp, echo, grep, ls, mv, rm
+  system/                               cpuinfo, dmesg, meminfo, sysinfo, uptime
+  fixtures/                             argv-echo, flibc-demo, hello,
+                                        forkbomb, stackbomb — ABI, stress, fault
+  link/                                 retained EL0 linker scripts
 
 rootfs/                                 checked-in filesystem seeds
   etc/passwd                            account database
@@ -145,7 +144,7 @@ exact commands.
 6. The scheduler creates PID 1 as a kernel thread. It installs console
    descriptors 0, 1, and 2, locates `/sbin/init` in the initramfs, and loads
    its ELF image into EL0.
-7. `user/pid1/src/lib.rs` runs the optional boot-selftest harness and then
+7. `userland/init/pid1/src/lib.rs` runs the optional boot-selftest harness and then
    execs `/bin/login`. Login authenticates, forks a session child, drops its
    UID/GID, and execs the configured shell.
 
@@ -456,7 +455,7 @@ Coverage includes:
 
 ### Runtime harness
 
-With `--boot-selftest`, `user/pid1/src/harness.rs` runs exactly 30 EL0
+With `--boot-selftest`, `userland/init/pid1/src/harness.rs` runs exactly 30 EL0
 scenarios:
 
 | Area                 | Scenarios                                                                                                                     |

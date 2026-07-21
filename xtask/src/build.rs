@@ -877,7 +877,7 @@ impl KernelFeatures {
         f
     }
 
-    /// Cargo features for PID 1 (`user/pid1`) — the only payload that takes any.
+    /// Cargo features for PID 1 (`userland/init/pid1`) — the only payload that takes any.
     fn pid1(self) -> Vec<String> {
         let mut f = Vec::new();
         if self.boot_selftest {

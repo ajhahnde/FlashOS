@@ -1,7 +1,7 @@
 # 9. Login, Credentials, and Password Storage
 
 After optional selftests, PID 1 execs `/bin/login`. The login program is an
-EL0 Rust executable under `user/login/`; authentication primitives and access
+EL0 Rust executable under `userland/auth/login/`; authentication primitives and access
 checks are enforced by the kernel.
 
 ## Account formats

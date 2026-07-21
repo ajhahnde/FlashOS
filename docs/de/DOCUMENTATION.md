@@ -83,17 +83,16 @@ crates/flibc/                       Userland-Engines (Readline, Pager, TUI)
 crates/console-ui/                  gemeinsame Boot-/Statusdarstellung
 crates/pwfile/                      gemeinsamer /etc/passwd-Parser
 
-user/                               Rust-EL0-Programme
-  pid1/                             PID 1 und Runtime-Harness mit 30 Szenarien
-  fsh/                              interaktive Shell
-  login/, passwd/                   Authentifizierungsprogramme
-  edit/, less/                      Vollbildprogramme
-  cat/, clear/, cp/, echo/, grep/
-  ls/, mv/, rm/                     Core-Utilities
-  cpuinfo/, dmesg/, meminfo/
-  sysinfo/, uptime/                 Systeminformationswerkzeuge
-  argv-echo/, flibc-demo/, hello/
-  forkbomb/, stackbomb/             ABI-, Stress- und Fault-Fixtures
+userland/                           Rust-EL0-Programme
+  init/pid1/                        PID 1 und Runtime-Harness mit 30 Szenarien
+  shells/fsh/                       interaktive Shell
+  auth/login/, auth/passwd/         Authentifizierungsprogramme
+  interactive/edit/, .../less/      Vollbildprogramme
+  coreutils/                        cat, clear, cp, echo, grep, ls, mv, rm
+  system/                           cpuinfo, dmesg, meminfo, sysinfo, uptime
+  fixtures/                         argv-echo, flibc-demo, hello,
+                                    forkbomb, stackbomb — ABI-, Stress-, Fault
+  link/                             beibehaltene EL0-Linker-Skripte
 
 rootfs/                             eingecheckte Dateisystem-Seeds
   etc/passwd                        Account-Datenbank
@@ -162,7 +161,7 @@ exakten Befehle stehen unter [Setup](SETUP.md).
 6. Der Scheduler erzeugt PID 1 als Kernel-Thread. Dieser erhält die
    Konsolen-Descriptors 0, 1 und 2, findet `/sbin/init` im Initramfs und lädt
    dessen ELF-Image nach EL0.
-7. `user/pid1/src/lib.rs` führt optional das Boot-Selftest-Harness aus und
+7. `userland/init/pid1/src/lib.rs` führt optional das Boot-Selftest-Harness aus und
    exect danach `/bin/login`. Login authentifiziert, forkt ein Session-Kind,
    legt dessen UID/GID ab und exect die konfigurierte Shell.
 
@@ -488,7 +487,7 @@ Die Abdeckung umfasst:
 
 ### Runtime-Harness
 
-Mit `--boot-selftest` führt `user/pid1/src/harness.rs` exakt **30
+Mit `--boot-selftest` führt `userland/init/pid1/src/harness.rs` exakt **30
 EL0-Szenarien** aus:
 
 | Bereich | Szenarien |

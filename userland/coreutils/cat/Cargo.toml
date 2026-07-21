@@ -1,0 +1,15 @@
+[package]
+name = "flashos-cat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "flashos_cat"
+crate-type = ["staticlib"]
+
+[dependencies]
+flashsdk-abi = { workspace = true }
+flashos-flibc = { path = "../../../crates/flibc" }
+flashsdk-rt = { workspace = true }

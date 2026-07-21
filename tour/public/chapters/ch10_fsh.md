@@ -1,13 +1,13 @@
 # 10. `fsh`: The Current Recovery-Capable Shell
 
-`user/fsh/` contains the Rust shell shipped in the current Rust-port image. It
+`userland/shells/fsh/` contains the Rust shell shipped in the current Rust-port image. It
 is the current interactive session after login and is intentionally retained
 as a tested recovery shell when the future UI stack arrives.
 
 ## Read, parse, dispatch
 
 `crates/flibc/src/readline.rs` provides line editing, history, cursor movement,
-and completion. `user/fsh/src/tokenize.rs` splits the command line and supports
+and completion. `userland/shells/fsh/src/tokenize.rs` splits the command line and supports
 one pipeline separator.
 
 The shell then chooses between:
@@ -40,14 +40,14 @@ last reference closes.
 
 The checked-in startup seed is `rootfs/fsh/fshrc`; the build stages it as
 `/etc/fshrc`. It is data, not a source directory. User programs themselves
-live under `user/`.
+live under `userland/`.
 
 ## Built-ins and external tools
 
 Process-local operations such as changing the shell's current directory must
 be built-ins. Programs such as `ls`, `cat`, `grep`, `cp`, `mv`, `rm`, `less`,
 `edit`, `passwd`, and system-information tools are separate Rust ELF payloads
-under `user/`.
+under `userland/`.
 
 ## What the future names mean
 

@@ -6,7 +6,7 @@ deterministic initramfs.
 
 ## Building the filesystem image
 
-`xtask/src/build.rs` builds every program under `user/`, inspects the ELF,
+`xtask/src/build.rs` builds every program under `userland/`, inspects the ELF,
 strips it, and stages it under its runtime path. `xtask/src/initramfs.rs`
 encodes the sorted staging tree as a deterministic newc CPIO archive.
 
@@ -16,9 +16,9 @@ Checked-in seed files come from `rootfs/`:
 rootfs/etc/passwd   → /etc/passwd
 rootfs/fsh/fshrc    → /etc/fshrc
 generated shadow    → /etc/shadow
-user/pid1           → /sbin/init
-user/fsh            → /bin/fsh
-user/* tools        → /bin/* and /test/*
+userland/init/pid1   → /sbin/init
+userland/shells/fsh  → /bin/fsh
+userland/* tools     → /bin/* and /test/*
 ```
 
 `rootfs/etc/perms.tab` is the third checked-in seed. It is deployed to the
@@ -67,7 +67,7 @@ boundary and make the kernel consume that canonical ABI.
 ## Loading PID 1
 
 The kernel finds `/sbin/init` through the VFS and maps its ELF segments with
-permissions derived from their program headers. `user/pid1/src/lib.rs` runs
+permissions derived from their program headers. `userland/init/pid1/src/lib.rs` runs
 the optional boot-selftest harness, then replaces itself with `/bin/login`.
 
 Four dedicated fixtures under `/test` exercise argument transfer, runtime I/O,
@@ -76,6 +76,6 @@ fork pressure, and stack failure paths without becoming user-facing commands.
 > [!NOTE]
 > The root `src/` directory does not contain the initramfs parser or user
 > programs. Kernel filesystem code is under `crates/kernel/`; EL0 programs are
-> under `user/`; static seeds are under `rootfs/`.
+> under `userland/`; static seeds are under `rootfs/`.
 
 Next, we follow PID 1 through authentication and privilege dropping.
