@@ -34,7 +34,7 @@ under the License.
 ## Attribution
 
 FlashOS began as a port and substantial rewrite of the C bare-metal
-architecture originally developed by **Wei-Lin Chang (rhythm16)**, and is
+architecture originally developed by **rhythm16**, and is
 derived in part from
 [`rhythm16/rpi4-bare-metal`](https://github.com/rhythm16/rpi4-bare-metal)
 — Copyright © Wei-Lin Chang.

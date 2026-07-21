@@ -1,0 +1,11 @@
+FlashOS
+Copyright 2026 ajhahnde
+
+Licensed under the Apache License, Version 2.0 (see LICENSE). This license
+applies to the entire repository, including the FlashSDK, FlashShell, and
+FlashUI components.
+
+This product includes software derived in part from rhythm16/rpi4-bare-metal
+(https://github.com/rhythm16/rpi4-bare-metal), Copyright (c) rhythm16.
+The FlashOS kernel began as a port and substantial rewrite of that C
+bare-metal architecture.
