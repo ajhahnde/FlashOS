@@ -35,9 +35,10 @@ and is not part of the current release gate.
 
 The repository mirrors those boundaries. `crates/kernel/` owns the Rust kernel,
 `crates/kernel-abi/` owns layouts shared with userland and assembly, `userland/` contains
-EL0 executables, and `rootfs/` contains checked-in filesystem seeds. The root
-`src/` directory now contains only retained assembly, linker, trace, and symbol
-glue—not the kernel implementation.
+EL0 executables, and `rootfs/` contains checked-in filesystem seeds. Retained
+assembly and linker glue live beside them: architecture code under
+`arch/aarch64/`, per-board entry quirks under `board/`, and the firmware stub
+under `armstub/`.
 
 ## How to use this tour
 

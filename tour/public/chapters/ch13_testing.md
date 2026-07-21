@@ -10,7 +10,7 @@ layer claims to cover the others.
 cargo xtask test
 ```
 
-At the current tree revision this discovers **746 Rust tests with 0 failures**.
+At the current tree revision this discovers **751 Rust tests with 0 failures**.
 The command's own output remains authoritative.
 
 Coverage includes ABI layout, memory, scheduler, VFS/FAT32, descriptors,
@@ -61,6 +61,24 @@ Artefact inspection rejects undefined symbols, `core::fmt`, FP/SIMD
 instructions, duplicate memory providers, and size-budget violations. The full
 guard performs the production build behind rejecting command shims and checks
 the recorded subprocess trace.
+
+## The CI pipeline
+
+Every push and pull request replays this evidence chain on GitHub Actions
+(`.github/workflows/ci.yml`). A `metadata` job derives the user-payload shard
+matrix from `cargo xtask user --list`, so the workflow never hardcodes the
+payload set. Five jobs then run in parallel: quality gates, host tests, the
+contract guards, per-shard payload inspection, and the nested FlashShell
+workspace's own checks under its pinned toolchain.
+
+Only after all of them pass does a clean-room job perform the production
+build, a second job stage a bootable test image from that exact artifact, and
+`qemu-boot-test` boot it under the same watchdog contract described above —
+uploading the serial log as a diagnostic artifact when a boot fails. A single
+final `required` status aggregates the whole graph, giving branch protection
+one stable name to pin. Two sibling workflows cover the rest: `security.yml`
+reviews dependencies and enforces the cargo-deny policies (including
+FlashShell's own), and `release.yml` packages and publishes tagged builds.
 
 ## Hardware acceptance
 

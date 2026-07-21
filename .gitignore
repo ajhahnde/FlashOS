@@ -28,7 +28,3 @@ rust-out/
 *.capture
 screenlog.*
 
-# tour web app — keep source, drop deps & scratch
-/tour/node_modules/
-/tour/temp/
-/tour/SETUP.md

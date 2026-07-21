@@ -74,8 +74,8 @@ Four dedicated fixtures under `/test` exercise argument transfer, runtime I/O,
 fork pressure, and stack failure paths without becoming user-facing commands.
 
 > [!NOTE]
-> The root `src/` directory does not contain the initramfs parser or user
-> programs. Kernel filesystem code is under `crates/kernel/`; EL0 programs are
-> under `userland/`; static seeds are under `rootfs/`.
+> Kernel filesystem code, including the initramfs parser, is under
+> `crates/kernel/`; EL0 programs are under `userland/`; static seeds are under
+> `rootfs/`.
 
 Next, we follow PID 1 through authentication and privilege dropping.

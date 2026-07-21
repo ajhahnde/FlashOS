@@ -146,21 +146,5 @@
     <!-- Main Client-Side JS -->
     <script src="index.js"></script>
 
-    <!-- Live reload (dev only): the normal server and static hosting both
-         report/behave as disabled, so neither opens a reconnecting stream. -->
-    <script>
-      (function () {
-        fetch('/api/config')
-          .then((res) => res.ok ? res.json() : null)
-          .then((config) => {
-            if (!config || !config.liveReload) return;
-            const es = new EventSource('/api/livereload');
-            es.onmessage = () => location.reload();
-            // onerror fires on transient blips; EventSource auto-reconnects via
-            // the server's `retry:` hint, so nothing to do here.
-          })
-          .catch(() => {});
-      })();
-    </script>
 </body>
 </html>

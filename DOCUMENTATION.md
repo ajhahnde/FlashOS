@@ -437,7 +437,7 @@ untrusted user stack.
 
 `cargo xtask test` runs the workspace host tests while excluding only the two
 bare-metal static libraries that cannot link as host binaries. At the current
-tree revision it discovers 746 Rust tests. The command's own output remains
+tree revision it discovers 751 Rust tests. The command's own output remains
 the authoritative count.
 
 Coverage includes:
