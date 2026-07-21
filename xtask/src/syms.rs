@@ -49,10 +49,22 @@ const MAX_SYM_NAME_LEN: usize = ENTRY_SIZE - 8 - 1;
 /// qualifies it. Truncation is never used — v0 puts the crate/hash prefix first, so
 /// cutting at the limit would throw away exactly the function name a backtrace needs.
 pub fn demangle_v0(sym: &str) -> Option<String> {
-    let bytes = sym.as_bytes();
     if !sym.starts_with("_R") {
         return None;
     }
+
+    // LLVM appends a vendor suffix (`.0`, `.1`, `.llvm.<hash>`) to some locals and
+    // promoted statics. It is not part of the v0 path grammar, so the segment
+    // scanner below must not see it — otherwise the `.` skips as a control byte and
+    // the following digit is misread as a segment length that runs past the end,
+    // failing the whole demangle and leaving the over-long raw name. Split it off,
+    // demangle the path, and re-attach it so distinct statics keep distinct names.
+    // A Rust identifier never contains `.`, so the first `.` reliably starts it.
+    let (mangled, suffix) = match sym.find('.') {
+        Some(dot) => (&sym[..dot], &sym[dot..]),
+        None => (sym, ""),
+    };
+    let bytes = mangled.as_bytes();
 
     // Collect the path segments in order.
     let mut segs: Vec<&str> = Vec::with_capacity(16);
@@ -96,7 +108,7 @@ pub fn demangle_v0(sym: &str) -> Option<String> {
         }
         // `get` fails on both an out-of-range span (malformed) and a non-char
         // boundary — either way leave the raw name alone rather than panic.
-        let seg = sym.get(i..i + len)?;
+        let seg = mangled.get(i..i + len)?;
         segs.push(seg);
         i += len;
     }
@@ -104,14 +116,16 @@ pub fn demangle_v0(sym: &str) -> Option<String> {
         return None;
     }
 
-    // Join with "::", dropping leading segments until the result fits.
+    // Join with "::", dropping leading segments until the result (plus any vendor
+    // suffix, which always stays attached to the tail) fits.
     let mut first = 0usize;
     while first < segs.len() {
         let need: usize = segs[first..]
             .iter()
             .enumerate()
             .map(|(k, s)| s.len() + if k == 0 { 0 } else { 2 })
-            .sum();
+            .sum::<usize>()
+            + suffix.len();
         if need <= MAX_SYM_NAME_LEN {
             break;
         }
@@ -121,7 +135,9 @@ pub fn demangle_v0(sym: &str) -> Option<String> {
         return None;
     }
 
-    Some(segs[first..].join("::"))
+    let mut joined = segs[first..].join("::");
+    joined.push_str(suffix);
+    Some(joined)
 }
 
 /// Whether an `nm -n` line survives the pre-filter the old shell pipeline applied

@@ -13,44 +13,33 @@
 #[cfg(test)]
 extern crate std;
 
-pub mod block_dev;
-pub mod console;
-pub mod elf;
-pub mod execve;
-pub mod fat32;
-pub mod fat32_backend;
-pub mod fdtable;
-pub mod file;
-pub mod fork;
-pub mod generic_timer;
-pub mod hwrng;
-pub mod initramfs;
-pub mod initramfs_backend;
-pub mod klog_ring;
+pub mod diagnostics;
+pub mod drivers;
+pub mod fs;
 pub mod kmain;
-pub mod mailbox;
-pub mod mm_user;
-pub mod overlay;
-pub mod page_alloc;
-pub mod path;
-pub mod perm;
-pub mod pipe;
-pub mod rpi4b_emmc2;
-pub mod rpi4b_gpio;
-pub mod rpi4b_irq;
-pub mod rpi4b_mailbox;
-pub mod rpi4b_power;
-pub mod rpi4b_timer;
-pub mod rpi4b_uart;
-pub mod rpi4b_usb;
-pub mod sched;
-pub mod sdhci_cmd;
-pub mod sha256;
-pub mod shadow;
-pub mod sys;
-pub mod trace;
-pub mod usb_descriptors;
-pub mod usb_tx_ring;
-pub mod utilc;
-pub mod vfs;
-pub mod wait_queue;
+pub mod mm;
+pub mod process;
+pub mod security;
+pub mod syscall;
+pub mod util;
+
+// Flat re-exports preserving the pre-grouping module paths. Assembly, the
+// `crates/klib` ABI seam, and `xtask` address these services by their original
+// names; keeping them here confines the grouping to the module tree.
+pub use crate::diagnostics::{generic_timer, trace};
+pub use crate::drivers::block::{block_dev, sdhci_cmd};
+pub use crate::drivers::console::{console, klog_ring};
+pub use crate::drivers::platform::rpi4b::{
+    emmc2 as rpi4b_emmc2, gpio as rpi4b_gpio, irq as rpi4b_irq, mailbox as rpi4b_mailbox,
+    power as rpi4b_power, timer as rpi4b_timer, uart as rpi4b_uart, usb as rpi4b_usb,
+};
+pub use crate::drivers::usb::{usb_descriptors, usb_tx_ring};
+pub use crate::fs::{
+    fat32, fat32_backend, fdtable, file, initramfs, initramfs_backend, overlay, path, perm, pipe,
+    vfs,
+};
+pub use crate::mm::{page_alloc, user as mm_user};
+pub use crate::process::{elf, execve, fork, sched, wait_queue};
+pub use crate::security::{hwrng, sha256, shadow};
+pub use crate::syscall::sys;
+pub use crate::util::{mailbox, utilc};
