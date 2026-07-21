@@ -125,10 +125,12 @@ pub enum RuntimeErrorKind {
     Operation(OperationError),
     /// A lexical-scope failure raised by a binding, read, or assignment.
     Scope(ScopeError),
-    /// An `if`/`while` condition that did not evaluate to `Bool`.
+    /// An `if`/`while` condition that did not evaluate to `Bool` or `Status`.
     ConditionNotBool { actual: &'static str },
-    /// An operand of `!`, `&&`, or `||` that did not evaluate to `Bool`.
+    /// An operand of unary `!` that did not evaluate to `Bool`.
     LogicOperandNotBool { actual: &'static str },
+    /// An operand of `&&` or `||` that did not evaluate to `Bool` or `Status`.
+    ConditionalOperandNotBoolOrStatus { actual: &'static str },
     /// A `for` iterable that is neither a `List` nor a `Range`.
     NotIterable { actual: &'static str },
     /// `break` or `continue` used outside any loop.
@@ -199,10 +201,19 @@ impl fmt::Display for RuntimeErrorKind {
             Self::Operation(error) => error.fmt(formatter),
             Self::Scope(error) => error.fmt(formatter),
             Self::ConditionNotBool { actual } => {
-                write!(formatter, "condition must be a bool, found {actual}")
+                write!(
+                    formatter,
+                    "condition must be a bool or status, found {actual}"
+                )
             }
             Self::LogicOperandNotBool { actual } => {
                 write!(formatter, "logical operand must be a bool, found {actual}")
+            }
+            Self::ConditionalOperandNotBoolOrStatus { actual } => {
+                write!(
+                    formatter,
+                    "conditional operand must be a bool or status, found {actual}"
+                )
             }
             Self::NotIterable { actual } => {
                 write!(formatter, "cannot iterate a {actual}")
@@ -391,7 +402,7 @@ impl Clock for SystemClock {
 ///
 /// Cloning shares one underlying time, so a token built from a clone observes
 /// advances made through any handle.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FakeClock {
     now: Arc<AtomicU64>,
 }
@@ -1048,17 +1059,9 @@ impl<'source> Evaluator<'source> {
             return Ok(None);
         }
         if let Some(guard) = &arm.guard {
-            match self.expression(guard, scope)? {
-                Value::Bool(true) => {}
-                Value::Bool(false) => return Ok(None),
-                other => {
-                    return Err(self.error(
-                        RuntimeErrorKind::ConditionNotBool {
-                            actual: other.family_name(),
-                        },
-                        guard.span(),
-                    ));
-                }
+            let value = self.expression(guard, scope)?;
+            if !self.expect_condition(&value, guard.span())? {
+                return Ok(None);
             }
         }
         self.statements(&arm.body.statements, scope).map(Some)
@@ -1147,50 +1150,53 @@ impl<'source> Evaluator<'source> {
     }
 
     fn condition(&mut self, chain: &ConditionalChain, scope: &mut ScopeStack) -> Eval<bool> {
-        match self.eval_chain(chain, scope)? {
-            Value::Bool(value) => Ok(value),
-            other => Err(self.error(
-                RuntimeErrorKind::ConditionNotBool {
-                    actual: other.family_name(),
-                },
-                chain.span(),
-            )),
-        }
+        let value = self.eval_chain(chain, scope)?;
+        self.expect_condition(&value, chain.span())
     }
 
     /// Evaluates a conditional chain to a value.
     ///
-    /// A single-term chain is transparent: it yields its inner expression's value
-    /// of any type. Multiple `||` terms apply short-circuit logic returning a
-    /// `Bool`; each evaluated `||` term must itself be `Bool`.
+    /// A single-term chain is transparent. Multiple `||` terms return the last
+    /// evaluated operand and branch over either `Bool` or `Status`.
     fn eval_chain(&mut self, chain: &ConditionalChain, scope: &mut ScopeStack) -> Eval<Value> {
-        let or_terms = chain.or_terms();
-        if let [only] = or_terms {
-            return self.eval_and_chain(only, scope);
-        }
-        for and_chain in or_terms {
-            let value = self.eval_and_chain(and_chain, scope)?;
-            if self.expect_logic_bool(&value, and_chain.span())? {
-                return Ok(Value::Bool(true));
+        let mut terms = chain.or_terms().iter();
+        let first = terms
+            .next()
+            .expect("a parsed conditional chain contains an operand");
+        let mut value = self.eval_and_chain(first, scope)?;
+        let mut value_span = first.span();
+        for and_chain in terms {
+            if self.expect_logic_condition(&value, value_span)? {
+                return Ok(value);
             }
+            value = self.eval_and_chain(and_chain, scope)?;
+            value_span = and_chain.span();
         }
-        Ok(Value::Bool(false))
+        if chain.or_terms().len() > 1 {
+            self.expect_logic_condition(&value, value_span)?;
+        }
+        Ok(value)
     }
 
-    /// Evaluates one `&&` chain. A single term is transparent; multiple terms
-    /// apply short-circuit logic returning a `Bool` over `Bool` operands.
+    /// Evaluates one `&&` chain and returns its last evaluated operand.
     fn eval_and_chain(&mut self, and_chain: &AndChain, scope: &mut ScopeStack) -> Eval<Value> {
-        let terms = and_chain.and_terms();
-        if let [only] = terms {
-            return self.eval_pipeline(only, scope);
-        }
+        let mut terms = and_chain.and_terms().iter();
+        let first = terms
+            .next()
+            .expect("a parsed and-chain contains an operand");
+        let mut value = self.eval_pipeline(first, scope)?;
+        let mut value_span = first.span();
         for pipeline in terms {
-            let value = self.eval_pipeline(pipeline, scope)?;
-            if !self.expect_logic_bool(&value, pipeline.span())? {
-                return Ok(Value::Bool(false));
+            if !self.expect_logic_condition(&value, value_span)? {
+                return Ok(value);
             }
+            value = self.eval_pipeline(pipeline, scope)?;
+            value_span = pipeline.span();
         }
-        Ok(Value::Bool(true))
+        if and_chain.and_terms().len() > 1 {
+            self.expect_logic_condition(&value, value_span)?;
+        }
+        Ok(value)
     }
 
     /// Evaluates a single-stage expression pipeline. A multi-stage pipeline or a
@@ -1207,12 +1213,40 @@ impl<'source> Evaluator<'source> {
         }
     }
 
-    /// Requires a value to be `Bool`, else a logic-operand type error at `span`.
+    /// Requires a value to be `Bool` or `Status` at a conditional-chain edge.
+    fn expect_logic_condition(&self, value: &Value, span: Span) -> Eval<bool> {
+        match value {
+            Value::Bool(boolean) => Ok(*boolean),
+            Value::Status(status) => Ok(status.is_ok()),
+            other => Err(self.error(
+                RuntimeErrorKind::ConditionalOperandNotBoolOrStatus {
+                    actual: other.family_name(),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Requires a `Bool` for unary logical negation.
     fn expect_logic_bool(&self, value: &Value, span: Span) -> Eval<bool> {
         match value {
             Value::Bool(boolean) => Ok(*boolean),
             other => Err(self.error(
                 RuntimeErrorKind::LogicOperandNotBool {
+                    actual: other.family_name(),
+                },
+                span,
+            )),
+        }
+    }
+
+    /// Requires a value to be `Bool` or `Status` at a language condition.
+    fn expect_condition(&self, value: &Value, span: Span) -> Eval<bool> {
+        match value {
+            Value::Bool(boolean) => Ok(*boolean),
+            Value::Status(status) => Ok(status.is_ok()),
+            other => Err(self.error(
+                RuntimeErrorKind::ConditionNotBool {
                     actual: other.family_name(),
                 },
                 span,

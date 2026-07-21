@@ -13,12 +13,16 @@ use flashshell_platform::{
     ChildDescriptor, ChildProcess, DescriptorEndpoint, FileOpenMode, FileOpenRequest, Platform,
     ProcessStatus, SpawnRequest,
 };
-use flashshell_syntax::{OutputMode, PipeOperator};
+use flashshell_syntax::{ConditionalChain, OutputMode, PipeOperator, SourceFile};
 
-use crate::eval::{RuntimeError, RuntimeErrorKind};
+use crate::command::CommandRegistry;
+use crate::eval::{Clock, Instant, RuntimeError, RuntimeErrorKind};
 use crate::plan::{
-    ExecutionPlan, PlannedRedirection, PlannedResolution, RedirectionAction, preflight,
+    ExecutionPlan, PlannedRedirection, PlannedResolution, RedirectionAction, SessionOptions,
+    plan_pipeline_with_options, preflight,
 };
+use crate::resolve::ExecutableProbe;
+use crate::{Duration, Environment, ScopeStack, Signal, Status};
 
 /// Execute one external foreground stage.
 ///
@@ -52,7 +56,7 @@ pub fn execute_foreground(
 /// each stage is passed to direct spawn, all parent endpoint owners are released
 /// immediately after their stage starts, and no child is waited before every
 /// stage has spawned. The returned low-level statuses remain in source order;
-/// language-level aggregation and `pipefail` are a separate layer.
+/// [`execute_foreground_status`] adds language-level timing and aggregation.
 pub fn execute_foreground_pipeline(
     plan: &ExecutionPlan,
     platform: &dyn Platform,
@@ -61,10 +65,198 @@ pub fn execute_foreground_pipeline(
     execute_preflighted_pipeline(plan, platform)
 }
 
+/// Execute a foreground pipeline and return its language-level completion
+/// status.
+///
+/// Each completed process becomes a source-ordered leaf status. A multi-stage
+/// plan returns an aggregate selected by the plan's snapshotted `pipefail`
+/// option; a one-stage plan returns its leaf directly. Nonzero exits and signal
+/// termination remain normal completion.
+pub fn execute_foreground_status(
+    plan: &ExecutionPlan,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<Status, RuntimeError> {
+    preflight(plan)?;
+    let pipeline_started = clock.now();
+    let completions = execute_preflighted_pipeline_timed(plan, platform, clock)?;
+    let pipeline_duration = elapsed(pipeline_started, clock.now());
+    let stages: Vec<Status> = completions
+        .into_iter()
+        .map(|completion| language_status(completion.status, completion.duration))
+        .collect();
+
+    if let [stage] = stages.as_slice() {
+        return Ok(stage.clone());
+    }
+
+    let selected = if plan.pipefail() {
+        stages
+            .iter()
+            .rposition(|stage| !stage.is_ok())
+            .unwrap_or(stages.len() - 1)
+    } else {
+        stages.len() - 1
+    };
+    Ok(Status::aggregate(stages, selected, pipeline_duration)
+        .expect("executor completion satisfies aggregate status invariants"))
+}
+
+/// Plan and execute a foreground external-command conditional chain.
+///
+/// Pipelines are planned only when reached. `&&` continues after a successful
+/// status, while `||` continues after an unsuccessful status; the returned
+/// value is the last status actually evaluated. Planning or execution errors
+/// abort the chain and do not activate `||`.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_foreground_chain(
+    chain: &ConditionalChain,
+    cwd: &Path,
+    source: &SourceFile,
+    scope: &mut ScopeStack,
+    environment: &Environment,
+    registry: &CommandRegistry,
+    probe: &dyn ExecutableProbe,
+    options: &SessionOptions,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<Status, RuntimeError> {
+    let mut or_terms = chain.or_terms().iter();
+    let first = or_terms
+        .next()
+        .expect("a parsed conditional chain contains an operand");
+    let mut status = execute_and_chain(
+        first,
+        cwd,
+        source,
+        scope,
+        environment,
+        registry,
+        probe,
+        options,
+        platform,
+        clock,
+    )?;
+    for and_chain in or_terms {
+        if status.is_ok() {
+            break;
+        }
+        status = execute_and_chain(
+            and_chain,
+            cwd,
+            source,
+            scope,
+            environment,
+            registry,
+            probe,
+            options,
+            platform,
+            clock,
+        )?;
+    }
+    Ok(status)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_and_chain(
+    chain: &flashshell_syntax::AndChain,
+    cwd: &Path,
+    source: &SourceFile,
+    scope: &mut ScopeStack,
+    environment: &Environment,
+    registry: &CommandRegistry,
+    probe: &dyn ExecutableProbe,
+    options: &SessionOptions,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<Status, RuntimeError> {
+    let mut pipelines = chain.and_terms().iter();
+    let first = pipelines
+        .next()
+        .expect("a parsed and-chain contains an operand");
+    let mut status = plan_and_execute(
+        first,
+        cwd,
+        source,
+        scope,
+        environment,
+        registry,
+        probe,
+        options,
+        platform,
+        clock,
+    )?;
+    for pipeline in pipelines {
+        if !status.is_ok() {
+            break;
+        }
+        status = plan_and_execute(
+            pipeline,
+            cwd,
+            source,
+            scope,
+            environment,
+            registry,
+            probe,
+            options,
+            platform,
+            clock,
+        )?;
+    }
+    Ok(status)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_and_execute(
+    pipeline: &flashshell_syntax::Pipeline,
+    cwd: &Path,
+    source: &SourceFile,
+    scope: &mut ScopeStack,
+    environment: &Environment,
+    registry: &CommandRegistry,
+    probe: &dyn ExecutableProbe,
+    options: &SessionOptions,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<Status, RuntimeError> {
+    let plan = plan_pipeline_with_options(
+        pipeline,
+        cwd,
+        source,
+        scope,
+        environment,
+        registry,
+        probe,
+        options,
+    )?;
+    execute_foreground_status(&plan, platform, clock)
+}
+
 fn execute_preflighted_pipeline(
     plan: &ExecutionPlan,
     platform: &dyn Platform,
 ) -> Result<Vec<ProcessStatus>, RuntimeError> {
+    execute_preflighted_pipeline_inner(plan, platform, None).map(|completions| {
+        completions
+            .into_iter()
+            .map(|completion| completion.status)
+            .collect()
+    })
+}
+
+fn execute_preflighted_pipeline_timed(
+    plan: &ExecutionPlan,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<Vec<StageCompletion>, RuntimeError> {
+    execute_preflighted_pipeline_inner(plan, platform, Some(clock))
+}
+
+fn execute_preflighted_pipeline_inner(
+    plan: &ExecutionPlan,
+    platform: &dyn Platform,
+    clock: Option<&dyn Clock>,
+) -> Result<Vec<StageCompletion>, RuntimeError> {
     if plan.stages().is_empty() {
         return Err(RuntimeError::new(
             RuntimeErrorKind::Unsupported {
@@ -92,7 +284,7 @@ fn execute_preflighted_pipeline(
         .iter()
         .map(|(name, value)| (OsString::from(name), value.to_os_string()))
         .collect();
-    let mut children: Vec<Box<dyn ChildProcess>> = Vec::with_capacity(plan.stages().len());
+    let mut children: Vec<StartedChild> = Vec::with_capacity(plan.stages().len());
 
     for (index, stage) in plan.stages().iter().enumerate() {
         let input = index.checked_sub(1).and_then(|edge| pipes[edge].0.take());
@@ -126,6 +318,7 @@ fn execute_preflighted_pipeline(
             .with_closed_descriptors(&closed_descriptors)
             .expect("a final descriptor cannot be both mapped and closed");
         let command_span = stage.argv()[0].span();
+        let started_at = clock.map(Clock::now);
         let child = platform.spawn(&request).map_err(|error| {
             RuntimeError::new(RuntimeErrorKind::ProcessSpawn(error), command_span)
         });
@@ -135,7 +328,7 @@ fn execute_preflighted_pipeline(
         drop(descriptor_map);
 
         match child {
-            Ok(child) => children.push(child),
+            Ok(child) => children.push(StartedChild { child, started_at }),
             Err(error) => {
                 drop(pipes);
                 terminate_and_reap(&mut children);
@@ -145,7 +338,7 @@ fn execute_preflighted_pipeline(
     }
 
     drop(pipes);
-    wait_in_source_order(children, plan)
+    wait_in_source_order(children, plan, clock)
 }
 
 fn validate_external_stage(stage: &crate::plan::PlannedStage) -> Result<(), RuntimeError> {
@@ -160,13 +353,23 @@ fn validate_external_stage(stage: &crate::plan::PlannedStage) -> Result<(), Runt
     Ok(())
 }
 
-fn terminate_and_reap(children: &mut [Box<dyn ChildProcess>]) {
+fn terminate_and_reap(children: &mut [StartedChild]) {
     for child in &mut *children {
-        let _ = child.terminate();
+        let _ = child.child.terminate();
     }
     for child in children {
-        let _ = child.wait();
+        let _ = child.child.wait();
     }
+}
+
+struct StartedChild {
+    child: Box<dyn ChildProcess>,
+    started_at: Option<Instant>,
+}
+
+struct StageCompletion {
+    status: ProcessStatus,
+    duration: Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -352,14 +555,21 @@ impl StageDescriptorMap {
 }
 
 fn wait_in_source_order(
-    children: Vec<Box<dyn ChildProcess>>,
+    children: Vec<StartedChild>,
     plan: &ExecutionPlan,
-) -> Result<Vec<ProcessStatus>, RuntimeError> {
+    clock: Option<&dyn Clock>,
+) -> Result<Vec<StageCompletion>, RuntimeError> {
     let mut statuses = Vec::with_capacity(children.len());
     let mut first_error = None;
     for (mut child, stage) in children.into_iter().zip(plan.stages()) {
-        match child.wait() {
-            Ok(status) => statuses.push(status),
+        match child.child.wait() {
+            Ok(status) => {
+                let duration = match (child.started_at, clock) {
+                    (Some(started_at), Some(clock)) => elapsed(started_at, clock.now()),
+                    _ => Duration::ZERO,
+                };
+                statuses.push(StageCompletion { status, duration });
+            }
             Err(error) => {
                 if first_error.is_none() {
                     first_error = Some(RuntimeError::new(
@@ -375,4 +585,20 @@ fn wait_in_source_order(
         Some(error) => Err(error),
         None => Ok(statuses),
     }
+}
+
+fn elapsed(start: Instant, end: Instant) -> Duration {
+    Duration::from_nanos(i128::from(end.as_nanos().saturating_sub(start.as_nanos())))
+}
+
+fn language_status(status: ProcessStatus, duration: Duration) -> Status {
+    match status {
+        ProcessStatus::Exited(code) => Status::exit(i64::from(code), duration),
+        ProcessStatus::Signaled(number) => Status::signaled(
+            Signal::new(Some(i64::from(number)), None)
+                .expect("a platform signal status always carries its number"),
+            duration,
+        ),
+    }
+    .expect("monotonic execution durations are valid")
 }

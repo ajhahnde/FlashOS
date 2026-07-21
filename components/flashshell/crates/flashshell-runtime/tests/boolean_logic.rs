@@ -4,7 +4,7 @@
 //! over the pure evaluator.
 
 use flashshell_runtime::eval::{RuntimeError, RuntimeErrorKind, evaluate};
-use flashshell_runtime::{ScopeStack, Value};
+use flashshell_runtime::{BindingMutability, Duration, ScopeStack, Status, Value};
 use flashshell_syntax::{ParseOutcome, SourceFile, SourceId, parse};
 
 fn run(source: &str) -> Result<Value, RuntimeError> {
@@ -15,6 +15,15 @@ fn run(source: &str) -> Result<Value, RuntimeError> {
     };
     let mut scope = ScopeStack::new();
     evaluate(&script, &file, &mut scope)
+}
+
+fn run_with_scope(source: &str, scope: &mut ScopeStack) -> Result<Value, RuntimeError> {
+    let file = SourceFile::new(SourceId::new(1), "test.fsh", source);
+    let script = match parse(&file) {
+        ParseOutcome::Complete(script) => script,
+        other => panic!("source did not parse: {other:?}\n{source}"),
+    };
+    evaluate(&script, &file, scope)
 }
 
 fn ok(source: &str) -> Value {
@@ -72,12 +81,12 @@ fn a_non_bool_operand_that_is_evaluated_is_an_error() {
     // The left operand is always evaluated, so a non-bool left is an error.
     assert!(matches!(
         err("1 || true"),
-        RuntimeErrorKind::LogicOperandNotBool { .. }
+        RuntimeErrorKind::ConditionalOperandNotBoolOrStatus { .. }
     ));
     // A reached right operand is likewise typed.
     assert!(matches!(
         err("true && 1"),
-        RuntimeErrorKind::LogicOperandNotBool { .. }
+        RuntimeErrorKind::ConditionalOperandNotBoolOrStatus { .. }
     ));
 }
 
@@ -103,4 +112,42 @@ $result";
 
     // A grouped chain used as an expression value.
     assert_eq!(ok("let both = (true && true)\n$both"), boolean(true));
+}
+
+#[test]
+fn status_values_drive_chains_and_conditions_without_losing_identity() {
+    let failed = Status::exit(7, Duration::from_nanos(4)).unwrap();
+    let succeeded = Status::exit(0, Duration::from_nanos(8)).unwrap();
+    let mut scope = ScopeStack::new();
+    scope
+        .declare(
+            "failed",
+            BindingMutability::Immutable,
+            Value::from(failed.clone()),
+        )
+        .unwrap();
+    scope
+        .declare(
+            "succeeded",
+            BindingMutability::Immutable,
+            Value::from(succeeded.clone()),
+        )
+        .unwrap();
+
+    assert_eq!(
+        run_with_scope("$failed || $succeeded", &mut scope).unwrap(),
+        Value::from(succeeded)
+    );
+    assert_eq!(
+        run_with_scope("$failed && $never", &mut scope).unwrap(),
+        Value::from(failed)
+    );
+    assert_eq!(
+        run_with_scope(
+            "mut result = 'no'\nif $succeeded { $result = 'yes' }\n$result",
+            &mut scope,
+        )
+        .unwrap(),
+        Value::string("yes")
+    );
 }

@@ -39,6 +39,7 @@ pub struct ExecutionPlan {
     environment: Environment,
     stages: Vec<PlannedStage>,
     edges: Vec<PipelineEdge>,
+    pipefail: bool,
     span: Span,
 }
 
@@ -65,6 +66,15 @@ impl ExecutionPlan {
     #[must_use]
     pub fn edges(&self) -> &[PipelineEdge] {
         &self.edges
+    }
+
+    /// Whether this plan uses rightmost-failure pipeline status aggregation.
+    ///
+    /// The value is copied from the session when the plan is built, so a later
+    /// session-option change cannot alter an already running pipeline.
+    #[must_use]
+    pub const fn pipefail(&self) -> bool {
+        self.pipefail
     }
 
     /// The whole-pipeline source span.
@@ -122,6 +132,32 @@ impl ExecutionPlan {
             let _ = writeln!(out, "edge {index} {operator} {}", index + 1);
         }
         out
+    }
+}
+
+/// Session execution options that affect command planning.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SessionOptions {
+    pipefail: bool,
+}
+
+impl SessionOptions {
+    /// Whether pipelines select their rightmost unsuccessful stage.
+    #[must_use]
+    pub const fn pipefail(self) -> bool {
+        self.pipefail
+    }
+
+    /// Return these options with `pipefail` set to `enabled`.
+    #[must_use]
+    pub const fn with_pipefail(mut self, enabled: bool) -> Self {
+        self.pipefail = enabled;
+        self
+    }
+
+    /// Change the option used by plans created after this call.
+    pub const fn set_pipefail(&mut self, enabled: bool) {
+        self.pipefail = enabled;
     }
 }
 
@@ -331,6 +367,33 @@ pub fn plan_pipeline(
     registry: &CommandRegistry,
     probe: &dyn ExecutableProbe,
 ) -> Result<ExecutionPlan, RuntimeError> {
+    plan_pipeline_with_options(
+        pipeline,
+        cwd,
+        source,
+        scope,
+        environment,
+        registry,
+        probe,
+        &SessionOptions::default(),
+    )
+}
+
+/// Plans one command pipeline and snapshots its session execution options.
+///
+/// This is the option-aware form of [`plan_pipeline`]. Planning remains free of
+/// platform calls and process execution.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_pipeline_with_options(
+    pipeline: &Pipeline,
+    cwd: impl Into<PathBuf>,
+    source: &SourceFile,
+    scope: &mut ScopeStack,
+    environment: &Environment,
+    registry: &CommandRegistry,
+    probe: &dyn ExecutableProbe,
+    options: &SessionOptions,
+) -> Result<ExecutionPlan, RuntimeError> {
     let mut stages = Vec::with_capacity(pipeline.stages().len());
     for stage in pipeline.stages() {
         let span = stage.span();
@@ -367,6 +430,7 @@ pub fn plan_pipeline(
         environment: environment.clone(),
         stages,
         edges,
+        pipefail: options.pipefail(),
         span: pipeline.span(),
     })
 }
