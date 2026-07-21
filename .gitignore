@@ -5,10 +5,6 @@
 target/
 rust-out/
 
-# Private notes, management, and local session state
-/ajhahnde/
-/management/
-
 # Local secrets and signing material (versions.env is intentionally public)
 .env
 .env.*
@@ -27,4 +23,3 @@ rust-out/
 *.raw
 *.capture
 screenlog.*
-
