@@ -891,7 +891,7 @@ impl KernelFeatures {
 }
 
 /// Where one initramfs entry's bytes come from.
-enum ArcSource {
+pub(crate) enum ArcSource {
     /// A Rust EL0 payload, looked up in `USER_ELFS` by stem.
     User(&'static str),
     /// A checked-in file, repository-root-relative.
@@ -904,7 +904,7 @@ enum ArcSource {
 /// archive path — the encoder writes entries in this order, so the list is the
 /// single source of truth for the archive's entry order and therefore its
 /// sha256. Preserves the retired graph's archive list + staging contract exactly.
-const INITRAMFS: &[(&str, u32, ArcSource)] = &[
+pub(crate) const INITRAMFS: &[(&str, u32, ArcSource)] = &[
     ("bin/cat", 0o100755, ArcSource::User("cat")),
     ("bin/clear", 0o100755, ArcSource::User("clear")),
     ("bin/cp", 0o100755, ArcSource::User("cp")),
@@ -1042,7 +1042,10 @@ fn kernel_link(
         .map(|s| (root.join(s), None))
         .chain(board.board_asm().iter().map(|s| (board_dir.join(s), None)))
         .collect();
-    sources.push((root.join("crates/kernel/link/initramfs.S"), Some(cpio_dir.to_path_buf())));
+    sources.push((
+        root.join("crates/kernel/link/initramfs.S"),
+        Some(cpio_dir.to_path_buf()),
+    ));
 
     let mut objs: Vec<PathBuf> = Vec::new();
     for (src, extra_inc) in &sources {

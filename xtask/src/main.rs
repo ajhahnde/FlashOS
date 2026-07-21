@@ -6,6 +6,7 @@
 mod asm_defs;
 mod build;
 mod census;
+mod check_layout;
 mod guard;
 mod initramfs;
 mod qemu;
@@ -48,6 +49,7 @@ Commands:
   gen-shadow --output <path>    Bake /etc/shadow with the kernel's own PBKDF2
   test                          Run the Rust host tests (all crates but the bare-metal ones)
   census                        Reject maintained Flash/Zig implementation files
+  check-layout                  Enforce the repository layout invariants
   check-hygiene                 Run the repo's whitespace and hex-literal gates
   clean                         Remove rust-out/ and the cargo target dir
   help                          This text
@@ -218,6 +220,7 @@ fn dispatch() -> Result<(), String> {
             ])
             .run(),
         "census" => census::run(&root),
+        "check-layout" => check_layout::run(&root),
         "check-hygiene" => {
             let trace = root.join("rust-out/xtask-trace.log");
             for script in [
@@ -230,6 +233,7 @@ fn dispatch() -> Result<(), String> {
                     .run()
                     .map_err(|e| format!("{script}: {e}"))?;
             }
+            check_layout::run(&root)?;
             println!("hygiene OK");
             Ok(())
         }
