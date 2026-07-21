@@ -122,7 +122,7 @@ if ! awk -v expected="$FLASHOS_RELEASE_VERSION" '
   failed=1
 fi
 
-live_docs="README.md DOCUMENTATION.md SETUP.md arch/aarch64/README.md docs/de tutorial/public"
+live_docs="README.md DOCUMENTATION.md SETUP.md arch/aarch64/README.md docs/de tour/public"
 # The Rust version badge is the one sanctioned patch-version citation: it shows
 # the exact pinned toolchain and is regenerated from versions.env by --write, so
 # exclude its `alt="Rust <version>"` form. Prose and any mismatched/stale patch

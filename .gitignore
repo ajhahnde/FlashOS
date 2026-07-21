@@ -28,7 +28,7 @@ rust-out/
 *.capture
 screenlog.*
 
-# tutorial web app — keep source, drop deps & scratch
-/tutorial/node_modules/
-/tutorial/temp/
-/tutorial/SETUP.md
+# tour web app — keep source, drop deps & scratch
+/tour/node_modules/
+/tour/temp/
+/tour/SETUP.md

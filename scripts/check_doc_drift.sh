@@ -8,7 +8,7 @@
 # stay with the human-in-the-loop reviewer — they false-positive too easily to
 # gate a push.
 #
-# The checks cover the active public English and German docs plus the tutorial.
+# The checks cover the active public English and German docs plus the tour.
 # CHANGELOG.md is FROZEN provenance — a historical version or path there is
 # honored lineage, not drift, and is never scanned.
 #
@@ -21,7 +21,7 @@
 # Usage: scripts/check_doc_drift.sh   (run from the repo root)
 set -uo pipefail
 
-DOCS="README.md DOCUMENTATION.md SETUP.md docs/de/README.md docs/de/DOCUMENTATION.md docs/de/SETUP.md tutorial/public/chapters/*.md"
+DOCS="README.md DOCUMENTATION.md SETUP.md docs/de/README.md docs/de/DOCUMENTATION.md docs/de/SETUP.md tour/public/chapters/*.md"
 fatal=0
 
 note()  { printf '%s\n' "$*"; }

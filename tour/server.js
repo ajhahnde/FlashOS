@@ -10,11 +10,11 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const LIVE_RELOAD = process.env.TUTORIAL_LIVE_RELOAD === '1';
+const LIVE_RELOAD = process.env.TOUR_LIVE_RELOAD === '1';
 
 // Path to the flashc compiler built in the Flash workspace. FlashOS itself
 // consumes a pinned compiler revision (see flash-toolchain.lock), so the
-// default points at the sibling Flash checkout. The tutorial requests the Zig
+// default points at the sibling Flash checkout. The tour requests the Zig
 // compatibility backend as a readable lab/test view. FlashOS production
 // artifacts are compiled through flashc's native LLVM path.
 const COMPILER_PATH = process.env.FLASHC
@@ -154,5 +154,5 @@ if (LIVE_RELOAD) {
 }
 
 app.listen(PORT, 'localhost', () => {
-  console.log(`FlashOS Tutorial running at http://localhost:${PORT}`);
+  console.log(`FlashOS Tour running at http://localhost:${PORT}`);
 });
