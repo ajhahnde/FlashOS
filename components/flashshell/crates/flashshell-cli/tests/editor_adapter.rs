@@ -1,0 +1,45 @@
+#![forbid(unsafe_code)]
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use flashshell_cli::ReedlineEditor;
+use flashshell_cli::editor::{EditorError, EditorEvent, EditorPrompt, LineEditor};
+
+struct RecordingEditor {
+    event: Option<EditorEvent>,
+    prompts: Vec<EditorPrompt>,
+}
+
+impl LineEditor for RecordingEditor {
+    fn read_line(&mut self, prompt: &EditorPrompt) -> Result<EditorEvent, EditorError> {
+        self.prompts.push(prompt.clone());
+        self.event
+            .take()
+            .ok_or_else(|| EditorError::new("scripted editor exhausted"))
+    }
+}
+
+#[test]
+fn session_code_consumes_editor_owned_events_without_a_terminal() {
+    let prompt = EditorPrompt::new("fsh> ", "...> ");
+    let mut editor = RecordingEditor {
+        event: Some(EditorEvent::Submitted("echo hello".to_owned())),
+        prompts: Vec::new(),
+    };
+
+    assert_eq!(
+        editor
+            .read_line(&prompt)
+            .expect("scripted input should exist"),
+        EditorEvent::Submitted("echo hello".to_owned())
+    );
+    assert_eq!(editor.prompts, vec![prompt]);
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn reedline_is_constructed_behind_the_line_editor_contract() {
+    fn accepts_adapter(_: &mut dyn LineEditor) {}
+
+    let mut editor = ReedlineEditor::new();
+    accepts_adapter(&mut editor);
+}
