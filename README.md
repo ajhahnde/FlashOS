@@ -10,7 +10,7 @@
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/ci.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/security.yml?branch=main&style=flat-square&label=security" alt="Security"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
-    <a href="https://github.com/ajhahnde/FlashOS/releases/latest"><img src="https://img.shields.io/github/v/release/ajhahnde/FlashOS?style=flat-square&label=version" alt="Version"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/releases/latest"><img src="https://img.shields.io/github/v/release/ajhahnde/FlashOS?style=flat-square&label=version&color=f59e0b" alt="Version"></a>
     <img src="https://img.shields.io/badge/rust-toolchain--pinned-dea584?style=flat-square" alt="Repository-pinned Rust toolchain">
     <img src="https://img.shields.io/badge/target-aarch64--unknown--none--softfloat-lightgrey?style=flat-square" alt="aarch64-unknown-none-softfloat">
     <img src="https://img.shields.io/badge/license-apache--2.0-lightgrey?style=flat-square" alt="License">
@@ -134,11 +134,9 @@ config.txt                  RPi 4 firmware configuration
 
 ## CI/CD and release engineering
 
-FlashOS is built and qualified by a multi-stage GitHub Actions pipeline for a
-Rust/AArch64 bare-metal target. Cheap quality gates fan out in parallel, funnel
-into a single clean-room production build, promote one immutable boot artifact,
-and boot that exact artifact on an emulated Raspberry Pi 4B before a final
-aggregate status.
+A GitHub Actions pipeline builds and qualifies the Rust/AArch64 image. Quality
+gates run in parallel, then feed one clean-room build. That build produces a
+single boot artifact, which is booted unchanged on an emulated Raspberry Pi 4B.
 
 ```mermaid
 flowchart TD
@@ -157,26 +155,24 @@ flowchart TD
     T --> R[CI / required]
 ```
 
-- **Parallel gates** — formatting, Clippy (`-D warnings`), host tests, the
-  architecture contracts (hygiene, generated ASM layout, armstub, source
-  census), a sharded EL0-payload link matrix, and the FlashShell consumer
-  workspace under its own pinned toolchain.
-- **Clean-room build** — the production image is built under rejecting `PATH`
-  shims with subprocess tracing, proving no retired compiler is invoked.
-- **Immutable promotion** — the boot job never rebuilds; it downloads the
-  checksummed artifact from the build job and verifies its SHA-256 sums before
-  powering on a pinned, source-built QEMU (`raspi4b`).
-- **CI vs. production artifacts** — the CI boot image carries `--ci-login-seed`
-  and `--boot-selftest` (an auto-authenticated login and the in-kernel test
-  harness). The **release** bundle is a separate, rebuilt-from-tag artifact that
-  omits both flags and boots to the real `login:` prompt.
-- **Releases** — tag-driven and reproducible (pinned `mtime`, sorted archives),
-  shipping the flashable bundle plus `SHA256SUMS`, a CycloneDX SBOM, a
-  provenance attestation, and a `build-info.json` manifest. A manual dry run
-  packages every asset without publishing.
+- **Gates** — formatting, Clippy (`-D warnings`), host tests, the architecture
+  contracts (hygiene, generated ASM layout, armstub, source census), a sharded
+  EL0-payload link matrix, and FlashShell under its own pinned toolchain.
+- **Clean-room build** — built under rejecting `PATH` shims with subprocess
+  tracing, so no retired compiler can sneak in.
+- **Boot** — the boot job never rebuilds. It pulls the artifact from the build
+  job, checks its SHA-256 sums, and powers on a pinned, source-built QEMU
+  (`raspi4b`).
+- **CI vs. release image** — the CI image carries `--ci-login-seed` and
+  `--boot-selftest` (auto-login plus the in-kernel test harness). The release
+  bundle is rebuilt from the tag without either flag and boots to the real
+  `login:` prompt.
+- **Releases** — tag-driven and reproducible (pinned `mtime`, sorted archives).
+  Each ships the flashable bundle, `SHA256SUMS`, a CycloneDX SBOM, a provenance
+  attestation, and a `build-info.json`. A dry run packages everything without
+  publishing.
 - **Supply chain** — pinned Rust and QEMU, SHA-pinned actions kept fresh by
-  Dependabot, dependency review on pull requests, and a reviewed `cargo-deny`
-  policy (advisories, licenses, bans, sources).
+  Dependabot, dependency review on PRs, and a reviewed `cargo-deny` policy.
 
 ## See also
 
