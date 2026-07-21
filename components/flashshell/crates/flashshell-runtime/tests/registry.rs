@@ -10,7 +10,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 
 use flashshell_runtime::Environment;
-use flashshell_runtime::command::{Carrier, CommandRegistry, CommandSignature};
+use flashshell_runtime::command::{Carrier, CommandOutput, CommandRegistry, CommandSignature};
 use flashshell_runtime::resolve::{ExecutableProbe, Resolution, ResolutionError, resolve_command};
 
 struct FakeExecutables(HashSet<OsString>);
@@ -48,7 +48,10 @@ fn a_signature_exposes_its_name_carriers_and_output() {
     let signature = sig("where", [Carrier::ValueStream], Carrier::ValueStream);
 
     assert_eq!(signature.name(), "where");
-    assert_eq!(signature.output(), Carrier::ValueStream);
+    assert_eq!(
+        signature.output(),
+        CommandOutput::Fixed(Carrier::ValueStream)
+    );
     assert!(signature.accepts(Carrier::ValueStream));
     assert!(!signature.accepts(Carrier::ByteStream));
 }
@@ -64,6 +67,22 @@ fn a_signature_can_accept_more_than_one_input_carrier() {
     assert!(signature.accepts(Carrier::Value));
     assert!(signature.accepts(Carrier::ValueStream));
     assert!(!signature.accepts(Carrier::Empty));
+}
+
+#[test]
+fn a_passthrough_signature_resolves_to_each_actual_input_carrier() {
+    let signature =
+        CommandSignature::passthrough("check", [Carrier::ByteStream, Carrier::ValueStream]);
+
+    assert_eq!(signature.output(), CommandOutput::SameAsInput);
+    assert_eq!(
+        signature.output().resolve(Carrier::ByteStream),
+        Carrier::ByteStream
+    );
+    assert_eq!(
+        signature.output().resolve(Carrier::ValueStream),
+        Carrier::ValueStream
+    );
 }
 
 #[test]
@@ -88,7 +107,7 @@ fn registering_a_duplicate_name_is_rejected_and_keeps_the_first() {
     assert!(!registry.register(sig("cd", [Carrier::Value], Carrier::Value)));
 
     let kept = registry.lookup("cd").expect("still registered");
-    assert_eq!(kept.output(), Carrier::Empty);
+    assert_eq!(kept.output(), CommandOutput::Fixed(Carrier::Empty));
     assert!(kept.accepts(Carrier::Empty));
     assert!(!kept.accepts(Carrier::Value));
     assert_eq!(registry.len(), 1);

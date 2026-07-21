@@ -6,7 +6,7 @@ use std::path::Path;
 use flashshell_platform::{
     Capabilities, Capability, ChildDescriptor, DescriptorReadError, FakePlatform, FileActionError,
     FileOpenMode, FileOpenRequest, PipeError, Platform, PlatformError, ProcessStatus, SpawnError,
-    SpawnRequest, SpawnRequestError,
+    SpawnRequest, SpawnRequestError, WorkingDirectoryError, WorkingDirectoryRequest,
 };
 
 #[test]
@@ -60,6 +60,30 @@ fn full_supports_every_capability_and_empty_supports_none() {
             "empty unexpectedly has {capability:?}",
         );
     }
+}
+
+#[test]
+fn fake_working_directory_resolution_is_host_free_and_capability_gated() {
+    let resolved = FakePlatform::full()
+        .resolve_working_directory(WorkingDirectoryRequest::new(
+            Path::new("../next"),
+            Path::new("/work/current"),
+        ))
+        .expect("full fake should resolve lexically");
+    assert_eq!(resolved, Path::new("/work/next"));
+
+    let error = FakePlatform::none()
+        .resolve_working_directory(WorkingDirectoryRequest::new(
+            Path::new("next"),
+            Path::new("/work"),
+        ))
+        .expect_err("absent capability should fail before resolution");
+    assert_eq!(
+        error,
+        WorkingDirectoryError::Platform(PlatformError::Unsupported {
+            capability: Capability::WorkingDirectory,
+        })
+    );
 }
 
 #[test]

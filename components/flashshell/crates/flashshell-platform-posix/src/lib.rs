@@ -20,7 +20,8 @@ use std::process::{Child, Command, Stdio};
 use flashshell_platform::{
     Capabilities, Capability, ChildProcess, DescriptorEndpoint, DescriptorReadError,
     FileActionError, FileOpenMode, FileOpenRequest, PipeEndpoints, PipeError, Platform,
-    ProcessStatus, SpawnError, SpawnRequest, TerminateError, WaitError,
+    ProcessStatus, SpawnError, SpawnRequest, TerminateError, WaitError, WorkingDirectoryError,
+    WorkingDirectoryRequest,
 };
 
 /// A uniquely owned POSIX descriptor with close-on-exec discipline.
@@ -112,6 +113,27 @@ impl ChildProcess for PosixChild {
 impl Platform for PosixPlatform {
     fn capabilities(&self) -> Capabilities {
         Capabilities::full()
+    }
+
+    fn resolve_working_directory(
+        &self,
+        request: WorkingDirectoryRequest<'_>,
+    ) -> Result<std::path::PathBuf, WorkingDirectoryError> {
+        self.require(Capability::WorkingDirectory)?;
+        let candidate = if request.path().is_absolute() {
+            request.path().to_owned()
+        } else {
+            request.cwd().join(request.path())
+        };
+        let resolved = std::fs::canonicalize(candidate).map_err(working_directory_error)?;
+        let metadata = std::fs::metadata(&resolved).map_err(working_directory_error)?;
+        if !metadata.is_dir() {
+            return Err(WorkingDirectoryError::Operation {
+                kind: io::ErrorKind::NotADirectory,
+                message: format!("{} is not a directory", resolved.display()),
+            });
+        }
+        Ok(resolved)
     }
 
     fn pipe(&self) -> Result<PipeEndpoints, PipeError> {
@@ -325,6 +347,13 @@ fn spawn_error(error: io::Error) -> SpawnError {
 
 fn file_action_error(error: io::Error) -> FileActionError {
     FileActionError::Operation {
+        kind: error.kind(),
+        message: error.to_string(),
+    }
+}
+
+fn working_directory_error(error: io::Error) -> WorkingDirectoryError {
+    WorkingDirectoryError::Operation {
         kind: error.kind(),
         message: error.to_string(),
     }

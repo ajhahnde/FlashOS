@@ -26,12 +26,32 @@ pub enum Carrier {
     ValueStream,
 }
 
+/// How an internal command determines its output carrier.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum CommandOutput {
+    /// The command always produces one fixed carrier.
+    Fixed(Carrier),
+    /// The command forwards whichever carrier it accepted unchanged.
+    SameAsInput,
+}
+
+impl CommandOutput {
+    /// Resolve this contract for an actual input carrier.
+    #[must_use]
+    pub const fn resolve(self, input: Carrier) -> Carrier {
+        match self {
+            Self::Fixed(output) => output,
+            Self::SameAsInput => input,
+        }
+    }
+}
+
 /// An internal command's v0.1 signature: its name and pipeline-carrier contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandSignature {
     name: String,
     inputs: BTreeSet<Carrier>,
-    output: Carrier,
+    output: CommandOutput,
 }
 
 impl CommandSignature {
@@ -45,7 +65,16 @@ impl CommandSignature {
         Self {
             name: name.into(),
             inputs: inputs.into_iter().collect(),
-            output,
+            output: CommandOutput::Fixed(output),
+        }
+    }
+
+    /// Builds a signature that forwards its accepted input carrier unchanged.
+    pub fn passthrough(name: impl Into<String>, inputs: impl IntoIterator<Item = Carrier>) -> Self {
+        Self {
+            name: name.into(),
+            inputs: inputs.into_iter().collect(),
+            output: CommandOutput::SameAsInput,
         }
     }
 
@@ -68,7 +97,7 @@ impl CommandSignature {
 
     /// The carrier the command produces.
     #[must_use]
-    pub fn output(&self) -> Carrier {
+    pub fn output(&self) -> CommandOutput {
         self.output
     }
 }

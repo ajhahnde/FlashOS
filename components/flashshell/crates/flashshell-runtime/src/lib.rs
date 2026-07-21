@@ -2,6 +2,7 @@
 
 //! Platform-independent runtime contracts for FlashShell.
 
+pub mod builtin;
 pub mod command;
 mod environment;
 pub mod eval;

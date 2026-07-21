@@ -22,7 +22,7 @@ use flashshell_syntax::{
     RedirectionKind, SourceFile, Span, StageKind,
 };
 
-use crate::command::{Carrier, CommandRegistry};
+use crate::command::{Carrier, CommandOutput, CommandRegistry};
 use crate::eval::{ExpandedWord, RuntimeError, RuntimeErrorKind, expand_spread, expand_word};
 use crate::resolve::{ExecutableProbe, Resolution, ResolutionError, resolve_command};
 use crate::{Environment, ScopeStack};
@@ -438,6 +438,10 @@ pub fn plan_pipeline_with_options(
 ) -> Result<ExecutionPlan, RuntimeError> {
     let mut stages = Vec::with_capacity(pipeline.stages().len());
     for stage in pipeline.stages() {
+        let has_upstream = !stages.is_empty();
+        let input_carrier = stages
+            .last()
+            .map_or(Carrier::Empty, PlannedStage::output_carrier);
         let span = stage.span();
         let StageKind::Command(command) = stage.kind() else {
             return Err(RuntimeError::new(
@@ -447,15 +451,15 @@ pub fn plan_pipeline_with_options(
                 span,
             ));
         };
-        stages.push(plan_stage(
-            command,
-            span,
+        let context = StagePlanningContext {
             source,
-            scope,
             environment,
             registry,
             probe,
-        )?);
+            input_carrier,
+            has_upstream,
+        };
+        stages.push(plan_stage(command, span, scope, &context)?);
     }
 
     let edges = pipeline
@@ -478,35 +482,37 @@ pub fn plan_pipeline_with_options(
     })
 }
 
+struct StagePlanningContext<'a> {
+    source: &'a SourceFile,
+    environment: &'a Environment,
+    registry: &'a CommandRegistry,
+    probe: &'a dyn ExecutableProbe,
+    input_carrier: Carrier,
+    has_upstream: bool,
+}
+
 fn plan_stage(
     command: &CommandStage,
     span: Span,
-    source: &SourceFile,
     scope: &mut ScopeStack,
-    environment: &Environment,
-    registry: &CommandRegistry,
-    probe: &dyn ExecutableProbe,
+    context: &StagePlanningContext<'_>,
 ) -> Result<PlannedStage, RuntimeError> {
     // argv[0] is the expanded command word; the head marker only steers
     // resolution and is never part of the name.
-    let head = expand_word(command.head.word(), source, scope)?;
+    let head = expand_word(command.head.word(), context.source, scope)?;
     let force_external = command.head.kind() == flashshell_syntax::CommandHeadKind::ForcedExternal;
-    let (resolution, input_carriers, output_carrier) = resolve(
-        head.value(),
-        force_external,
-        command.head.span(),
-        registry,
-        environment,
-        probe,
-    )?;
+    let (resolution, input_carriers, output_carrier) =
+        resolve(head.value(), force_external, command.head.span(), context)?;
 
     let mut argv = vec![head];
     let mut redirections = Vec::new();
     for item in &command.items {
         match item.kind() {
-            CommandItemKind::Word(word) => argv.push(expand_word(word, source, scope)?),
+            CommandItemKind::Word(word) => {
+                argv.push(expand_word(word, context.source, scope)?);
+            }
             CommandItemKind::Spread(variable) => {
-                argv.extend(expand_spread(variable, item.span(), source, scope)?);
+                argv.extend(expand_spread(variable, item.span(), context.source, scope)?);
             }
             CommandItemKind::Closure(_) => {
                 return Err(RuntimeError::new(
@@ -517,7 +523,7 @@ fn plan_stage(
                 ));
             }
             CommandItemKind::Redirection(redirection) => {
-                let action = plan_redirection(redirection.kind(), source, scope)?;
+                let action = plan_redirection(redirection.kind(), context.source, scope)?;
                 redirections.push(PlannedRedirection {
                     action,
                     span: redirection.span(),
@@ -544,18 +550,33 @@ fn resolve(
     name: &OsStr,
     force_external: bool,
     head_span: Span,
-    registry: &CommandRegistry,
-    environment: &Environment,
-    probe: &dyn ExecutableProbe,
+    context: &StagePlanningContext<'_>,
 ) -> Result<(PlannedResolution, BTreeSet<Carrier>, Carrier), RuntimeError> {
-    match resolve_command(name, force_external, registry, environment, probe) {
-        Ok(Resolution::Internal(signature)) => Ok((
-            PlannedResolution::Internal {
-                name: signature.name().to_owned(),
-            },
-            signature.inputs().collect(),
-            signature.output(),
-        )),
+    match resolve_command(
+        name,
+        force_external,
+        context.registry,
+        context.environment,
+        context.probe,
+    ) {
+        Ok(Resolution::Internal(signature)) => {
+            if signature.name() == "check"
+                && signature.output() == CommandOutput::SameAsInput
+                && !context.has_upstream
+            {
+                return Err(RuntimeError::new(
+                    RuntimeErrorKind::CheckRequiresUpstream,
+                    head_span,
+                ));
+            }
+            Ok((
+                PlannedResolution::Internal {
+                    name: signature.name().to_owned(),
+                },
+                signature.inputs().collect(),
+                signature.output().resolve(context.input_carrier),
+            ))
+        }
         Ok(Resolution::External(command)) => Ok((
             PlannedResolution::External {
                 path: command.path().to_owned(),

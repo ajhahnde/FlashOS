@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use flashshell_platform::{
     Capability, ChildDescriptor, FileOpenMode, FileOpenRequest, Platform, ProcessStatus,
-    SpawnError, SpawnRequest,
+    SpawnError, SpawnRequest, WorkingDirectoryError, WorkingDirectoryRequest,
 };
 use flashshell_platform_posix::{OwnedDescriptor, PosixPlatform};
 
@@ -27,6 +27,35 @@ fn posix_platform_supports_every_capability() {
         );
         assert_eq!(platform.require(capability), Ok(()));
     }
+}
+
+#[test]
+fn posix_working_directory_resolution_canonicalizes_and_rejects_files() {
+    let temp = TempDir::new("working-directory");
+    fs::create_dir(temp.path().join("child")).expect("child directory should be created");
+    fs::write(temp.path().join("file"), b"not a directory").expect("file should be created");
+
+    let resolved = PosixPlatform
+        .resolve_working_directory(WorkingDirectoryRequest::new(
+            Path::new("child/.."),
+            temp.path(),
+        ))
+        .expect("directory should resolve through the host");
+    assert_eq!(
+        resolved,
+        fs::canonicalize(temp.path()).expect("temporary directory canonicalizes")
+    );
+
+    let error = PosixPlatform
+        .resolve_working_directory(WorkingDirectoryRequest::new(Path::new("file"), temp.path()))
+        .expect_err("a regular file is not a working directory");
+    assert!(matches!(
+        error,
+        WorkingDirectoryError::Operation {
+            kind: std::io::ErrorKind::NotADirectory,
+            ..
+        }
+    ));
 }
 
 #[test]

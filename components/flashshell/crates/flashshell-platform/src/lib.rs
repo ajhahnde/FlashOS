@@ -17,7 +17,7 @@ use std::any::Any;
 use std::ffi::OsString;
 use std::fmt;
 use std::io;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// One platform capability group an adapter either supports or does not.
 ///
@@ -247,6 +247,63 @@ impl fmt::Display for DescriptorReadError {
 impl std::error::Error for DescriptorReadError {}
 
 impl From<PlatformError> for DescriptorReadError {
+    fn from(error: PlatformError) -> Self {
+        Self::Platform(error)
+    }
+}
+
+/// One byte-preserving logical working-directory resolution request.
+#[derive(Clone, Copy, Debug)]
+pub struct WorkingDirectoryRequest<'a> {
+    path: &'a Path,
+    cwd: &'a Path,
+}
+
+impl<'a> WorkingDirectoryRequest<'a> {
+    /// Resolve `path`, interpreting a relative path against `cwd`.
+    pub const fn new(path: &'a Path, cwd: &'a Path) -> Self {
+        Self { path, cwd }
+    }
+
+    /// The requested native path.
+    pub const fn path(self) -> &'a Path {
+        self.path
+    }
+
+    /// The current logical working directory.
+    pub const fn cwd(self) -> &'a Path {
+        self.cwd
+    }
+}
+
+/// Failure while resolving and validating a logical working directory.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkingDirectoryError {
+    /// The platform cannot satisfy working-directory resolution.
+    Platform(PlatformError),
+    /// The host rejected the path or it did not name a directory.
+    Operation {
+        /// Stable I/O error category from the host adapter.
+        kind: io::ErrorKind,
+        /// Human-readable host error text.
+        message: String,
+    },
+}
+
+impl fmt::Display for WorkingDirectoryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Platform(error) => error.fmt(formatter),
+            Self::Operation { message, .. } => {
+                write!(formatter, "working-directory resolution failed: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for WorkingDirectoryError {}
+
+impl From<PlatformError> for WorkingDirectoryError {
     fn from(error: PlatformError) -> Self {
         Self::Platform(error)
     }
@@ -637,6 +694,19 @@ pub trait Platform: Send + Sync {
         }
     }
 
+    /// Resolve and validate one logical working directory.
+    fn resolve_working_directory(
+        &self,
+        request: WorkingDirectoryRequest<'_>,
+    ) -> Result<PathBuf, WorkingDirectoryError> {
+        self.require(Capability::WorkingDirectory)?;
+        let _ = request;
+        Err(WorkingDirectoryError::Operation {
+            kind: io::ErrorKind::Unsupported,
+            message: "the adapter does not implement working-directory resolution".to_owned(),
+        })
+    }
+
     /// Create one anonymous byte pipe with uniquely owned endpoints.
     fn pipe(&self) -> Result<PipeEndpoints, PipeError>;
 
@@ -699,6 +769,19 @@ impl Platform for FakePlatform {
         self.capabilities
     }
 
+    fn resolve_working_directory(
+        &self,
+        request: WorkingDirectoryRequest<'_>,
+    ) -> Result<PathBuf, WorkingDirectoryError> {
+        self.require(Capability::WorkingDirectory)?;
+        let path = if request.path().is_absolute() {
+            request.path().to_owned()
+        } else {
+            request.cwd().join(request.path())
+        };
+        Ok(normalize_path(&path))
+    }
+
     fn pipe(&self) -> Result<PipeEndpoints, PipeError> {
         self.require(Capability::Pipes)?;
         Ok(PipeEndpoints::new(
@@ -736,6 +819,22 @@ impl Platform for FakePlatform {
         self.require(Capability::ProcessSpawn)?;
         Ok(Box::new(FakeChild))
     }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 /// Opaque endpoint used by [`FakePlatform`] without touching a host resource.
