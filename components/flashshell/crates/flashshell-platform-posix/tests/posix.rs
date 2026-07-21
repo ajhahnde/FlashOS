@@ -2,7 +2,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::symlink;
@@ -10,7 +10,10 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use flashshell_platform::{Capability, Platform, ProcessStatus, SpawnError, SpawnRequest};
+use flashshell_platform::{
+    Capability, ChildDescriptor, FileOpenMode, FileOpenRequest, Platform, ProcessStatus,
+    SpawnError, SpawnRequest,
+};
 use flashshell_platform_posix::{OwnedDescriptor, PosixPlatform};
 
 #[test]
@@ -44,6 +47,104 @@ fn owned_descriptors_close_on_drop_and_clones_keep_the_resource_alive() {
 
     let mut byte = [0_u8; 1];
     assert_eq!(peer.read(&mut byte).expect("peer read should succeed"), 0);
+}
+
+#[test]
+fn posix_pipe_returns_connected_owned_endpoints_with_prompt_eof() {
+    let (reader, writer) = PosixPlatform
+        .pipe()
+        .expect("pipe creation should succeed")
+        .into_parts();
+    let reader_clone = reader
+        .as_any()
+        .downcast_ref::<OwnedDescriptor>()
+        .expect("POSIX returns POSIX descriptors")
+        .try_clone()
+        .expect("the read endpoint should clone")
+        .into_owned_fd();
+    let writer_clone = writer
+        .as_any()
+        .downcast_ref::<OwnedDescriptor>()
+        .expect("POSIX returns POSIX descriptors")
+        .try_clone()
+        .expect("the write endpoint should clone")
+        .into_owned_fd();
+    drop(reader);
+    drop(writer);
+
+    let mut reader = fs::File::from(reader_clone);
+    let mut writer = fs::File::from(writer_clone);
+    writer.write_all(b"pipeline bytes").expect("write succeeds");
+    drop(writer);
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).expect("read reaches EOF");
+
+    assert_eq!(bytes, b"pipeline bytes");
+}
+
+#[test]
+fn posix_file_actions_preserve_relative_cwd_and_open_modes() {
+    let temp = TempDir::new("file-actions");
+    fs::write(temp.path().join("target"), b"old").expect("seed file should be written");
+
+    let truncate = PosixPlatform
+        .open_file(FileOpenRequest::new(
+            Path::new("target"),
+            temp.path(),
+            FileOpenMode::WriteTruncate,
+        ))
+        .expect("truncate open should succeed");
+    let mut file = fs::File::from(
+        truncate
+            .as_any()
+            .downcast_ref::<OwnedDescriptor>()
+            .expect("POSIX returns POSIX descriptors")
+            .try_clone()
+            .expect("the descriptor should clone")
+            .into_owned_fd(),
+    );
+    file.write_all(b"new").expect("truncate target is writable");
+    drop((file, truncate));
+
+    let append = PosixPlatform
+        .open_file(FileOpenRequest::new(
+            Path::new("target"),
+            temp.path(),
+            FileOpenMode::WriteAppend,
+        ))
+        .expect("append open should succeed");
+    let mut file = fs::File::from(
+        append
+            .as_any()
+            .downcast_ref::<OwnedDescriptor>()
+            .expect("POSIX returns POSIX descriptors")
+            .try_clone()
+            .expect("the descriptor should clone")
+            .into_owned_fd(),
+    );
+    file.write_all(b"+").expect("append target is writable");
+    drop((file, append));
+
+    let input = PosixPlatform
+        .open_file(FileOpenRequest::new(
+            Path::new("target"),
+            temp.path(),
+            FileOpenMode::Read,
+        ))
+        .expect("read open should succeed");
+    let mut file = fs::File::from(
+        input
+            .as_any()
+            .downcast_ref::<OwnedDescriptor>()
+            .expect("POSIX returns POSIX descriptors")
+            .try_clone()
+            .expect("the descriptor should clone")
+            .into_owned_fd(),
+    );
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).expect("input is readable");
+
+    assert_eq!(bytes, b"new+");
 }
 
 #[test]
@@ -127,6 +228,41 @@ fn owned_descriptors_are_not_inherited_across_exec() {
         encode_report(&argv, &child_cwd, OsStr::new(""), OsStr::new(""), false,)
     );
     drop(descriptor);
+}
+
+#[test]
+fn posix_spawn_installs_a_deliberate_arbitrary_child_descriptor() {
+    let temp = TempDir::new("mapped-fd");
+    let report = temp.path().join("report.bin");
+    let fixture = Path::new(env!("CARGO_BIN_EXE_flashshell-argv-probe-fixture"));
+    let (owned_end, _peer) = UnixStream::pair().expect("socket pair should open");
+    let descriptor = OwnedDescriptor::adopt(OwnedFd::from(owned_end))
+        .expect("descriptor adoption should succeed");
+    let argv = [OsString::from("probe")];
+    let environment = [
+        (
+            OsString::from("FLASH_PROBE_REPORT"),
+            report.clone().into_os_string(),
+        ),
+        (OsString::from("FLASH_PROBE_FD"), OsString::from("3")),
+    ];
+    let mappings = [ChildDescriptor::new(3, &descriptor)];
+    let request = SpawnRequest::new(fixture, &argv, &environment, temp.path())
+        .expect("the spawn request is valid")
+        .with_descriptors(&mappings)
+        .expect("descriptor 3 has one mapping");
+
+    let mut child = PosixPlatform
+        .spawn(&request)
+        .expect("the fixture should spawn with descriptor 3");
+    assert_eq!(child.wait(), Ok(ProcessStatus::Exited(0)));
+
+    let bytes = fs::read(&report).expect("the fixture should write its report");
+    let child_cwd = fs::canonicalize(temp.path()).expect("temporary cwd should canonicalize");
+    assert_eq!(
+        bytes,
+        encode_report(&argv, &child_cwd, OsStr::new(""), OsStr::new(""), true)
+    );
 }
 
 #[test]

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant as SystemInstant;
 
-use flashshell_platform::{SpawnError, WaitError};
+use flashshell_platform::{FileActionError, PipeError, SpawnError, WaitError};
 use flashshell_syntax::{
     AndChain, Assignment, BinaryOperator, Block, CallExpression, Closure, ConditionalChain,
     ControlTransfer, Declaration, ElseBranch, EnvironmentStatement, Expression, ExpressionKind,
@@ -183,6 +183,10 @@ pub enum RuntimeErrorKind {
     /// A descriptor duplication (`n>&m`) whose source `m` is not open in the
     /// stage's descriptor map at that point.
     DescriptorNotOpen { descriptor: u32 },
+    /// The platform rejected or failed creation of an anonymous pipeline edge.
+    PipeCreate(PipeError),
+    /// A source-ordered redirection file action could not be prepared.
+    RedirectionSetup(FileActionError),
     /// The platform rejected or failed a direct external-process spawn.
     ProcessSpawn(SpawnError),
     /// Waiting for a successfully spawned external process failed.
@@ -265,6 +269,8 @@ impl fmt::Display for RuntimeErrorKind {
                 formatter,
                 "cannot duplicate descriptor {descriptor}: it is not open in this stage"
             ),
+            Self::PipeCreate(error) => error.fmt(formatter),
+            Self::RedirectionSetup(error) => error.fmt(formatter),
             Self::ProcessSpawn(error) => error.fmt(formatter),
             Self::ProcessWait(error) => error.fmt(formatter),
         }

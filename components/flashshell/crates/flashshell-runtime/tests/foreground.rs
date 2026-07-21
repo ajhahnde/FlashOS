@@ -10,8 +10,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use flashshell_platform::{
-    Capabilities, Capability, ChildProcess, Platform, ProcessStatus, SpawnError, SpawnRequest,
-    WaitError,
+    Capabilities, Capability, ChildProcess, DescriptorEndpoint, FakeDescriptorEndpoint,
+    FileActionError, FileOpenRequest, PipeEndpoints, PipeError, Platform, ProcessStatus,
+    SpawnError, SpawnRequest, TerminateError, WaitError,
 };
 use flashshell_platform_posix::PosixPlatform;
 use flashshell_runtime::command::{Carrier, CommandRegistry, CommandSignature};
@@ -101,6 +102,30 @@ impl Platform for RecordingPlatform {
         self.capabilities
     }
 
+    fn pipe(&self) -> Result<PipeEndpoints, PipeError> {
+        self.require(Capability::Pipes)?;
+        Ok(PipeEndpoints::new(
+            Box::new(FakeDescriptorEndpoint),
+            Box::new(FakeDescriptorEndpoint),
+        ))
+    }
+
+    fn open_file(
+        &self,
+        _request: FileOpenRequest<'_>,
+    ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError> {
+        self.require(Capability::FileActions)?;
+        Ok(Box::new(FakeDescriptorEndpoint))
+    }
+
+    fn inherit_descriptor(
+        &self,
+        _descriptor: u32,
+    ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError> {
+        self.require(Capability::FileActions)?;
+        Ok(Box::new(FakeDescriptorEndpoint))
+    }
+
     fn spawn(&self, request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError> {
         self.require(Capability::ProcessSpawn)?;
         if let Some(error) = &self.spawn_error {
@@ -135,6 +160,10 @@ impl ChildProcess for TestChild {
             Some(error) => Err(error.clone()),
             None => Ok(self.status),
         }
+    }
+
+    fn terminate(&mut self) -> Result<(), TerminateError> {
+        Ok(())
     }
 }
 
@@ -243,7 +272,7 @@ fn wait_failure_is_anchored_on_the_stage() {
 }
 
 #[test]
-fn pipeline_internal_and_redirection_plans_are_rejected_before_spawn() {
+fn pipeline_and_internal_plans_are_rejected_before_spawn() {
     let mut registry = CommandRegistry::new();
     registry.register(CommandSignature::new(
         "inside",
@@ -253,7 +282,6 @@ fn pipeline_internal_and_redirection_plans_are_rejected_before_spawn() {
     let cases = [
         build("^tool | ^other", &registry),
         build("inside", &registry),
-        build("^tool > output", &registry),
     ];
 
     for plan in cases {

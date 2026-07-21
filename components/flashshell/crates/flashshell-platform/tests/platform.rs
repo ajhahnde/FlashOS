@@ -4,8 +4,9 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use flashshell_platform::{
-    Capabilities, Capability, FakePlatform, Platform, PlatformError, ProcessStatus, SpawnError,
-    SpawnRequest, SpawnRequestError,
+    Capabilities, Capability, ChildDescriptor, FakePlatform, FileActionError, FileOpenMode,
+    FileOpenRequest, PipeError, Platform, PlatformError, ProcessStatus, SpawnError, SpawnRequest,
+    SpawnRequestError,
 };
 
 #[test]
@@ -98,6 +99,100 @@ fn spawn_requests_require_an_explicit_argv_zero() {
         .expect_err("an empty argv must be rejected");
 
     assert_eq!(error, SpawnRequestError::EmptyArgv);
+}
+
+#[test]
+fn fake_pipes_are_host_free_and_require_the_pipe_capability() {
+    let endpoints = FakePlatform::full()
+        .pipe()
+        .expect("the full fake creates opaque endpoints");
+    let (_reader, _writer) = endpoints.into_parts();
+
+    assert_eq!(
+        FakePlatform::none()
+            .pipe()
+            .expect_err("the empty fake rejects pipes"),
+        PipeError::Platform(PlatformError::Unsupported {
+            capability: Capability::Pipes,
+        })
+    );
+}
+
+#[test]
+fn final_descriptor_maps_reject_duplicate_targets_but_allow_endpoint_aliasing() {
+    let (reader, writer) = FakePlatform::full()
+        .pipe()
+        .expect("the fake pipe should succeed")
+        .into_parts();
+    let argv = [OsString::from("fixture")];
+    let environment = [];
+    let aliased = [
+        ChildDescriptor::new(1, writer.as_ref()),
+        ChildDescriptor::new(2, writer.as_ref()),
+    ];
+    let request = SpawnRequest::new(
+        Path::new("/fixture"),
+        &argv,
+        &environment,
+        Path::new("/work"),
+    )
+    .expect("the request is valid")
+    .with_descriptors(&aliased)
+    .expect("two targets may deliberately share one endpoint");
+    assert_eq!(request.descriptors().len(), 2);
+
+    let duplicate = [
+        ChildDescriptor::new(0, reader.as_ref()),
+        ChildDescriptor::new(0, writer.as_ref()),
+    ];
+    let error = SpawnRequest::new(
+        Path::new("/fixture"),
+        &argv,
+        &environment,
+        Path::new("/work"),
+    )
+    .expect("the request is valid")
+    .with_descriptors(&duplicate)
+    .expect_err("one child target may have only one final mapping");
+    assert_eq!(error, SpawnRequestError::DuplicateDescriptor(0));
+
+    let error = SpawnRequest::new(
+        Path::new("/fixture"),
+        &argv,
+        &environment,
+        Path::new("/work"),
+    )
+    .expect("the request is valid")
+    .with_descriptors(&aliased)
+    .expect("the map is valid")
+    .with_closed_descriptors(&[2])
+    .expect_err("one target cannot be both mapped and closed");
+    assert_eq!(error, SpawnRequestError::MappedAndClosedDescriptor(2));
+}
+
+#[test]
+fn fake_file_actions_are_host_free_and_capability_gated() {
+    let request = FileOpenRequest::new(
+        Path::new("target"),
+        Path::new("/work"),
+        FileOpenMode::WriteAppend,
+    );
+    let endpoint = FakePlatform::full()
+        .open_file(request)
+        .expect("the full fake opens an opaque endpoint");
+    let inherited = FakePlatform::full()
+        .inherit_descriptor(1)
+        .expect("the full fake duplicates an inherited endpoint");
+    drop((endpoint, inherited));
+
+    assert_eq!(
+        FakePlatform::none()
+            .open_file(request)
+            .expect_err("the empty fake rejects file actions"),
+        FileActionError::Platform(PlatformError::Unsupported {
+            capability: Capability::FileActions,
+        })
+    );
 }
 
 #[test]

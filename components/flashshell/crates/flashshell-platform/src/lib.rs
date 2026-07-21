@@ -13,6 +13,7 @@
 //! standard [`std::ffi::OsStr`] / [`std::path::Path`] family so native argv,
 //! environment, and path bytes survive without lossy UTF-8 conversion.
 
+use std::any::Any;
 use std::ffi::OsString;
 use std::fmt;
 use std::io;
@@ -153,6 +154,164 @@ impl fmt::Display for PlatformError {
 
 impl std::error::Error for PlatformError {}
 
+/// One uniquely owned descriptor resource returned by a platform adapter.
+///
+/// The runtime treats endpoints as opaque resources and can only move, borrow,
+/// or drop them. An adapter downcasts endpoints it created when installing the
+/// final descriptor map for a child.
+pub trait DescriptorEndpoint: Send + fmt::Debug {
+    /// Adapter-private concrete endpoint access for the matching spawn adapter.
+    fn as_any(&self) -> &dyn Any;
+}
+
+/// The two uniquely owned endpoints of one anonymous byte pipe.
+#[derive(Debug)]
+pub struct PipeEndpoints {
+    reader: Box<dyn DescriptorEndpoint>,
+    writer: Box<dyn DescriptorEndpoint>,
+}
+
+impl PipeEndpoints {
+    /// Build one pipe from its read and write endpoint owners.
+    pub fn new(reader: Box<dyn DescriptorEndpoint>, writer: Box<dyn DescriptorEndpoint>) -> Self {
+        Self { reader, writer }
+    }
+
+    /// Split the pipe into its unique read and write endpoint owners.
+    pub fn into_parts(self) -> (Box<dyn DescriptorEndpoint>, Box<dyn DescriptorEndpoint>) {
+        (self.reader, self.writer)
+    }
+}
+
+/// Failure while creating an anonymous byte pipe.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PipeError {
+    /// The platform cannot satisfy the pipe capability.
+    Platform(PlatformError),
+    /// The host rejected or could not complete pipe creation.
+    Operation {
+        /// Stable I/O error category from the host adapter.
+        kind: io::ErrorKind,
+        /// Human-readable host error text.
+        message: String,
+    },
+}
+
+impl fmt::Display for PipeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Platform(error) => error.fmt(formatter),
+            Self::Operation { message, .. } => write!(formatter, "pipe creation failed: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for PipeError {}
+
+impl From<PlatformError> for PipeError {
+    fn from(error: PlatformError) -> Self {
+        Self::Platform(error)
+    }
+}
+
+/// How a redirection target is opened for one child descriptor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileOpenMode {
+    /// Open an existing file for reading.
+    Read,
+    /// Create or replace a file for writing.
+    WriteTruncate,
+    /// Create or append to a file for writing.
+    WriteAppend,
+}
+
+/// One byte-preserving file-open request for redirection setup.
+#[derive(Clone, Copy, Debug)]
+pub struct FileOpenRequest<'a> {
+    path: &'a Path,
+    cwd: &'a Path,
+    mode: FileOpenMode,
+}
+
+impl<'a> FileOpenRequest<'a> {
+    /// Build a file-open request relative to the stage working directory.
+    pub const fn new(path: &'a Path, cwd: &'a Path, mode: FileOpenMode) -> Self {
+        Self { path, cwd, mode }
+    }
+
+    /// The native redirection target.
+    pub const fn path(self) -> &'a Path {
+        self.path
+    }
+
+    /// The working directory used for a relative target.
+    pub const fn cwd(self) -> &'a Path {
+        self.cwd
+    }
+
+    /// The requested read, truncate, or append semantics.
+    pub const fn mode(self) -> FileOpenMode {
+        self.mode
+    }
+}
+
+/// Failure while preparing an owned descriptor for a redirection action.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileActionError {
+    /// The platform cannot satisfy file actions.
+    Platform(PlatformError),
+    /// The host rejected an open or inherited-descriptor duplication.
+    Operation {
+        /// Stable I/O error category from the host adapter.
+        kind: io::ErrorKind,
+        /// Human-readable host error text.
+        message: String,
+    },
+}
+
+impl fmt::Display for FileActionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Platform(error) => error.fmt(formatter),
+            Self::Operation { message, .. } => {
+                write!(formatter, "redirection setup failed: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FileActionError {}
+
+impl From<PlatformError> for FileActionError {
+    fn from(error: PlatformError) -> Self {
+        Self::Platform(error)
+    }
+}
+
+/// One entry in the final logical descriptor map passed to a child.
+#[derive(Clone, Copy, Debug)]
+pub struct ChildDescriptor<'a> {
+    target: u32,
+    endpoint: &'a dyn DescriptorEndpoint,
+}
+
+impl<'a> ChildDescriptor<'a> {
+    /// Map `endpoint` onto the child's descriptor number `target`.
+    pub const fn new(target: u32, endpoint: &'a dyn DescriptorEndpoint) -> Self {
+        Self { target, endpoint }
+    }
+
+    /// The descriptor number visible in the child.
+    pub const fn target(self) -> u32 {
+        self.target
+    }
+
+    /// The opaque owned resource borrowed for this spawn.
+    pub const fn endpoint(self) -> &'a dyn DescriptorEndpoint {
+        self.endpoint
+    }
+}
+
 /// A structurally valid request to execute one program directly with argv.
 ///
 /// The first argv entry is explicit rather than inferred from `executable`.
@@ -164,6 +323,8 @@ pub struct SpawnRequest<'a> {
     argv: &'a [OsString],
     environment: &'a [(OsString, OsString)],
     cwd: &'a Path,
+    descriptors: &'a [ChildDescriptor<'a>],
+    closed_descriptors: &'a [u32],
 }
 
 impl<'a> SpawnRequest<'a> {
@@ -183,7 +344,53 @@ impl<'a> SpawnRequest<'a> {
             argv,
             environment,
             cwd,
+            descriptors: &[],
+            closed_descriptors: &[],
         })
+    }
+
+    /// Attach the final child descriptor mappings to this request.
+    ///
+    /// A target may occur only once. Two targets may deliberately borrow the
+    /// same endpoint, as required for a merged stdout-and-stderr pipeline.
+    pub fn with_descriptors(
+        mut self,
+        descriptors: &'a [ChildDescriptor<'a>],
+    ) -> Result<Self, SpawnRequestError> {
+        for (index, mapping) in descriptors.iter().enumerate() {
+            if descriptors[..index]
+                .iter()
+                .any(|prior| prior.target == mapping.target)
+            {
+                return Err(SpawnRequestError::DuplicateDescriptor(mapping.target));
+            }
+            if self.closed_descriptors.contains(&mapping.target) {
+                return Err(SpawnRequestError::MappedAndClosedDescriptor(mapping.target));
+            }
+        }
+        self.descriptors = descriptors;
+        Ok(self)
+    }
+
+    /// Attach descriptor numbers that must be closed in the child.
+    pub fn with_closed_descriptors(
+        mut self,
+        closed_descriptors: &'a [u32],
+    ) -> Result<Self, SpawnRequestError> {
+        for (index, descriptor) in closed_descriptors.iter().enumerate() {
+            if closed_descriptors[..index].contains(descriptor) {
+                return Err(SpawnRequestError::DuplicateClosedDescriptor(*descriptor));
+            }
+            if self
+                .descriptors
+                .iter()
+                .any(|mapping| mapping.target == *descriptor)
+            {
+                return Err(SpawnRequestError::MappedAndClosedDescriptor(*descriptor));
+            }
+        }
+        self.closed_descriptors = closed_descriptors;
+        Ok(self)
     }
 
     /// The resolved executable path passed directly to the host.
@@ -205,6 +412,16 @@ impl<'a> SpawnRequest<'a> {
     pub const fn cwd(self) -> &'a Path {
         self.cwd
     }
+
+    /// The final logical descriptors installed for this child.
+    pub const fn descriptors(self) -> &'a [ChildDescriptor<'a>] {
+        self.descriptors
+    }
+
+    /// The child descriptor numbers explicitly closed before execution.
+    pub const fn closed_descriptors(self) -> &'a [u32] {
+        self.closed_descriptors
+    }
 }
 
 /// A spawn request that cannot represent a process invocation.
@@ -212,12 +429,36 @@ impl<'a> SpawnRequest<'a> {
 pub enum SpawnRequestError {
     /// Direct process execution requires an explicit argv zero.
     EmptyArgv,
+    /// A final child descriptor map named the same target twice.
+    DuplicateDescriptor(u32),
+    /// A descriptor was named more than once in the final close set.
+    DuplicateClosedDescriptor(u32),
+    /// A descriptor was both mapped and closed in the final request.
+    MappedAndClosedDescriptor(u32),
 }
 
 impl fmt::Display for SpawnRequestError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyArgv => formatter.write_str("a spawn request requires argv zero"),
+            Self::DuplicateDescriptor(descriptor) => {
+                write!(
+                    formatter,
+                    "child descriptor {descriptor} is mapped more than once"
+                )
+            }
+            Self::DuplicateClosedDescriptor(descriptor) => {
+                write!(
+                    formatter,
+                    "child descriptor {descriptor} is closed more than once"
+                )
+            }
+            Self::MappedAndClosedDescriptor(descriptor) => {
+                write!(
+                    formatter,
+                    "child descriptor {descriptor} is both mapped and closed"
+                )
+            }
         }
     }
 }
@@ -294,6 +535,36 @@ impl fmt::Display for WaitError {
 
 impl std::error::Error for WaitError {}
 
+/// Failure while terminating a child during execution cleanup.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminateError {
+    kind: io::ErrorKind,
+    message: String,
+}
+
+impl TerminateError {
+    /// Build a termination error from a host I/O failure.
+    pub fn new(kind: io::ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    /// Stable I/O error category from the host adapter.
+    pub const fn kind(&self) -> io::ErrorKind {
+        self.kind
+    }
+}
+
+impl fmt::Display for TerminateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "process termination failed: {}", self.message)
+    }
+}
+
+impl std::error::Error for TerminateError {}
+
 /// One owned child process returned by a platform adapter.
 pub trait ChildProcess: Send + fmt::Debug {
     /// Adapter-native process identifier, widened for a portable boundary.
@@ -303,6 +574,9 @@ pub trait ChildProcess: Send + fmt::Debug {
     ///
     /// Calling this more than once returns the same completed status.
     fn wait(&mut self) -> Result<ProcessStatus, WaitError>;
+
+    /// Request immediate termination during failure cleanup.
+    fn terminate(&mut self) -> Result<(), TerminateError>;
 }
 
 /// Implemented by FlashShell platform adapters.
@@ -324,6 +598,21 @@ pub trait Platform: Send + Sync {
             Err(PlatformError::Unsupported { capability })
         }
     }
+
+    /// Create one anonymous byte pipe with uniquely owned endpoints.
+    fn pipe(&self) -> Result<PipeEndpoints, PipeError>;
+
+    /// Open one redirection target as an opaque owned endpoint.
+    fn open_file(
+        &self,
+        request: FileOpenRequest<'_>,
+    ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError>;
+
+    /// Duplicate one deliberate inherited descriptor into an owned endpoint.
+    fn inherit_descriptor(
+        &self,
+        descriptor: u32,
+    ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError>;
 
     /// Execute `request.executable` directly with its explicit native argv.
     fn spawn(&self, request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError>;
@@ -361,9 +650,43 @@ impl Platform for FakePlatform {
         self.capabilities
     }
 
+    fn pipe(&self) -> Result<PipeEndpoints, PipeError> {
+        self.require(Capability::Pipes)?;
+        Ok(PipeEndpoints::new(
+            Box::new(FakeDescriptorEndpoint),
+            Box::new(FakeDescriptorEndpoint),
+        ))
+    }
+
+    fn open_file(
+        &self,
+        _request: FileOpenRequest<'_>,
+    ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError> {
+        self.require(Capability::FileActions)?;
+        Ok(Box::new(FakeDescriptorEndpoint))
+    }
+
+    fn inherit_descriptor(
+        &self,
+        _descriptor: u32,
+    ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError> {
+        self.require(Capability::FileActions)?;
+        Ok(Box::new(FakeDescriptorEndpoint))
+    }
+
     fn spawn(&self, _request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError> {
         self.require(Capability::ProcessSpawn)?;
         Ok(Box::new(FakeChild))
+    }
+}
+
+/// Opaque endpoint used by [`FakePlatform`] without touching a host resource.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FakeDescriptorEndpoint;
+
+impl DescriptorEndpoint for FakeDescriptorEndpoint {
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -378,5 +701,9 @@ impl ChildProcess for FakeChild {
 
     fn wait(&mut self) -> Result<ProcessStatus, WaitError> {
         Ok(ProcessStatus::Exited(0))
+    }
+
+    fn terminate(&mut self) -> Result<(), TerminateError> {
+        Ok(())
     }
 }

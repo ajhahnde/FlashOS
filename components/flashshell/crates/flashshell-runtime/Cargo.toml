@@ -21,5 +21,12 @@ test = false
 bench = false
 doc = false
 
+[[bin]]
+name = "flashshell-pipeline-fixture"
+path = "tests/fixtures/pipeline_child.rs"
+test = false
+bench = false
+doc = false
+
 [lints]
 workspace = true
