@@ -213,7 +213,7 @@ fn posix_file_actions_preserve_relative_cwd_and_open_modes() {
 fn posix_spawn_preserves_native_argv_and_never_invokes_a_shell() {
     let temp = TempDir::new("direct-argv");
     let report = temp.path().join("report.bin");
-    let fixture = Path::new(env!("CARGO_BIN_EXE_flashshell-argv-probe-fixture"));
+    let fixture = Path::new(env!("CARGO_BIN_EXE_flashshell-process-observer-fixture"));
     symlink(fixture, temp.path().join("argv-probe")).expect("fixture symlink should be created");
     let argv = [
         OsString::from("deliberate-argv-zero"),
@@ -259,7 +259,7 @@ fn posix_spawn_preserves_native_argv_and_never_invokes_a_shell() {
 fn owned_descriptors_are_not_inherited_across_exec() {
     let temp = TempDir::new("close-on-exec");
     let report = temp.path().join("report.bin");
-    let fixture = Path::new(env!("CARGO_BIN_EXE_flashshell-argv-probe-fixture"));
+    let fixture = Path::new(env!("CARGO_BIN_EXE_flashshell-process-observer-fixture"));
     let (owned_end, _peer) = UnixStream::pair().expect("socket pair should open");
     let descriptor = OwnedDescriptor::adopt(OwnedFd::from(owned_end))
         .expect("descriptor adoption should succeed");
@@ -296,7 +296,7 @@ fn owned_descriptors_are_not_inherited_across_exec() {
 fn posix_spawn_installs_a_deliberate_arbitrary_child_descriptor() {
     let temp = TempDir::new("mapped-fd");
     let report = temp.path().join("report.bin");
-    let fixture = Path::new(env!("CARGO_BIN_EXE_flashshell-argv-probe-fixture"));
+    let fixture = Path::new(env!("CARGO_BIN_EXE_flashshell-process-observer-fixture"));
     let (owned_end, _peer) = UnixStream::pair().expect("socket pair should open");
     let descriptor = OwnedDescriptor::adopt(OwnedFd::from(owned_end))
         .expect("descriptor adoption should succeed");

@@ -22,6 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   boundaries, and add the normative grammar-family corpus.
 - Ratify the v0.1 lexical surface and add the normative complete, incomplete,
   and invalid lexical corpus.
-- Add the initial `fsh --help` and `fsh --version` placeholders.
+- Add `fsh script.fsh` execution for foreground external commands, byte
+  pipelines, conditional status chains, and source-ordered redirections, with
+  source diagnostics and process-status exit mapping.
+- Add shared shell-free Rust process fixtures and end-to-end coverage for native
+  arguments and paths, large streams, broken pipes, resolution failures, and
+  redirection setup failures.
 
 ---

@@ -15,15 +15,15 @@ flashshell-syntax = { path = "../flashshell-syntax" }
 flashshell-platform-posix = { path = "../flashshell-platform-posix" }
 
 [[bin]]
-name = "flashshell-foreground-fixture"
-path = "tests/fixtures/foreground_child.rs"
+name = "flashshell-status-fixture"
+path = "../../tests/fixtures/status.rs"
 test = false
 bench = false
 doc = false
 
 [[bin]]
-name = "flashshell-pipeline-fixture"
-path = "tests/fixtures/pipeline_child.rs"
+name = "flashshell-stream-fixture"
+path = "../../tests/fixtures/stream.rs"
 test = false
 bench = false
 doc = false

@@ -485,7 +485,7 @@ fn wait_failure_keeps_its_stage_span_and_does_not_skip_later_reaping() {
 #[test]
 fn real_posix_pipeline_moves_more_than_a_pipe_buffer_without_capture() {
     const LENGTH: usize = 4 * 1024 * 1024;
-    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-pipeline-fixture"));
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-stream-fixture"));
     let directory = fixture.parent().expect("fixture has a parent").to_owned();
     let name = fixture.file_name().expect("fixture has a name");
     let text = format!(
@@ -518,7 +518,7 @@ fn real_posix_pipeline_moves_more_than_a_pipe_buffer_without_capture() {
 
 #[test]
 fn real_posix_pipe_both_merges_stdout_and_stderr() {
-    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-pipeline-fixture"));
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-stream-fixture"));
     let directory = fixture.parent().expect("fixture has a parent").to_owned();
     let name = fixture.file_name().expect("fixture has a name");
     let text = format!("^{0} both 3 |& ^{0} sink 4 5", name.to_string_lossy(),);
@@ -547,7 +547,7 @@ fn real_posix_redirections_cover_input_truncate_and_append() {
     let input = temp.path.join("input.bin");
     let output = temp.path.join("output.bin");
     fs::write(&input, vec![b'x'; 64 * 1024]).expect("input should be seeded");
-    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-pipeline-fixture"));
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-stream-fixture"));
     let name = fixture.file_name().expect("fixture has a name");
 
     let plan = build_real(
@@ -592,7 +592,7 @@ fn real_posix_redirections_cover_input_truncate_and_append() {
 fn real_posix_redirection_aliases_arbitrary_descriptors_then_closes_them() {
     let temp = TempDir::new("redirection-alias");
     let output = temp.path.join("combined.bin");
-    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-pipeline-fixture"));
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-stream-fixture"));
     let name = fixture.file_name().expect("fixture has a name");
     let plan = build_real(
         &format!(
@@ -617,7 +617,7 @@ fn real_posix_redirection_aliases_arbitrary_descriptors_then_closes_them() {
 fn real_posix_local_output_overrides_pipeline_plumbing_without_delaying_eof() {
     let temp = TempDir::new("redirection-pipeline-override");
     let output = temp.path.join("producer.bin");
-    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-pipeline-fixture"));
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-stream-fixture"));
     let name = fixture.file_name().expect("fixture has a name");
     let plan = build_real(
         &format!(

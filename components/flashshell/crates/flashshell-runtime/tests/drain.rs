@@ -527,7 +527,7 @@ impl ExecutableProbe for ExactProbe {
 #[test]
 fn real_posix_pipeline_drains_64_mib_without_executor_side_capture() {
     const LENGTH: usize = 64 * 1024 * 1024;
-    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-pipeline-fixture"));
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-stream-fixture"));
     let directory = fixture.parent().expect("fixture has a parent").to_owned();
     let name = fixture.file_name().expect("fixture has a name");
     let text = format!(

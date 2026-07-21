@@ -304,30 +304,30 @@ fn a_signalled_child_remains_a_normal_platform_completion() {
 }
 
 #[test]
-fn a_real_posix_child_runs_foreground_and_returns_its_exit() {
-    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-foreground-fixture"));
+fn a_real_posix_status_fixture_reports_exit_and_signal_completion() {
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flashshell-status-fixture"));
     let fixture_dir = fixture.parent().expect("fixture has a parent").to_owned();
-    let file = source("^flashshell-foreground-fixture 23");
-    let pipeline = pipeline(&file);
-    let mut scope = ScopeStack::new();
     let environment =
         Environment::from_snapshot([("PATH", fixture_dir.as_os_str().to_os_string())]);
-    let probe = ExactProbe(fixture);
-    let plan = plan_pipeline(
-        &pipeline,
-        &fixture_dir,
-        &file,
-        &mut scope,
-        &environment,
-        &CommandRegistry::new(),
-        &probe,
-    )
-    .expect("real fixture plan should build");
 
-    assert_eq!(
-        execute_foreground(&plan, &PosixPlatform),
-        Ok(ProcessStatus::Exited(23))
-    );
+    for (arguments, expected) in [
+        ("exit 23", ProcessStatus::Exited(23)),
+        ("signal", ProcessStatus::Signaled(6)),
+    ] {
+        let file = source(&format!("^flashshell-status-fixture {arguments}"));
+        let plan = plan_pipeline(
+            &pipeline(&file),
+            &fixture_dir,
+            &file,
+            &mut ScopeStack::new(),
+            &environment,
+            &CommandRegistry::new(),
+            &ExactProbe(fixture.clone()),
+        )
+        .expect("real fixture plan should build");
+
+        assert_eq!(execute_foreground(&plan, &PosixPlatform), Ok(expected));
+    }
 }
 
 struct ExactProbe(PathBuf);

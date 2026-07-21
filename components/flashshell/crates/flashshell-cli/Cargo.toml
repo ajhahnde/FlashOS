@@ -11,6 +11,27 @@ repository.workspace = true
 name = "fsh"
 path = "src/main.rs"
 
+[[bin]]
+name = "flashshell-e2e-process-observer-fixture"
+path = "../../tests/fixtures/process_observer.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "flashshell-e2e-status-fixture"
+path = "../../tests/fixtures/status.rs"
+test = false
+bench = false
+doc = false
+
+[[bin]]
+name = "flashshell-e2e-stream-fixture"
+path = "../../tests/fixtures/stream.rs"
+test = false
+bench = false
+doc = false
+
 [dependencies]
 flashshell-platform-posix = { path = "../flashshell-platform-posix" }
 flashshell-runtime = { path = "../flashshell-runtime" }

@@ -11,8 +11,8 @@ repository.workspace = true
 flashshell-platform = { path = "../flashshell-platform" }
 
 [[bin]]
-name = "flashshell-argv-probe-fixture"
-path = "tests/fixtures/argv_probe.rs"
+name = "flashshell-process-observer-fixture"
+path = "../../tests/fixtures/process_observer.rs"
 test = false
 bench = false
 doc = false
