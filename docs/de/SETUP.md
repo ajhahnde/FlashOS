@@ -13,7 +13,7 @@
     <a href="DOCUMENTATION.md"><b>Dokumentation</b></a> ·
     <b>Setup</b> ·
     <a href="../../CHANGELOG.md"><b>Changelog</b></a> ·
-    <a href="../../LICENSE.md"><b>Lizenz</b></a>
+    <a href="../../LICENSE"><b>Lizenz</b></a>
   </p>
 
 <p>

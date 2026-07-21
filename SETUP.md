@@ -11,7 +11,7 @@
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <b>Setup</b> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
-    <a href="LICENSE.md"><b>License</b></a>
+    <a href="LICENSE"><b>License</b></a>
   </p>
 
 </div>

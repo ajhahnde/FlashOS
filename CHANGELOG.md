@@ -11,7 +11,7 @@
     <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <b>Changelog</b> ·
-    <a href="LICENSE.md"><b>License</b></a>
+    <a href="LICENSE"><b>License</b></a>
   </p>
 </div>
 
@@ -178,7 +178,7 @@ The project was founded on April 28th, 2026.
   system. Both remain in git history. The navigation bar across the shipped
   docs now runs README → Documentation → Setup → Changelog → License. The
   attribution notice they referenced continues to live in
-  [License](LICENSE.md).
+  [License](LICENSE).
 
 ## [v0.7.3] - 2026-07-04
 
@@ -534,4 +534,4 @@ highlights are below.
 
 ---
 
-[← Prev: Setup](SETUP.md) · [Next: License →](LICENSE.md)
+[← Prev: Setup](SETUP.md) · [Next: License →](LICENSE)

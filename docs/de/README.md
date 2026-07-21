@@ -12,7 +12,7 @@
     <a href="https://github.com/ajhahnde/FlashOS/releases/latest"><img src="https://img.shields.io/github/v/release/ajhahnde/FlashOS?style=flat-square&label=release" alt="Neuestes Release"></a>
     <a href="https://codecov.io/gh/ajhahnde/FlashOS"><img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=flat-square&label=coverage" alt="Coverage"></a>
     <img src="https://img.shields.io/badge/version-v0.8.0-f59e0b?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/rust-toolchain--pinned-dea584?style=flat-square" alt="Repository-gepinnte Rust-Toolchain">
+    <img src="https://img.shields.io/badge/rust-1.97.1-dea584?style=flat-square" alt="Rust 1.97.1">
     <img src="https://img.shields.io/badge/target-aarch64--unknown--none--softfloat-lightgrey?style=flat-square" alt="aarch64-unknown-none-softfloat">
     <img src="https://img.shields.io/badge/license-apache--2.0-lightgrey?style=flat-square" alt="Lizenz">
   </p>
@@ -22,7 +22,7 @@
     <a href="DOCUMENTATION.md"><b>Dokumentation</b></a> ·
     <a href="SETUP.md"><b>Setup</b></a> ·
     <a href="../../CHANGELOG.md"><b>Changelog</b></a> ·
-    <a href="../../LICENSE.md"><b>Lizenz</b></a>
+    <a href="../../LICENSE"><b>Lizenz</b></a>
   </p>
 
 <p>
