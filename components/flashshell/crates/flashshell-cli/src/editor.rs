@@ -41,10 +41,15 @@ impl EditorPrompt {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum EditorEvent {
+    /// A complete input buffer ready for evaluation.
     Submitted(String),
+    /// The current edit was cancelled and the session should re-prompt.
     Cancelled,
+    /// End-of-input received while the edit buffer was empty.
     EndOfInput,
+    /// A request delegated to a future host integration.
     HostCommand(String),
+    /// An external interruption delegated to a future host integration.
     ExternalBreak(String),
 }
 
