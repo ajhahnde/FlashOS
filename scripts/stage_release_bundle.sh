@@ -24,9 +24,10 @@ dest="$root/FlashOS-${version}-rpi4b"
 kernel="rust-out/rpi4b/kernel8.img"
 armstub="rust-out/rpi4b/armstub8.bin"
 
+fw=vendor/raspberrypi-firmware/rpi4b
 for f in "$kernel" "$armstub" config.txt LICENSE.md \
-         firmware/start4.elf firmware/fixup4.dat \
-         firmware/bcm2711-rpi-4-b.dtb firmware/overlays/miniuart-bt.dtbo; do
+         "$fw/start4.elf" "$fw/fixup4.dat" \
+         "$fw/bcm2711-rpi-4-b.dtb" "$fw/overlays/miniuart-bt.dtbo"; do
   [ -f "$f" ] || { printf 'stage-release: missing %s\n' "$f" >&2; exit 1; }
 done
 
@@ -37,10 +38,10 @@ mkdir -p "$dest/overlays"
 cp "$kernel"                          "$dest/kernel8.img"
 cp "$armstub"                         "$dest/armstub8.bin"
 cp config.txt                         "$dest/config.txt"
-cp firmware/start4.elf                "$dest/start4.elf"
-cp firmware/fixup4.dat                "$dest/fixup4.dat"
-cp firmware/bcm2711-rpi-4-b.dtb       "$dest/bcm2711-rpi-4-b.dtb"
-cp firmware/overlays/miniuart-bt.dtbo "$dest/overlays/miniuart-bt.dtbo"
+cp "$fw/start4.elf"                    "$dest/start4.elf"
+cp "$fw/fixup4.dat"                    "$dest/fixup4.dat"
+cp "$fw/bcm2711-rpi-4-b.dtb"           "$dest/bcm2711-rpi-4-b.dtb"
+cp "$fw/overlays/miniuart-bt.dtbo"     "$dest/overlays/miniuart-bt.dtbo"
 cp LICENSE.md                         "$dest/LICENSE.md"
 
 epoch=${SOURCE_DATE_EPOCH:-$(date -u +%s)}

@@ -24,7 +24,7 @@ two-pass build, deployment is an explicit operator action:
 
 ```bash
 source flashos.zsh
-SD_BOOT=/Volumes/BOOT FIRMWARE=firmware build -d
+SD_BOOT=/Volumes/BOOT build -d
 ```
 
 Without `-d`, the build does not write to the SD card.

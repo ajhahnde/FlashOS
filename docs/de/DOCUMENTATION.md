@@ -104,7 +104,7 @@ xtask/                              nativer Build-, Generator- und Prüftreiber
 link/                               ELF-Linker-Skripte und Initramfs-Embed-Assembly
 armstub/                            Pi-EL3→EL1-Bootstrap
 scripts/                            Watchdog, Disk-Image, Hygiene und Baseline
-firmware/                           gebündelte Raspberry-Pi-Firmware-Inputs
+vendor/raspberrypi-firmware/rpi4b/  gebündelte Raspberry-Pi-Firmware-Inputs
 Cargo.toml                          Rust-Workspace und Release-Profil
 versions.env                        Quelle für Release-, Rust- und QEMU-Version
 rust-toolchain.toml                 synchronisierter Compiler-Pin, Target, Komponenten

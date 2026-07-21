@@ -157,15 +157,16 @@ fixup4.dat                  # bundled in this repo
 overlays/miniuart-bt.dtbo
 ```
 
-The firmware blobs are bundled in this repo under `firmware/`
-(`bcm2711-rpi-4-b.dtb`, `start4.elf`, `fixup4.dat`,
-`overlays/miniuart-bt.dtbo`), taken from the official
+The firmware blobs are bundled in this repo under
+`vendor/raspberrypi-firmware/rpi4b/` (`bcm2711-rpi-4-b.dtb`, `start4.elf`,
+`fixup4.dat`, `overlays/miniuart-bt.dtbo`), taken from the official
 [raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)
-project and kept here for convenience and license/credit clarity. The
+project and kept here for convenience and license/credit clarity. See that
+directory's `README.md` and `SHA256SUMS` for provenance and checksums. The
 deploy step points at that directory by default:
 
 ```bash
-SD_BOOT=/Volumes/BOOT FIRMWARE=firmware build -d
+SD_BOOT=/Volumes/BOOT build -d
 ```
 
 The deploy step reads two environment variables:
@@ -173,7 +174,7 @@ The deploy step reads two environment variables:
 | Variable   | Default         | Purpose                                          |
 | :--------- | :-------------- | :----------------------------------------------- |
 | `SD_BOOT`  | `/Volumes/BOOT` | SD-card mount point on macOS                     |
-| `FIRMWARE` | `firmware`      | Directory holding the bundled RPi firmware files |
+| `FIRMWARE` | `vendor/raspberrypi-firmware/rpi4b` | Directory holding the bundled RPi firmware files |
 
 ## 5. Serial console
 

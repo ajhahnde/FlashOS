@@ -638,7 +638,7 @@ _flashos_build_cleanup() {
 _flashos_build_deploy() {
   emulate -L zsh
   local kernel_img=$1
-  local firmware="${FIRMWARE:-firmware}"
+  local firmware="${FIRMWARE:-vendor/raspberrypi-firmware/rpi4b}"
 
   # The mount check is deliberately strict: deployment removes the contents
   # of this one explicitly mounted FAT volume before copying the boot set.

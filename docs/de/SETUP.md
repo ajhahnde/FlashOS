@@ -174,19 +174,21 @@ fixup4.dat              # im Repository gebündelt
 overlays/miniuart-bt.dtbo
 ```
 
-Die Firmware-Blobs liegen unter `firmware/`. Sie stammen aus dem offiziellen
+Die Firmware-Blobs liegen unter `vendor/raspberrypi-firmware/rpi4b/`. Sie
+stammen aus dem offiziellen
 [raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)-
-Projekt und werden aus Komfort- sowie Lizenz-/Credit-Gründen mitgeführt. Der
-Deploy-Schritt verwendet dieses Verzeichnis standardmäßig:
+Projekt und werden aus Komfort- sowie Lizenz-/Credit-Gründen mitgeführt.
+Provenance und Checksummen stehen in `README.md` und `SHA256SUMS` dieses
+Verzeichnisses. Der Deploy-Schritt verwendet dieses Verzeichnis standardmäßig:
 
 ```bash
-SD_BOOT=/Volumes/BOOT FIRMWARE=firmware build -d
+SD_BOOT=/Volumes/BOOT build -d
 ```
 
 | Variable   | Standardwert    | Zweck                                  |
 | :--------- | :-------------- | :------------------------------------- |
 | `SD_BOOT`  | `/Volumes/BOOT` | SD-Karten-Mountpoint unter macOS       |
-| `FIRMWARE` | `firmware`      | Verzeichnis mit Pi-Firmwaredateien     |
+| `FIRMWARE` | `vendor/raspberrypi-firmware/rpi4b` | Verzeichnis mit Pi-Firmwaredateien |
 
 ## 5. Serielle Konsole
 

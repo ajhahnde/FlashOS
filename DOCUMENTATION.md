@@ -88,7 +88,7 @@ xtask/                                  native build, generation, and inspection
 link/                                   ELF linker scripts and initramfs embed assembly
 armstub/                                Pi EL3-to-EL1 bootstrap
 scripts/                                watchdog, disk image, hygiene, and baseline tools
-firmware/                               bundled Raspberry Pi firmware inputs
+vendor/raspberrypi-firmware/rpi4b/      bundled Raspberry Pi firmware inputs
 Cargo.toml                              Rust workspace and release profile
 versions.env                            live release, Rust, and QEMU version source
 rust-toolchain.toml                     synchronized compiler pin, target, components
