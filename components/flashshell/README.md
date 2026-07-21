@@ -5,9 +5,8 @@
 <h3>A command shell and scripting language, written in Rust — built to become the shell of FlashOS.</h3>
 
 <p>
-  <a href="https://github.com/ajhahnde/FlashShell/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashShell/ci.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
   <img src="https://img.shields.io/badge/version-v0.1.0-f59e0b?style=flat-square" alt="Version">
-  <img src="https://img.shields.io/badge/rust-1.96.1-f59e0b?style=flat-square" alt="Rust 1.96.1">
+  <img src="https://img.shields.io/badge/rust-1.97-f59e0b?style=flat-square" alt="Rust 1.97">
   <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
 </p>
 
@@ -135,5 +134,5 @@ adapters behind the platform contract.
 
 ## See also
 
-- **[FlashOS](https://github.com/ajhahnde/FlashOS)** — an AArch64 bare-metal kernel, written in Flash.
+- **[FlashOS](https://github.com/ajhahnde/FlashOS)** — an AArch64 bare-metal kernel, written in Rust.
 - **[FlashOS Tour →](https://ajhahn.de/flashos/)**
