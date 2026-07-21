@@ -13,7 +13,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
 license = "Apache-2.0"
-repository = "https://github.com/flashshell/flashshell"
+repository = "https://github.com/ajhahnde/FlashOS"
 
 [workspace.lints.rust]
 rust_2018_idioms = "deny"
