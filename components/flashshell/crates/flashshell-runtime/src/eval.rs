@@ -191,6 +191,13 @@ pub enum RuntimeErrorKind {
     CapturePipe(PipeError),
     /// Reading the captured stdout pipe failed while draining it.
     CaptureRead(DescriptorReadError),
+    /// Captured stdout exceeded the plan's configured raw-byte limit.
+    CaptureLimitExceeded { limit: usize },
+    /// Text capture encountered invalid UTF-8.
+    CaptureInvalidUtf8 {
+        valid_up_to: usize,
+        error_len: Option<usize>,
+    },
     /// A source-ordered redirection file action could not be prepared.
     RedirectionSetup(FileActionError),
     /// The platform rejected or failed a direct external-process spawn.
@@ -287,6 +294,25 @@ impl fmt::Display for RuntimeErrorKind {
             Self::PipeCreate(error) => error.fmt(formatter),
             Self::CapturePipe(error) => error.fmt(formatter),
             Self::CaptureRead(error) => error.fmt(formatter),
+            Self::CaptureLimitExceeded { limit } => {
+                write!(
+                    formatter,
+                    "command output exceeds the {limit}-byte capture limit"
+                )
+            }
+            Self::CaptureInvalidUtf8 {
+                valid_up_to,
+                error_len,
+            } => {
+                write!(
+                    formatter,
+                    "command output is not valid UTF-8 at byte {valid_up_to}"
+                )?;
+                if let Some(length) = error_len {
+                    write!(formatter, " (invalid sequence length {length})")?;
+                }
+                formatter.write_str("; use capture bytes to preserve arbitrary output")
+            }
             Self::RedirectionSetup(error) => error.fmt(formatter),
             Self::ProcessSpawn(error) => error.fmt(formatter),
             Self::ProcessWait(error) => error.fmt(formatter),

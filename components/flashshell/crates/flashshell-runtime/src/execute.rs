@@ -15,7 +15,7 @@ use flashshell_platform::{
     ChildDescriptor, ChildProcess, DescriptorEndpoint, FileOpenMode, FileOpenRequest, Platform,
     ProcessStatus, SpawnRequest,
 };
-use flashshell_syntax::{ConditionalChain, OutputMode, PipeOperator, SourceFile};
+use flashshell_syntax::{ConditionalChain, OutputMode, PipeOperator, Pipeline, SourceFile};
 
 use crate::command::CommandRegistry;
 use crate::eval::{Clock, Instant, RuntimeError, RuntimeErrorKind};
@@ -25,6 +25,33 @@ use crate::plan::{
 };
 use crate::resolve::ExecutableProbe;
 use crate::{Duration, Environment, ScopeStack, Signal, Status};
+
+/// Captured command output paired with its normal completion status.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommandCapture<T> {
+    output: T,
+    status: Status,
+}
+
+impl<T> CommandCapture<T> {
+    /// The captured output.
+    #[must_use]
+    pub const fn output(&self) -> &T {
+        &self.output
+    }
+
+    /// The nested command or aggregate pipeline status.
+    #[must_use]
+    pub const fn status(&self) -> &Status {
+        &self.status
+    }
+
+    /// Consume the capture into its output and status.
+    #[must_use]
+    pub fn into_parts(self) -> (T, Status) {
+        (self.output, self.status)
+    }
+}
 
 /// Execute one external foreground stage.
 ///
@@ -144,6 +171,183 @@ where
     ))
 }
 
+/// Capture a foreground pipeline's stdout as exact bytes with bounded storage.
+///
+/// The plan's snapshotted capture limit counts raw bytes. Once exceeded, the
+/// collector stops retaining data but continues draining through EOF and reaps
+/// every child before returning [`RuntimeErrorKind::CaptureLimitExceeded`].
+pub fn capture_foreground_bytes(
+    plan: &ExecutionPlan,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<CommandCapture<Vec<u8>>, RuntimeError> {
+    let mut collector = BoundedCapture::new(plan.capture_limit());
+    let status = {
+        let mut collect = |chunk: &[u8]| collector.push(chunk);
+        execute_foreground_with_stdout_drain(plan, platform, clock, &mut collect)?
+    };
+    collector.finish(status, plan.span())
+}
+
+/// Capture a foreground pipeline's stdout as strict UTF-8 text.
+///
+/// Every trailing LF or CRLF sequence is removed after decoding. A lone
+/// trailing carriage return remains data. Nonzero and signal statuses are
+/// returned normally beside the text.
+pub fn capture_foreground_text(
+    plan: &ExecutionPlan,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<CommandCapture<String>, RuntimeError> {
+    let captured = capture_foreground_bytes(plan, platform, clock)?;
+    decode_text_capture(captured, plan.span())
+}
+
+/// Execute the conditional-chain body of a command substitution and capture all
+/// stdout from every reached pipeline as exact bytes.
+///
+/// `&&` and `||` retain their ordinary status short-circuit behavior. The one
+/// session capture limit spans the complete chain rather than resetting for
+/// each reached pipeline.
+#[allow(clippy::too_many_arguments)]
+pub fn capture_command_substitution_bytes(
+    chain: &ConditionalChain,
+    cwd: &Path,
+    source: &SourceFile,
+    scope: &mut ScopeStack,
+    environment: &Environment,
+    registry: &CommandRegistry,
+    probe: &dyn ExecutableProbe,
+    options: &SessionOptions,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<CommandCapture<Vec<u8>>, RuntimeError> {
+    let mut collector = BoundedCapture::new(options.capture_limit());
+    let status = execute_conditional_chain_with(chain, &mut |pipeline| {
+        let plan = plan_pipeline_with_options(
+            pipeline,
+            cwd,
+            source,
+            scope,
+            environment,
+            registry,
+            probe,
+            options,
+        )?;
+        let mut collect = |chunk: &[u8]| collector.push(chunk);
+        let status = execute_foreground_with_stdout_drain(&plan, platform, clock, &mut collect)?;
+        collector.ensure_within_limit(chain.span())?;
+        Ok(status)
+    })?;
+    collector.finish(status, chain.span())
+}
+
+/// Execute the conditional-chain body of a command substitution and capture all
+/// reached stdout as strict UTF-8 text with trailing line endings removed.
+#[allow(clippy::too_many_arguments)]
+pub fn capture_command_substitution_text(
+    chain: &ConditionalChain,
+    cwd: &Path,
+    source: &SourceFile,
+    scope: &mut ScopeStack,
+    environment: &Environment,
+    registry: &CommandRegistry,
+    probe: &dyn ExecutableProbe,
+    options: &SessionOptions,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+) -> Result<CommandCapture<String>, RuntimeError> {
+    let captured = capture_command_substitution_bytes(
+        chain,
+        cwd,
+        source,
+        scope,
+        environment,
+        registry,
+        probe,
+        options,
+        platform,
+        clock,
+    )?;
+    decode_text_capture(captured, chain.span())
+}
+
+fn decode_text_capture(
+    captured: CommandCapture<Vec<u8>>,
+    span: flashshell_syntax::Span,
+) -> Result<CommandCapture<String>, RuntimeError> {
+    let (bytes, status) = captured.into_parts();
+    let mut output = match String::from_utf8(bytes) {
+        Ok(output) => output,
+        Err(error) => {
+            let utf8 = error.utf8_error();
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::CaptureInvalidUtf8 {
+                    valid_up_to: utf8.valid_up_to(),
+                    error_len: utf8.error_len(),
+                },
+                span,
+            ));
+        }
+    };
+    trim_trailing_line_endings(&mut output);
+    Ok(CommandCapture { output, status })
+}
+
+struct BoundedCapture {
+    output: Vec<u8>,
+    limit: usize,
+    exceeded: bool,
+}
+
+impl BoundedCapture {
+    const fn new(limit: usize) -> Self {
+        Self {
+            output: Vec::new(),
+            limit,
+            exceeded: false,
+        }
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        let remaining = self.limit.saturating_sub(self.output.len());
+        let retained = remaining.min(chunk.len());
+        self.output.extend_from_slice(&chunk[..retained]);
+        self.exceeded |= retained != chunk.len();
+    }
+
+    fn finish(
+        self,
+        status: Status,
+        span: flashshell_syntax::Span,
+    ) -> Result<CommandCapture<Vec<u8>>, RuntimeError> {
+        self.ensure_within_limit(span)?;
+        Ok(CommandCapture {
+            output: self.output,
+            status,
+        })
+    }
+
+    fn ensure_within_limit(&self, span: flashshell_syntax::Span) -> Result<(), RuntimeError> {
+        if self.exceeded {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::CaptureLimitExceeded { limit: self.limit },
+                span,
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn trim_trailing_line_endings(output: &mut String) {
+    while output.ends_with('\n') {
+        output.pop();
+        if output.ends_with('\r') {
+            output.pop();
+        }
+    }
+}
+
 fn aggregate_language_status(
     plan: &ExecutionPlan,
     completions: Vec<StageCompletion>,
@@ -189,76 +393,8 @@ pub fn execute_foreground_chain(
     platform: &dyn Platform,
     clock: &dyn Clock,
 ) -> Result<Status, RuntimeError> {
-    let mut or_terms = chain.or_terms().iter();
-    let first = or_terms
-        .next()
-        .expect("a parsed conditional chain contains an operand");
-    let mut status = execute_and_chain(
-        first,
-        cwd,
-        source,
-        scope,
-        environment,
-        registry,
-        probe,
-        options,
-        platform,
-        clock,
-    )?;
-    for and_chain in or_terms {
-        if status.is_ok() {
-            break;
-        }
-        status = execute_and_chain(
-            and_chain,
-            cwd,
-            source,
-            scope,
-            environment,
-            registry,
-            probe,
-            options,
-            platform,
-            clock,
-        )?;
-    }
-    Ok(status)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn execute_and_chain(
-    chain: &flashshell_syntax::AndChain,
-    cwd: &Path,
-    source: &SourceFile,
-    scope: &mut ScopeStack,
-    environment: &Environment,
-    registry: &CommandRegistry,
-    probe: &dyn ExecutableProbe,
-    options: &SessionOptions,
-    platform: &dyn Platform,
-    clock: &dyn Clock,
-) -> Result<Status, RuntimeError> {
-    let mut pipelines = chain.and_terms().iter();
-    let first = pipelines
-        .next()
-        .expect("a parsed and-chain contains an operand");
-    let mut status = plan_and_execute(
-        first,
-        cwd,
-        source,
-        scope,
-        environment,
-        registry,
-        probe,
-        options,
-        platform,
-        clock,
-    )?;
-    for pipeline in pipelines {
-        if !status.is_ok() {
-            break;
-        }
-        status = plan_and_execute(
+    execute_conditional_chain_with(chain, &mut |pipeline| {
+        plan_and_execute(
             pipeline,
             cwd,
             source,
@@ -269,7 +405,48 @@ fn execute_and_chain(
             options,
             platform,
             clock,
-        )?;
+        )
+    })
+}
+
+fn execute_conditional_chain_with<E>(
+    chain: &ConditionalChain,
+    execute: &mut E,
+) -> Result<Status, RuntimeError>
+where
+    E: FnMut(&Pipeline) -> Result<Status, RuntimeError>,
+{
+    let mut or_terms = chain.or_terms().iter();
+    let first = or_terms
+        .next()
+        .expect("a parsed conditional chain contains an operand");
+    let mut status = execute_and_chain_with(first, execute)?;
+    for and_chain in or_terms {
+        if status.is_ok() {
+            break;
+        }
+        status = execute_and_chain_with(and_chain, execute)?;
+    }
+    Ok(status)
+}
+
+fn execute_and_chain_with<E>(
+    chain: &flashshell_syntax::AndChain,
+    execute: &mut E,
+) -> Result<Status, RuntimeError>
+where
+    E: FnMut(&Pipeline) -> Result<Status, RuntimeError>,
+{
+    let mut pipelines = chain.and_terms().iter();
+    let first = pipelines
+        .next()
+        .expect("a parsed and-chain contains an operand");
+    let mut status = execute(first)?;
+    for pipeline in pipelines {
+        if !status.is_ok() {
+            break;
+        }
+        status = execute(pipeline)?;
     }
     Ok(status)
 }

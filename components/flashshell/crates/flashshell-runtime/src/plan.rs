@@ -40,6 +40,7 @@ pub struct ExecutionPlan {
     stages: Vec<PlannedStage>,
     edges: Vec<PipelineEdge>,
     pipefail: bool,
+    capture_limit: usize,
     span: Span,
 }
 
@@ -75,6 +76,16 @@ impl ExecutionPlan {
     #[must_use]
     pub const fn pipefail(&self) -> bool {
         self.pipefail
+    }
+
+    /// The maximum raw stdout bytes retained by command capture.
+    ///
+    /// The value is copied from the session when the plan is built. Reaching
+    /// it exactly succeeds; observing a later byte produces a bounded capture
+    /// error after the pipe has still been drained to EOF.
+    #[must_use]
+    pub const fn capture_limit(&self) -> usize {
+        self.capture_limit
     }
 
     /// The whole-pipeline source span.
@@ -136,12 +147,16 @@ impl ExecutionPlan {
 }
 
 /// Session execution options that affect command planning.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SessionOptions {
     pipefail: bool,
+    capture_limit: usize,
 }
 
 impl SessionOptions {
+    /// The default raw stdout budget for one command capture (8 MiB).
+    pub const DEFAULT_CAPTURE_LIMIT: usize = 8 * 1024 * 1024;
+
     /// Whether pipelines select their rightmost unsuccessful stage.
     #[must_use]
     pub const fn pipefail(self) -> bool {
@@ -158,6 +173,33 @@ impl SessionOptions {
     /// Change the option used by plans created after this call.
     pub const fn set_pipefail(&mut self, enabled: bool) {
         self.pipefail = enabled;
+    }
+
+    /// The maximum raw stdout bytes retained by one command capture.
+    #[must_use]
+    pub const fn capture_limit(self) -> usize {
+        self.capture_limit
+    }
+
+    /// Return these options with the command-capture byte limit set to `limit`.
+    #[must_use]
+    pub const fn with_capture_limit(mut self, limit: usize) -> Self {
+        self.capture_limit = limit;
+        self
+    }
+
+    /// Change the capture limit used by plans created after this call.
+    pub const fn set_capture_limit(&mut self, limit: usize) {
+        self.capture_limit = limit;
+    }
+}
+
+impl Default for SessionOptions {
+    fn default() -> Self {
+        Self {
+            pipefail: false,
+            capture_limit: Self::DEFAULT_CAPTURE_LIMIT,
+        }
     }
 }
 
@@ -431,6 +473,7 @@ pub fn plan_pipeline_with_options(
         stages,
         edges,
         pipefail: options.pipefail(),
+        capture_limit: options.capture_limit(),
         span: pipeline.span(),
     })
 }
