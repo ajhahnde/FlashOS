@@ -6,6 +6,7 @@ use reedline::{
 };
 
 use crate::editor::{EditorError, EditorEvent, EditorPrompt, LineEditor};
+use crate::history::{EditorHistory, HistoryError, HistorySelection};
 
 /// macOS/Linux terminal editor backed by the pinned Reedline implementation.
 pub struct ReedlineEditor {
@@ -19,6 +20,16 @@ impl ReedlineEditor {
             inner: Reedline::create().with_validator(Box::new(FlashShellValidator)),
         }
     }
+
+    /// Constructs the editor with a FlashShell-selected history policy.
+    pub fn with_history(selection: HistorySelection) -> Result<Self, HistoryError> {
+        let history = EditorHistory::open(selection)?;
+        Ok(Self {
+            inner: Reedline::create()
+                .with_history(history.into_backend())
+                .with_validator(Box::new(FlashShellValidator)),
+        })
+    }
 }
 
 impl Default for ReedlineEditor {
@@ -30,10 +41,16 @@ impl Default for ReedlineEditor {
 impl LineEditor for ReedlineEditor {
     fn read_line(&mut self, prompt: &EditorPrompt) -> Result<EditorEvent, EditorError> {
         let prompt = ReedlinePrompt { prompt };
-        self.inner
+        let signal = self
+            .inner
             .read_line(&prompt)
-            .map_err(|error| EditorError::with_source("line editor failed", error))
-            .and_then(map_signal)
+            .map_err(|error| EditorError::with_source("line editor failed", error))?;
+        if matches!(signal, Signal::Success(_)) {
+            self.inner.sync_history().map_err(|error| {
+                EditorError::with_source("cannot synchronize interactive history", error)
+            })?;
+        }
+        map_signal(signal)
     }
 }
 

@@ -3,6 +3,8 @@
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use flashshell_cli::ReedlineEditor;
 use flashshell_cli::editor::{EditorError, EditorEvent, EditorPrompt, LineEditor};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use flashshell_cli::history::HistorySelection;
 
 struct RecordingEditor {
     event: Option<EditorEvent>,
@@ -50,4 +52,8 @@ fn reedline_is_constructed_behind_the_line_editor_contract() {
 
     let mut editor = ReedlineEditor::new();
     accepts_adapter(&mut editor);
+
+    let mut disabled = ReedlineEditor::with_history(HistorySelection::Disabled)
+        .expect("disabled history should require no filesystem state");
+    accepts_adapter(&mut disabled);
 }
