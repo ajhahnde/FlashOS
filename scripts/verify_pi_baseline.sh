@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify the rpi4b kernel8.img + armstub8.bin against
-# scripts/pi_baseline.sha256. Stashes generated/symbol_area.S to HEAD first
+# scripts/pi_baseline.sha256. Stashes crates/kernel/generated/symbol_area.S to HEAD first
 # (the populate-syms M-state would yield a different hash). Idempotent:
 # safe to re-run; restores the working tree on exit.
 set -eu
@@ -24,8 +24,8 @@ RUST_BIN=$(dirname "$RUSTC_BIN")
 CARGO=(env "PATH=$RUST_BIN:$PATH" rustup run "$TOOLCHAIN" cargo)
 
 STASHED=0
-if ! git diff --quiet HEAD -- generated/symbol_area.S; then
-    git stash push --quiet -m "verify_pi_baseline" -- generated/symbol_area.S
+if ! git diff --quiet HEAD -- crates/kernel/generated/symbol_area.S; then
+    git stash push --quiet -m "verify_pi_baseline" -- crates/kernel/generated/symbol_area.S
     STASHED=1
 fi
 restore_stash() {

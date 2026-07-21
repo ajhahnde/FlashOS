@@ -41,9 +41,9 @@ Commands:
   klib [--output <path>] [--feature <name>]...
                                Build the Rust kernel staticlib linked into kernel8.elf
   populate-syms --board <..> [gate flags]
-                               Relink the kernel, then regenerate generated/symbol_area.S
+                               Relink the kernel, then regenerate crates/kernel/generated/symbol_area.S
                                from its symbol table. Re-run `build` to relink with it.
-  clear-syms                    Reset generated/symbol_area.S to an empty (placeholder)
+  clear-syms                    Reset crates/kernel/generated/symbol_area.S to an empty (placeholder)
                                table of the same size, for a from-scratch two-pass
   gen-shadow --output <path>    Bake /etc/shadow with the kernel's own PBKDF2
   test                          Run the Rust host tests (all crates but the bare-metal ones)
@@ -115,8 +115,9 @@ fn dispatch() -> Result<(), String> {
                 .collect::<Vec<_>>()
                 .join("\n");
             let (content, used) = syms::generate(&filtered)?;
-            let dst = root.join("generated/symbol_area.S");
-            std::fs::write(&dst, content).map_err(|e| format!("write {}: {e}", dst.display()))?;
+            let dst = root.join("crates/kernel/generated/symbol_area.S");
+            std::fs::write(&dst, format!("{}{content}", syms::HEADER))
+                .map_err(|e| format!("write {}: {e}", dst.display()))?;
             println!("       -> symbol area: {used} bytes");
             println!(
                 "wrote {} — re-run `cargo xtask build` to relink",
@@ -188,8 +189,8 @@ fn dispatch() -> Result<(), String> {
             Ok(())
         }
         "clear-syms" => {
-            let dst = root.join("generated/symbol_area.S");
-            std::fs::write(&dst, syms::clear())
+            let dst = root.join("crates/kernel/generated/symbol_area.S");
+            std::fs::write(&dst, format!("{}{}", syms::HEADER, syms::clear()))
                 .map_err(|e| format!("write {}: {e}", dst.display()))?;
             println!("cleared {}", dst.display());
             Ok(())

@@ -437,7 +437,7 @@ Der `build`-Helper führt aus:
 1. Kernel-Link mit dem aktuellen Platzhalter oder der Tabelle;
 2. `cargo xtask populate-syms --board rpi4b`, das neu linkt, `kernel8.elf` mit
    dem gepinnten `llvm-nm` liest, Mapping- und Runtime-Aliase filtert und
-   `generated/symbol_area.S` neu schreibt;
+   `crates/kernel/generated/symbol_area.S` neu schreibt;
 3. finaler Link;
 4. `nm`-Vergleich als Beleg der konvergierten Symboladressen.
 

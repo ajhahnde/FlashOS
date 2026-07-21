@@ -87,7 +87,7 @@ build -d                   # same build, with deploy to the SD card
 ```
 
 The `build` helper runs `cargo xtask clean`, checks source hygiene, links a
-first kernel, regenerates `generated/symbol_area.S` with `populate-syms`, relinks,
+first kernel, regenerates `crates/kernel/generated/symbol_area.S` with `populate-syms`, relinks,
 and verifies that the symbol layout converged. On `rpi4b` it also builds the
 armstub. There is no interactive deploy prompt; `-d` is the deploy consent.
 
@@ -97,7 +97,7 @@ armstub. There is no interactive deploy prompt; `-d` is the deploy consent.
 | :---------------------------------------- | :------------------------------------------ |
 | `cargo xtask build --board rpi4b`         | Production Pi kernel, userland, initramfs   |
 | `cargo xtask armstub`                     | Pi EL3→EL1 armstub                          |
-| `cargo xtask populate-syms --board rpi4b` | Regenerate `generated/symbol_area.S`              |
+| `cargo xtask populate-syms --board rpi4b` | Regenerate `crates/kernel/generated/symbol_area.S`              |
 | `cargo xtask test`                        | Rust host tests                             |
 | `cargo xtask guard --board rpi4b --full`  | Clean-room full production build            |
 | `cargo xtask build --board rpi4b --trace` | Trace-feature kernel                        |
@@ -125,7 +125,7 @@ run watchdog rpi4b
 ```
 
 To verify the Pi byte-identity baseline before flashing the SD card
-(stashes `generated/symbol_area.S`, cleans, rebuilds, diffs against
+(stashes `crates/kernel/generated/symbol_area.S`, cleans, rebuilds, diffs against
 `scripts/pi_baseline.sha256`):
 
 ```bash

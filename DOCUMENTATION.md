@@ -407,7 +407,7 @@ The user-facing `build` helper performs:
 1. a kernel link with the current placeholder or table;
 2. `cargo xtask populate-syms --board rpi4b`, which relinks, reads
    `kernel8.elf` with the pinned `llvm-nm`, filters mapping and runtime
-   aliases, and rewrites `generated/symbol_area.S`;
+   aliases, and rewrites `crates/kernel/generated/symbol_area.S`;
 3. a final link;
 4. an `nm` comparison proving symbol addresses converged.
 

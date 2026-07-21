@@ -842,7 +842,7 @@ fn inspect(p: &Paths, tc: &Toolchain) -> Result<(), String> {
 /// `link/initramfs.S`. Order within `.text` does not matter for these — only
 /// boot.S's position in `.text.boot` is load-bearing, and that is `COMMON_ASM[0]`.
 const KERNEL_EXTRA_ASM: &[&str] = &[
-    "generated/symbol_area.S",
+    "crates/kernel/generated/symbol_area.S",
     "arch/aarch64/trace/hook.S",
     "arch/aarch64/trace/patchable_trampolines.S",
 ];
