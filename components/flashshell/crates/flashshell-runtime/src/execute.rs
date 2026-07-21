@@ -8,6 +8,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
 
 use flashshell_platform::{
     ChildDescriptor, ChildProcess, DescriptorEndpoint, FileOpenMode, FileOpenRequest, Platform,
@@ -81,13 +83,79 @@ pub fn execute_foreground_status(
     let pipeline_started = clock.now();
     let completions = execute_preflighted_pipeline_timed(plan, platform, clock)?;
     let pipeline_duration = elapsed(pipeline_started, clock.now());
+    Ok(aggregate_language_status(
+        plan,
+        completions,
+        pipeline_duration,
+    ))
+}
+
+/// Execute a foreground pipeline while incrementally draining its final stdout.
+///
+/// A dedicated scoped thread begins reading before the first child wait, so a
+/// producer may emit more than one pipe buffer without deadlocking. `drain`
+/// receives one borrowed chunk at a time; the executor never accumulates output.
+/// A stage-local stdout redirection still wins because capture plumbing is
+/// installed before source-ordered redirections. Text decoding, byte collection,
+/// and capture limits belong to the command-substitution layer built on top.
+pub fn execute_foreground_with_stdout_drain<D>(
+    plan: &ExecutionPlan,
+    platform: &dyn Platform,
+    clock: &dyn Clock,
+    drain: &mut D,
+) -> Result<Status, RuntimeError>
+where
+    D: FnMut(&[u8]) + Send,
+{
+    preflight(plan)?;
+    validate_preflighted_external_plan(plan)?;
+    let producer_span = plan
+        .stages()
+        .last()
+        .map_or(plan.span(), crate::plan::PlannedStage::span);
+    let (reader, writer) = platform
+        .pipe()
+        .map_err(|error| RuntimeError::new(RuntimeErrorKind::CapturePipe(error), producer_span))?
+        .into_parts();
+    let pipeline_started = clock.now();
+    let children = start_preflighted_pipeline(plan, platform, Some(clock), Some(writer))?;
+
+    let (wait_result, drain_result) = thread::scope(|scope| {
+        let (ready_sender, ready_receiver) = mpsc::sync_channel(0);
+        let drain_task =
+            scope.spawn(move || drain_stdout(platform, reader, drain, producer_span, ready_sender));
+        ready_receiver
+            .recv()
+            .expect("the drain task signals before returning");
+        let wait_result = wait_in_source_order(children, plan, Some(clock));
+        let drain_result = drain_task
+            .join()
+            .expect("a drain callback panic is an implementation failure");
+        (wait_result, drain_result)
+    });
+
+    let completions = wait_result?;
+    drain_result?;
+    let pipeline_duration = elapsed(pipeline_started, clock.now());
+    Ok(aggregate_language_status(
+        plan,
+        completions,
+        pipeline_duration,
+    ))
+}
+
+fn aggregate_language_status(
+    plan: &ExecutionPlan,
+    completions: Vec<StageCompletion>,
+    pipeline_duration: Duration,
+) -> Status {
     let stages: Vec<Status> = completions
         .into_iter()
         .map(|completion| language_status(completion.status, completion.duration))
         .collect();
 
     if let [stage] = stages.as_slice() {
-        return Ok(stage.clone());
+        return stage.clone();
     }
 
     let selected = if plan.pipefail() {
@@ -98,8 +166,8 @@ pub fn execute_foreground_status(
     } else {
         stages.len() - 1
     };
-    Ok(Status::aggregate(stages, selected, pipeline_duration)
-        .expect("executor completion satisfies aggregate status invariants"))
+    Status::aggregate(stages, selected, pipeline_duration)
+        .expect("executor completion satisfies aggregate status invariants")
 }
 
 /// Plan and execute a foreground external-command conditional chain.
@@ -257,18 +325,17 @@ fn execute_preflighted_pipeline_inner(
     platform: &dyn Platform,
     clock: Option<&dyn Clock>,
 ) -> Result<Vec<StageCompletion>, RuntimeError> {
-    if plan.stages().is_empty() {
-        return Err(RuntimeError::new(
-            RuntimeErrorKind::Unsupported {
-                feature: "an empty foreground pipeline",
-            },
-            plan.span(),
-        ));
-    }
+    let children = start_preflighted_pipeline(plan, platform, clock, None)?;
+    wait_in_source_order(children, plan, clock)
+}
 
-    for stage in plan.stages() {
-        validate_external_stage(stage)?;
-    }
+fn start_preflighted_pipeline(
+    plan: &ExecutionPlan,
+    platform: &dyn Platform,
+    clock: Option<&dyn Clock>,
+    mut final_output: Option<Box<dyn DescriptorEndpoint>>,
+) -> Result<Vec<StartedChild>, RuntimeError> {
+    validate_preflighted_external_plan(plan)?;
 
     let mut pipes = Vec::with_capacity(plan.edges().len());
     for edge in plan.edges() {
@@ -288,9 +355,14 @@ fn execute_preflighted_pipeline_inner(
 
     for (index, stage) in plan.stages().iter().enumerate() {
         let input = index.checked_sub(1).and_then(|edge| pipes[edge].0.take());
-        let output = pipes.get_mut(index).and_then(|edge| edge.1.take());
+        let edge_output = pipes.get_mut(index).and_then(|edge| edge.1.take());
         let merge_output =
-            output.is_some() && plan.edges()[index].kind() == PipeOperator::StdoutAndStderr;
+            edge_output.is_some() && plan.edges()[index].kind() == PipeOperator::StdoutAndStderr;
+        let output = edge_output.or_else(|| {
+            (index + 1 == plan.stages().len())
+                .then(|| final_output.take())
+                .flatten()
+        });
         let mut descriptor_map = StageDescriptorMap::new(input, output, merge_output);
         if let Err(error) =
             descriptor_map.apply_redirections(stage.redirections(), plan.cwd(), platform)
@@ -338,7 +410,22 @@ fn execute_preflighted_pipeline_inner(
     }
 
     drop(pipes);
-    wait_in_source_order(children, plan, clock)
+    Ok(children)
+}
+
+fn validate_preflighted_external_plan(plan: &ExecutionPlan) -> Result<(), RuntimeError> {
+    if plan.stages().is_empty() {
+        return Err(RuntimeError::new(
+            RuntimeErrorKind::Unsupported {
+                feature: "an empty foreground pipeline",
+            },
+            plan.span(),
+        ));
+    }
+    for stage in plan.stages() {
+        validate_external_stage(stage)?;
+    }
+    Ok(())
 }
 
 fn validate_external_stage(stage: &crate::plan::PlannedStage) -> Result<(), RuntimeError> {
@@ -585,6 +672,43 @@ fn wait_in_source_order(
         Some(error) => Err(error),
         None => Ok(statuses),
     }
+}
+
+fn drain_stdout<D>(
+    platform: &dyn Platform,
+    reader: Box<dyn DescriptorEndpoint>,
+    drain: &mut D,
+    producer_span: flashshell_syntax::Span,
+    ready: mpsc::SyncSender<()>,
+) -> Result<(), RuntimeError>
+where
+    D: FnMut(&[u8]),
+{
+    const CHUNK_SIZE: usize = 64 * 1024;
+    let mut buffer = [0u8; CHUNK_SIZE];
+    let first = read_capture_chunk(platform, reader.as_ref(), &mut buffer, producer_span);
+    ready
+        .send(())
+        .expect("the waiting executor retains the drain-ready receiver");
+    let mut amount = first?;
+    loop {
+        if amount == 0 {
+            return Ok(());
+        }
+        drain(&buffer[..amount]);
+        amount = read_capture_chunk(platform, reader.as_ref(), &mut buffer, producer_span)?;
+    }
+}
+
+fn read_capture_chunk(
+    platform: &dyn Platform,
+    reader: &dyn DescriptorEndpoint,
+    buffer: &mut [u8],
+    producer_span: flashshell_syntax::Span,
+) -> Result<usize, RuntimeError> {
+    platform
+        .read_descriptor(reader, buffer)
+        .map_err(|error| RuntimeError::new(RuntimeErrorKind::CaptureRead(error), producer_span))
 }
 
 fn elapsed(start: Instant, end: Instant) -> Duration {

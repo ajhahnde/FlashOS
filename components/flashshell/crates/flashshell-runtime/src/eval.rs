@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant as SystemInstant;
 
-use flashshell_platform::{FileActionError, PipeError, SpawnError, WaitError};
+use flashshell_platform::{DescriptorReadError, FileActionError, PipeError, SpawnError, WaitError};
 use flashshell_syntax::{
     AndChain, Assignment, BinaryOperator, Block, CallExpression, Closure, ConditionalChain,
     ControlTransfer, Declaration, ElseBranch, EnvironmentStatement, Expression, ExpressionKind,
@@ -187,6 +187,10 @@ pub enum RuntimeErrorKind {
     DescriptorNotOpen { descriptor: u32 },
     /// The platform rejected or failed creation of an anonymous pipeline edge.
     PipeCreate(PipeError),
+    /// The platform rejected or failed creation of the stdout capture pipe.
+    CapturePipe(PipeError),
+    /// Reading the captured stdout pipe failed while draining it.
+    CaptureRead(DescriptorReadError),
     /// A source-ordered redirection file action could not be prepared.
     RedirectionSetup(FileActionError),
     /// The platform rejected or failed a direct external-process spawn.
@@ -281,6 +285,8 @@ impl fmt::Display for RuntimeErrorKind {
                 "cannot duplicate descriptor {descriptor}: it is not open in this stage"
             ),
             Self::PipeCreate(error) => error.fmt(formatter),
+            Self::CapturePipe(error) => error.fmt(formatter),
+            Self::CaptureRead(error) => error.fmt(formatter),
             Self::RedirectionSetup(error) => error.fmt(formatter),
             Self::ProcessSpawn(error) => error.fmt(formatter),
             Self::ProcessWait(error) => error.fmt(formatter),

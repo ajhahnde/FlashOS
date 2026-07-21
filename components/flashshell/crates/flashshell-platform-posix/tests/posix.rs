@@ -83,6 +83,39 @@ fn posix_pipe_returns_connected_owned_endpoints_with_prompt_eof() {
 }
 
 #[test]
+fn posix_platform_reads_an_owned_pipe_endpoint_to_eof() {
+    let (reader, writer) = PosixPlatform
+        .pipe()
+        .expect("POSIX creates a connected pipe")
+        .into_parts();
+    let writer_clone = writer
+        .as_any()
+        .downcast_ref::<OwnedDescriptor>()
+        .expect("POSIX returns POSIX descriptors")
+        .try_clone()
+        .expect("the write endpoint should clone")
+        .into_owned_fd();
+    drop(writer);
+    let mut file = fs::File::from(writer_clone);
+    file.write_all(b"drained bytes").expect("write succeeds");
+    drop(file);
+
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 4];
+    loop {
+        let amount = PosixPlatform
+            .read_descriptor(reader.as_ref(), &mut buffer)
+            .expect("pipe read should succeed");
+        if amount == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..amount]);
+    }
+
+    assert_eq!(bytes, b"drained bytes");
+}
+
+#[test]
 fn posix_file_actions_preserve_relative_cwd_and_open_modes() {
     let temp = TempDir::new("file-actions");
     fs::write(temp.path().join("target"), b"old").expect("seed file should be written");

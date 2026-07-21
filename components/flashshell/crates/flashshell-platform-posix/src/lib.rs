@@ -11,16 +11,16 @@
 
 use std::any::Any;
 use std::collections::BTreeSet;
-use std::fs::OpenOptions;
-use std::io;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, Stdio};
 
 use flashshell_platform::{
-    Capabilities, Capability, ChildProcess, DescriptorEndpoint, FileActionError, FileOpenMode,
-    FileOpenRequest, PipeEndpoints, PipeError, Platform, ProcessStatus, SpawnError, SpawnRequest,
-    TerminateError, WaitError,
+    Capabilities, Capability, ChildProcess, DescriptorEndpoint, DescriptorReadError,
+    FileActionError, FileOpenMode, FileOpenRequest, PipeEndpoints, PipeError, Platform,
+    ProcessStatus, SpawnError, SpawnRequest, TerminateError, WaitError,
 };
 
 /// A uniquely owned POSIX descriptor with close-on-exec discipline.
@@ -30,7 +30,7 @@ use flashshell_platform::{
 /// happens only through `Drop` or an explicit transfer back into [`OwnedFd`].
 #[derive(Debug)]
 pub struct OwnedDescriptor {
-    descriptor: OwnedFd,
+    descriptor: File,
 }
 
 impl OwnedDescriptor {
@@ -40,7 +40,7 @@ impl OwnedDescriptor {
     pub fn adopt(descriptor: OwnedFd) -> io::Result<Self> {
         let cloexec_descriptor = descriptor.try_clone()?;
         Ok(Self {
-            descriptor: cloexec_descriptor,
+            descriptor: File::from(cloexec_descriptor),
         })
     }
 
@@ -58,7 +58,7 @@ impl OwnedDescriptor {
 
     /// Transfer ownership to a standard-library descriptor owner.
     pub fn into_owned_fd(self) -> OwnedFd {
-        self.descriptor
+        self.descriptor.into()
     }
 }
 
@@ -172,7 +172,28 @@ impl Platform for PosixPlatform {
             }
         }
         .map_err(file_action_error)?;
-        Ok(Box::new(OwnedDescriptor { descriptor }))
+        Ok(Box::new(OwnedDescriptor {
+            descriptor: File::from(descriptor),
+        }))
+    }
+
+    fn read_descriptor(
+        &self,
+        endpoint: &dyn DescriptorEndpoint,
+        buffer: &mut [u8],
+    ) -> Result<usize, DescriptorReadError> {
+        self.require(Capability::Pipes)?;
+        let endpoint = endpoint
+            .as_any()
+            .downcast_ref::<OwnedDescriptor>()
+            .ok_or(DescriptorReadError::InvalidEndpoint)?;
+        let mut descriptor = &endpoint.descriptor;
+        descriptor
+            .read(buffer)
+            .map_err(|error| DescriptorReadError::Operation {
+                kind: error.kind(),
+                message: error.to_string(),
+            })
     }
 
     fn spawn(&self, request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError> {

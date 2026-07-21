@@ -4,9 +4,9 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use flashshell_platform::{
-    Capabilities, Capability, ChildDescriptor, FakePlatform, FileActionError, FileOpenMode,
-    FileOpenRequest, PipeError, Platform, PlatformError, ProcessStatus, SpawnError, SpawnRequest,
-    SpawnRequestError,
+    Capabilities, Capability, ChildDescriptor, DescriptorReadError, FakePlatform, FileActionError,
+    FileOpenMode, FileOpenRequest, PipeError, Platform, PlatformError, ProcessStatus, SpawnError,
+    SpawnRequest, SpawnRequestError,
 };
 
 #[test]
@@ -115,6 +115,24 @@ fn fake_pipes_are_host_free_and_require_the_pipe_capability() {
         PipeError::Platform(PlatformError::Unsupported {
             capability: Capability::Pipes,
         })
+    );
+}
+
+#[test]
+fn fake_descriptor_reads_are_host_free_and_capability_gated() {
+    let full = FakePlatform::full();
+    let (reader, _writer) = full
+        .pipe()
+        .expect("the fake pipe should exist")
+        .into_parts();
+    let mut buffer = [0u8; 16];
+
+    assert_eq!(full.read_descriptor(reader.as_ref(), &mut buffer), Ok(0));
+    assert_eq!(
+        FakePlatform::none().read_descriptor(reader.as_ref(), &mut buffer),
+        Err(DescriptorReadError::Platform(PlatformError::Unsupported {
+            capability: Capability::Pipes,
+        }))
     );
 }
 

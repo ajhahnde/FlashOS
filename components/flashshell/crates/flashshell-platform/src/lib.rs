@@ -214,6 +214,44 @@ impl From<PlatformError> for PipeError {
     }
 }
 
+/// Failure while draining bytes from an owned descriptor endpoint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DescriptorReadError {
+    /// The platform cannot satisfy pipe-backed descriptor reads.
+    Platform(PlatformError),
+    /// The endpoint was not created by the adapter asked to read it.
+    InvalidEndpoint,
+    /// The host read operation failed.
+    Operation {
+        /// Stable I/O error category from the host adapter.
+        kind: io::ErrorKind,
+        /// Human-readable host error text.
+        message: String,
+    },
+}
+
+impl fmt::Display for DescriptorReadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Platform(error) => error.fmt(formatter),
+            Self::InvalidEndpoint => {
+                formatter.write_str("descriptor endpoint belongs to another platform adapter")
+            }
+            Self::Operation { message, .. } => {
+                write!(formatter, "descriptor read failed: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DescriptorReadError {}
+
+impl From<PlatformError> for DescriptorReadError {
+    fn from(error: PlatformError) -> Self {
+        Self::Platform(error)
+    }
+}
+
 /// How a redirection target is opened for one child descriptor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileOpenMode {
@@ -614,6 +652,17 @@ pub trait Platform: Send + Sync {
         descriptor: u32,
     ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError>;
 
+    /// Read one chunk from an owned pipe endpoint, returning zero at EOF.
+    fn read_descriptor(
+        &self,
+        endpoint: &dyn DescriptorEndpoint,
+        buffer: &mut [u8],
+    ) -> Result<usize, DescriptorReadError> {
+        self.require(Capability::Pipes)?;
+        let _ = (endpoint, buffer);
+        Err(DescriptorReadError::InvalidEndpoint)
+    }
+
     /// Execute `request.executable` directly with its explicit native argv.
     fn spawn(&self, request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError>;
 }
@@ -672,6 +721,15 @@ impl Platform for FakePlatform {
     ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError> {
         self.require(Capability::FileActions)?;
         Ok(Box::new(FakeDescriptorEndpoint))
+    }
+
+    fn read_descriptor(
+        &self,
+        _endpoint: &dyn DescriptorEndpoint,
+        _buffer: &mut [u8],
+    ) -> Result<usize, DescriptorReadError> {
+        self.require(Capability::Pipes)?;
+        Ok(0)
     }
 
     fn spawn(&self, _request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError> {
