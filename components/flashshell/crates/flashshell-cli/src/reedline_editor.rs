@@ -1,11 +1,15 @@
 use std::borrow::Cow;
 
 use flashshell_syntax::{ParseOutcome, SourceFile, SourceId, parse};
+use nu_ansi_term::{Color, Style};
 use reedline::{
-    Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal, ValidationResult, Validator,
+    Completer, Highlighter, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal, Span,
+    StyledText, Suggestion, ValidationResult, Validator,
 };
 
+use crate::completion::{CompletionCatalog, CompletionEngine};
 use crate::editor::{EditorError, EditorEvent, EditorPrompt, LineEditor};
+use crate::highlight::{HighlightKind, SyntaxHighlighter};
 use crate::history::{EditorHistory, HistoryError, HistorySelection};
 
 /// macOS/Linux terminal editor backed by the pinned Reedline implementation.
@@ -17,7 +21,7 @@ impl ReedlineEditor {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: Reedline::create().with_validator(Box::new(FlashShellValidator)),
+            inner: editor_engine(),
         }
     }
 
@@ -25,11 +29,21 @@ impl ReedlineEditor {
     pub fn with_history(selection: HistorySelection) -> Result<Self, HistoryError> {
         let history = EditorHistory::open(selection)?;
         Ok(Self {
-            inner: Reedline::create()
-                .with_history(history.into_backend())
-                .with_validator(Box::new(FlashShellValidator)),
+            inner: editor_engine().with_history(history.into_backend()),
         })
     }
+}
+
+fn editor_engine() -> Reedline {
+    let registry = flashshell_runtime::builtin::standard_registry();
+    let scope = flashshell_runtime::ScopeStack::new();
+    let catalog = CompletionCatalog::from_runtime(&registry, &scope);
+    Reedline::create()
+        .with_validator(Box::new(FlashShellValidator))
+        .with_highlighter(Box::new(ReedlineSyntaxHighlighter))
+        .with_completer(Box::new(ReedlineCompleter {
+            engine: CompletionEngine::new(catalog),
+        }))
 }
 
 impl Default for ReedlineEditor {
@@ -63,6 +77,56 @@ impl Validator for FlashShellValidator {
             ParseOutcome::Incomplete(_) => ValidationResult::Incomplete,
             ParseOutcome::Complete(_) | ParseOutcome::Invalid(_) => ValidationResult::Complete,
         }
+    }
+}
+
+struct ReedlineSyntaxHighlighter;
+
+impl Highlighter for ReedlineSyntaxHighlighter {
+    fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
+        let mut styled = StyledText::new();
+        for segment in SyntaxHighlighter::new().highlight(line) {
+            styled.push((highlight_style(segment.kind()), segment.text().to_owned()));
+        }
+        styled
+    }
+}
+
+struct ReedlineCompleter {
+    engine: CompletionEngine,
+}
+
+impl Completer for ReedlineCompleter {
+    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+        self.engine
+            .complete(line, pos)
+            .into_iter()
+            .map(|completion| {
+                let replacement = completion.replacement();
+                Suggestion {
+                    value: completion.value().to_owned(),
+                    description: Some(format!("{:?}", completion.kind())),
+                    span: Span::new(replacement.start, replacement.end),
+                    append_whitespace: completion.append_whitespace(),
+                    ..Suggestion::default()
+                }
+            })
+            .collect()
+    }
+}
+
+fn highlight_style(kind: HighlightKind) -> Style {
+    match kind {
+        HighlightKind::Plain => Style::new(),
+        HighlightKind::Comment => Style::new().fg(Color::DarkGray).italic(),
+        HighlightKind::Keyword => Style::new().fg(Color::Purple).bold(),
+        HighlightKind::Literal => Style::new().fg(Color::Yellow),
+        HighlightKind::String => Style::new().fg(Color::Green),
+        HighlightKind::Escape => Style::new().fg(Color::LightYellow),
+        HighlightKind::Expansion => Style::new().fg(Color::Cyan),
+        HighlightKind::Operator => Style::new().fg(Color::LightBlue),
+        HighlightKind::Delimiter => Style::new().fg(Color::Blue),
+        HighlightKind::Invalid => Style::new().fg(Color::Red).underline(),
     }
 }
 
@@ -172,5 +236,39 @@ mod tests {
                 ValidationResult::Incomplete
             ));
         }
+    }
+
+    #[test]
+    fn reedline_highlighter_preserves_source_and_maps_semantic_styles() {
+        let source = "let name = \"$value\" # note";
+        let styled = ReedlineSyntaxHighlighter.highlight(source, source.len());
+
+        assert_eq!(styled.raw_string(), source);
+        assert!(styled.buffer.iter().any(|(style, text)| *style
+            == highlight_style(HighlightKind::Keyword)
+            && text == "let"));
+        assert!(styled.buffer.iter().any(|(style, text)| {
+            *style == highlight_style(HighlightKind::Expansion) && text == "$value"
+        }));
+        assert!(styled.buffer.iter().any(|(style, text)| {
+            *style == highlight_style(HighlightKind::Comment) && text == "# note"
+        }));
+    }
+
+    #[test]
+    fn reedline_completer_preserves_replacement_span_and_spacing_policy() {
+        let registry = flashshell_runtime::builtin::standard_registry();
+        let scope = flashshell_runtime::ScopeStack::new();
+        let mut completer = ReedlineCompleter {
+            engine: CompletionEngine::new(CompletionCatalog::from_runtime(&registry, &scope)),
+        };
+
+        let suggestions = completer.complete("pw", 2);
+        let pwd = suggestions
+            .iter()
+            .find(|suggestion| suggestion.value == "pwd")
+            .expect("standard command should be bridged");
+        assert_eq!(pwd.span, Span::new(0, 2));
+        assert!(pwd.append_whitespace);
     }
 }

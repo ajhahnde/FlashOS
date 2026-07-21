@@ -45,7 +45,11 @@ fn not_found_name(error: ResolutionError) -> OsString {
 
 #[test]
 fn a_signature_exposes_its_name_carriers_and_output() {
-    let signature = sig("where", [Carrier::ValueStream], Carrier::ValueStream);
+    let signature = sig("where", [Carrier::ValueStream], Carrier::ValueStream).with_flags([
+        "--reverse",
+        "--ignore-case",
+        "--reverse",
+    ]);
 
     assert_eq!(signature.name(), "where");
     assert_eq!(
@@ -54,6 +58,10 @@ fn a_signature_exposes_its_name_carriers_and_output() {
     );
     assert!(signature.accepts(Carrier::ValueStream));
     assert!(!signature.accepts(Carrier::ByteStream));
+    assert_eq!(
+        signature.flags().collect::<Vec<_>>(),
+        ["--ignore-case", "--reverse"]
+    );
 }
 
 #[test]

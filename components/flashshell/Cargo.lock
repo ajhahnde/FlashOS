@@ -175,6 +175,7 @@ dependencies = [
  "flashshell-platform-posix",
  "flashshell-runtime",
  "flashshell-syntax",
+ "nu-ansi-term",
  "reedline",
  "rustix",
 ]

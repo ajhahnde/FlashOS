@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
@@ -130,6 +131,19 @@ impl ScopeStack {
             return Ok(());
         }
         Err(ScopeError::UnknownBinding(name.to_owned()))
+    }
+
+    /// Returns the visible bindings in name order, with inner frames shadowing
+    /// bindings of the same name in outer frames.
+    #[must_use]
+    pub fn visible_bindings(&self) -> Vec<(&str, &Value)> {
+        let mut visible = BTreeMap::new();
+        for frame in &self.frames {
+            for (name, binding) in &frame.bindings {
+                visible.insert(name.as_ref(), &binding.value);
+            }
+        }
+        visible.into_iter().collect()
     }
 
     fn find(&self, name: &str) -> Option<&Binding> {

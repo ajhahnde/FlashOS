@@ -1,9 +1,9 @@
-//! The command registry and its minimal command signature.
+//! The command registry and command signatures.
 //!
 //! A [`CommandSignature`] is, for v0.1, exactly the pipeline-carrier contract an
-//! internal command declares: the input carriers it accepts and the carrier it
-//! produces. Typed parameters, flags, and options are a later additive extension
-//! and are deliberately absent. A [`CommandRegistry`] maps a name to a signature;
+//! internal command declares: the input carriers it accepts, the carrier it
+//! produces, and the flags it advertises to editor services. Typed parameters
+//! and option value schemas remain later additive extensions. A [`CommandRegistry`] maps a name to a signature;
 //! it is empty by default, and each built-in's signature is registered with the
 //! built-in. Registering a name twice is rejected, since a duplicate built-in name
 //! is a definition-time bug rather than a runtime override.
@@ -46,12 +46,13 @@ impl CommandOutput {
     }
 }
 
-/// An internal command's v0.1 signature: its name and pipeline-carrier contract.
+/// An internal command's signature: its name, pipeline contract, and flags.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandSignature {
     name: String,
     inputs: BTreeSet<Carrier>,
     output: CommandOutput,
+    flags: BTreeSet<String>,
 }
 
 impl CommandSignature {
@@ -66,6 +67,7 @@ impl CommandSignature {
             name: name.into(),
             inputs: inputs.into_iter().collect(),
             output: CommandOutput::Fixed(output),
+            flags: BTreeSet::new(),
         }
     }
 
@@ -75,7 +77,15 @@ impl CommandSignature {
             name: name.into(),
             inputs: inputs.into_iter().collect(),
             output: CommandOutput::SameAsInput,
+            flags: BTreeSet::new(),
         }
+    }
+
+    /// Adds the flags this command accepts. Duplicate spellings collapse to one.
+    #[must_use]
+    pub fn with_flags(mut self, flags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.flags.extend(flags.into_iter().map(Into::into));
+        self
     }
 
     /// The command name.
@@ -99,6 +109,11 @@ impl CommandSignature {
     #[must_use]
     pub fn output(&self) -> CommandOutput {
         self.output
+    }
+
+    /// The advertised flags, in sorted order.
+    pub fn flags(&self) -> impl Iterator<Item = &str> {
+        self.flags.iter().map(String::as_str)
     }
 }
 
