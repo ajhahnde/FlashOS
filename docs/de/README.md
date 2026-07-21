@@ -89,15 +89,17 @@ unter **[Setup](SETUP.md)** beschrieben.
   sie Speicher beschädigen.
 - **Vereinheitlichte File Descriptors.** Konsole, Pipe und Datei teilen eine
   API mit vererbbarer und umleitbarer Standard-Ein-/Ausgabe.
-- **Künftiger Plattform-Stack.** Nach dem Rust-Port-Release definiert
-  **FlashSDK** den schmalen öffentlichen Syscall-/Userspace-ABI-Vertrag, die
-  EL0-Runtime, die Basisbibliothek und den Target-/Link-Vertrag. Danach wird
-  **[FlashShell](https://github.com/ajhahnde/FlashShell)** erster
-  Produkt-Consumer. **[FlashUI](https://ajhahn.de/repos/FlashUI/)** folgt als
-  native TUI, bettet FlashShell ein und wird später die Standardoberfläche
-  nach dem Login. Das heutige `/bin/fsh` bleibt als getestete Recovery-Shell
-  erhalten. Diese Verträge bleiben bis zum FlashOS-v1.0-Stabilitätsschnitt
-  pre-1.0.
+- **Plattform-Stack.** **FlashSDK** — die Crates `flashsdk-abi`,
+  `flashsdk-rt` und `flashsdk-base` in diesem Workspace — definiert den
+  schmalen öffentlichen Syscall-/Userspace-ABI-Vertrag, die EL0-Runtime, die
+  Basisbibliothek und den Target-/Link-Vertrag; Kernel und jedes User-Programm
+  konsumieren ihn in-tree als Path-Dependencies. **FlashShell**, in-tree als
+  nested Consumer-Workspace (`components/flashshell/`) mit eigener gepinnter
+  Toolchain und eigenem CI-Job eingebettet, ist der erste Produkt-Consumer.
+  **FlashUI** folgt als native TUI, bettet FlashShell ein und wird später die
+  Standardoberfläche nach dem Login; das heutige `/bin/fsh` bleibt als
+  getestete Recovery-Shell erhalten. Diese Verträge bleiben bis zum
+  FlashOS-v1.0-Stabilitätsschnitt pre-1.0.
 - **Benutzer, Login und Berechtigungen.** UID/GID-Identität, Unix-artige
   Dateimodi, Privilege-Drop, PBKDF2-HMAC-SHA256-Authentifizierung und
   geschützter Passwortspeicher mit read-only Fallback.
@@ -139,9 +141,6 @@ config.txt                  Raspberry-Pi-Firmwarekonfiguration
 
 - **[FlashOS Tour →](https://ajhahn.de/flashos/)**
 - **[ajhahn.de →](https://ajhahn.de/)**
-- **[FlashSDK →](https://github.com/ajhahnde/FlashSDK)**
-- **[FlashShell →](https://ajhahn.de/repos/FlashShell/)**
-- **[FlashUI →](https://ajhahn.de/repos/FlashUI/)**
 
 ---
 
