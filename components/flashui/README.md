@@ -2,11 +2,10 @@
 
 <h1>FlashUI</h1>
 
-<h3>A native terminal user interface and session frontend for FlashOS, written in Rust.</h3>
+<h3>A native terminal user interface and session frontend, written in Rust.</h3>
 
 <p>
   <img src="https://img.shields.io/badge/version-PLANNED-f59e0b?style=flat-square" alt="Version">
-  <img src="https://img.shields.io/badge/rust-1.97.1-dea584?style=flat-square" alt="Rust 1.97.1">
   <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey?style=flat-square" alt="License">
 </p>
 
@@ -89,7 +88,4 @@ The first development milestone is a functional host-based TUI with input handli
 
 FlashUI is designed to remain independently versioned, testable without QEMU and portable across platform backends while serving as the default interactive session environment for FlashOS.
 
-## See also
-
-- **[FlashOS](https://github.com/ajhahnde/FlashOS)** — an AArch64 bare-metal kernel, written in Flash.
-- **[FlashOS Tour →](https://ajhahn.de/flashos/)**
+---

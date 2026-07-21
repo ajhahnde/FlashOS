@@ -33,15 +33,14 @@ Reference:
 
 ## 1. Host toolchain
 
-| Tool                     | Version / source       | Purpose                                      |
-| :----------------------- | :--------------------- | :------------------------------------------- |
-| Rust                     | repository pin         | Kernel, userland, host tools, and tests       |
-| Clang                    | host LLVM               | Assemble retained AArch64 `.S` sources        |
-| Rust `llvm-tools`        | repository pin         | Link, inspect, and convert AArch64 artefacts  |
+| Tool                     | Version / source        | Purpose                                      |
+| :----------------------- | :---------------------- | :------------------------------------------- |
+| Rust                     | repository pin          | Kernel, userland, host tools, and tests      |
+| Clang                    | host LLVM               | Assemble retained AArch64 `.S` sources       |
+| Rust `llvm-tools`        | repository pin          | Link, inspect, and convert AArch64 artefacts |
 | `qemu-system-aarch64`    | repository contract pin | Run the `raspi4b` boot contract              |
-| `mtools`                 | current                | Create the QEMU FAT32 test disk               |
-| `screen` (or equivalent) | –                      | Serial console for the Pi                     |
-| Python 3                 | current                | DTR-aware unattended Pi console capture       |
+| `mtools`                 | current                 | Create the QEMU FAT32 test disk              |
+| `screen` (or equivalent) | –                       | Serial console for the Pi                    |
 
 On macOS:
 
@@ -50,7 +49,7 @@ brew install llvm qemu mtools
 rustup show
 ```
 
-`versions.env` is the single authored source for the live FlashOS, Rust, and
+`versions.env` is the single source for the live FlashOS, Rust, and
 QEMU versions; `scripts/sync_versions.sh` synchronizes the conventional files
 required by Cargo, rustup, CI, and the public badges. `rust-toolchain.toml`
 additionally owns the `aarch64-unknown-none-softfloat` target and the
@@ -61,14 +60,14 @@ the assembler.
 
 ### Runtime system requirements
 
-| Item | Current requirement |
-| :--- | :------------------ |
-| Board | Raspberry Pi 4 Model B (BCM2711), booting AArch64 |
-| RAM | The 4 GiB model is release-qualified. The 1 GiB model is unsupported because the physical-page pool begins at 1 GiB; other capacities are not part of the v0.8.0 hardware gate. |
-| Boot media | One FAT32 microSD partition. The current boot bundle uses about 3.4 MiB, so any normal card has ample capacity. |
+| Item         | Current requirement                                                                                                                        |
+| :----------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
+| Board        | Raspberry Pi 4 Model B (BCM2711), booting AArch64                                                                                          |
+| RAM          | The 4 GiB model is release-qualified. The 1 GiB model is unsupported because the physical-page pool begins at 1 GiB                        |
+| Boot media   | One FAT32 microSD partition. The current boot bundle uses about 3.4 MiB, so any normal card has ample capacity.                            |
 | Kernel image | The current production `kernel8.img` is about 1.2 MiB, including an approximately 87 KiB initramfs. These sizes may change between builds. |
-| Console | A data-capable USB-C connection for the user console; a 3.3 V Mini-UART adapter is optional for early diagnostics and tracing. |
-| Emulation | `qemu-system-aarch64 -M raspi4b`; EMMC2 and USB-device hardware legs still require a real Pi. |
+| Console      | A data-capable USB-C connection for the user console; a 3.3 V Mini-UART adapter is optional for early diagnostics and tracing.             |
+| Emulation    | `qemu-system-aarch64 -M raspi4b`; EMMC2 and USB-device hardware legs still require a real Pi.                                              |
 
 ## 2. Building
 
@@ -82,9 +81,9 @@ cargo xtask armstub
 For the complete two-pass symbol build, source the shell helpers:
 
 ```bash
-source flashos.zsh         # provides the `build` helper
+source flashos.zsh
 build                      # clean, test hygiene, two-pass build, armstub
-build -d                   # same build, then deploy to the SD card
+build -d                   # same build, with deploy to the SD card
 ```
 
 The `build` helper runs `cargo xtask clean`, checks source hygiene, links a
@@ -94,34 +93,29 @@ armstub. There is no interactive deploy prompt; `-d` is the deploy consent.
 
 ### Build steps
 
-| Command                                            | Result                                      |
-| :------------------------------------------------- | :------------------------------------------ |
-| `cargo xtask build --board rpi4b`                  | Production Pi kernel, userland, initramfs   |
-| `cargo xtask armstub`                              | Pi EL3→EL1 armstub                          |
-| `cargo xtask populate-syms --board rpi4b`          | Regenerate `src/symbol_area.S`              |
-| `cargo xtask test`                                 | Rust host tests                             |
-| `cargo xtask guard --board rpi4b --full`           | Clean-room full production build            |
-| `cargo xtask build --board rpi4b --trace`          | Trace-feature kernel                        |
-| `cargo xtask clean`                                | Remove `target/` and `rust-out/`             |
-| `run qemu`                                         | Build and run QEMU `-M raspi4b`             |
-| `run watchdog rpi4b`                               | Run the unattended production boot contract |
-| `build -d`                                         | Two-pass build and deploy to `$SD_BOOT`      |
+| Command                                   | Result                                      |
+| :---------------------------------------- | :------------------------------------------ |
+| `cargo xtask build --board rpi4b`         | Production Pi kernel, userland, initramfs   |
+| `cargo xtask armstub`                     | Pi EL3→EL1 armstub                          |
+| `cargo xtask populate-syms --board rpi4b` | Regenerate `src/symbol_area.S`              |
+| `cargo xtask test`                        | Rust host tests                             |
+| `cargo xtask guard --board rpi4b --full`  | Clean-room full production build            |
+| `cargo xtask build --board rpi4b --trace` | Trace-feature kernel                        |
+| `cargo xtask clean`                       | Remove `target/` and `rust-out/`            |
+| `run qemu`                                | Build and run QEMU `-M raspi4b`             |
+| `run watchdog rpi4b`                      | Run the unattended production boot contract |
+| `build -d`                                | Two-pass build and deploy to `$SD_BOOT`     |
 
 Production artefacts use Cargo's `release` profile. The bare-metal target and
 soft-float ABI are fixed by the build driver rather than selected interactively.
 
 ## 3. Running under QEMU
 
-Source `flashos.zsh`, then use the live `raspi4b` path:
-
 ```bash
+source flashos.zsh
 run qemu
 run watchdog rpi4b
 ```
-
-`rpi4b` is the validated board and the release gate. The retained `virt` build
-is frozen and deprioritized; it is available through `run virt` for historical
-comparison but is not a current compatibility promise.
 
 For an unattended run that validates the test tally, page checkpoints,
 and final `fsh` prompt:
@@ -144,8 +138,8 @@ and enforces the serial-output contract with a 720-second ceiling.
 
 A green run reports `30/30 passed`, no `[FAIL]` or `ERROR CAUGHT`, the
 expected page checkpoints, and three shell homescreen markers. See
-[Documentation §7](DOCUMENTATION.md#qemu-watchdog-contract) for the exact
-invariants. QEMU is the authoritative inner-loop signal; real hardware
+[Documentation §7](DOCUMENTATION.md#qemu-watchdog-contract) for the exact invariants.
+QEMU is the authoritative inner-loop signal; real hardware
 uses the same image, modulo timing.
 
 ## 4. SD-card layout
@@ -154,12 +148,12 @@ The Raspberry Pi 4 boots from a FAT32-formatted card whose root must
 contain at least:
 
 ```text
-config.txt              # ships in this repo
-kernel8.img             # built by `cargo xtask build --board rpi4b`
-armstub8.bin            # built by `cargo xtask armstub`
-bcm2711-rpi-4-b.dtb     # bundled in this repo
-start4.elf              # bundled in this repo
-fixup4.dat              # bundled in this repo
+config.txt                  # ships in this repo
+kernel8.img                 # built by `cargo xtask build --board rpi4b`
+armstub8.bin                # built by `cargo xtask armstub`
+bcm2711-rpi-4-b.dtb         # bundled in this repo
+start4.elf                  # bundled in this repo
+fixup4.dat                  # bundled in this repo
 overlays/miniuart-bt.dtbo
 ```
 
@@ -249,20 +243,20 @@ Source [`flashos.zsh`](flashos.zsh) from the repository or your
 source ~/FlashOS/flashos.zsh
 ```
 
-| Helper                        | Purpose                                                 |
-| :---------------------------- | :------------------------------------------------------ |
-| `build [-d]`                  | Two-pass symbol build; `-d` also deploys to the SD card |
-| `run qemu` / `run virt`       | Build and start the selected QEMU board                 |
-| `run watchdog [rpi4b \| virt]` | Run the unattended boot validation                      |
-| `run test [--NAME]`           | Run all host tests or a filtered test                   |
-| `run hw [--trace]`            | Attach to the Pi console                                |
-| `pi capture [usb \| mu]`       | Capture a boot into `boot.log`                          |
-| `pi connect [usb \| mu]`       | Open an interactive console                             |
-| `pi list` / `pi quit`         | List devices or stop a capture session                  |
-| `pi log` / `pi tail [N]`      | Read or follow the latest capture                       |
-| `flashos` / `flashos list`    | List helpers and native build commands                  |
-| `flashos versions [show \| check \| sync]` | Inspect or propagate the central version manifest |
-| `flashos check [all \| versions \| docs \| hygiene \| shell]` | Run maintained repository checks |
+| Helper                                                        | Purpose                                                 |
+| :------------------------------------------------------------ | :------------------------------------------------------ |
+| `build [-d]`                                                  | Two-pass symbol build; `-d` also deploys to the SD card |
+| `run qemu` / `run virt`                                       | Build and start the selected QEMU board                 |
+| `run watchdog [rpi4b \| virt]`                                | Run the unattended boot validation                      |
+| `run test [--NAME]`                                           | Run all host tests or a filtered test                   |
+| `run hw [--trace]`                                            | Attach to the Pi console                                |
+| `pi capture [usb \| mu]`                                      | Capture a boot into `boot.log`                          |
+| `pi connect [usb \| mu]`                                      | Open an interactive console                             |
+| `pi list` / `pi quit`                                         | List devices or stop a capture session                  |
+| `pi log` / `pi tail [N]`                                      | Read or follow the latest capture                       |
+| `flashos` / `flashos list`                                    | List helpers and native build commands                  |
+| `flashos versions [show \| check \| sync]`                    | Inspect or propagate the central version manifest       |
+| `flashos check [all \| versions \| docs \| hygiene \| shell]` | Run maintained repository checks                        |
 
 The legacy names `picapture`, `piconnect`, `piquit`, and `pilist`
 remain aliases. USB CDC devices are detected as `/dev/cu.usbmodem*`;

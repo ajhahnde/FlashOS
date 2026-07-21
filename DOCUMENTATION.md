@@ -20,7 +20,7 @@
 
 This document describes the current Rust implementation. Historical source
 layouts and retired build paths remain available through Git history and the
-changelog; they are not active build instructions.
+changelog.
 
 ## Contents
 
@@ -34,8 +34,6 @@ changelog; they are not active build instructions.
 8. [Build artefacts](#8-build-artefacts)
 
 ## 1. Source layout
-
-The active implementation is split by responsibility rather than by language:
 
 ```text
 arch/aarch64/                           AArch64 boot, vectors, IRQ entry, and switching
@@ -152,9 +150,9 @@ The normal deploy image does not run the selftest harness and stops at an
 interactive login. The watchdog image adds both `--boot-selftest` and
 `--ci-login-seed` so the same path can complete unattended.
 
-The retained `virt` board input is frozen and deprioritized. The active
-release gates are `rpi4b` under QEMU and the same `rpi4b` artefact on
-Raspberry Pi hardware.
+> The retained `virt` board input is frozen and deprioritized. The active
+> release gates are `rpi4b` under QEMU and the same `rpi4b` artefact on
+> Raspberry Pi hardware.
 
 ## 3. Memory management
 
@@ -351,22 +349,11 @@ and rewriting the destination because the current FAT32 write path does not
 truncate an existing file.
 
 The current production image ships `fsh`, the text-mode programs above, and
-an internal Rust ABI in `crates/abi/`. After the Rust-port release, the planned
-integration order is:
-
-1. create and activate FlashSDK as the narrow public syscall/userspace ABI,
-   EL0 runtime, base library, and target-and-link contract;
-2. make FlashShell the first real FlashSDK product consumer; its source is
-   already vendored in-tree as a nested workspace under `components/flashshell/`,
-   built and tested by its own CI job under a pinned toolchain;
-3. build FlashUI as the second consumer, a native TUI that embeds FlashShell;
-4. cut the default session over to `PID 1 -> login -> flashui`, while retaining
-   `/bin/fsh` as a tested recovery shell.
+an internal Rust ABI in `crates/abi/`.
 
 Kernel-private records such as `TaskStruct`, register frames, and VFS/fd
 internals do not become public merely because they currently live beside
-syscall types in `crates/abi/`. FlashSDK will version independently as a 0.x
-contract; the FlashOS v1.0 stability cut is the first durable ABI promise.
+syscall types in `crates/abi/`.
 
 ## 5. Syscalls and exceptions
 
@@ -484,33 +471,29 @@ skips when `/mnt` is unavailable.
 ### QEMU watchdog contract
 
 `run watchdog rpi4b` builds with `--boot-selftest --ci-login-seed`,
-creates `rust-out/test_sd.img`, and boots QEMU with a 720-second ceiling. A
-green result requires:
+creates `rust-out/test_sd.img`, and boots QEMU.
+A green result requires:
 
-- `30/30 passed`;
-- no `[FAIL]` and no `ERROR CAUGHT`;
-- 34 user checkpoints at `0xbbff1`;
-- one pre-PID-1 boot checkpoint at `0xbc000`;
-- one healthy entropy announcement and no entropy self-test failure;
-- one exact `elf hello` marker;
-- three `type 'help' for commands` shell markers.
-
-The retained frozen `virt` matcher currently records `0x3be4f` for the
-user checkpoint and `0x3be5e` for the boot checkpoint. Those values are not
-an active release gate while `virt` remains frozen.
+- `30/30 passed`
+- no `[FAIL]` and no `ERROR CAUGHT`
+- 34 user checkpoints at `0xbbff1`
+- one pre-PID-1 boot checkpoint at `0xbc000`
+- one healthy entropy announcement and no entropy self-test failure
+- one exact `elf hello` marker
+- three `type 'help' for commands` shell markers
 
 ### Static gates
 
 CI also runs:
 
-- `cargo fmt --all --check`;
-- workspace Clippy with warnings denied;
-- `cargo xtask check-hygiene`;
-- every shipped EL0 payload build and inspection;
-- `cargo xtask asm-defs --check`;
-- `cargo xtask census`;
-- `cargo xtask guard --board rpi4b --full`;
-- the rpi4b watchdog.
+- `cargo fmt --all --check`
+- workspace Clippy with warnings denied
+- `cargo xtask check-hygiene`
+- every shipped EL0 payload build and inspection
+- `cargo xtask asm-defs --check`
+- `cargo xtask census`
+- `cargo xtask guard --board rpi4b --full`
+- the rpi4b watchdog
 
 The full guard executes the production build behind rejecting command shims,
 then checks its subprocess trace. Artefact inspection enforces zero undefined
@@ -519,17 +502,16 @@ symbols, zero `core::fmt`, and zero FP/SIMD instructions.
 ### Hardware-only acceptance
 
 The exact release `kernel8.img` and `armstub8.bin` must also boot on a
-Raspberry Pi 4B. Hardware acceptance covers:
+Raspberry Pi 4B.
 
-- the login-to-shell path;
-- EMMC2 block read/write;
-- two-boot FAT32 roundtrip persistence;
-- create/write/read/rename/unlink on the real card;
-- USB-C CDC-ACM enumeration and console fallback;
-- optional PL011 trace capture for a trace-feature image.
+Hardware acceptance covers:
 
-Flashing or overwriting an SD card is an explicit operator action; the build
-does not deploy unless `build -d` is used.
+- the login-to-shell path
+- EMMC2 block read/write
+- two-boot FAT32 roundtrip persistence
+- create/write/read/rename/unlink on the real card
+- USB-C CDC-ACM enumeration and console fallback
+- optional PL011 trace capture for a trace-feature image
 
 ## 8. Build artefacts
 
