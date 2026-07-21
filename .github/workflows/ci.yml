@@ -114,7 +114,7 @@ jobs:
           done
 
   # FlashShell is a separate consumer workspace (edition 2024, resolver 3, its
-  # own pinned 1.96.1 toolchain) excluded from the root workspace, so the gates
+  # own pinned 1.97.1 toolchain) excluded from the root workspace, so the gates
   # above never touch it. Give it its own toolchain and its own quality gate.
   flashshell:
     name: flashshell
@@ -128,7 +128,7 @@ jobs:
       - name: Activate FlashShell's pinned toolchain
         run: |
           set -euo pipefail
-          # rustup honours components/flashshell/rust-toolchain.toml (1.96.1).
+          # rustup honours components/flashshell/rust-toolchain.toml (1.97.1).
           rustup show active-toolchain || rustup toolchain install
           rustc --version
       - name: Formatting
