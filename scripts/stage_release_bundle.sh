@@ -25,7 +25,7 @@ kernel="rust-out/rpi4b/kernel8.img"
 armstub="rust-out/rpi4b/armstub8.bin"
 
 fw=vendor/raspberrypi-firmware/rpi4b
-for f in "$kernel" "$armstub" config.txt LICENSE.md \
+for f in "$kernel" "$armstub" config.txt LICENSE NOTICE \
          "$fw/start4.elf" "$fw/fixup4.dat" \
          "$fw/bcm2711-rpi-4-b.dtb" "$fw/overlays/miniuart-bt.dtbo"; do
   [ -f "$f" ] || { printf 'stage-release: missing %s\n' "$f" >&2; exit 1; }
@@ -42,7 +42,8 @@ cp "$fw/start4.elf"                    "$dest/start4.elf"
 cp "$fw/fixup4.dat"                    "$dest/fixup4.dat"
 cp "$fw/bcm2711-rpi-4-b.dtb"           "$dest/bcm2711-rpi-4-b.dtb"
 cp "$fw/overlays/miniuart-bt.dtbo"     "$dest/overlays/miniuart-bt.dtbo"
-cp LICENSE.md                         "$dest/LICENSE.md"
+cp LICENSE                            "$dest/LICENSE"
+cp NOTICE                             "$dest/NOTICE"
 
 epoch=${SOURCE_DATE_EPOCH:-$(date -u +%s)}
 if date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ >/dev/null 2>&1; then
@@ -66,7 +67,7 @@ cat > "$dest/build-info.json" <<EOF
   "built_at": "${built_at}",
   "files": [
     "kernel8.img", "armstub8.bin", "config.txt", "start4.elf", "fixup4.dat",
-    "bcm2711-rpi-4-b.dtb", "overlays/miniuart-bt.dtbo", "LICENSE.md"
+    "bcm2711-rpi-4-b.dtb", "overlays/miniuart-bt.dtbo", "LICENSE", "NOTICE"
   ]
 }
 EOF

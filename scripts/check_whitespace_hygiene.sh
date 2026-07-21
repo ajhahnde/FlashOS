@@ -2,9 +2,9 @@
 # check_whitespace_hygiene: fail on whitespace regressions in shipped
 # sources.
 #
-# Read-only gate for CI and pre-commit. Scope: src, rootfs, crates,
-# user, xtask, tools, armstub/src, scripts, .github/workflows, top-level
-# docs, and German translations in docs/de. Checks three
+# Read-only gate for CI and pre-commit. Scope: arch, board, rootfs,
+# crates, userland, xtask, armstub/src, scripts, .github/workflows,
+# top-level docs, and German translations in docs/de. Checks three
 # regressions:
 #
 #   - trailing spaces on any line ('  $')
@@ -22,14 +22,15 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-PATHS="src rootfs crates userland xtask tools armstub/src scripts .github/workflows
-README.md DOCUMENTATION.md SETUP.md CHANGELOG.md LICENSE.md
+PATHS="arch board rootfs crates userland xtask armstub/src scripts .github/workflows
+README.md DOCUMENTATION.md SETUP.md CHANGELOG.md LICENSE NOTICE
 Cargo.toml config.txt docs/de"
 
 EXTS="--include=*.rs --include=*.S --include=*.inc \
       --include=*.md --include=*.sh --include=*.zsh \
       --include=*.yml --include=*.yaml --include=*.txt \
-      --include=*.ld --include=*.toml"
+      --include=*.ld --include=*.toml \
+      --include=LICENSE --include=NOTICE"
 
 SELF_EXCLUDE='^(crates/kernel/generated/symbol_area\.S|scripts/check_whitespace_hygiene\.sh):'
 
