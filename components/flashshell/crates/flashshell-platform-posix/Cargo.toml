@@ -10,5 +10,12 @@ repository.workspace = true
 [dependencies]
 flashshell-platform = { path = "../flashshell-platform" }
 
+[[bin]]
+name = "flashshell-argv-probe-fixture"
+path = "tests/fixtures/argv_probe.rs"
+test = false
+bench = false
+doc = false
+
 [lints]
 workspace = true

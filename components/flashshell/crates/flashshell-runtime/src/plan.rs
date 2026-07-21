@@ -543,8 +543,8 @@ fn descriptor_value(number: IoNumber, source: &SourceFile) -> Result<u32, Runtim
 /// it), an ambiguous structured-to-byte pipeline edge (a producer carrier the
 /// consumer does not accept, or a merged stdout+stderr edge whose producer is
 /// not a byte stream), and a descriptor duplication whose source is not open in
-/// the stage's descriptor map. Validating unsupported platform capabilities is
-/// left to the platform adapter, which does not exist yet.
+/// the stage's descriptor map. Platform capability validation occurs at
+/// execution time so this pass remains platform-independent.
 pub fn preflight(plan: &ExecutionPlan) -> Result<(), RuntimeError> {
     for stage in plan.stages() {
         check_nul(stage)?;

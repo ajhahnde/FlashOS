@@ -11,5 +11,15 @@ repository.workspace = true
 flashshell-platform = { path = "../flashshell-platform" }
 flashshell-syntax = { path = "../flashshell-syntax" }
 
+[dev-dependencies]
+flashshell-platform-posix = { path = "../flashshell-platform-posix" }
+
+[[bin]]
+name = "flashshell-foreground-fixture"
+path = "tests/fixtures/foreground_child.rs"
+test = false
+bench = false
+doc = false
+
 [lints]
 workspace = true

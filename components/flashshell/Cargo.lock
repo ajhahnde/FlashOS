@@ -26,6 +26,7 @@ name = "flashshell-runtime"
 version = "0.1.0"
 dependencies = [
  "flashshell-platform",
+ "flashshell-platform-posix",
  "flashshell-syntax",
 ]
 

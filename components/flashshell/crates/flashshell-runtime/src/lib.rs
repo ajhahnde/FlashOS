@@ -5,6 +5,7 @@
 pub mod command;
 mod environment;
 pub mod eval;
+pub mod execute;
 pub mod operation;
 pub mod plan;
 pub mod resolve;

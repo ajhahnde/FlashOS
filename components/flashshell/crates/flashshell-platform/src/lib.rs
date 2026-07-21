@@ -13,7 +13,10 @@
 //! standard [`std::ffi::OsStr`] / [`std::path::Path`] family so native argv,
 //! environment, and path bytes survive without lossy UTF-8 conversion.
 
+use std::ffi::OsString;
 use std::fmt;
+use std::io;
+use std::path::Path;
 
 /// One platform capability group an adapter either supports or does not.
 ///
@@ -150,6 +153,158 @@ impl fmt::Display for PlatformError {
 
 impl std::error::Error for PlatformError {}
 
+/// A structurally valid request to execute one program directly with argv.
+///
+/// The first argv entry is explicit rather than inferred from `executable`.
+/// Environment entries describe the complete child environment, not a delta;
+/// adapters clear their inherited environment before installing these entries.
+#[derive(Clone, Copy, Debug)]
+pub struct SpawnRequest<'a> {
+    executable: &'a Path,
+    argv: &'a [OsString],
+    environment: &'a [(OsString, OsString)],
+    cwd: &'a Path,
+}
+
+impl<'a> SpawnRequest<'a> {
+    /// Build a direct-spawn request, rejecting an absent argv zero.
+    pub fn new(
+        executable: &'a Path,
+        argv: &'a [OsString],
+        environment: &'a [(OsString, OsString)],
+        cwd: &'a Path,
+    ) -> Result<Self, SpawnRequestError> {
+        if argv.is_empty() {
+            return Err(SpawnRequestError::EmptyArgv);
+        }
+
+        Ok(Self {
+            executable,
+            argv,
+            environment,
+            cwd,
+        })
+    }
+
+    /// The resolved executable path passed directly to the host.
+    pub const fn executable(self) -> &'a Path {
+        self.executable
+    }
+
+    /// The complete native argv, including explicit argv zero.
+    pub const fn argv(self) -> &'a [OsString] {
+        self.argv
+    }
+
+    /// The complete native child environment.
+    pub const fn environment(self) -> &'a [(OsString, OsString)] {
+        self.environment
+    }
+
+    /// The child's working directory.
+    pub const fn cwd(self) -> &'a Path {
+        self.cwd
+    }
+}
+
+/// A spawn request that cannot represent a process invocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpawnRequestError {
+    /// Direct process execution requires an explicit argv zero.
+    EmptyArgv,
+}
+
+impl fmt::Display for SpawnRequestError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyArgv => formatter.write_str("a spawn request requires argv zero"),
+        }
+    }
+}
+
+impl std::error::Error for SpawnRequestError {}
+
+/// A direct process spawn failure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SpawnError {
+    /// The platform cannot satisfy the process-spawn capability.
+    Platform(PlatformError),
+    /// The host rejected or could not complete the spawn operation.
+    Operation {
+        /// Stable I/O error category from the host adapter.
+        kind: io::ErrorKind,
+        /// Human-readable host error text.
+        message: String,
+    },
+}
+
+impl fmt::Display for SpawnError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Platform(error) => error.fmt(formatter),
+            Self::Operation { message, .. } => write!(formatter, "process spawn failed: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for SpawnError {}
+
+impl From<PlatformError> for SpawnError {
+    fn from(error: PlatformError) -> Self {
+        Self::Platform(error)
+    }
+}
+
+/// The low-level completion state of one child process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessStatus {
+    /// The process called an exit path with this code.
+    Exited(i32),
+    /// The process was terminated by this platform signal number.
+    Signaled(i32),
+}
+
+/// Failure while waiting for an already-spawned child.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WaitError {
+    kind: io::ErrorKind,
+    message: String,
+}
+
+impl WaitError {
+    /// Build a wait error from a host I/O failure.
+    pub fn new(kind: io::ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    /// Stable I/O error category from the host adapter.
+    pub const fn kind(&self) -> io::ErrorKind {
+        self.kind
+    }
+}
+
+impl fmt::Display for WaitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "process wait failed: {}", self.message)
+    }
+}
+
+impl std::error::Error for WaitError {}
+
+/// One owned child process returned by a platform adapter.
+pub trait ChildProcess: Send + fmt::Debug {
+    /// Adapter-native process identifier, widened for a portable boundary.
+    fn id(&self) -> u64;
+
+    /// Block until the child completes and return its low-level status.
+    ///
+    /// Calling this more than once returns the same completed status.
+    fn wait(&mut self) -> Result<ProcessStatus, WaitError>;
+}
+
 /// Implemented by FlashShell platform adapters.
 ///
 /// Capability methods (spawn, pipes, file actions, …) are added to this trait
@@ -169,6 +324,9 @@ pub trait Platform: Send + Sync {
             Err(PlatformError::Unsupported { capability })
         }
     }
+
+    /// Execute `request.executable` directly with its explicit native argv.
+    fn spawn(&self, request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError>;
 }
 
 /// A deterministic in-process [`Platform`] for tests.
@@ -201,5 +359,24 @@ impl FakePlatform {
 impl Platform for FakePlatform {
     fn capabilities(&self) -> Capabilities {
         self.capabilities
+    }
+
+    fn spawn(&self, _request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError> {
+        self.require(Capability::ProcessSpawn)?;
+        Ok(Box::new(FakeChild))
+    }
+}
+
+/// Deterministic host-free child returned by [`FakePlatform`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FakeChild;
+
+impl ChildProcess for FakeChild {
+    fn id(&self) -> u64 {
+        0
+    }
+
+    fn wait(&mut self) -> Result<ProcessStatus, WaitError> {
+        Ok(ProcessStatus::Exited(0))
     }
 }

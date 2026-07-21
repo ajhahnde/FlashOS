@@ -1,6 +1,12 @@
 //! Acceptance tests for the platform capability foundation.
 
-use flashshell_platform::{Capabilities, Capability, FakePlatform, Platform, PlatformError};
+use std::ffi::OsString;
+use std::path::Path;
+
+use flashshell_platform::{
+    Capabilities, Capability, FakePlatform, Platform, PlatformError, ProcessStatus, SpawnError,
+    SpawnRequest, SpawnRequestError,
+};
 
 #[test]
 fn fake_platform_reports_its_scripted_capability_set() {
@@ -83,4 +89,59 @@ fn unavailable_carries_the_capability_and_a_reason() {
         }
         other => panic!("expected Unavailable, got {other:?}"),
     }
+}
+
+#[test]
+fn spawn_requests_require_an_explicit_argv_zero() {
+    let environment = [];
+    let error = SpawnRequest::new(Path::new("/fixture"), &[], &environment, Path::new("/work"))
+        .expect_err("an empty argv must be rejected");
+
+    assert_eq!(error, SpawnRequestError::EmptyArgv);
+}
+
+#[test]
+fn fake_spawn_is_host_free_and_returns_an_owned_waitable_child() {
+    let platform = FakePlatform::full();
+    let argv = [
+        OsString::from("fixture"),
+        OsString::from("literal argument"),
+    ];
+    let environment = [(OsString::from("FLASH"), OsString::from("shell"))];
+    let request = SpawnRequest::new(
+        Path::new("/does/not/need/to/exist"),
+        &argv,
+        &environment,
+        Path::new("/also/not/read"),
+    )
+    .expect("the request is valid");
+
+    let mut child = platform.spawn(&request).expect("the fake spawn succeeds");
+
+    assert_eq!(child.id(), 0);
+    assert_eq!(child.wait(), Ok(ProcessStatus::Exited(0)));
+    assert_eq!(child.wait(), Ok(ProcessStatus::Exited(0)));
+}
+
+#[test]
+fn spawn_rejects_an_absent_capability_before_host_access() {
+    let platform = FakePlatform::none();
+    let argv = [OsString::from("fixture")];
+    let environment = [];
+    let request = SpawnRequest::new(
+        Path::new("/does/not/exist"),
+        &argv,
+        &environment,
+        Path::new("/does/not/exist"),
+    )
+    .expect("the request is structurally valid");
+
+    assert_eq!(
+        platform
+            .spawn(&request)
+            .expect_err("spawn must be rejected"),
+        SpawnError::Platform(PlatformError::Unsupported {
+            capability: Capability::ProcessSpawn,
+        }),
+    );
 }
