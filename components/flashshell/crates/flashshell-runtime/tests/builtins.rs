@@ -81,7 +81,9 @@ fn standard_registry_has_exact_carrier_contracts() {
     let registry = standard_registry();
     assert_eq!(
         registry.names().collect::<Vec<_>>(),
-        ["cd", "check", "command", "exit", "pwd", "which"]
+        [
+            "cd", "check", "command", "decode", "encode", "exit", "from", "pwd", "to", "which"
+        ]
     );
 
     let fixed = |name| registry.lookup(name).expect("registered").output();
@@ -105,6 +107,26 @@ fn standard_registry_has_exact_carrier_contracts() {
         Carrier::ValueStream,
     ] {
         assert!(registry.lookup("check").unwrap().accepts(carrier));
+    }
+
+    // The explicit byte/structured boundary commands. `decode`/`from` parse a
+    // `ByteStream` into structured values; `encode`/`to` serialize structured
+    // values back into a `ByteStream`. These make the pipeline-validation
+    // `encode`/`to` and `decode`/`from` bridge suggestions name real commands.
+    assert_eq!(fixed("decode"), CommandOutput::Fixed(Carrier::ValueStream));
+    assert_eq!(fixed("from"), CommandOutput::Fixed(Carrier::ValueStream));
+    assert_eq!(fixed("encode"), CommandOutput::Fixed(Carrier::ByteStream));
+    assert_eq!(fixed("to"), CommandOutput::Fixed(Carrier::ByteStream));
+    for name in ["decode", "from"] {
+        let signature = registry.lookup(name).unwrap();
+        assert!(signature.accepts(Carrier::ByteStream));
+        assert!(!signature.accepts(Carrier::Value));
+    }
+    for name in ["encode", "to"] {
+        let signature = registry.lookup(name).unwrap();
+        assert!(signature.accepts(Carrier::Value));
+        assert!(signature.accepts(Carrier::ValueStream));
+        assert!(!signature.accepts(Carrier::ByteStream));
     }
 }
 

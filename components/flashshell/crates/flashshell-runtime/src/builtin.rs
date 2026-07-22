@@ -164,6 +164,24 @@ pub fn standard_registry() -> CommandRegistry {
                 Carrier::ValueStream,
             ],
         ),
+        // The explicit byte/structured boundaries (see the value-model spec).
+        // `decode`/`from` parse a byte stream into structured values; `encode`/`to`
+        // serialize structured values back into a byte stream. Registering their
+        // carrier contracts makes the pipeline-validation bridge hints name real
+        // commands. `decode`/`encode` implement the codec crossing in `convert`;
+        // `from`/`to`'s format conversions arrive with the format library.
+        CommandSignature::new("decode", [Carrier::ByteStream], Carrier::ValueStream),
+        CommandSignature::new("from", [Carrier::ByteStream], Carrier::ValueStream),
+        CommandSignature::new(
+            "encode",
+            [Carrier::Value, Carrier::ValueStream],
+            Carrier::ByteStream,
+        ),
+        CommandSignature::new(
+            "to",
+            [Carrier::Value, Carrier::ValueStream],
+            Carrier::ByteStream,
+        ),
     ] {
         assert!(
             registry.register(signature),

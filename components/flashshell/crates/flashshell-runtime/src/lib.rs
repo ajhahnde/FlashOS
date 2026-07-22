@@ -4,6 +4,7 @@
 
 pub mod builtin;
 pub mod command;
+pub mod convert;
 mod environment;
 pub mod eval;
 pub mod execute;
