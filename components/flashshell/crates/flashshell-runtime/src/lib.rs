@@ -13,6 +13,7 @@ pub mod resolve;
 mod scope;
 pub mod script;
 pub mod session;
+pub mod stream;
 mod value;
 
 pub use environment::Environment;
