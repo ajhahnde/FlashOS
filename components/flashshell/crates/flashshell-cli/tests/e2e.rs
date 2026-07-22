@@ -128,10 +128,14 @@ fn script_with_a_native_non_utf8_path_executes() {
     let name = OsString::from_vec(b"script-\xff.fsh".to_vec());
     let script = temp.path().join(Path::new(&name));
     if let Err(error) = fs::write(&script, format!("^{} exit 0\n", status_fixture())) {
+        // Some filesystems reject a non-UTF-8 file name (macOS APFS returns
+        // EILSEQ, which maps to an uncategorized kind); skip where it cannot be
+        // created rather than assert a platform capability the test does not own.
         if matches!(
             error.kind(),
             std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::InvalidInput
-        ) {
+        ) || error.raw_os_error() == Some(92)
+        {
             return;
         }
         panic!("native-path script should be written: {error}");

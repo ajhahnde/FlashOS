@@ -3,8 +3,10 @@ use std::borrow::Cow;
 use flashshell_syntax::{ParseOutcome, SourceFile, SourceId, parse};
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    Completer, Highlighter, Hinter, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline,
-    SearchQuery, Signal, Span, StyledText, Suggestion, ValidationResult, Validator,
+    ColumnarMenu, Completer, Emacs, Highlighter, Hinter, History, KeyCode, KeyModifiers,
+    MenuBuilder, Prompt, PromptEditMode, PromptHistorySearch, Reedline, ReedlineEvent,
+    ReedlineMenu, SearchQuery, Signal, Span, StyledText, Suggestion, ValidationResult, Validator,
+    default_emacs_keybindings,
 };
 
 use crate::completion::{CompletionCatalog, CompletionEngine};
@@ -39,6 +41,16 @@ fn editor_engine() -> Reedline {
     let registry = flashshell_runtime::builtin::standard_registry();
     let scope = flashshell_runtime::ScopeStack::new();
     let catalog = CompletionCatalog::from_runtime(&registry, &scope);
+    // Bind Tab to the completion menu so the installed completer is reachable.
+    let mut keybindings = default_emacs_keybindings();
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Tab,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::Menu(COMPLETION_MENU.to_owned()),
+            ReedlineEvent::MenuNext,
+        ]),
+    );
     Reedline::create()
         .with_cwd(Some(String::new()))
         .with_validator(Box::new(FlashShellValidator))
@@ -46,8 +58,14 @@ fn editor_engine() -> Reedline {
         .with_completer(Box::new(ReedlineCompleter {
             engine: CompletionEngine::new(catalog),
         }))
+        .with_menu(ReedlineMenu::EngineCompleter(Box::new(
+            ColumnarMenu::default().with_name(COMPLETION_MENU),
+        )))
+        .with_edit_mode(Box::new(Emacs::new(keybindings)))
         .with_hinter(Box::new(ReedlineHinter::new()))
 }
+
+const COMPLETION_MENU: &str = "completion_menu";
 
 impl Default for ReedlineEditor {
     fn default() -> Self {

@@ -12,6 +12,7 @@ pub mod plan;
 pub mod resolve;
 mod scope;
 pub mod script;
+pub mod session;
 mod value;
 
 pub use environment::Environment;
