@@ -15,6 +15,7 @@ mod scope;
 pub mod script;
 pub mod session;
 pub mod stream;
+pub mod structured;
 mod value;
 
 pub use environment::Environment;

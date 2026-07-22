@@ -82,7 +82,8 @@ fn standard_registry_has_exact_carrier_contracts() {
     assert_eq!(
         registry.names().collect::<Vec<_>>(),
         [
-            "cd", "check", "command", "decode", "encode", "exit", "from", "pwd", "to", "which"
+            "cd", "check", "collect", "command", "decode", "encode", "exit", "first", "from",
+            "last", "length", "pwd", "to", "which"
         ]
     );
 
@@ -125,6 +126,19 @@ fn standard_registry_has_exact_carrier_contracts() {
     for name in ["encode", "to"] {
         let signature = registry.lookup(name).unwrap();
         assert!(signature.accepts(Carrier::Value));
+        assert!(signature.accepts(Carrier::ValueStream));
+        assert!(!signature.accepts(Carrier::ByteStream));
+    }
+
+    // The closure-free terminal structured commands. Each consumes a value stream;
+    // `first`/`last` reshape it to a value stream, `collect`/`length` produce one
+    // value.
+    assert_eq!(fixed("first"), CommandOutput::Fixed(Carrier::ValueStream));
+    assert_eq!(fixed("last"), CommandOutput::Fixed(Carrier::ValueStream));
+    assert_eq!(fixed("collect"), CommandOutput::Fixed(Carrier::Value));
+    assert_eq!(fixed("length"), CommandOutput::Fixed(Carrier::Value));
+    for name in ["first", "last", "collect", "length"] {
+        let signature = registry.lookup(name).unwrap();
         assert!(signature.accepts(Carrier::ValueStream));
         assert!(!signature.accepts(Carrier::ByteStream));
     }

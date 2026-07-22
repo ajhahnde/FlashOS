@@ -182,6 +182,13 @@ pub fn standard_registry() -> CommandRegistry {
             [Carrier::Value, Carrier::ValueStream],
             Carrier::ByteStream,
         ),
+        // The closure-free terminal structured commands (see `structured`). Each
+        // consumes a value stream: `first`/`last` reshape it to a bounded value
+        // stream, `collect` materializes one `List` value, and `length` counts.
+        CommandSignature::new("first", [Carrier::ValueStream], Carrier::ValueStream),
+        CommandSignature::new("last", [Carrier::ValueStream], Carrier::ValueStream),
+        CommandSignature::new("collect", [Carrier::ValueStream], Carrier::Value),
+        CommandSignature::new("length", [Carrier::ValueStream], Carrier::Value),
     ] {
         assert!(
             registry.register(signature),
