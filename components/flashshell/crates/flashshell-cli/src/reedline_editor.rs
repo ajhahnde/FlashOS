@@ -3,13 +3,14 @@ use std::borrow::Cow;
 use flashshell_syntax::{ParseOutcome, SourceFile, SourceId, parse};
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    Completer, Highlighter, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal, Span,
-    StyledText, Suggestion, ValidationResult, Validator,
+    Completer, Highlighter, Hinter, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline,
+    SearchQuery, Signal, Span, StyledText, Suggestion, ValidationResult, Validator,
 };
 
 use crate::completion::{CompletionCatalog, CompletionEngine};
 use crate::editor::{EditorError, EditorEvent, EditorPrompt, LineEditor};
 use crate::highlight::{HighlightKind, SyntaxHighlighter};
+use crate::hint::{HintCatalog, HintEngine, MAX_HINT_HISTORY_ENTRIES};
 use crate::history::{EditorHistory, HistoryError, HistorySelection};
 
 /// macOS/Linux terminal editor backed by the pinned Reedline implementation.
@@ -39,11 +40,13 @@ fn editor_engine() -> Reedline {
     let scope = flashshell_runtime::ScopeStack::new();
     let catalog = CompletionCatalog::from_runtime(&registry, &scope);
     Reedline::create()
+        .with_cwd(Some(String::new()))
         .with_validator(Box::new(FlashShellValidator))
         .with_highlighter(Box::new(ReedlineSyntaxHighlighter))
         .with_completer(Box::new(ReedlineCompleter {
             engine: CompletionEngine::new(catalog),
         }))
+        .with_hinter(Box::new(ReedlineHinter::new()))
 }
 
 impl Default for ReedlineEditor {
@@ -113,6 +116,60 @@ impl Completer for ReedlineCompleter {
             })
             .collect()
     }
+}
+
+struct ReedlineHinter {
+    engine: HintEngine,
+    current_hint: String,
+}
+
+impl ReedlineHinter {
+    const fn new() -> Self {
+        Self {
+            engine: HintEngine::new(),
+            current_hint: String::new(),
+        }
+    }
+}
+
+impl Hinter for ReedlineHinter {
+    fn handle(
+        &mut self,
+        line: &str,
+        pos: usize,
+        history: &dyn History,
+        use_ansi_coloring: bool,
+        _cwd: &str,
+    ) -> String {
+        let mut query = SearchQuery::last_with_prefix(line.to_owned(), history.session());
+        query.limit = Some(MAX_HINT_HISTORY_ENTRIES as i64);
+        let catalog = history.search(query).map_or_else(
+            |_| HintCatalog::default(),
+            |items| HintCatalog::new(items.into_iter().map(|item| item.command_line)),
+        );
+        self.current_hint = self
+            .engine
+            .hint(line, pos, &catalog)
+            .map_or_else(String::new, |hint| hint.suffix().to_owned());
+
+        if use_ansi_coloring && !self.current_hint.is_empty() {
+            hint_style().paint(&self.current_hint).to_string()
+        } else {
+            self.current_hint.clone()
+        }
+    }
+
+    fn complete_hint(&self) -> String {
+        self.current_hint.clone()
+    }
+
+    fn next_hint_token(&self) -> String {
+        self.current_hint.clone()
+    }
+}
+
+fn hint_style() -> Style {
+    Style::new().fg(Color::DarkGray).italic()
 }
 
 fn highlight_style(kind: HighlightKind) -> Style {
@@ -270,5 +327,25 @@ mod tests {
             .expect("standard command should be bridged");
         assert_eq!(pwd.span, Span::new(0, 2));
         assert!(pwd.append_whitespace);
+    }
+
+    #[test]
+    fn reedline_hinter_uses_exact_raw_suffix_for_display_and_acceptance() {
+        use reedline::{FileBackedHistory, HistoryItem};
+
+        let mut history = FileBackedHistory::new(4).expect("in-memory history should initialize");
+        history
+            .save(HistoryItem::from_command_line("echo λ-world"))
+            .expect("history entry should save");
+        let mut hinter = ReedlineHinter::new();
+
+        let raw = hinter.handle("echo λ", "echo λ".len(), &history, false, "");
+        assert_eq!(raw, "-world");
+        assert_eq!(hinter.complete_hint(), "-world");
+        assert_eq!(hinter.next_hint_token(), "-world");
+
+        let styled = hinter.handle("echo λ", "echo λ".len(), &history, true, "");
+        assert_eq!(styled, hint_style().paint("-world").to_string());
+        assert_eq!(hinter.complete_hint(), "-world");
     }
 }

@@ -111,6 +111,26 @@ pub enum FrameCallee {
     Closure,
 }
 
+/// A capability deliberately unavailable while automatic startup config runs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RestrictedCapability {
+    /// Starting or composing commands and pipelines.
+    ProcessExecution,
+    /// Capturing the output of a command substitution.
+    CommandSubstitution,
+}
+
+impl RestrictedCapability {
+    /// Stable diagnostic spelling for the unavailable capability.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::ProcessExecution => "process execution",
+            Self::CommandSubstitution => "command substitution",
+        }
+    }
+}
+
 impl fmt::Display for RuntimeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.kind.fmt(formatter)
@@ -149,6 +169,8 @@ pub enum RuntimeErrorKind {
     DuplicateParameter { name: String },
     /// A construct requiring the execution engine that does not exist yet.
     ExecutionUnsupported,
+    /// Automatic startup config reached an operation outside its capability set.
+    RestrictedStartup { capability: RestrictedCapability },
     /// Evaluation charged more steps than its resource budget allowed.
     ResourceBudgetExceeded,
     /// A language form deferred to a later evaluation slice.
@@ -270,6 +292,11 @@ impl fmt::Display for RuntimeErrorKind {
             Self::ExecutionUnsupported => {
                 formatter.write_str("command execution is not available in pure evaluation")
             }
+            Self::RestrictedStartup { capability } => write!(
+                formatter,
+                "{} is not available during automatic startup",
+                capability.name()
+            ),
             Self::ResourceBudgetExceeded => {
                 formatter.write_str("evaluation exceeded its resource budget")
             }
@@ -639,13 +666,34 @@ impl Default for ResourceBudget {
 pub struct EvalLimits {
     cancel: CancellationToken,
     budget: ResourceBudget,
+    policy: EvaluationPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EvaluationPolicy {
+    General,
+    Startup,
 }
 
 impl EvalLimits {
     /// Limits pairing a cancellation token with a resource budget.
     #[must_use]
     pub const fn new(cancel: CancellationToken, budget: ResourceBudget) -> Self {
-        Self { cancel, budget }
+        Self {
+            cancel,
+            budget,
+            policy: EvaluationPolicy::General,
+        }
+    }
+
+    /// Limits for automatic startup config with process capabilities disabled.
+    #[must_use]
+    pub const fn startup(cancel: CancellationToken, budget: ResourceBudget) -> Self {
+        Self {
+            cancel,
+            budget,
+            policy: EvaluationPolicy::Startup,
+        }
     }
 }
 
@@ -758,6 +806,7 @@ pub fn evaluate_in_environment(
         source,
         cancel: limits.cancel.clone(),
         budget: limits.budget,
+        policy: limits.policy,
         env,
     };
     let mut last = Value::Null;
@@ -852,6 +901,7 @@ pub fn expand_word(
         source,
         cancel: limits.cancel.clone(),
         budget: limits.budget,
+        policy: limits.policy,
         env: &mut env,
     };
     match evaluator.expand_word(word, scope) {
@@ -885,6 +935,7 @@ pub fn expand_spread(
         source,
         cancel: limits.cancel.clone(),
         budget: limits.budget,
+        policy: limits.policy,
         env: &mut env,
     };
     match evaluator.expand_spread(variable, item_span, scope) {
@@ -928,6 +979,7 @@ struct Evaluator<'source> {
     source: &'source SourceFile,
     cancel: CancellationToken,
     budget: ResourceBudget,
+    policy: EvaluationPolicy,
     env: &'source mut Environment,
 }
 
@@ -979,6 +1031,14 @@ impl<'source> Evaluator<'source> {
             StatementKind::Match(match_statement) => self.match_statement(match_statement, scope),
             StatementKind::Control(control) => self.control(control, scope, span),
             StatementKind::Job(job) => {
+                if self.policy == EvaluationPolicy::Startup {
+                    return Err(self.error(
+                        RuntimeErrorKind::RestrictedStartup {
+                            capability: RestrictedCapability::ProcessExecution,
+                        },
+                        span,
+                    ));
+                }
                 if job.background_span.is_some() {
                     return Err(self.error(RuntimeErrorKind::ExecutionUnsupported, span));
                 }
@@ -1292,10 +1352,24 @@ impl<'source> Evaluator<'source> {
     /// command stage needs process execution and is unsupported here.
     fn eval_pipeline(&mut self, pipeline: &Pipeline, scope: &mut ScopeStack) -> Eval<Value> {
         let [stage] = pipeline.stages() else {
+            if self.policy == EvaluationPolicy::Startup {
+                return Err(self.error(
+                    RuntimeErrorKind::RestrictedStartup {
+                        capability: RestrictedCapability::ProcessExecution,
+                    },
+                    pipeline.span(),
+                ));
+            }
             return Err(self.error(RuntimeErrorKind::ExecutionUnsupported, pipeline.span()));
         };
         match stage.kind() {
             StageKind::Expression(expression) => self.expression(expression, scope),
+            StageKind::Command(_) if self.policy == EvaluationPolicy::Startup => Err(self.error(
+                RuntimeErrorKind::RestrictedStartup {
+                    capability: RestrictedCapability::ProcessExecution,
+                },
+                pipeline.span(),
+            )),
             StageKind::Command(_) => {
                 Err(self.error(RuntimeErrorKind::ExecutionUnsupported, pipeline.span()))
             }
@@ -1424,6 +1498,14 @@ impl<'source> Evaluator<'source> {
         match expression.kind() {
             // A parenthesized pure expression is evaluated; a grouped command is not.
             ExpressionKind::GroupedJob(chain) => self.eval_chain(chain, scope),
+            ExpressionKind::CommandSubstitution(_) if self.policy == EvaluationPolicy::Startup => {
+                Err(self.error(
+                    RuntimeErrorKind::RestrictedStartup {
+                        capability: RestrictedCapability::CommandSubstitution,
+                    },
+                    span,
+                ))
+            }
             ExpressionKind::CommandSubstitution(_) => {
                 Err(self.error(RuntimeErrorKind::ExecutionUnsupported, span))
             }
@@ -1580,6 +1662,14 @@ impl<'source> Evaluator<'source> {
                 value.push(self.encode_scalar(&resolved, span)?);
             }
             WordPartKind::CommandSubstitution(_) => {
+                if self.policy == EvaluationPolicy::Startup {
+                    return Err(self.error(
+                        RuntimeErrorKind::RestrictedStartup {
+                            capability: RestrictedCapability::CommandSubstitution,
+                        },
+                        span,
+                    ));
+                }
                 return Err(self.unsupported("command substitution in a word", span));
             }
             WordPartKind::DoubleQuoted(_) => unreachable!("handled before provenance tracking"),
