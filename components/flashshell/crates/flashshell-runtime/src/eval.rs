@@ -139,6 +139,40 @@ impl fmt::Display for RuntimeError {
 
 impl Error for RuntimeError {}
 
+/// The explicit boundary that would repair a structured-to-byte or
+/// byte-to-structured pipeline edge.
+///
+/// A structured producer meeting a byte consumer needs serialization; a byte
+/// producer meeting a structured consumer needs parsing. The concrete boundary
+/// commands (`encode`/`to`, `decode`/`from`) arrive with the structured-command
+/// slice; this hint names the direction so a mismatch points at its own fix.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CarrierBridge {
+    /// Serialize a structured stream into bytes before a byte consumer.
+    StructuredToByte,
+    /// Parse bytes into structured values before a structured consumer.
+    ByteToStructured,
+}
+
+/// The actionable detail of an incompatible pipeline edge.
+///
+/// Boxed into its [`RuntimeErrorKind::CarrierMismatch`] variant so a large,
+/// rarely constructed diagnostic does not widen every runtime `Result`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CarrierMismatch {
+    /// The producing stage's head word, as the reader typed it.
+    pub producer_command: String,
+    /// The carrier the producing stage emits.
+    pub produced: crate::command::Carrier,
+    /// The consuming stage's head word, as the reader typed it.
+    pub consumer_command: String,
+    /// The carrier set the consuming stage accepts, in a deterministic order.
+    pub accepted: Vec<crate::command::Carrier>,
+    /// The explicit boundary that would repair a structured-to-byte crossing,
+    /// when one applies.
+    pub bridge: Option<CarrierBridge>,
+}
+
 /// A source-independent runtime failure kind.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -202,10 +236,23 @@ pub enum RuntimeErrorKind {
     /// An argv argument or redirection target containing a NUL byte, which no
     /// external argv or platform path can represent.
     ArgumentContainsNul,
-    /// A pipeline edge whose producer carrier the consumer cannot accept, or a
-    /// merged stdout+stderr edge whose producer is not a byte stream. `producer`
-    /// is the producing stage's output carrier.
-    CarrierMismatch { producer: crate::command::Carrier },
+    /// A pipeline edge whose producer carrier the consumer cannot accept. The
+    /// boxed [`CarrierMismatch`] names both stages, the accepted carrier set, and
+    /// the explicit boundary that would repair a structured-to-byte crossing.
+    CarrierMismatch(Box<CarrierMismatch>),
+    /// A merged stdout+stderr edge (`|&`) whose producer is not a byte stream.
+    /// `producer_command` is the producing head word and `produced` its carrier.
+    MergedEdgeNotByteStream {
+        producer_command: String,
+        produced: crate::command::Carrier,
+    },
+    /// A pipeline head stage whose command does not accept an empty input: it
+    /// requires an upstream stage to consume. `command` is the head word and
+    /// `accepted` the carrier set it consumes.
+    PipelineHeadInput {
+        command: String,
+        accepted: Vec<crate::command::Carrier>,
+    },
     /// A descriptor duplication (`n>&m`) whose source `m` is not open in the
     /// stage's descriptor map at that point.
     DescriptorNotOpen { descriptor: u32 },
@@ -250,6 +297,23 @@ pub enum RuntimeErrorKind {
     ProcessSpawn(SpawnError),
     /// Waiting for a successfully spawned external process failed.
     ProcessWait(WaitError),
+}
+
+/// Renders a carrier set as a human list: `A`, `A or B`, or `A, B, or C`.
+fn render_carrier_set(carriers: &[crate::command::Carrier]) -> String {
+    match carriers {
+        [] => "nothing".to_owned(),
+        [only] => format!("{only:?}"),
+        [first, second] => format!("{first:?} or {second:?}"),
+        [rest @ .., last] => {
+            let mut out = String::new();
+            for carrier in rest {
+                out.push_str(&format!("{carrier:?}, "));
+            }
+            out.push_str(&format!("or {last:?}"));
+            out
+        }
+    }
 }
 
 impl fmt::Display for RuntimeErrorKind {
@@ -333,10 +397,45 @@ impl fmt::Display for RuntimeErrorKind {
             Self::ArgumentContainsNul => {
                 formatter.write_str("argument or redirection target contains a NUL byte")
             }
-            Self::CarrierMismatch { producer } => write!(
+            Self::CarrierMismatch(mismatch) => {
+                let CarrierMismatch {
+                    producer_command,
+                    produced,
+                    consumer_command,
+                    accepted,
+                    bridge,
+                } = mismatch.as_ref();
+                write!(
+                    formatter,
+                    "incompatible pipeline edge: `{producer_command}` emits a {produced:?} but \
+                     `{consumer_command}` accepts {}",
+                    render_carrier_set(accepted)
+                )?;
+                match bridge {
+                    Some(CarrierBridge::StructuredToByte) => formatter.write_str(
+                        "; add an explicit `encode`/`to` boundary to serialize the \
+                         structured stream to bytes",
+                    ),
+                    Some(CarrierBridge::ByteToStructured) => formatter.write_str(
+                        "; add an explicit `decode`/`from` boundary to parse the bytes \
+                         into structured values",
+                    ),
+                    None => Ok(()),
+                }
+            }
+            Self::MergedEdgeNotByteStream {
+                producer_command,
+                produced,
+            } => write!(
                 formatter,
-                "incompatible pipeline edge: producer emits {producer:?} that the \
-                 consumer does not accept"
+                "a `|&` edge merges stderr and requires a byte-stream producer, but \
+                 `{producer_command}` emits a {produced:?}"
+            ),
+            Self::PipelineHeadInput { command, accepted } => write!(
+                formatter,
+                "`{command}` needs an upstream pipeline stage: it accepts {} input, not an \
+                 empty pipeline head",
+                render_carrier_set(accepted)
             ),
             Self::DescriptorNotOpen { descriptor } => write!(
                 formatter,

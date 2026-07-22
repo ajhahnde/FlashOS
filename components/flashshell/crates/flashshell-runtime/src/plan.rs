@@ -23,7 +23,10 @@ use flashshell_syntax::{
 };
 
 use crate::command::{Carrier, CommandOutput, CommandRegistry};
-use crate::eval::{ExpandedWord, RuntimeError, RuntimeErrorKind, expand_spread, expand_word};
+use crate::eval::{
+    CarrierBridge, CarrierMismatch, ExpandedWord, RuntimeError, RuntimeErrorKind, expand_spread,
+    expand_word,
+};
 use crate::resolve::{ExecutableProbe, Resolution, ResolutionError, resolve_command};
 use crate::{Environment, ScopeStack};
 
@@ -267,6 +270,13 @@ impl PlannedStage {
     #[must_use]
     pub fn accepts_input(&self, carrier: Carrier) -> bool {
         self.input_carriers.contains(&carrier)
+    }
+
+    /// The carrier set this stage accepts on its input edge, in a deterministic
+    /// order.
+    #[must_use]
+    pub fn accepted_inputs(&self) -> Vec<Carrier> {
+        self.input_carriers.iter().copied().collect()
     }
 
     /// The expanded argument vector, with `argv[0]` the command word.
@@ -666,20 +676,75 @@ fn descriptor_value(number: IoNumber, source: &SourceFile) -> Result<u32, Runtim
 
 /// Validates a built plan before any stage is spawned.
 ///
-/// Preflight rejects three statically detectable faults: a NUL byte in any argv
+/// Preflight rejects the statically detectable faults: a NUL byte in any argv
 /// argument or redirection target (no external argv or platform path can carry
-/// it), an ambiguous structured-to-byte pipeline edge (a producer carrier the
-/// consumer does not accept, or a merged stdout+stderr edge whose producer is
-/// not a byte stream), and a descriptor duplication whose source is not open in
-/// the stage's descriptor map. Platform capability validation occurs at
-/// execution time so this pass remains platform-independent.
+/// it), a descriptor duplication whose source is not open in the stage's
+/// descriptor map, a pipeline head whose command cannot begin a pipeline (it
+/// does not accept an empty input), and an incompatible pipeline edge (a
+/// producer carrier the consumer does not accept, or a merged stdout+stderr edge
+/// whose producer is not a byte stream). A carrier mismatch carries an
+/// actionable diagnostic naming both commands, the accepted carrier set, and the
+/// explicit boundary that would repair a structured-to-byte crossing. Platform
+/// capability validation occurs at execution time so this pass remains
+/// platform-independent.
 pub fn preflight(plan: &ExecutionPlan) -> Result<(), RuntimeError> {
     for stage in plan.stages() {
         check_nul(stage)?;
         check_descriptor_ownership(stage)?;
     }
+    check_head_input(plan)?;
     check_edges(plan)?;
     Ok(())
+}
+
+/// The head word a stage's reader typed, used to name a stage in a diagnostic.
+///
+/// `argv[0]` is always present: planning pushes the expanded command word first.
+fn head_word(stage: &PlannedStage) -> String {
+    stage
+        .argv()
+        .first()
+        .map(|word| word.value().to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// The explicit boundary that would repair a structured-to-byte crossing, if the
+/// mismatch is exactly that crossing.
+///
+/// A structured producer that a byte consumer accepts is bridged by serializing;
+/// a byte producer that a structured consumer accepts is bridged by parsing. Any
+/// other mismatch (for example an empty carrier) has no single-boundary repair.
+fn bridge_for(produced: Carrier, accepted: &[Carrier]) -> Option<CarrierBridge> {
+    let is_structured = |carrier: Carrier| matches!(carrier, Carrier::Value | Carrier::ValueStream);
+    if is_structured(produced) && accepted.contains(&Carrier::ByteStream) {
+        Some(CarrierBridge::StructuredToByte)
+    } else if produced == Carrier::ByteStream && accepted.iter().copied().any(is_structured) {
+        Some(CarrierBridge::ByteToStructured)
+    } else {
+        None
+    }
+}
+
+/// Rejects a pipeline head whose command can only consume a structured input.
+///
+/// The head stage has no upstream: its input is the inherited terminal, a byte
+/// source (or nothing). A command that accepts `Empty` or `ByteStream` can
+/// therefore begin a pipeline, but one that consumes only a value or value
+/// stream has no structured source at the head and needs an upstream stage.
+fn check_head_input(plan: &ExecutionPlan) -> Result<(), RuntimeError> {
+    let Some(head) = plan.stages().first() else {
+        return Ok(());
+    };
+    if head.accepts_input(Carrier::Empty) || head.accepts_input(Carrier::ByteStream) {
+        return Ok(());
+    }
+    Err(RuntimeError::new(
+        RuntimeErrorKind::PipelineHeadInput {
+            command: head_word(head),
+            accepted: head.accepted_inputs(),
+        },
+        head.span(),
+    ))
 }
 
 /// Rejects a NUL byte in any argv argument or redirection target.
@@ -715,17 +780,37 @@ fn reject_nul(word: &ExpandedWord) -> Result<(), RuntimeError> {
 }
 
 /// Rejects an incompatible carrier edge between two consecutive stages.
+///
+/// A merged stdout+stderr edge that does not carry bytes is the more specific
+/// fault and is reported first; otherwise a carrier the consumer does not accept
+/// is reported with an actionable diagnostic naming both stages, the accepted
+/// set, and a repair boundary when the crossing is structured-to-byte.
 fn check_edges(plan: &ExecutionPlan) -> Result<(), RuntimeError> {
     for (index, edge) in plan.edges().iter().enumerate() {
         let producer = &plan.stages()[index];
         let consumer = &plan.stages()[index + 1];
         let carried = producer.output_carrier();
         // A merged stdout+stderr edge is only meaningful for a byte producer.
-        let byte_edge_ok =
-            edge.kind() != PipeOperator::StdoutAndStderr || carried == Carrier::ByteStream;
-        if !consumer.accepts_input(carried) || !byte_edge_ok {
+        if edge.kind() == PipeOperator::StdoutAndStderr && carried != Carrier::ByteStream {
             return Err(RuntimeError::new(
-                RuntimeErrorKind::CarrierMismatch { producer: carried },
+                RuntimeErrorKind::MergedEdgeNotByteStream {
+                    producer_command: head_word(producer),
+                    produced: carried,
+                },
+                edge.operator_span(),
+            ));
+        }
+        if !consumer.accepts_input(carried) {
+            let accepted = consumer.accepted_inputs();
+            let bridge = bridge_for(carried, &accepted);
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::CarrierMismatch(Box::new(CarrierMismatch {
+                    producer_command: head_word(producer),
+                    produced: carried,
+                    consumer_command: head_word(consumer),
+                    accepted,
+                    bridge,
+                })),
                 edge.operator_span(),
             ));
         }
