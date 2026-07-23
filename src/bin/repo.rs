@@ -1766,7 +1766,7 @@ fn run_tui_cook(config: CliConfig, recipes: Vec<CookRecipe>) -> Result<TuiApp> {
                     }
                 };
 
-                let end = cmp::min(panel_height + start, total_log_lines - 1);
+                let end = cmp::max(start, cmp::min(panel_height + start, total_log_lines - 1));
 
                 log_text[start..end]
                     .iter()

@@ -121,7 +121,7 @@ ifeq ($(PODMAN_BUILD),1)
 else
 	rm -rf "$@.partial" "$@"
 	mkdir -p "$@.partial"
-	tar --extract --file "$<" --directory "$@.partial" --no-same-owner --strip-components=1
+	bsdtar --extract --file "$<" --directory "$@.partial" --no-same-owner --strip-components=1
 	touch "$@.partial"
 	mv "$@.partial" "$@"
 endif
