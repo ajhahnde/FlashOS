@@ -1,0 +1,199 @@
+# Shared foundation for FlashOS images.
+#
+# This intentionally does not inherit config/base.toml: that upstream profile
+# carries Orbital permissions and legacy /ui compatibility paths. FlashOS is
+# TUI-only, while framebuffer display, input, audio, and networking remain in
+# scope.
+
+[general]
+prompt = false
+
+[packages]
+base = {}
+bootloader = "source"
+kernel = "source"
+libgcc = {}
+libstdcxx = {}
+netdb = {}
+netutils = {}
+relibc = {}
+userutils = "source"
+uutils = {}
+
+[[files]]
+path = "/etc/login_schemes.toml"
+data = """
+[user_schemes.root]
+schemes = ["*"]
+[user_schemes.user]
+schemes = [
+  # Kernel schemes
+  "debug",
+  "event",
+  "memory",
+  "pipe",
+  "time",
+  "sys",
+  # Base schemes
+  "rand",
+  "null",
+  "zero",
+  "log",
+  # Network schemes
+  "ip",
+  "icmp",
+  "tcp",
+  "udp",
+  # IPC schemes
+  "shm",
+  "chan",
+  "uds_stream",
+  "uds_dgram",
+  # Files, processes, terminals, framebuffer console, and audio
+  "file",
+  "display*",
+  "proc",
+  "pty",
+  "sudo",
+  "audio",
+]
+"""
+
+# Default network configuration for the QEMU development environment.
+[[files]]
+path = "/etc/net/dns"
+data = """
+9.9.9.9
+"""
+
+[[files]]
+path = "/etc/net/ip"
+data = """
+10.0.2.15
+"""
+
+[[files]]
+path = "/etc/net/ip_router"
+data = """
+10.0.2.2
+"""
+
+[[files]]
+path = "/etc/net/ip_subnet"
+data = """
+255.255.255.0
+"""
+
+[[files]]
+path = "/etc/os-release"
+data = "../usr/lib/os-release"
+symlink = true
+
+# Transitional package source while the inherited userspace is replaced.
+[[files]]
+path = "/etc/pkg.d/50_redox"
+data = "https://static.redox-os.org/pkg"
+
+# /usr and usrmerge symlinks.
+[[files]]
+path = "/usr"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/usr/bin"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/bin"
+data = "usr/bin"
+symlink = true
+
+[[files]]
+path = "/usr/include"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/include"
+data = "usr/include"
+symlink = true
+
+[[files]]
+path = "/usr/lib"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/lib"
+data = "usr/lib"
+symlink = true
+
+[[files]]
+path = "/usr/libexec"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/usr/share"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/share"
+data = "usr/share"
+symlink = true
+
+# Runtime state directories.
+[[files]]
+path = "/var"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/var/cache"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/var/lib"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/var/lock"
+data = ""
+directory = true
+mode = 0o1777
+
+[[files]]
+path = "/var/log"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/var/run"
+data = ""
+directory = true
+mode = 0o755
+
+[[files]]
+path = "/var/tmp"
+data = ""
+directory = true
+mode = 0o1777
+
+[groups.sudo]
+gid = 1
+members = ["user"]

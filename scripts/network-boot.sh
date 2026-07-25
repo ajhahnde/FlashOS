@@ -45,7 +45,7 @@ ARGS=(
     "--dhcp-boot=tag:!ipxe,tag:efi-aarch64,ipxe-aarch64.efi"
     # IPXE
     "--dhcp-userclass=set:ipxe,iPXE"
-    "--dhcp-boot=tag:ipxe,redox.ipxe"
+    "--dhcp-boot=tag:ipxe,flashos.ipxe"
 )
 
 python3 -m http.server -b "${NETWORK}.1" -d "${BUILD}" "8080"&

@@ -1,0 +1,18 @@
+diff --git a/src/config/general.rs b/src/config/general.rs
+index 417ff2d..fbb9b59 100644
+--- a/src/config/general.rs
++++ b/src/config/general.rs
+@@ -21,0 +22,2 @@ pub struct GeneralConfig {
++    /// Create the conventional graphical XDG user directories.
++    pub create_xdg_user_dirs: Option<bool>,
+@@ -40,0 +43 @@ impl GeneralConfig {
++        self.create_xdg_user_dirs = other.create_xdg_user_dirs.or(self.create_xdg_user_dirs);
+diff --git a/src/installer.rs b/src/installer.rs
+index 3580e9d..180db24 100644
+--- a/src/installer.rs
++++ b/src/installer.rs
+@@ -158,0 +159 @@ pub fn install_dir(
++    let create_xdg_user_dirs = config.general.create_xdg_user_dirs.unwrap_or(true);
+@@ -206 +207 @@ pub fn install_dir(
+-        if uid >= 1000 {
++        if uid >= 1000 && create_xdg_user_dirs {

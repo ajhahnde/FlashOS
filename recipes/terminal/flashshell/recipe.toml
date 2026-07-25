@@ -1,0 +1,9 @@
+[source]
+git = "https://github.com/ajhahnde/FlashOS"
+
+[build]
+template = "cargo"
+cargopath = "components/flashshell/crates/flashshell-cli"
+cargoflags = [
+    "--bin fsh",
+]

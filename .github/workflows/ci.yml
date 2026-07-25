@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: build-system-quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: root-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: root-cargo-${{ runner.os }}-
+
+      - name: Activate the pinned root toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Build-system tests
+        run: cargo test --locked
+
+  flashshell:
+    name: flashshell-quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: components/flashshell
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Cache FlashShell Cargo downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: flashshell-cargo-${{ runner.os }}-${{ hashFiles('components/flashshell/Cargo.lock') }}
+          restore-keys: flashshell-cargo-${{ runner.os }}-
+
+      - name: Activate the pinned FlashShell toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+  product-contract:
+    name: tui-product-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Validate package, TUI, shell, identity, and audio policy
+        run: python3 ci/check_profile.py
+
+      - name: Reject whitespace errors
+        run: git diff --check HEAD
+
+  image:
+    name: image-and-runtime
+    needs: [quality, flashshell, product-contract]
+    uses: ./.github/workflows/_image.yml
+    with:
+      artifact-name: flashos-x86_64-ci-${{ github.sha }}
+      retention-days: 7
+    permissions:
+      contents: read
+
+  required:
+    name: required
+    if: always()
+    needs: [quality, flashshell, product-contract, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Summarize and enforce every gate
+        env:
+          ROOT_RESULT: ${{ needs.quality.result }}
+          SHELL_RESULT: ${{ needs.flashshell.result }}
+          CONTRACT_RESULT: ${{ needs.product-contract.result }}
+          IMAGE_RESULT: ${{ needs.image.result }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## FlashOS CI"
+            echo
+            echo "| gate | result |"
+            echo "|:--|:--|"
+            echo "| build system | ${ROOT_RESULT} |"
+            echo "| FlashShell | ${SHELL_RESULT} |"
+            echo "| TUI product contract | ${CONTRACT_RESULT} |"
+            echo "| Docker image + QEMU runtime | ${IMAGE_RESULT} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          for result in \
+            "${ROOT_RESULT}" \
+            "${SHELL_RESULT}" \
+            "${CONTRACT_RESULT}" \
+            "${IMAGE_RESULT}"
+          do
+            if [ "${result}" != "success" ]; then
+              echo "::error::one or more required CI gates failed"
+              exit 1
+            fi
+          done

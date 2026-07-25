@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# This script setup the Redox build system with Podman
+# This script sets up the FlashOS build system with Podman
 # It install the Podman dependencies for cross-compilation
 # and download the build system configuration files
 
@@ -12,7 +12,7 @@ set -e
 banner()
 {
   echo "|------------------------------------------|"
-  echo "|----- Welcome to the redox bootstrap -----|"
+  echo "|----- Welcome to the FlashOS bootstrap ----|"
   echo "|-------- for building with Podman --------|"
   echo "|------------------------------------------|"
 }
@@ -562,27 +562,27 @@ rustInstall()
 ###########################################################################
 boot()
 {
-    echo "Cloning gitlab repo..."
-    git clone https://gitlab.redox-os.org/redox-os/redox.git --origin upstream
+    echo "Cloning FlashOS..."
+    git clone https://github.com/ajhahnde/FlashOS.git
+    git -C FlashOS remote add upstream https://github.com/redox-os/redox.git
     echo "Creating .config with PODMAN_BUILD=1"
-    echo 'PODMAN_BUILD?=1' > redox/.config
-    if [[ "$(uname -m)" == "arm64" ]]; then
-        echo "Appending .config with ARCH=aarch64"
-        echo 'ARCH=aarch64' >> redox/.config
-    fi
+    printf '%s\n' \
+        'PODMAN_BUILD?=1' \
+        'ARCH?=x86_64' \
+        'CONFIG_NAME?=flashos' > FlashOS/.config
     echo "Cleaning up..."
     rm podman_bootstrap.sh
     echo
     echo "---------------------------------------"
     echo "Well it looks like you are ready to go!"
     echo "---------------------------------------"
-    echo "The file redox/.config was created with PODMAN_BUILD=1."
+    echo "FlashOS/.config selects the Podman build, x86_64, and the flashos image."
     echo "If you need a much quicker installation, run: "
-    echo "  echo REPO_BINARY=1 >> redox/.config"
+    echo "  echo REPO_BINARY=1 >> FlashOS/.config"
     echo
-    echo "Run the following commands to build Redox using Podman:"
+    echo "Run the following commands to build FlashOS using Podman:"
     echo
-    echo "cd redox"
+    echo "cd FlashOS"
     MAKE="make"
     if [[ "$(uname)" == "FreeBSD" ]]; then
         MAKE="gmake"
@@ -598,7 +598,7 @@ boot()
 if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
     usage
 elif [ "$1" == "-u" ]; then
-    git pull upstream master
+    git pull origin main
     exit
 fi
 
@@ -623,7 +623,7 @@ banner
 rustInstall "$noninteractive"
 
 if [ "$update" == "true" ]; then
-    git pull upstream master
+    git pull origin main
     exit
 fi
 

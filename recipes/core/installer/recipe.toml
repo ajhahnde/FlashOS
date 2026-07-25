@@ -1,5 +1,9 @@
 [source]
 git = "https://gitlab.redox-os.org/redox-os/installer.git"
+patches = [
+    "flashos-tui-home.patch",
+    "flashos-branding.patch",
+]
 
 [build]
 template = "cargo"

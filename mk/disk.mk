@@ -17,7 +17,7 @@ else
 	mv $@.partial $@
 endif
 
-$(BUILD)/redox-live.iso: $(FSTOOLS) $(REPO_TAG) redox.ipxe
+$(BUILD)/redox-live.iso: $(FSTOOLS) $(REPO_TAG) flashos.ipxe
 ifeq ($(FSTOOLS_IN_PODMAN),1)
 	$(PODMAN_RUN) make $@
 else
@@ -31,7 +31,7 @@ else
 	truncate -s "$$FILESYSTEM_SIZE"m $@.partial
 	umask 002 && $(INSTALLER) $(INSTALLER_OPTS) -c $(FILESYSTEM_CONFIG) --write-bootloader="$(BUILD)/bootloader-live.efi" --live $@.partial
 	mv $@.partial $@
-	cp redox.ipxe $(BUILD)/redox.ipxe
+	cp flashos.ipxe $(BUILD)/flashos.ipxe
 endif
 
 $(BUILD)/filesystem.img: $(FSTOOLS) $(REPO_TAG)

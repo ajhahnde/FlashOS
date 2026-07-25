@@ -1,0 +1,31 @@
+diff --git a/src/arch/aarch64/start.rs b/src/arch/aarch64/start.rs
+index 68e6ff37..ba61478e 100644
+--- a/src/arch/aarch64/start.rs
++++ b/src/arch/aarch64/start.rs
+@@ -94 +94 @@ unsafe extern "C" fn start(args_ptr: *const KernelArgs) -> ! {
+-            info!("Redox OS starting...");
++            info!("FlashOS starting...");
+diff --git a/src/arch/riscv64/start.rs b/src/arch/riscv64/start.rs
+index 146fb375..3cfbf6ad 100644
+--- a/src/arch/riscv64/start.rs
++++ b/src/arch/riscv64/start.rs
+@@ -100 +100 @@ unsafe extern "C" fn start(args_ptr: *const KernelArgs) -> ! {
+-            info!("Redox OS starting...");
++            info!("FlashOS starting...");
+diff --git a/src/arch/x86_shared/start.rs b/src/arch/x86_shared/start.rs
+index a18491d7..5c71618d 100644
+--- a/src/arch/x86_shared/start.rs
++++ b/src/arch/x86_shared/start.rs
+@@ -98 +98 @@ unsafe extern "C" fn start(args_ptr: *const KernelArgs, stack_end: usize) -> ! {
+-            info!("Redox OS starting...");
++            info!("FlashOS starting...");
+diff --git a/src/devices/graphical_debug/mod.rs b/src/devices/graphical_debug/mod.rs
+index b701c9a8..d72672a6 100644
+--- a/src/devices/graphical_debug/mod.rs
++++ b/src/devices/graphical_debug/mod.rs
+@@ -14 +14 @@ pub fn init(env: &[u8]) {
+-    println!("Starting graphical debug");
++    println!("Starting framebuffer debug");
+@@ -69 +69 @@ pub fn fini() {
+-    println!("Finished graphical debug");
++    println!("Finished framebuffer debug");

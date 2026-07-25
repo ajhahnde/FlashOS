@@ -1,0 +1,23 @@
+FlashOS
+Copyright 2026 Anton Hahn
+
+FlashOS is an independent solo operating-system project. Its current
+implementation is derived from the Redox OS build system and ecosystem.
+FlashOS is not a Redox OS subproject or official distribution and is not
+affiliated with or endorsed by the Redox OS nonprofit.
+
+The inherited build-system code is derived from Redox OS and remains covered
+by the MIT License and copyright notice in LICENSE:
+
+    Copyright (c) 2016 Redox OS Developers
+
+Redox OS, its logo, and related marks belong to the Redox OS nonprofit. The
+upstream trademark policy is retained in docs/upstream/REDOX_TRADEMARK.md.
+
+FlashShell, located under components/flashshell, is licensed separately under
+the Apache License, Version 2.0. See components/flashshell/LICENSE.
+
+Technical identifiers such as x86_64-unknown-redox, redoxer, relibc, and
+upstream package names are currently retained for compatibility and
+attribution. FlashOS intends to own every system layer except the borrowed
+kernel; the kernel itself may diverge into a FlashOS-specific implementation.

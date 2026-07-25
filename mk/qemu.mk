@@ -1,7 +1,7 @@
 # Configuration file for QEMU
 
 QEMU?=qemu-system-$(QEMU_ARCH)
-QEMUFLAGS?=-d guest_errors -name "Redox OS $(ARCH)"
+QEMUFLAGS?=-d guest_errors -name "FlashOS $(ARCH)"
 netboot?=no
 redoxer?=no
 VGA_SUPPORTED=no
@@ -212,7 +212,7 @@ else
 
 	EXTRANETARGS=
 	ifeq ($(netboot),yes)
-		EXTRANETARGS+=,tftp=$(BUILD),bootfile=redox.ipxe
+		EXTRANETARGS+=,tftp=$(BUILD),bootfile=flashos.ipxe
 		QEMUFLAGS+=-kernel /usr/lib/ipxe/ipxe-amd64.efi
 	endif
 

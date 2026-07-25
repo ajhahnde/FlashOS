@@ -1,0 +1,38 @@
+# Supply-chain policy for the inherited FlashOS build-system workspace.
+
+[advisories]
+version = 2
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# These pinned Redox repositories are part of the current transitional build
+# boundary. Adding another Git source is a reviewed architecture decision.
+allow-git = [
+    "https://gitlab.redox-os.org/redox-os/installer.git",
+    "https://gitlab.redox-os.org/redox-os/pkgar.git",
+    "https://gitlab.redox-os.org/redox-os/pkgutils.git",
+    "https://gitlab.redox-os.org/redox-os/redoxer.git",
+]

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# This script is used to setup the Redox build system
+# This script is used to set up the FlashOS build system
 # It installs Rustup, the recipe dependencies for cross-compilation
 # and downloads the build system configuration files
 
@@ -12,7 +12,7 @@ set -e
 banner()
 {
     echo "|------------------------------------------|"
-    echo "|----- Welcome to the Redox bootstrap -----|"
+    echo "|----- Welcome to the FlashOS bootstrap ----|"
     echo "|------------------------------------------|"
 }
 
@@ -1023,10 +1023,14 @@ rustInstall()
 ###########################################################################
 boot()
 {
-    echo "Cloning gitlab repo..."
-    git clone https://gitlab.redox-os.org/redox-os/redox.git --origin upstream
+    echo "Cloning FlashOS..."
+    git clone https://github.com/ajhahnde/FlashOS.git
+    git -C FlashOS remote add upstream https://github.com/redox-os/redox.git
     echo "Creating .config with PODMAN_BUILD=0"
-    echo 'PODMAN_BUILD?=0' > redox/.config
+    printf '%s\n' \
+        'PODMAN_BUILD?=0' \
+        'ARCH?=x86_64' \
+        'CONFIG_NAME?=flashos' > FlashOS/.config
     echo "Cleaning up..."
     rm native_bootstrap.sh
     echo
@@ -1037,8 +1041,8 @@ boot()
     echo "** Be sure to update your path to include Rust - run the following command: **"
     echo 'source $HOME/.cargo/env'
     echo
-    echo "Run the following commands to build Redox:"
-    echo "cd redox"
+    echo "Run the following commands to build FlashOS:"
+    echo "cd FlashOS"
     MAKE="make"
     if [[ "$(uname)" == "FreeBSD" ]]; then
         MAKE="gmake"
@@ -1055,7 +1059,7 @@ boot()
 if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
     usage
 elif [ "$1" == "-u" ]; then
-    git pull upstream master
+    git pull origin main
     exit
 fi
 
@@ -1091,7 +1095,7 @@ if [ "Darwin" == "$(uname -s)" ]; then
 fi
 
 if [ "$update" == "true" ]; then
-    git pull upstream master
+    git pull origin main
     exit
 fi
 

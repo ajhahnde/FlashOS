@@ -1,0 +1,7 @@
+diff --git a/src/installer.rs b/src/installer.rs
+index 180db24..1a19c5f 100644
+--- a/src/installer.rs
++++ b/src/installer.rs
+@@ -655 +655 @@ where
+-                name: "REDOX".to_string(),
++                name: "FLASHOS".to_string(),

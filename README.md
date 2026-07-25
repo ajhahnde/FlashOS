@@ -1,62 +1,167 @@
-<p align="center">
-<img alt="Redox" width="346" src="https://gitlab.redox-os.org/redox-os/assets/raw/master/logos/redox/logo.png">
-</p>
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/flashos_logo_dark.png">
+    <img src="assets/flashos_logo_light.png" alt="FlashOS" width="420">
+  </picture>
 
-This repository is the **Build System** for Redox OS.
+<h3>An independent, TUI-first operating system for x86_64</h3>
 
-Redox is under active development by a vibrant community, you can see the key links below:
+<p>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/security.yml?branch=main&style=flat-square&label=security" alt="Security"></a>
+    <img src="https://img.shields.io/badge/version-0.1.0-f59e0b?style=flat-square" alt="Version 0.1.0">
+    <img src="https://img.shields.io/badge/status-pre--alpha-f59e0b?style=flat-square" alt="Pre-alpha">
+    <img src="https://img.shields.io/badge/target-x86__64--unknown--redox-lightgrey?style=flat-square" alt="x86_64-unknown-redox">
+    <img src="https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-lightgrey?style=flat-square" alt="MIT and Apache-2.0">
+  </p>
 
-- [The **main website** for Redox OS](https://www.redox-os.org).
-- [The Redox Book](https://doc.redox-os.org/book/) and [Build Instructions](https://doc.redox-os.org/book/podman-build.html).
-- [Redox Chat and Support](https://matrix.to/#/#redox-join:matrix.org).
-- [Patreon](https://www.patreon.com/redox_os), [Donate](https://redox-os.org/donate/) and [Merch](https://redox-os.creator-spring.com/).
-- Scroll down for a list of key Redox components and their repositories.
+<p>
+    <b>README</b> ·
+    <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
+    <a href="SETUP.md"><b>Setup</b></a> ·
+    <a href="ci/README.md"><b>CI/CD</b></a> ·
+    <a href="CHANGELOG.md"><b>Changelog</b></a> ·
+    <a href="LICENSE"><b>License</b></a>
+  </p>
 
-[Redox](https://www.redox-os.org) is an open-source operating system written in Rust, a language with focus on safety, efficiency and high performance. Redox uses a microkernel architecture, and aims to be reliable, secure, usable, correct, and free. Redox is inspired by previous operating systems, such as seL4, MINIX, Plan 9, Linux and BSD.
+</div>
 
-Redox _is not_ just a kernel, it's a **full-featured operating system**, providing components (file system, display server, core utilities, etc.) that together make up a functional and convenient operating system. Redox uses the COSMIC desktop apps, and provides source code compatibility with many Rust, Linux and BSD programs.
+---
 
-[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+## About
 
-## More Links
+FlashOS is a small, independent operating-system project. It produces a
+minimal x86_64 image, starts a console session, and currently uses
+[FlashShell](components/flashshell/) (`fsh`) as the login shell for both the
+regular user and root.
 
-- [Book](https://doc.redox-os.org/book/)
-- [Contribute](CONTRIBUTING.md)
-- [Hardware Compatibility](https://doc.redox-os.org/book/hardware-support.html)
-- Run Redox in a [Virtual Machine](https://doc.redox-os.org/book/running-vm.html) or on [Real Hardware](https://doc.redox-os.org/book/real-hardware.html)
-- [Trying Out Redox](https://doc.redox-os.org/book/trying-out-redox.html)
-- [Building Redox](https://doc.redox-os.org/book/podman-build.html)
-- [Build System Documentation](https://doc.redox-os.org/book/build-system-reference.html)
-- [Developer FAQ](https://doc.redox-os.org/book/developer-faq.html)
-- [Chat/Discussions/Help](https://doc.redox-os.org/book/chat.html)
+FlashOS is a solo project with its own identity, roadmap, decisions, and
+releases. It is not a Redox OS subproject or an official Redox OS
+distribution, and it is not affiliated with or endorsed by the Redox OS
+nonprofit.
 
-## Ecosystem
+> FlashOS is pre-alpha software. Interfaces, package boundaries, and disk
+> formats may change without compatibility guarantees.
 
-Some of the key repositories on the Redox GitLab:
+## Current system
 
-| Essential Repositories                                                               | Maintainer
-|-------------------------------------------------------------------------------------------------------------|---------------------------
-| [Kernel](https://gitlab.redox-os.org/redox-os/kernel)                                                       | **@jackpot51**
-| [Base (essential system components and drivers)](https://gitlab.redox-os.org/redox-os/base)                             | **@jackpot51**
-| [RedoxFS (default filesystem)](https://gitlab.redox-os.org/redox-os/redoxfs)                                | **@jackpot51**
-| [relibc (C POSIX library written in Rust)](https://gitlab.redox-os.org/redox-os/relibc)                     | **@jackpot51**
-| [Ion (defauilt shell)](https://gitlab.redox-os.org/redox-os/ion)                                            | **@jackpot51**
-| [Termion (terminal library)](https://gitlab.redox-os.org/redox-os/termion)                                  | **@jackpot51**
-| [pkgutils (current package manager)](https://gitlab.redox-os.org/redox-os/pkgutils)                         | **@jackpot51**
-| [Orbital (display server and window manager)](https://gitlab.redox-os.org/redox-os/orbital)                 | **@jackpot51**
-| This repo - the root of the Build System                                                                    | **@jackpot51** **@hatred_45**
-| [Redoxer (tool for easy Redox development on Linux)](https://gitlab.redox-os.org/redox-os/redoxer)          | **@jackpot51**
-| [The Redox Book](https://gitlab.redox-os.org/redox-os/book)                                                 | **@jackpot51** **@hatred_45**
-| [Website](https://gitlab.redox-os.org/redox-os/website)                                                     | **@jackpot51** **@hatred_45**
+|                                |                                                      |
+| :----------------------------- | :--------------------------------------------------- |
+| **Product**                    | FlashOS 0.1.0                                        |
+| **Architecture**               | x86_64                                               |
+| **Target ABI**                 | `x86_64-unknown-redox`                               |
+| **Interface**                  | keyboard-first terminal user interface               |
+| **Login shell**                | FlashShell at `/usr/bin/fsh`                         |
+| **Image profile**              | TUI-only system without a GUI or desktop environment |
+| **Current kernel baseline**    | Redox OS 0.9.0                                       |
+| **Primary development target** | QEMU `q35` with UEFI                                 |
 
-## What it looks like
+The current image boots in QEMU, permits login, reaches the `fsh> ` prompt,
+and runs external pipelines. Physical-machine qualification is deliberately
+scheduled after the repository migration and image gates; results are tracked
+in [Hardware Compatibility](HARDWARE.md).
 
-See [Redox in Action](https://www.redox-os.org/screens/) for photos and videos.
+## Architecture
 
-<img alt="Redox" height="150" src="https://gitlab.redox-os.org/redox-os/website/-/raw/master/static/img/screenshot/orbital-visual.png">
-<img alt="Redox" height="150" src="https://gitlab.redox-os.org/redox-os/website/-/raw/master/static/img/screenshot/cosmic-programs.png">
-<img alt="Redox" height="150" src="https://gitlab.redox-os.org/redox-os/website/-/raw/master/static/img/screenshot/cosmic-term-screenfetch.png">
+FlashOS currently bootstraps from more of the Redox OS system than it intends
+to keep permanently:
 
-<img alt="Redox" height="150" src="https://gitlab.redox-os.org/redox-os/website/-/raw/master/static/img/screenshot/cosmic-edit-redox.png">
-<img alt="Redox" height="150" src="https://gitlab.redox-os.org/redox-os/website/-/raw/master/static/img/screenshot/image-viewer.png">
-<img alt="Redox" height="150" src="https://gitlab.redox-os.org/redox-os/assets/raw/master/screenshots/Boot.png">
+| Layer                                | Current state                  | Direction                                            |
+| :----------------------------------- | :----------------------------- | :--------------------------------------------------- |
+| Kernel                               | Redox OS kernel baseline       | Borrowed kernel; a FlashOS-specific fork may diverge |
+| Target ABI and libc                  | Redox target and relibc        | Transitional compatibility boundary                  |
+| Boot, installer, and package tooling | inherited Redox infrastructure | Transitional build foundation                        |
+| System identity and image profile    | FlashOS-owned                  | FlashOS                                              |
+| Interactive shell                    | FlashShell                     | FlashOS                                              |
+
+The intended long-term borrowed boundary is the kernel only. Names such as
+`x86_64-unknown-redox`, `redoxer`, `relibc`, and inherited package identifiers
+remain where they describe a real ABI or tool interface. They are compatibility
+names, not product branding.
+
+## Features
+
+- **FlashShell by default.** `fsh` is the login shell for the development
+  accounts and the main product interface.
+- **TUI-only product.** Orbital, COSMIC, X11, Wayland, GUI applications, and
+  the graphical installer are outside the FlashOS product scope.
+- **Minimal x86_64 image.** The active profile contains FlashShell,
+  `coreutils`, and `extrautils` without a desktop stack.
+- **UEFI QEMU workflow.** The primary development machine is QEMU `q35`
+  with edk2 firmware.
+- **Independent identity.** Hostname, release metadata, console issue, build
+  paths, and virtual-machine names identify FlashOS.
+- **Upstream traceability.** The Redox OS origin remains documented and
+  available through the `upstream` Git remote.
+- **Kernel freedom.** Future kernel changes do not have to preserve the
+  ability to consume later Redox kernel updates.
+- **Qualified delivery.** GitHub Actions separates host quality checks,
+  containerized image construction, immutable artefact promotion, QEMU boot
+  qualification, supply-chain policy, and tagged releases.
+
+## Quick start
+
+Install the platform dependencies and create the local build configuration as
+described in [Setup](SETUP.md), then build the FlashOS profile:
+
+```sh
+make CONFIG_NAME=flashos all
+```
+
+The resulting image is written to:
+
+```text
+build/x86_64/flashos/harddrive.img
+```
+
+Start it in QEMU:
+
+```sh
+make CONFIG_NAME=flashos qemu
+```
+
+The development image currently provides the `user` account with a blank
+password. Its credentials are for local development only.
+
+## Repository layout
+
+```text
+config/flashos-base.toml         TUI base without Orbital or legacy /ui paths
+config/x86_64/flashos.toml       FlashOS image, identity, users, and services
+components/flashshell/           FlashShell workspace
+recipes/terminal/flashshell/     target recipe that installs /usr/bin/fsh
+recipes/core/kernel/             current borrowed-kernel boundary
+recipes/                         transitional system package recipes
+ci/ and .github/workflows/       CI contracts, clean-room build, and delivery
+mk/ and Makefile                 image, package, and emulator build logic
+src/                             build-system support tools
+docs/upstream/                   retained Redox OS reference documents
+```
+
+A deeper explanation of the system and build path is in
+[Documentation](DOCUMENTATION.md).
+
+## Project links
+
+- [Setup](SETUP.md)
+- [CI/CD architecture](ci/README.md)
+- [Hardware compatibility](HARDWARE.md)
+- [Trademark and project identity](TRADEMARK.md)
+- [Upstream attribution](NOTICE)
+- [FlashShell documentation](components/flashshell/README.md)
+
+## Upstream and license
+
+The `upstream` Git remote tracks
+[`redox-os/redox`](https://github.com/redox-os/redox) for attribution,
+comparison, and optional kernel updates. FlashOS may modify its kernel
+independently and may eventually stop accepting Redox kernel updates.
+
+The inherited root build system is available under the
+[MIT License](LICENSE). FlashShell is available under the
+[Apache License 2.0](components/flashshell/LICENSE). Fetched packages retain
+their own licenses. See [NOTICE](NOTICE) for attribution.
+
+---
+
+[Next: Documentation →](DOCUMENTATION.md)

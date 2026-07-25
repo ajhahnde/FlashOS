@@ -867,7 +867,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "redox_cookbook"
+name = "flashos_build"
 version = "0.1.0"
 dependencies = [
  "ansi-to-tui",

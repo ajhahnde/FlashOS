@@ -1,0 +1,111 @@
+name: reusable image qualification
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Immutable workflow-artifact name.
+        required: true
+        type: string
+      retention-days:
+        description: Artifact retention period.
+        required: false
+        default: 7
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: docker-clean-room-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Build the FlashOS CI container
+        run: >-
+          docker build
+          --file ci/container/Dockerfile
+          --tag "flashos-ci:${GITHUB_SHA}"
+          .
+
+      - name: Build the x86_64 image in the clean container
+        run: |
+          set -euo pipefail
+          docker run --rm --privileged \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            --env CI=1 \
+            "flashos-ci:${GITHUB_SHA}" \
+            make \
+              ARCH=x86_64 \
+              CONFIG_NAME=flashos \
+              PODMAN_BUILD=0 \
+              SKIP_CHECK_TOOLS=1 \
+              REPO_BINARY=1 \
+              REPO_NONSTOP=0 \
+              FSTOOLS_NO_MOUNT=1 \
+              build/x86_64/flashos/harddrive.img
+
+      - name: Stage the immutable image
+        run: |
+          set -euo pipefail
+          mkdir -p dist/image
+          cp build/x86_64/flashos/harddrive.img \
+            dist/image/FlashOS-x86_64-harddrive.img
+          (
+            cd dist/image
+            sha256sum FlashOS-x86_64-harddrive.img > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Upload the image
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist/image/
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+  boot:
+    name: qemu-artifact-consumer
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install QEMU and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+
+      - name: Download the promoted image
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist/image
+
+      - name: Verify image integrity
+        working-directory: dist/image
+        run: sha256sum --check SHA256SUMS
+
+      - name: Boot the exact downloaded image
+        run: |
+          python3 ci/qemu_smoke.py \
+            --image dist/image/FlashOS-x86_64-harddrive.img \
+            --log dist/qemu-smoke.log \
+            --timeout 180
+
+      - name: Upload boot diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: qemu-boot-failure-${{ github.sha }}
+          path: |
+            dist/qemu-smoke.log
+            dist/image/SHA256SUMS
+          retention-days: 14
+          if-no-files-found: warn

@@ -2,6 +2,8 @@
 /prefix/
 .config
 **/my_*
+__pycache__/
+*.py[cod]
 # Local settings folder for Jetbrains products (RustRover, IntelliJ, CLion)
 .idea/
 # Local settings folder for Visual Studio Professional
