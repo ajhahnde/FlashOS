@@ -13,7 +13,11 @@ LABEL org.opencontainers.image.source="https://github.com/ajhahnde/FlashOS"
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates \
+       curl \
+       git \
+       libarchive-tools \
     && rm -rf /var/lib/apt/lists/* \
     && curl --fail --show-error --silent --proto '=https' --tlsv1.2 \
        https://sh.rustup.rs -o /tmp/rustup-init.sh \
