@@ -28,6 +28,8 @@ remains available in the archived `FlashOS-old` repository.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-26
+
 ### Added
 
 - Added the independent x86_64 FlashOS image profile at
@@ -95,19 +97,11 @@ remains available in the archived `FlashOS-old` repository.
   final rebranded image.
 - Automated QEMU contract including the FlashOS bootloader, kernel identity,
   login prompt, FlashShell pipeline, and retained IHDA audio driver.
-- First non-publishing release dry run: clean-room image rebuild, exact
-  artefact QEMU qualification, compressed image, checksum verification, and
-  CycloneDX SBOM generation.
-
-### Pending
-
-- Enable the GitHub dependency graph so the pull-request dependency-review
-  gate can evaluate changes instead of reporting that the repository is
-  unsupported.
-- Run the updated non-publishing release workflow and inspect the compressed
-  image, checksums, CycloneDX SBOM, and provenance attestation.
-- Complete physical hardware qualification before tagging and publishing
-  `v0.1.0`.
+- Non-publishing release workflow: clean-room rebuild of both images, separate
+  NVMe and USB QEMU qualification, compression, checksum verification,
+  CycloneDX SBOM generation, and build-provenance attestation.
+- Physical live USB boot, display, keyboard, login, and FlashShell validation
+  on a Sony VAIO VPCEB4L1E.
 
 ---
 

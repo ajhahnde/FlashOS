@@ -56,10 +56,9 @@ nonprofit.
 | **Current kernel baseline**    | Redox OS 0.9.0                                       |
 | **Primary development target** | QEMU `q35` with UEFI                                 |
 
-The current image boots in QEMU, permits login, reaches the `fsh> ` prompt,
-and runs external pipelines. Physical-machine qualification is deliberately
-scheduled after the repository migration and image gates; results are tracked
-in [Hardware Compatibility](HARDWARE.md).
+The QEMU gate covers both harddrive and live USB image paths, including login,
+the `fsh> ` prompt, and external pipelines. Device-specific validation scope
+and results are maintained in [Hardware Compatibility](HARDWARE.md).
 
 ## Architecture
 
