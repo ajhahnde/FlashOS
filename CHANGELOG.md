@@ -94,4 +94,4 @@ remains available in the archived `FlashOS-old` repository.
 
 ---
 
-[← Back: Setup](SETUP.md) · [Back to README](README.md)
+[← Back: CI/CD](ci/README.md) · [Back to README](README.md)

@@ -55,3 +55,7 @@ python3 ci/qemu_smoke.py \
 The QEMU test exposes an emulated HDA controller with a null host backend. That
 proves the guest audio driver still starts without requiring audio hardware on
 a headless CI runner.
+
+---
+
+[← Back: Setup](../SETUP.md) · [Next: Changelog →](../CHANGELOG.md)

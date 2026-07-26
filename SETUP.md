@@ -270,4 +270,4 @@ technical identifiers intentionally coexist during the transition.
 
 ---
 
-[← Back: Documentation](DOCUMENTATION.md) · [Next: Changelog →](CHANGELOG.md)
+[← Back: Documentation](DOCUMENTATION.md) · [Next: CI/CD →](ci/README.md)
