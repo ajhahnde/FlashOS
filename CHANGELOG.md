@@ -28,6 +28,14 @@ remains available in the archived `FlashOS-old` repository.
 
 ## [Unreleased]
 
+### Changed
+
+- Changed the default build configuration from the inherited `desktop` profile
+  to `flashos`, so an invocation without an explicit `CONFIG_NAME` builds the
+  TUI-only product image instead of a graphical desktop image. The same default
+  now applies to `build.sh` and to the `changelog`, `find-recipe`, and `ventoy`
+  helper scripts.
+
 ## [0.1.0] - 2026-07-26
 
 ### Added

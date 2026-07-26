@@ -50,7 +50,7 @@ if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
 fi
 
 defaultarch="x86_64"
-defaultname="desktop"
+defaultname="flashos"
 ARCH=""
 CONFIG_NAME=""
 FILESYSTEM_CONFIG=""

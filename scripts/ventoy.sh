@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 
-# This script create and copy the Redox bootable image to an Ventoy-formatted device
+# This script creates and copies the FlashOS bootable image to a Ventoy-formatted device
 
 set -e
 
 ARCHS=(
-    i686
     x86_64
 )
 CONFIGS=(
-    demo
-    desktop
+    flashos
 )
 
 VENTOY="/media/${USER}/Ventoy"
@@ -26,7 +24,7 @@ do
     do
         IMAGE="build/${ARCH}/${CONFIG_NAME}/redox-live.iso"
         make ARCH="${ARCH}" CONFIG_NAME="${CONFIG_NAME}" "${IMAGE}"
-        cp -v "${IMAGE}" "${VENTOY}/redox-${CONFIG_NAME}-${ARCH}.iso"
+        cp -v "${IMAGE}" "${VENTOY}/${CONFIG_NAME}-${ARCH}.iso"
     done
 done
 
