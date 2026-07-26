@@ -31,14 +31,16 @@ A machine is qualified when it:
 - accepts keyboard input;
 - permits login and reaches the `fsh> ` prompt;
 - runs an external-to-external pipeline;
+- reports the expected storage, input/display, and audio drivers without a
+  fatal startup error;
 - shuts down or exits the session without corrupting the image.
 
 ## Results
 
 | Machine | Firmware | Status | Notes |
 |---|---|---|---|
-| QEMU x86_64 (`q35`, UEFI) | edk2 | Qualified | Login, FlashShell prompt, and external pipeline verified. |
-| Sony VAIO VPCEB4L1E | BIOS/UEFI to be confirmed | Pending | Physical test begins after the repository migration and local image gates are complete. |
+| QEMU x86_64 (`q35`, UEFI) | edk2 | Qualified | Login, FlashShell prompt, external pipeline, and IHDA startup verified. |
+| Sony VAIO VPCEB4L1E | BIOS/UEFI to be confirmed | Pending | Read-only device identification and the physical qualification gate remain. |
 | 21.5-inch iMac (2017) | EFI | Not tested | Secondary target after the Sony qualification. |
 
 The inherited Redox OS compatibility list is retained as an

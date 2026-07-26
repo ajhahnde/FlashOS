@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -59,6 +60,16 @@ def release_version() -> str:
 profile = load(PROFILE_PATH)
 base = load(BASE_PATH)
 version = release_version()
+root_manifest = load(ROOT / "Cargo.toml")
+flashshell_manifest = load(ROOT / "components/flashshell/Cargo.toml")
+
+if root_manifest.get("package", {}).get("version") != version:
+    fail("root Cargo package version drifted from versions.env")
+flashshell_version = (
+    flashshell_manifest.get("workspace", {}).get("package", {}).get("version")
+)
+if flashshell_version != version:
+    fail("FlashShell workspace version drifted from versions.env")
 
 if profile.get("include") != ["../flashos-base.toml"]:
     fail("the x86_64 profile must include only ../flashos-base.toml")
@@ -121,10 +132,55 @@ os_release_file = next(
 )
 if os_release_file is None:
     fail("/usr/lib/os-release is missing")
-if f'VERSION_ID="{version}"' not in os_release_file["data"]:
-    fail("os-release version drifted from versions.env")
-if f"FlashOS {version}" not in (ROOT / "README.md").read_text():
+for expected in (
+    f'PRETTY_NAME="FlashOS {version}"',
+    f'VERSION_ID="{version}"',
+    f'VERSION="{version}"',
+):
+    if expected not in os_release_file["data"]:
+        fail(f"os-release version drifted from versions.env: {expected}")
+
+issue_file = next(
+    (
+        item
+        for item in profile.get("files", [])
+        if item.get("path") == "/etc/issue" and not item.get("append")
+    ),
+    None,
+)
+if issue_file is None or issue_file.get("data") != f"FlashOS {version}\n":
+    fail("/etc/issue version drifted from versions.env")
+
+readme = (ROOT / "README.md").read_text()
+if f"FlashOS {version}" not in readme or f"version-{version}-" not in readme:
     fail("README version drifted from versions.env")
+
+release_workflow = (ROOT / ".github/workflows/release.yml").read_text()
+for expected in (
+    'expected="v${FLASHOS_RELEASE_VERSION}"',
+    "FlashOS-${VERSION}-x86_64-harddrive.img.zst",
+    "FlashOS-${{ steps.version.outputs.version }}.cdx.json",
+    "SYFT_SOURCE_NAME: FlashOS",
+    "SYFT_SOURCE_VERSION: ${{ steps.version.outputs.version }}",
+):
+    if expected not in release_workflow:
+        fail(f"release workflow contract is missing: {expected}")
+
+uses_pattern = re.compile(r"^\s*(?:-\s+)?uses:\s+([^\s#]+)")
+for workflow_path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+    for line_number, line in enumerate(workflow_path.read_text().splitlines(), 1):
+        match = uses_pattern.match(line)
+        if match is None:
+            continue
+        action = match.group(1)
+        if action.startswith("./"):
+            continue
+        _, separator, revision = action.rpartition("@")
+        if separator != "@" or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+            fail(
+                "GitHub Action is not pinned to an immutable commit: "
+                f"{workflow_path.relative_to(ROOT)}:{line_number}: {action}"
+            )
 
 required_branding_patches = (
     ROOT / "recipes/core/bootloader/flashos-branding.patch",

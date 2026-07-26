@@ -200,15 +200,13 @@ working replacement.
 
 Changes are accepted in layers:
 
-1. **Orientation** — the shared Codex/Claude session hook reports the active
-   FlashOS repository without applying archived AArch64 contracts.
-2. **Host shell** — FlashShell tests and clippy pass.
-3. **Target shell** — `fsh` builds for `x86_64-unknown-redox`.
-4. **Recipe** — the FlashShell package cooks from the intended source.
-5. **Image** — the `flashos` image builds with the expected identity, package,
+1. **Host shell** — FlashShell tests and clippy pass.
+2. **Target shell** — `fsh` builds for `x86_64-unknown-redox`.
+3. **Recipe** — the FlashShell package cooks from the intended source.
+4. **Image** — the `flashos` image builds with the expected identity, package,
    user, and shell metadata.
-6. **QEMU** — login reaches `fsh> ` and an external-to-external pipeline runs.
-7. **Hardware** — a physical device is tested only after the migration and
+5. **QEMU** — login reaches `fsh> ` and an external-to-external pipeline runs.
+6. **Hardware** — a physical device is tested only after the migration and
    image gates are complete.
 
 The physical qualification criteria and current matrix are maintained in

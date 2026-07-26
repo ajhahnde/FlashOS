@@ -33,7 +33,8 @@ here.
 | Promotion | Upload one checksummed disk image | GitHub immutable workflow artifact |
 | Runtime qualification | Download and boot that exact artifact without rebuilding | `qemu_smoke.py` and serial log |
 | Security | Dependency review and Cargo policy | scheduled and pull-request security workflow |
-| Delivery | Compress, checksum, SBOM, attest, and publish tagged builds | release workflow and GitHub attestations |
+| Candidate | Compress, checksum, SBOM, and attest every release dry run | release workflow and GitHub attestations |
+| Delivery | Publish an already qualified and attested tagged candidate | GitHub release |
 
 The stages are intentionally separated so a successful compile cannot stand
 in for a successful boot, and a boot test cannot quietly rebuild different

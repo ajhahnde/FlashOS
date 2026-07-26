@@ -1,18 +1,2 @@
-.git
-.github
-.claude
-.codex
-.agents
-ajhahnde
-build
-prefix
-repo
-web
-**/target
-**/source
-**/source.tmp
-**/source-new
-**/source-old
-*.img
-*.iso
-*.log
+# The toolchain image consumes no repository files.
+**

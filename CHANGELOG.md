@@ -48,8 +48,6 @@ remains available in the archived `FlashOS-old` repository.
   light/dark logo presentation and top navigation.
 - Added public hardware, trademark, attribution, and upstream reference
   documents.
-- Added shared private Codex and Claude orientation, rules, hooks, handovers,
-  and project-state integration for the new repository.
 - Restored GitHub Actions as an x86_64-native CI/CD architecture with
   independent build-system, FlashShell, and TUI product-contract gates.
 - Added a FlashOS-owned Docker clean-room build, immutable checksummed image
@@ -73,6 +71,14 @@ remains available in the archived `FlashOS-old` repository.
   and build dependencies remain transitional.
 - Made future kernel divergence explicit: FlashOS may stop consuming Redox
   kernel updates when its kernel requirements differ.
+- Extended the product contract to enforce release-version lockstep across
+  the root crate, FlashShell workspace, README, `os-release`, console issue,
+  and release artefact names.
+- Moved build-provenance attestation into release-candidate packaging so a
+  non-publishing dry run exercises the same attestation used by tagged
+  delivery.
+- Updated artifact downloads and pull-request dependency review to their
+  Node 24 action runtimes.
 
 ### Verified
 
@@ -84,13 +90,19 @@ remains available in the archived `FlashOS-old` repository.
   final rebranded image.
 - Automated QEMU contract including the FlashOS bootloader, kernel identity,
   login prompt, FlashShell pipeline, and retained IHDA audio driver.
+- First non-publishing release dry run: clean-room image rebuild, exact
+  artefact QEMU qualification, compressed image, checksum verification, and
+  CycloneDX SBOM generation.
 
 ### Pending
 
-- Run the new GitHub-hosted Docker build and security policies after the
-  migration changes are committed.
-- Begin physical hardware qualification only after all software-migration
-  gates pass.
+- Enable the GitHub dependency graph so the pull-request dependency-review
+  gate can evaluate changes instead of reporting that the repository is
+  unsupported.
+- Run the updated non-publishing release workflow and inspect the compressed
+  image, checksums, CycloneDX SBOM, and provenance attestation.
+- Complete physical hardware qualification before tagging and publishing
+  `v0.1.0`.
 
 ---
 

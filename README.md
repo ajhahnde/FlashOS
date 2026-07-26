@@ -4,7 +4,7 @@
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="420">
   </picture>
 
-<h3>An independent, TUI-first operating system for x86_64</h3>
+<h3>An x86_64 operating system based on the Redox kernel</h3>
 
 <p>
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ajhahnde/FlashOS/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
