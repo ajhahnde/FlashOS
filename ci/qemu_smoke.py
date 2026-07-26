@@ -27,6 +27,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ovmf", type=Path)
     parser.add_argument("--log", type=Path, default=Path("qemu-smoke.log"))
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument(
+        "--disk-interface",
+        choices=("nvme", "usb"),
+        default="nvme",
+        help="Expose the image as an NVMe disk or USB mass-storage device",
+    )
     return parser.parse_args()
 
 
@@ -60,35 +66,44 @@ command = [
     "1024",
     "-drive",
     f"if=pflash,format=raw,unit=0,file={ovmf},readonly=on",
-    "-drive",
-    f"file={image},format=raw,if=none,id=drv0",
-    "-device",
-    "nvme,drive=drv0,serial=NVME_SERIAL",
-    "-device",
-    "qemu-xhci",
-    "-device",
-    "usb-kbd",
-    "-audiodev",
-    "none,id=audio0",
-    "-device",
-    "ich9-intel-hda",
-    "-device",
-    "hda-output,audiodev=audio0",
-    "-device",
-    "e1000,netdev=net0,id=nic0",
-    "-netdev",
-    "user,id=net0",
-    "-vga",
-    "std",
-    "-display",
-    "none",
-    "-chardev",
-    "stdio,id=debug,signal=off,mux=on",
-    "-serial",
-    "chardev:debug",
-    "-mon",
-    "chardev=debug",
 ]
+
+command.extend(
+    ["-drive", f"file={image},format=raw,if=none,id=drv0,snapshot=on"]
+)
+if args.disk_interface == "nvme":
+    command.extend(["-device", "nvme,drive=drv0,serial=NVME_SERIAL"])
+
+command.extend(["-device", "qemu-xhci,id=xhci"])
+if args.disk_interface == "usb":
+    command.extend(["-device", "usb-storage,drive=drv0,bus=xhci.0"])
+
+command.extend(
+    [
+        "-device",
+        "usb-kbd,bus=xhci.0",
+        "-audiodev",
+        "none,id=audio0",
+        "-device",
+        "ich9-intel-hda",
+        "-device",
+        "hda-output,audiodev=audio0",
+        "-device",
+        "e1000,netdev=net0,id=nic0",
+        "-netdev",
+        "user,id=net0",
+        "-vga",
+        "std",
+        "-display",
+        "none",
+        "-chardev",
+        "stdio,id=debug,signal=off,mux=on",
+        "-serial",
+        "chardev:debug",
+        "-mon",
+        "chardev=debug",
+    ]
+)
 
 process = subprocess.Popen(
     command,

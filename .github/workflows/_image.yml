@@ -31,7 +31,7 @@ jobs:
           --tag "flashos-ci:${GITHUB_SHA}"
           .
 
-      - name: Build the x86_64 image in the clean container
+      - name: Build the x86_64 disk and live images in the clean container
         run: |
           set -euo pipefail
           docker run --rm --privileged \
@@ -47,21 +47,27 @@ jobs:
               REPO_BINARY=1 \
               REPO_NONSTOP=0 \
               FSTOOLS_NO_MOUNT=1 \
-              build/x86_64/flashos/harddrive.img
+              build/x86_64/flashos/harddrive.img \
+              build/x86_64/flashos/redox-live.iso
 
-      - name: Stage the immutable image
+      - name: Stage the immutable images
         run: |
           set -euo pipefail
           mkdir -p dist/image
           cp build/x86_64/flashos/harddrive.img \
             dist/image/FlashOS-x86_64-harddrive.img
+          cp build/x86_64/flashos/redox-live.iso \
+            dist/image/FlashOS-x86_64-live.iso
           (
             cd dist/image
-            sha256sum FlashOS-x86_64-harddrive.img > SHA256SUMS
+            sha256sum \
+              FlashOS-x86_64-harddrive.img \
+              FlashOS-x86_64-live.iso \
+              > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
 
-      - name: Upload the image
+      - name: Upload the images
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.artifact-name }}
@@ -92,11 +98,20 @@ jobs:
         working-directory: dist/image
         run: sha256sum --check SHA256SUMS
 
-      - name: Boot the exact downloaded image
+      - name: Boot the exact harddrive image over NVMe
         run: |
           python3 ci/qemu_smoke.py \
             --image dist/image/FlashOS-x86_64-harddrive.img \
-            --log dist/qemu-smoke.log \
+            --disk-interface nvme \
+            --log dist/qemu-harddrive-smoke.log \
+            --timeout 180
+
+      - name: Boot the exact live image over USB
+        run: |
+          python3 ci/qemu_smoke.py \
+            --image dist/image/FlashOS-x86_64-live.iso \
+            --disk-interface usb \
+            --log dist/qemu-live-usb-smoke.log \
             --timeout 180
 
       - name: Upload boot diagnostics on failure
@@ -105,7 +120,8 @@ jobs:
         with:
           name: qemu-boot-failure-${{ github.sha }}
           path: |
-            dist/qemu-smoke.log
+            dist/qemu-harddrive-smoke.log
+            dist/qemu-live-usb-smoke.log
             dist/image/SHA256SUMS
           retention-days: 14
           if-no-files-found: warn

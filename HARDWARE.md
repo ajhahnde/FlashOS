@@ -23,24 +23,29 @@ This document tracks machines tested with the minimal x86_64 FlashOS image.
 Upstream Redox OS reports remain useful for driver expectations but do not
 count as FlashOS qualification.
 
-## Qualification gate
+## Validation levels
 
-A machine is qualified when it:
+The physical release gate for v0.1.0 requires a successful live USB boot,
+working display and keyboard input, login, and the `fsh> ` prompt.
 
-- boots the FlashOS image;
-- accepts keyboard input;
-- permits login and reaches the `fsh> ` prompt;
+A machine is fully qualified when it additionally:
+
 - runs an external-to-external pipeline;
 - reports the expected storage, input/display, and audio drivers without a
   fatal startup error;
 - shuts down or exits the session without corrupting the image.
 
+Use `redox-live.iso` for removable USB qualification. Its live bootloader
+copies the filesystem into memory before kernel startup. `harddrive.img` is
+qualified as a virtual or installed-disk image and is not an early-root USB
+image.
+
 ## Results
 
 | Machine | Firmware | Status | Notes |
 |---|---|---|---|
-| QEMU x86_64 (`q35`, UEFI) | edk2 | Qualified | Login, FlashShell prompt, external pipeline, and IHDA startup verified. |
-| Sony VAIO VPCEB4L1E | BIOS/UEFI to be confirmed | Pending | Read-only device identification and the physical qualification gate remain. |
+| QEMU x86_64 (`q35`, UEFI) | edk2 | Qualified | Harddrive/NVMe and live/USB paths reach login, FlashShell, an external pipeline, and IHDA startup. |
+| Sony VAIO VPCEB4L1E | BIOS/UEFI to be confirmed | Validated for v0.1.0 | `redox-live.iso` boots from USB with working display and keyboard, permits login, and reaches FlashShell. Full driver, pipeline, and shutdown qualification remains future work. |
 | 21.5-inch iMac (2017) | EFI | Not tested | Secondary target after the Sony qualification. |
 
 The inherited Redox OS compatibility list is retained as an

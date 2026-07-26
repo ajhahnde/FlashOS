@@ -102,23 +102,33 @@ names, not product branding.
 ## Quick start
 
 Install the platform dependencies and create the local build configuration as
-described in [Setup](SETUP.md), then build the FlashOS profile:
+described in [Setup](SETUP.md), then build the FlashOS development disk:
 
 ```sh
 make CONFIG_NAME=flashos all
 ```
 
-The resulting image is written to:
+Build the removable-media live image separately:
 
-```text
-build/x86_64/flashos/harddrive.img
+```sh
+make CONFIG_NAME=flashos build/x86_64/flashos/redox-live.iso
 ```
 
-Start it in QEMU:
+The resulting images are:
+
+```text
+build/x86_64/flashos/harddrive.img   QEMU or installed-disk image
+build/x86_64/flashos/redox-live.iso  self-contained USB live image
+```
+
+Start the development disk in QEMU:
 
 ```sh
 make CONFIG_NAME=flashos qemu
 ```
+
+Use the live image, not `harddrive.img`, when qualifying removable USB media.
+The live bootloader copies the filesystem into memory before FlashOS starts.
 
 The development image currently provides the `user` account with a blank
 password. Its credentials are for local development only.

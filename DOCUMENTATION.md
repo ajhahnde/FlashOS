@@ -137,9 +137,11 @@ The build is driven by Make and can run through Podman:
 2. The prefix stage provides the `x86_64-unknown-redox` compiler and sysroot.
 3. Cookbook builds or retrieves the packages selected by the FlashOS manifest.
 4. The installer assembles the filesystem and applies FlashOS users and files.
-5. The disk stage creates `build/x86_64/flashos/harddrive.img`.
-6. QEMU starts a `q35` machine, normally with UEFI firmware, and attaches the
-   disk image.
+5. The disk stage creates `build/x86_64/flashos/harddrive.img` for QEMU or an
+   installed disk and `build/x86_64/flashos/redox-live.iso` for removable
+   media.
+6. QEMU starts a `q35` machine with UEFI and qualifies the installed-disk
+   image over NVMe and the live image over USB mass storage.
 7. The console service starts `getty`; login launches `/usr/bin/fsh`.
 
 The current build foundation still has internal files and variables whose
@@ -219,10 +221,12 @@ The automation preserves a strict producer/consumer boundary:
 1. root build-system and FlashShell checks run independently;
 2. the active package, TUI, login-shell, and audio policy is checked without
    building an image;
-3. a FlashOS-owned Docker environment performs the clean-room x86_64 build;
-4. the resulting disk and checksum are uploaded as one immutable workflow
+3. a FlashOS-owned Docker environment performs the clean-room x86_64 disk and
+   live-image build;
+4. both images and their checksums are uploaded as one immutable workflow
    artefact;
-5. a separate runner downloads those exact bytes and boots them in QEMU;
+5. a separate runner downloads those exact bytes and boots the disk over NVMe
+   and the live image over USB;
 6. the smoke test verifies FlashOS branding, the TUI login, FlashShell,
    an external pipeline, and the IHDA audio driver;
 7. scheduled security automation evaluates advisories, licenses, dependency
@@ -240,7 +244,8 @@ contract commands.
 Generated output is ignored by Git. The main paths are:
 
 ```text
-build/x86_64/flashos/harddrive.img     bootable development disk image
+build/x86_64/flashos/harddrive.img     QEMU or installed-disk image
+build/x86_64/flashos/redox-live.iso    self-contained USB live image
 build/x86_64/flashos/filesystem/       assembled filesystem when mounted
 build/x86_64/flashos/repo.tag          package-repository completion marker
 prefix/x86_64-unknown-redox/           target toolchain and sysroot

@@ -53,6 +53,8 @@ remains available in the archived `FlashOS-old` repository.
 - Added a FlashOS-owned Docker clean-room build, immutable checksummed image
   promotion, and a separate QEMU consumer that verifies FlashOS identity,
   TUI login, FlashShell pipelines, and the IHDA audio driver.
+- Added a self-contained live image for removable USB media and qualified its
+  exact promoted bytes through an emulated USB mass-storage boot.
 - Added scheduled dependency policy, Dependabot, tag-driven release
   packaging, CycloneDX SBOM generation, checksums, and build provenance.
 
@@ -79,6 +81,9 @@ remains available in the archived `FlashOS-old` repository.
   delivery.
 - Updated artifact downloads and pull-request dependency review to their
   Node 24 action runtimes.
+- Kept the installed-disk and removable-media contracts distinct:
+  `harddrive.img` is qualified over NVMe, while `redox-live.iso` is qualified
+  over USB and included in release checksums and provenance.
 
 ### Verified
 

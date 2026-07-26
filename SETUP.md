@@ -111,11 +111,22 @@ make CONFIG_NAME=flashos all
 The first build may download or build the compiler prefix, packages, installer,
 and filesystem tools. Later builds reuse their caches.
 
-The output image is:
+The development-disk output is:
 
 ```text
 build/x86_64/flashos/harddrive.img
 ```
+
+For removable USB media, build the self-contained live image:
+
+```sh
+make CONFIG_NAME=flashos build/x86_64/flashos/redox-live.iso
+```
+
+Its output is `build/x86_64/flashos/redox-live.iso`. Do not substitute
+`harddrive.img` for USB boot: the installed-disk image expects its RedoxFS
+root device to remain available after kernel startup, while USB mass storage
+is not an early-root path.
 
 Inspect the selected build environment without building:
 
@@ -205,7 +216,17 @@ After building the image, run the same runtime contract used by CI:
 ```sh
 python3 ci/qemu_smoke.py \
   --image build/x86_64/flashos/harddrive.img \
+  --disk-interface nvme \
   --log build/x86_64/flashos/qemu-smoke.log
+```
+
+Qualify the live image through an emulated USB mass-storage device:
+
+```sh
+python3 ci/qemu_smoke.py \
+  --image build/x86_64/flashos/redox-live.iso \
+  --disk-interface usb \
+  --log build/x86_64/flashos/qemu-live-usb.log
 ```
 
 The automation uses a null host audio backend but keeps an HDA controller in
@@ -224,9 +245,10 @@ Before any physical write:
 2. identify the exact target device read-only by model, capacity, and mounts;
 3. unmount the correct device without guessing its name;
 4. obtain explicit approval for the exact write target;
-5. write and verify the image.
+5. write and verify `redox-live.iso` for removable USB qualification.
 
-The physical test starts only after the migration is final.
+`harddrive.img` remains the QEMU or installed-disk artefact. The physical
+removable-media test starts only after both QEMU paths are green.
 
 ## 9. Troubleshooting
 

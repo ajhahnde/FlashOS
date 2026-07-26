@@ -159,12 +159,30 @@ release_workflow = (ROOT / ".github/workflows/release.yml").read_text()
 for expected in (
     'expected="v${FLASHOS_RELEASE_VERSION}"',
     "FlashOS-${VERSION}-x86_64-harddrive.img.zst",
+    "FlashOS-${VERSION}-x86_64-live.iso.zst",
     "FlashOS-${{ steps.version.outputs.version }}.cdx.json",
     "SYFT_SOURCE_NAME: FlashOS",
     "SYFT_SOURCE_VERSION: ${{ steps.version.outputs.version }}",
 ):
     if expected not in release_workflow:
         fail(f"release workflow contract is missing: {expected}")
+
+image_workflow = (ROOT / ".github/workflows/_image.yml").read_text()
+for expected in (
+    "build/x86_64/flashos/harddrive.img",
+    "build/x86_64/flashos/redox-live.iso",
+    "FlashOS-x86_64-harddrive.img",
+    "FlashOS-x86_64-live.iso",
+    "--disk-interface nvme",
+    "--disk-interface usb",
+):
+    if expected not in image_workflow:
+        fail(f"image workflow contract is missing: {expected}")
+
+qemu_smoke = (ROOT / "ci/qemu_smoke.py").read_text()
+for expected in ('choices=("nvme", "usb")', "snapshot=on"):
+    if expected not in qemu_smoke:
+        fail(f"QEMU immutability/bus contract is missing: {expected}")
 
 uses_pattern = re.compile(r"^\s*(?:-\s+)?uses:\s+([^\s#]+)")
 for workflow_path in sorted((ROOT / ".github/workflows").glob("*.yml")):
