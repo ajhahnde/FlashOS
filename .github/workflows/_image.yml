@@ -108,7 +108,7 @@ jobs:
           # authoritative inventory is the recipe set that produced them, and
           # every shipped recipe now carries a pinned revision.
           python3 - <<'BIND'
-          import hashlib, json, pathlib, tomllib
+          import hashlib, json, pathlib, re, tomllib
 
           image_dir = pathlib.Path("dist/image")
           sbom_path = image_dir / "FlashOS-x86_64-image.cdx.json"
@@ -142,6 +142,20 @@ jobs:
                   entry["externalReferences"] = [
                       {"type": "vcs", "url": source["git"]}
                   ]
+              elif "tar" in source:
+                  # A release tarball, identified by its content hash rather
+                  # than a revision.
+                  checksum = source.get("blake3")
+                  match = re.search(r"-([0-9][^/]*?)\.tar", source["tar"])
+                  entry["version"] = (
+                      match.group(1) if match else (checksum or "unpinned")
+                  )
+                  entry["purl"] = f"pkg:generic/{payload.name}@{entry['version']}"
+                  entry["externalReferences"] = [
+                      {"type": "distribution", "url": source["tar"]}
+                  ]
+                  if checksum:
+                      entry["hashes"] = [{"alg": "BLAKE3", "content": checksum}]
               else:
                   # No upstream source of its own: the recipe copies artifacts
                   # out of the cross-toolchain sysroot the gcc recipe built.
