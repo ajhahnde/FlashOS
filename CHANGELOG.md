@@ -54,6 +54,15 @@ remains available in the archived `FlashOS-old` repository.
   set no longer offers a graphical stack, matching the TUI-only product scope.
   The corresponding entries were also dropped from the static-clean target, the
   native bootstrap package list, and the Nix development shell.
+- Removed an unreferenced maintenance script that checked package coverage
+  against an image configuration that no longer exists.
+- Removed the inherited work-in-progress recipe collection and the packages
+  that depended on it, transitively: the X11 and desktop client libraries, the
+  text and font shaping stack built on them, and the development, scripting,
+  and test-suite convenience groups. The recipe set is now 226 packages
+  covering the kernel, core system, terminal userspace, and their libraries.
+- Removed an unreferenced toolchain package manifest that no build step read
+  and that listed packages without recipes.
 
 ## [0.1.0] - 2026-07-26
 

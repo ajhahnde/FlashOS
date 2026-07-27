@@ -1,9 +1,0 @@
-#TODO port libpcap
-[source]
-git = "https://github.com/domcyrus/rustnet"
-shallow_clone = true
-[build]
-template = "cargo"
-dependencies = [
-    "libpcap",
-]

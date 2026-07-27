@@ -863,7 +863,7 @@ redox()
     echo "Installing necessary build tools..."
     
     # Core development packages that are available on x86_64 Redox
-    # This list is based on list of "cookbook" and "dev-essential" recipe
+    # These are host build tools; they are not part of the image package set.
     packages="autoconf \
     automake \
     cbindgen \
