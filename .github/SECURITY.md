@@ -30,8 +30,11 @@ current image profile, not vulnerabilities to report:
   remote.
 
 Releases are built from a profile that locks the root account, so root cannot
-be logged into directly. Removing the passwordless `user` account requires
-first-boot credential provisioning, which does not exist yet.
+be logged into directly. The passwordless `user` account is intentional while
+FlashOS is evaluation software: an image you boot from a USB stick to try the
+system should not stand between you and a prompt. It will be replaced by a
+credential set at first boot before FlashOS is presented as production
+software.
 
 The v0.1.0 release predates the release profile. Its images additionally
 contain a root account with a well-known password. Treat any published image
