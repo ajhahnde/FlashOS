@@ -4,15 +4,15 @@
 **/my_*
 __pycache__/
 *.py[cod]
-# Local settings folder for Jetbrains products (RustRover, IntelliJ, CLion)
-.idea/
-# Local settings folder for Visual Studio Professional
-.vs/
-# Local settings folder for vscode
-.vscode/
-# Local settings folder for the devcontainer extension that most IDEs support.
-.devcontainer/
-# Cookbook
+# Finder metadata created on macOS build hosts
+.DS_Store
+# Neovim swap, backup, session, and tag files
+*.sw[a-p]
+*~
+Session.vim
+.netrwhist
+/tags
+# Generated package repository and per-recipe build output
 /repo
 /web
 /cookbook.toml

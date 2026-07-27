@@ -97,7 +97,6 @@ include mk/disk.mk
 
 # Emulation recipes
 include mk/qemu.mk
-include mk/virtualbox.mk
 
 env: prefix FORCE $(CONTAINER_TAG)
 ifeq ($(PODMAN_BUILD),1)

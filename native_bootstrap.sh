@@ -1047,7 +1047,7 @@ boot()
         echo "kldload fuse.ko # This loads the kernel module for FUSE"
     fi
     echo "$MAKE all"
-    echo "$MAKE virtualbox or qemu"
+    echo "$MAKE qemu"
     echo
     echo "      Good luck!"
 

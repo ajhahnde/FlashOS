@@ -35,6 +35,10 @@ remains available in the archived `FlashOS-old` repository.
   TUI-only product image instead of a graphical desktop image. The same default
   now applies to `build.sh` and to the `changelog`, `find-recipe`, and `ventoy`
   helper scripts.
+- Declared the license and repository of the build-support crate and dropped
+  its inherited author field, matching the FlashShell workspace metadata.
+- Corrected two build-support paths that pointed at directories the recipe
+  tree no longer uses.
 
 ### Removed
 
@@ -63,6 +67,12 @@ remains available in the archived `FlashOS-old` repository.
   covering the kernel, core system, terminal userspace, and their libraries.
 - Removed an unreferenced toolchain package manifest that no build step read
   and that listed packages without recipes.
+- Removed the inherited windowing system and its clients, together with the
+  graphical toolkits, font, icon, and wallpaper data packages, and the
+  two-dimensional rendering libraries that only served them. The recipe set is
+  now 192 packages and contains no windowing stack.
+- Removed the unreferenced VirtualBox emulator target. QEMU is the supported
+  emulation path.
 
 ## [0.1.0] - 2026-07-26
 

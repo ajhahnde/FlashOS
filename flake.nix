@@ -179,10 +179,7 @@
 
                 buildInputs = with pkgs; [
                   rust-bin
-                  fuse # fuser
-                  fontconfig # orbutils
-                  xorg.utilmacros # libX11
-                  xorg.xtrans # libX11
+                  fuse # redoxfs mounting
                 ];
 
                 LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
