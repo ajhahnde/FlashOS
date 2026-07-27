@@ -38,7 +38,7 @@ blake3 = "1"
 globset = "0.4"
 libc = "0.2"
 ignore = "0.4"
-object = { version = "0.38", features = ["build_core"] }
+object = { version = "0.39", features = ["build_core"] }
 # The transitional Git sources are pinned to the revisions Cargo.lock already
 # resolves. A floating branch would let the same tag build a different toolchain.
 pkgar = { git = "https://gitlab.redox-os.org/redox-os/pkgar.git", rev = "ee2bcb2af97eba496ebd8eaf44f5acbed452c4ec" }
