@@ -66,7 +66,9 @@ jobs:
       - name: Collect the staged image payload
         run: |
           set -euo pipefail
-          mkdir -p dist/payload
+          # dist/image must exist before the SBOM step, which writes into it
+          # one step earlier than the images are staged there.
+          mkdir -p dist/payload dist/image
           found=0
           while IFS= read -r stage; do
             recipe="$(basename "$(dirname "$(dirname "$(dirname "${stage}")")")")"
