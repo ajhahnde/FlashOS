@@ -47,6 +47,13 @@ remains available in the archived `FlashOS-old` repository.
 - Removed the unreferenced upstream build-server image, packaging, and
   toolchain targets, which built configurations that no longer exist and named
   their artefacts after the upstream project.
+- Removed the inherited graphical client library and every package recipe that
+  depends on it, transitively: the SDL 1 and SDL 2 families, the OpenGL and
+  multimedia libraries built on them, the demo, game, emulator, and web-browser
+  packages, and the desktop, X11, and Xfce package groups. The remaining recipe
+  set no longer offers a graphical stack, matching the TUI-only product scope.
+  The corresponding entries were also dropped from the static-clean target, the
+  native bootstrap package list, and the Nix development shell.
 
 ## [0.1.0] - 2026-07-26
 

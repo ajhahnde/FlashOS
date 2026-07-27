@@ -180,9 +180,7 @@
                 buildInputs = with pkgs; [
                   rust-bin
                   fuse # fuser
-                  libpng # netsurf
                   fontconfig # orbutils
-                  SDL # prboom
                   xorg.utilmacros # libX11
                   xorg.xtrans # libX11
                 ];

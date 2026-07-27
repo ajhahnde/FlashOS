@@ -883,8 +883,6 @@ redox()
     pkg-config \
     python312 \
     rust \
-    sdl1 \
-    sdl2-ttf \
     vim \
     wget"
 
