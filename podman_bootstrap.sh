@@ -88,7 +88,7 @@ osx()
 ###############################################################################
 # This function takes care of installing all dependencies using MacPorts
 # for building Redox on macOS
-# @params:    $1 the emulator to install, "virtualbox" or "qemu"
+# @params:    $1 the emulator to install, "qemu"
 ###############################################################################
 osx_macports()
 {
@@ -105,8 +105,6 @@ osx_macports()
 
     if [ "$1" == "qemu" ]; then
         install_macports_pkg "qemu" "qemu-system-x86_64"
-    elif [ "$1" == "virtualbox" ]; then
-        install_macports_pkg "virtualbox"
     else
         echo "Unknown emulator: $1"
         exit 1
@@ -116,7 +114,7 @@ osx_macports()
 ###############################################################################
 # This function takes care of installing all dependencies using Homebrew
 # for building Redox on macOS
-# @params:    $1 the emulator to install, "virtualbox" or "qemu"
+# @params:    $1 the emulator to install, "qemu"
 ###############################################################################
 osx_homebrew()
 {
@@ -133,8 +131,6 @@ osx_homebrew()
 
     if [ "$1" == "qemu" ]; then
         install_brew_pkg "qemu" "qemu-system-x86_64"
-    elif [ "$1" == "virtualbox" ]; then
-        install_brew_pkg "virtualbox"
     else
         echo "Unknown emulator: $1"
         exit 1
@@ -144,7 +140,7 @@ osx_homebrew()
 ###############################################################################
 # This function takes care of installing all dependencies using pkg
 # for building Redox on FreeBSD
-# @params:    $1 the emulator to install, "virtualbox" or "qemu"
+# @params:    $1 the emulator to install, "qemu"
 ###############################################################################
 freebsd()
 {
@@ -160,8 +156,6 @@ freebsd()
 
     if [ "$1" == "qemu" ]; then
         install_freebsd_pkg "qemu" "qemu-system-x86_64"
-    elif [ "$1" == "virtualbox" ]; then
-        install_freebsd_pkg "virtualbox"
     else
         echo "Unknown emulator: $1"
         exit 1
@@ -173,7 +167,7 @@ freebsd()
 ###############################################################################
 # This function takes care of installing all dependencies for building Redox on
 # Arch Linux
-# @params:	$1 the emulator to install, "virtualbox" or "qemu"
+# @params:	$1 the emulator to install, "qemu"
 ###############################################################################
 archLinux()
 {
@@ -181,8 +175,6 @@ archLinux()
     packages="git make curl fuse3 fuse-overlayfs slirp4netns podman gdb"
     if [ "$1" == "qemu" ]; then
         packages="$packages qemu-desktop qemu-system-arm qemu-system-riscv"
-    elif [ "$1" == "virtualbox" ]; then
-        packages="$packages virtualbox"
     else
         echo "Unknown emulator: $1"
         exit 1
@@ -201,7 +193,7 @@ archLinux()
 ###############################################################################
 # This function takes care of installing all dependencies for building Redox on
 # Debian-based Linux
-# @params:	$1 the emulator to install, "virtualbox" or "qemu"
+# @params:	$1 the emulator to install, "qemu"
 # 		$2 the package manager to use
 ###############################################################################
 ubuntu()
@@ -224,21 +216,6 @@ ubuntu()
         else
             echo "QEMU already installed!"
         fi
-    elif [ "$1" == "virtualbox" ]; then
-        if [ -z "$(which virtualbox)" ]; then
-            if grep '^ID=debian$' /etc/os-release > /dev/null; then
-                echo "Virtualbox is not in the official debian packages"
-                echo "To install virtualbox on debian, see https://wiki.debian.org/VirtualBox"
-                echo "Please install VirtualBox and re-run this script,"
-                echo "or run with -e qemu"
-                exit 1
-            else
-                echo "Installing VirtualBox..."
-                sudo "$2" install virtualbox
-            fi
-        else
-            echo "VirtualBox already installed!"
-        fi
     else
         echo "Unknown emulator: $1"
         exit 1
@@ -248,7 +225,7 @@ ubuntu()
 ###############################################################################
 # This function takes care of installing all dependencies for building Redox on
 # Fedora Linux
-# @params:	$1 the emulator to install, "virtualbox" or "qemu"
+# @params:	$1 the emulator to install, "qemu"
 ###############################################################################
 fedora()
 {
@@ -265,14 +242,6 @@ fedora()
             qemu-system-riscv qemu-kvm edk2-aarch64
         else
             echo "QEMU already installed!"
-        fi
-    elif [ "$1" == "virtualbox" ]; then
-        if [ -z "$(which virtualbox)" ]; then
-            echo "Please install VirtualBox and re-run this script,"
-            echo "or run with -e qemu"
-            exit 1
-        else
-            echo "VirtualBox already installed!"
         fi
     else
         echo "Unknown emulator: $1"
@@ -292,7 +261,7 @@ fedora()
 ###############################################################################
 # This function takes care of installing all dependencies for building Redox on
 # *SUSE Linux
-# @params:	$1 the emulator to install, "virtualbox" or "qemu"
+# @params:	$1 the emulator to install, "qemu"
 ###############################################################################
 suse()
 {
@@ -320,14 +289,6 @@ suse()
             packages+=(qemu-x86 qemu-kvm)
         else
             echo "QEMU already installed!"
-        fi
-    elif [ "$1" == "virtualbox" ]; then
-        if [ -z "$(which virtualbox)" ]; then
-            echo "Please install VirtualBox and re-run this script,"
-            echo "or run with -e qemu"
-            exit 1
-        else
-            echo "VirtualBox already installed!"
         fi
     else
         echo "Unknown emulator: $1"
@@ -388,7 +349,7 @@ suse()
 ###############################################################################
 # This function takes care of installing all dependencies for building Redox on
 # Gentoo Linux
-# @params:	$1 the emulator to install, "virtualbox" or "qemu"
+# @params:	$1 the emulator to install, "qemu"
 ###############################################################################
 gentoo()
 {
@@ -411,14 +372,6 @@ gentoo()
         else
             echo "QEMU already installed!"
         fi
-    elif [ "$1" == "virtualbox" ]; then
-        if [ -z "$(which virtualbox)" ]; then
-            echo "Please install VirtualBox and re-run this script,"
-            echo "or run with -e qemu"
-            exit 1
-        else
-            echo "VirtualBox already installed!"
-        fi
     else
         echo "Unknown emulator: $1"
         exit 1
@@ -437,7 +390,7 @@ gentoo()
 ###############################################################################
 # This function takes care of installing all dependencies for building Redox on
 # Solus
-# @params:	$1 the emulator to install, "virtualbox" or "qemu"
+# @params:	$1 the emulator to install, "qemu"
 ###############################################################################
 solus()
 {
@@ -448,14 +401,6 @@ solus()
             sudo eopkg it qemu
         else
             echo "QEMU already installed!"
-        fi
-    elif [ "$1" == "virtualbox" ]; then
-        if [ -z "$(which virtualbox)" ]; then
-            echo "Please install VirtualBox and re-run this script,"
-            echo "or run with -e qemu"
-            exit 1
-        else
-            echo "VirtualBox already installed!"
         fi
     else
         echo "Unknown emulator: $1"
@@ -486,7 +431,7 @@ usage()
     echo "   -h,--help      Show this prompt"
     echo "   -u [branch]    Update git repo and update rust"
     echo "                  If blank defaults to master"
-    echo "   -e [emulator]  Install specific emulator, virtualbox or qemu"
+    echo "   -e [emulator]  Install specific emulator, qemu"
     echo "   -p [package    Choose an Ubuntu package manager, apt-fast or"
     echo "       manager]   aptitude"
     echo "   -d             Only install the dependencies, skip boot step"

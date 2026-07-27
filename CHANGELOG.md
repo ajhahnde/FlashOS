@@ -73,6 +73,9 @@ remains available in the archived `FlashOS-old` repository.
   now 192 packages and contains no windowing stack.
 - Removed the unreferenced VirtualBox emulator target. QEMU is the supported
   emulation path.
+- Removed VirtualBox installation from the native and container bootstrap
+  scripts, which offered to install an emulator the build system can no longer
+  target.
 
 ## [0.1.0] - 2026-07-26
 
