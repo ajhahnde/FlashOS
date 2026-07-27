@@ -30,6 +30,13 @@ remains available in the archived `FlashOS-old` repository.
 
 ### Added
 
+- Added a line editor to the console shell. `fsh` on the image read input in
+  canonical mode, so a session had no in-line editing, no history recall, and no
+  continuation prompt for an incomplete block. The shell now decodes keys
+  itself, holds the terminal in raw mode for the duration of a single read, and
+  redraws one physical row. It is selected only when standard input and standard
+  output are both terminals, so a redirected session still reads plain lines
+  instead of receiving cursor escapes.
 - Added a release image profile that locks the root account, so a published
   image no longer carries a root password. Locking is expressed by a new
   `locked` user option in the image installer and writes an unmatchable hash;
