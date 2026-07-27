@@ -36,6 +36,18 @@ remains available in the archived `FlashOS-old` repository.
   now applies to `build.sh` and to the `changelog`, `find-recipe`, and `ventoy`
   helper scripts.
 
+### Removed
+
+- Removed every inherited image configuration that the product does not build:
+  the desktop, Wayland, X11, server, minimal, development, and test profiles,
+  the inherited base configuration they were layered on, and the configuration
+  directories for the inactive `aarch64`, `i586`, and `riscv64gc`
+  architectures. `config/` now contains only the FlashOS base configuration and
+  the active `x86_64` product profile.
+- Removed the unreferenced upstream build-server image, packaging, and
+  toolchain targets, which built configurations that no longer exist and named
+  their artefacts after the upstream project.
+
 ## [0.1.0] - 2026-07-26
 
 ### Added

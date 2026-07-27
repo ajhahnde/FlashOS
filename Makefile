@@ -99,9 +99,6 @@ include mk/disk.mk
 include mk/qemu.mk
 include mk/virtualbox.mk
 
-# CI
-include mk/ci.mk
-
 env: prefix FORCE $(CONTAINER_TAG)
 ifeq ($(PODMAN_BUILD),1)
 	$(PODMAN_RUN) make $@

@@ -1,9 +1,9 @@
 # Shared foundation for FlashOS images.
 #
-# This intentionally does not inherit config/base.toml: that upstream profile
-# carries Orbital permissions and legacy /ui compatibility paths. FlashOS is
-# TUI-only, while framebuffer display, input, audio, and networking remain in
-# scope.
+# This is a standalone root configuration with no inherited parent. The former
+# upstream base profile carried Orbital permissions and legacy /ui compatibility
+# paths; FlashOS is TUI-only, while framebuffer display, input, audio, and
+# networking remain in scope.
 
 [general]
 prompt = false
