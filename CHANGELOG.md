@@ -28,7 +28,35 @@ remains available in the archived `FlashOS-old` repository.
 
 ## [Unreleased]
 
+### Added
+
+- Added a release image profile that locks the root account, so a published
+  image no longer carries a root password. Locking is expressed by a new
+  `locked` user option in the image installer and writes an unmatchable hash;
+  `sudo` is unaffected because it authenticates the invoking user before
+  switching to uid 0.
+- Added a security policy covering scope, supported versions, private
+  vulnerability reporting, and the credential weaknesses that published images
+  still carry.
+- Added a second software bill of materials describing the operating-system
+  image itself. Releases now publish a source document and an image document,
+  each named for what it covers, with the image document bound to the SHA-256
+  digests of the artifacts it describes.
+- Added product-contract rules covering release credentials, parity between the
+  development and release profiles, and immutable revisions for every recipe
+  that reaches the image.
+- Added a lint gate for the release-critical Python in `ci/`.
+
 ### Changed
+
+- Pinned every input the image is built from: the container base image by
+  digest, the Rust toolchain and its installer by version and checksum, the
+  build-system Git dependencies by revision, every package recipe that reaches
+  the image by revision, and the host installer that writes the image. The same
+  commit previously resolved to whatever the upstream default branches happened
+  to be at build time, including the kernel and the shell.
+- Corrected the build-support crate license to `MIT`, matching the root license
+  file and the upstream origin of every file under `src/`.
 
 - Changed the default build configuration from the inherited `desktop` profile
   to `flashos`, so an invocation without an explicit `CONFIG_NAME` builds the

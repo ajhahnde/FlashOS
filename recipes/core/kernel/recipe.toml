@@ -1,5 +1,6 @@
 [source]
 git = "https://gitlab.redox-os.org/redox-os/kernel.git"
+rev = "6230748accab004cc7359e5781b3f1f281e256d5"
 patches = [
     "flashos-branding.patch",
 ]

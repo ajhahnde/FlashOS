@@ -1,0 +1,31 @@
+diff --git a/src/config/user.rs b/src/config/user.rs
+--- a/src/config/user.rs
++++ b/src/config/user.rs
+@@ -5,0 +6,2 @@ pub struct UserConfig {
++    /// Write an unmatchable hash so this account cannot be logged into.
++    pub locked: Option<bool>,
+@@ -38,0 +41,3 @@ impl Display for UserConfig {
++        }
++        if self.locked.unwrap_or(false) {
++            write!(f, " locked=yes")?;
+diff --git a/src/installer.rs b/src/installer.rs
+--- a/src/installer.rs
++++ b/src/installer.rs
+@@ -163 +163,4 @@ pub fn install_dir(
+-        let password = if let Some(password) = user.password {
++        let locked = user.locked.unwrap_or(false);
++        let password = if locked {
++            String::new()
++        } else if let Some(password) = user.password {
+@@ -192 +195,3 @@ pub fn install_dir(
+-        if password.is_empty() {
++        if locked {
++            println!("\tPassword: locked");
++        } else if password.is_empty() {
+@@ -211 +216,5 @@ pub fn install_dir(
+-        let password = hash_password(&password)?;
++        let password = if locked {
++            "!".to_string()
++        } else {
++            hash_password(&password)?
++        };

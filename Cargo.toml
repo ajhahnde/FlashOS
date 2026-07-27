@@ -2,7 +2,10 @@
 name = "flashos_build"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
+# This crate is the inherited build system. Every file under `src/` originates
+# upstream, so the package license matches the root LICENSE file rather than the
+# Apache-2.0 license that covers FlashOS-original code such as FlashShell.
+license = "MIT"
 repository = "https://github.com/ajhahnde/FlashOS"
 default-run = "repo"
 
@@ -36,12 +39,14 @@ globset = "0.4"
 libc = "0.2"
 ignore = "0.4"
 object = { version = "0.38", features = ["build_core"] }
-pkgar = { git = "https://gitlab.redox-os.org/redox-os/pkgar.git" }
-pkgar-core = { git = "https://gitlab.redox-os.org/redox-os/pkgar.git" }
-pkgar-keys = { git = "https://gitlab.redox-os.org/redox-os/pkgar.git" }
-redox-pkg = { git = "https://gitlab.redox-os.org/redox-os/pkgutils.git", default-features = false }
-redox_installer = { git = "https://gitlab.redox-os.org/redox-os/installer.git", default-features = false }
-redoxer = { git = "https://gitlab.redox-os.org/redox-os/redoxer.git", default-features = false }
+# The transitional Git sources are pinned to the revisions Cargo.lock already
+# resolves. A floating branch would let the same tag build a different toolchain.
+pkgar = { git = "https://gitlab.redox-os.org/redox-os/pkgar.git", rev = "ee2bcb2af97eba496ebd8eaf44f5acbed452c4ec" }
+pkgar-core = { git = "https://gitlab.redox-os.org/redox-os/pkgar.git", rev = "ee2bcb2af97eba496ebd8eaf44f5acbed452c4ec" }
+pkgar-keys = { git = "https://gitlab.redox-os.org/redox-os/pkgar.git", rev = "ee2bcb2af97eba496ebd8eaf44f5acbed452c4ec" }
+redox-pkg = { git = "https://gitlab.redox-os.org/redox-os/pkgutils.git", rev = "1250a77bf160a79492cf1943b3b2533b39ebba73", default-features = false }
+redox_installer = { git = "https://gitlab.redox-os.org/redox-os/installer.git", rev = "1c2534e44c68ace0a21db2a1bc9503945a38c809", default-features = false }
+redoxer = { git = "https://gitlab.redox-os.org/redox-os/redoxer.git", rev = "ad2c0790906057323473074ba381524d973332ee", default-features = false }
 regex = "1.11"
 serde = { version = "1", features = ["derive"] }
 termion = "4"

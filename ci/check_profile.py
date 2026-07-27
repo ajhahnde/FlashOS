@@ -8,10 +8,24 @@ import sys
 import tomllib
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE_PATH = ROOT / "config/x86_64/flashos.toml"
+RELEASE_PROFILE_PATH = ROOT / "config/x86_64/flashos-release.toml"
 BASE_PATH = ROOT / "config/flashos-base.toml"
+
+# Passwords that must never reach a published image. An empty password is
+# handled separately: it is still permitted for the unprivileged account until
+# first-boot credential provisioning exists, and is documented in SECURITY.md.
+WELL_KNOWN_PASSWORDS = {
+    "123456",
+    "admin",
+    "flashos",
+    "password",
+    "redox",
+    "root",
+    "toor",
+    "user",
+}
 
 EXPECTED_PACKAGES = {
     "base",
@@ -58,6 +72,7 @@ def release_version() -> str:
 
 
 profile = load(PROFILE_PATH)
+release_profile = load(RELEASE_PROFILE_PATH)
 base = load(BASE_PATH)
 version = release_version()
 root_manifest = load(ROOT / "Cargo.toml")
@@ -92,6 +107,31 @@ for account in ("root", "user"):
     shell = profile.get("users", {}).get(account, {}).get("shell")
     if shell != "/usr/bin/fsh":
         fail(f"{account} shell is {shell!r}, expected /usr/bin/fsh")
+
+# The release profile must differ from the development profile in credentials
+# and in nothing else. Anything else diverging is drift, not policy.
+for section in ("general", "packages", "files"):
+    if profile.get(section) != release_profile.get(section):
+        fail(f"release profile drifted from the development profile: [{section}]")
+
+release_users = release_profile.get("users", {})
+if set(release_users) != set(profile.get("users", {})):
+    fail("release profile defines a different account set")
+
+# Root must be unreachable in a published image. A locked account carries an
+# unmatchable hash, so no password verifies against it; sudo is unaffected
+# because it authenticates the invoking user before switching to uid 0.
+if release_users.get("root", {}).get("locked") is not True:
+    fail("the release profile must lock the root account")
+if "password" in release_users.get("root", {}):
+    fail("a locked account must not also carry a password")
+
+for account, settings in sorted(release_users.items()):
+    password = settings.get("password")
+    if password is None:
+        continue
+    if password.lower() in WELL_KNOWN_PASSWORDS:
+        fail(f"release account {account} uses a well-known password")
 
 login_file = next(
     (
@@ -160,8 +200,14 @@ for expected in (
     'expected="v${FLASHOS_RELEASE_VERSION}"',
     "FlashOS-${VERSION}-x86_64-harddrive.img.zst",
     "FlashOS-${VERSION}-x86_64-live.iso.zst",
-    "FlashOS-${{ steps.version.outputs.version }}.cdx.json",
-    "SYFT_SOURCE_NAME: FlashOS",
+    # A release must never be built from the profile that carries the
+    # development logins.
+    "config-name: flashos-release",
+    # Both SBOMs must ship, and each must be named for what it describes. A
+    # single unqualified document previously covered only the source workspace.
+    "FlashOS-${{ steps.version.outputs.version }}-source.cdx.json",
+    "FlashOS-${{ steps.version.outputs.version }}-image.cdx.json",
+    "SYFT_SOURCE_NAME: FlashOS-source",
     "SYFT_SOURCE_VERSION: ${{ steps.version.outputs.version }}",
 ):
     if expected not in release_workflow:
@@ -169,15 +215,41 @@ for expected in (
 
 image_workflow = (ROOT / ".github/workflows/_image.yml").read_text()
 for expected in (
-    "build/x86_64/flashos/harddrive.img",
-    "build/x86_64/flashos/redox-live.iso",
+    "build/x86_64/${CONFIG_NAME}/harddrive.img",
+    "build/x86_64/${CONFIG_NAME}/redox-live.iso",
     "FlashOS-x86_64-harddrive.img",
     "FlashOS-x86_64-live.iso",
+    # The image SBOM is produced beside the image it describes, from the staged
+    # package payload rather than from the repository working tree.
+    "FlashOS-x86_64-image.cdx.json",
+    "dist/payload",
     "--disk-interface nvme",
     "--disk-interface usb",
 ):
     if expected not in image_workflow:
         fail(f"image workflow contract is missing: {expected}")
+
+# Every package that reaches the image is fetched from an upstream Git
+# repository. Without an explicit revision the same FlashOS tag would build
+# whatever that repository's default branch happened to be at the time.
+RECIPE_ROOTS = ("core", "libs", "terminal")
+for package in sorted(packages):
+    recipe_paths = [
+        ROOT / "recipes" / section / package / "recipe.toml"
+        for section in RECIPE_ROOTS
+    ]
+    recipe_path = next((path for path in recipe_paths if path.is_file()), None)
+    if recipe_path is None:
+        continue
+    source = load(recipe_path).get("source")
+    if source is None or "git" not in source:
+        continue
+    revision = source.get("rev")
+    if revision is None or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        fail(
+            "shipped recipe is not pinned to an immutable revision: "
+            f"{recipe_path.relative_to(ROOT)}"
+        )
 
 qemu_smoke = (ROOT / "ci/qemu_smoke.py").read_text()
 for expected in ('choices=("nvme", "usb")', "snapshot=on"):
@@ -206,7 +278,11 @@ required_branding_patches = (
     ROOT / "recipes/core/kernel/flashos-branding.patch",
     ROOT / "recipes/core/userutils/flashos-branding.patch",
 )
-missing_patches = [str(path.relative_to(ROOT)) for path in required_branding_patches if not path.is_file()]
+missing_patches = [
+    str(path.relative_to(ROOT))
+    for path in required_branding_patches
+    if not path.is_file()
+]
 if missing_patches:
     fail(f"branding patches are missing: {missing_patches}")
 

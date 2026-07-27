@@ -11,7 +11,6 @@ import sys
 import time
 from pathlib import Path
 
-
 DEFAULT_OVMF_PATHS = (
     "/usr/share/OVMF/OVMF_CODE.fd",
     "/usr/share/OVMF/OVMF_CODE_4M.fd",

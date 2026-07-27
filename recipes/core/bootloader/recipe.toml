@@ -1,5 +1,6 @@
 [source]
 git = "https://gitlab.redox-os.org/redox-os/bootloader.git"
+rev = "c45facac5b8b9db697a4dd8ff786259b2b6de20d"
 patches = [
     "flashos-branding.patch",
 ]

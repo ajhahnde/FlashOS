@@ -1,5 +1,6 @@
 [source]
 git = "https://gitlab.redox-os.org/redox-os/netutils.git"
+rev = "ffea9718d42533c63af777ae9337e26d9a47301e"
 
 [build]
 template = "cargo"

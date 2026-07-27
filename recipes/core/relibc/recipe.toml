@@ -1,5 +1,6 @@
 [source]
 git = "https://gitlab.redox-os.org/redox-os/relibc.git"
+rev = "5f6afb52692e62dae79154f4dbec2d0e79a07602"
 
 [build]
 template = "custom"

@@ -24,6 +24,7 @@ jobs:
     with:
       artifact-name: flashos-x86_64-release-${{ github.sha }}
       retention-days: 14
+      config-name: flashos-release
     permissions:
       contents: read
 
@@ -86,16 +87,27 @@ jobs:
             dist/input/FlashOS-x86_64-live.iso \
             -o "dist/release/FlashOS-${VERSION}-x86_64-live.iso.zst"
 
-      - name: Generate a CycloneDX SBOM
+      # Two SBOMs, named for what they actually describe. The source document
+      # covers this repository and its Cargo graph; the image document is the
+      # one produced next to the qualified image and covers what ships.
+      - name: Generate the source SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         env:
-          SYFT_SOURCE_NAME: FlashOS
+          SYFT_SOURCE_NAME: FlashOS-source
           SYFT_SOURCE_VERSION: ${{ steps.version.outputs.version }}
         with:
           path: .
           format: cyclonedx-json
-          output-file: dist/release/FlashOS-${{ steps.version.outputs.version }}.cdx.json
+          output-file: dist/release/FlashOS-${{ steps.version.outputs.version }}-source.cdx.json
           upload-artifact: false
+
+      - name: Promote the qualified image SBOM
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cp dist/input/FlashOS-x86_64-image.cdx.json \
+            "dist/release/FlashOS-${VERSION}-image.cdx.json"
 
       - name: Checksum the release candidate
         env:
@@ -106,7 +118,8 @@ jobs:
           sha256sum \
             "FlashOS-${VERSION}-x86_64-harddrive.img.zst" \
             "FlashOS-${VERSION}-x86_64-live.iso.zst" \
-            "FlashOS-${VERSION}.cdx.json" \
+            "FlashOS-${VERSION}-source.cdx.json" \
+            "FlashOS-${VERSION}-image.cdx.json" \
             > SHA256SUMS
           sha256sum --check SHA256SUMS
 
@@ -116,7 +129,8 @@ jobs:
           subject-path: |
             dist/release/FlashOS-${{ steps.version.outputs.version }}-x86_64-harddrive.img.zst
             dist/release/FlashOS-${{ steps.version.outputs.version }}-x86_64-live.iso.zst
-            dist/release/FlashOS-${{ steps.version.outputs.version }}.cdx.json
+            dist/release/FlashOS-${{ steps.version.outputs.version }}-source.cdx.json
+            dist/release/FlashOS-${{ steps.version.outputs.version }}-image.cdx.json
             dist/release/SHA256SUMS
 
       - name: Upload the release candidate
@@ -163,7 +177,8 @@ jobs:
           assets=(
             "FlashOS-${VERSION}-x86_64-harddrive.img.zst"
             "FlashOS-${VERSION}-x86_64-live.iso.zst"
-            "FlashOS-${VERSION}.cdx.json"
+            "FlashOS-${VERSION}-source.cdx.json"
+            "FlashOS-${VERSION}-image.cdx.json"
             "SHA256SUMS"
           )
           if gh release view "${TAG}" >/dev/null 2>&1; then

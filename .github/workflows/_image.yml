@@ -12,6 +12,13 @@ on:
         required: false
         default: 7
         type: number
+      config-name:
+        description: >-
+          Image profile under config/x86_64. CI qualifies the development
+          profile; a release must build the profile without convenience logins.
+        required: false
+        default: flashos
+        type: string
 
 permissions:
   contents: read
@@ -32,6 +39,8 @@ jobs:
           .
 
       - name: Build the x86_64 disk and live images in the clean container
+        env:
+          CONFIG_NAME: ${{ inputs.config-name }}
         run: |
           set -euo pipefail
           docker run --rm --privileged \
@@ -41,28 +50,94 @@ jobs:
             "flashos-ci:${GITHUB_SHA}" \
             make \
               ARCH=x86_64 \
-              CONFIG_NAME=flashos \
+              "CONFIG_NAME=${CONFIG_NAME}" \
               PODMAN_BUILD=0 \
               SKIP_CHECK_TOOLS=1 \
               REPO_BINARY=1 \
               REPO_NONSTOP=0 \
               FSTOOLS_NO_MOUNT=1 \
-              build/x86_64/flashos/harddrive.img \
-              build/x86_64/flashos/redox-live.iso
+              "build/x86_64/${CONFIG_NAME}/harddrive.img" \
+              "build/x86_64/${CONFIG_NAME}/redox-live.iso"
+
+      # Every package installed into the image is staged under its recipe as
+      # target/<triple>/stage before it is packed. Scanning those trees
+      # describes what the image actually contains, which a scan of the
+      # repository working tree does not.
+      - name: Collect the staged image payload
+        run: |
+          set -euo pipefail
+          mkdir -p dist/payload
+          found=0
+          while IFS= read -r stage; do
+            recipe="$(basename "$(dirname "$(dirname "$(dirname "${stage}")")")")"
+            mkdir -p "dist/payload/${recipe}"
+            cp -a "${stage}/." "dist/payload/${recipe}/"
+            found=$((found + 1))
+          done < <(find recipes -type d -path "*/target/x86_64-unknown-redox/stage")
+          if [ "${found}" -eq 0 ]; then
+            echo "::error::no staged package payload found; the image SBOM would be empty"
+            exit 1
+          fi
+          echo "staged payload collected from ${found} recipes"
+
+      - name: Generate the image SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        env:
+          SYFT_SOURCE_NAME: FlashOS-x86_64-image
+        with:
+          path: dist/payload
+          format: cyclonedx-json
+          output-file: dist/image/FlashOS-x86_64-image.cdx.json
+          upload-artifact: false
 
       - name: Stage the immutable images
+        env:
+          CONFIG_NAME: ${{ inputs.config-name }}
         run: |
           set -euo pipefail
           mkdir -p dist/image
-          cp build/x86_64/flashos/harddrive.img \
+          cp "build/x86_64/${CONFIG_NAME}/harddrive.img" \
             dist/image/FlashOS-x86_64-harddrive.img
-          cp build/x86_64/flashos/redox-live.iso \
+          cp "build/x86_64/${CONFIG_NAME}/redox-live.iso" \
             dist/image/FlashOS-x86_64-live.iso
+          # Bind the SBOM to the exact artifacts it describes, so a consumer can
+          # tell whether an SBOM and an image belong together.
+          python3 - <<'BIND'
+          import hashlib, json, pathlib
+
+          image_dir = pathlib.Path("dist/image")
+          sbom_path = image_dir / "FlashOS-x86_64-image.cdx.json"
+          sbom = json.loads(sbom_path.read_text())
+
+          def digest(name: str) -> dict:
+              data = (image_dir / name).read_bytes()
+              return {
+                  "name": name,
+                  "hashes": [{"alg": "SHA-256", "content": hashlib.sha256(data).hexdigest()}],
+              }
+
+          metadata = sbom.setdefault("metadata", {})
+          component = metadata.setdefault("component", {})
+          component["type"] = "operating-system"
+          component["name"] = "FlashOS"
+          properties = component.setdefault("properties", [])
+          for artifact in ("FlashOS-x86_64-harddrive.img", "FlashOS-x86_64-live.iso"):
+              entry = digest(artifact)
+              properties.append(
+                  {
+                      "name": f"flashos:artifact:{entry['name']}:sha256",
+                      "value": entry["hashes"][0]["content"],
+                  }
+              )
+          sbom_path.write_text(json.dumps(sbom, indent=2))
+          print("bound image SBOM to", len(properties), "artifact digests")
+          BIND
           (
             cd dist/image
             sha256sum \
               FlashOS-x86_64-harddrive.img \
               FlashOS-x86_64-live.iso \
+              FlashOS-x86_64-image.cdx.json \
               > SHA256SUMS
             sha256sum --check SHA256SUMS
           )

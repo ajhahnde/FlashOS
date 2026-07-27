@@ -1,5 +1,6 @@
 [source]
 git = "https://gitlab.redox-os.org/redox-os/extrautils.git"
+rev = "97bf8c6b6eade670e98de18a04a6f1b08ebcaf84"
 
 [build]
 template = "custom"

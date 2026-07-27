@@ -1,0 +1,22 @@
+# Lint policy for the FlashOS-owned Python in ci/. The rule set is stated
+# explicitly so a newer Ruff release cannot silently change what CI enforces.
+# Inherited build-system output under prefix/ and build/ is not FlashOS code.
+
+line-length = 88
+target-version = "py311"
+
+exclude = [
+    "build",
+    "prefix",
+    "components/flashshell/target",
+]
+
+[lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "W",  # pycodestyle warnings
+    "I",  # import ordering
+    "B",  # bugbear
+    "UP", # pyupgrade
+]
