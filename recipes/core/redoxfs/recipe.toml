@@ -1,5 +1,8 @@
 [source]
+# This builds the host tool that writes the image filesystem, so it is pinned
+# for the same reason the installer is.
 git = "https://gitlab.redox-os.org/redox-os/redoxfs.git"
+rev = "99bc185bf8ad8bd6f4d2562c424d800c2a3d310b"
 
 [build]
 template = "custom"

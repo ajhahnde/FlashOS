@@ -102,37 +102,74 @@ jobs:
             dist/image/FlashOS-x86_64-harddrive.img
           cp "build/x86_64/${CONFIG_NAME}/redox-live.iso" \
             dist/image/FlashOS-x86_64-live.iso
-          # Bind the SBOM to the exact artifacts it describes, so a consumer can
-          # tell whether an SBOM and an image belong together.
+          # Bind the SBOM to the artifacts it describes and give it a component
+          # list. Syft finds nothing in the staged payload on its own: these are
+          # bare Redox ELF binaries with no package manifest for it to read. The
+          # authoritative inventory is the recipe set that produced them, and
+          # every shipped recipe now carries a pinned revision.
           python3 - <<'BIND'
-          import hashlib, json, pathlib
+          import hashlib, json, pathlib, tomllib
 
           image_dir = pathlib.Path("dist/image")
           sbom_path = image_dir / "FlashOS-x86_64-image.cdx.json"
           sbom = json.loads(sbom_path.read_text())
 
-          def digest(name: str) -> dict:
-              data = (image_dir / name).read_bytes()
-              return {
-                  "name": name,
-                  "hashes": [{"alg": "SHA-256", "content": hashlib.sha256(data).hexdigest()}],
-              }
+          def digest(name: str) -> str:
+              return hashlib.sha256((image_dir / name).read_bytes()).hexdigest()
 
+          def recipe_for(name: str) -> pathlib.Path | None:
+              matches = sorted(pathlib.Path("recipes").glob(f"*/{name}/recipe.toml"))
+              return matches[0] if matches else None
+
+          components = list(sbom.get("components", []))
+          described = {component.get("name") for component in components}
+          for payload in sorted(pathlib.Path("dist/payload").iterdir()):
+              if not payload.is_dir() or payload.name in described:
+                  continue
+              recipe_path = recipe_for(payload.name)
+              if recipe_path is None:
+                  continue
+              source = tomllib.loads(recipe_path.read_text()).get("source", {})
+              revision = source.get("rev")
+              entry = {
+                  "type": "library",
+                  "name": payload.name,
+                  "purl": f"pkg:generic/{payload.name}"
+                  + (f"@{revision}" if revision else ""),
+              }
+              if "git" in source:
+                  entry["version"] = revision or "unpinned"
+                  entry["externalReferences"] = [
+                      {"type": "vcs", "url": source["git"]}
+                  ]
+              else:
+                  # No upstream source of its own: the recipe copies artifacts
+                  # out of the cross-toolchain sysroot the gcc recipe built.
+                  entry["version"] = "sysroot"
+                  entry["description"] = (
+                      "Copied from the cross-toolchain sysroot; it has no "
+                      "upstream revision of its own."
+                  )
+              components.append(entry)
+
+          if not components:
+              raise SystemExit("image SBOM would ship with no components")
+
+          sbom["components"] = components
           metadata = sbom.setdefault("metadata", {})
           component = metadata.setdefault("component", {})
           component["type"] = "operating-system"
           component["name"] = "FlashOS"
           properties = component.setdefault("properties", [])
           for artifact in ("FlashOS-x86_64-harddrive.img", "FlashOS-x86_64-live.iso"):
-              entry = digest(artifact)
               properties.append(
                   {
-                      "name": f"flashos:artifact:{entry['name']}:sha256",
-                      "value": entry["hashes"][0]["content"],
+                      "name": f"flashos:artifact:{artifact}:sha256",
+                      "value": digest(artifact),
                   }
               )
           sbom_path.write_text(json.dumps(sbom, indent=2))
-          print("bound image SBOM to", len(properties), "artifact digests")
+          print(f"image SBOM describes {len(components)} components")
           BIND
           (
             cd dist/image
