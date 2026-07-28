@@ -226,21 +226,40 @@ jobs:
         working-directory: dist/image
         run: sha256sum --check SHA256SUMS
 
+      # A locked root account is a property of the release profile only, so the
+      # assertion is opt-in. The interactive assertions hold for both profiles
+      # and need no flag. The smoke test's timeout covers boot and every
+      # assertion together, so it allows for the interactive round trips under
+      # emulation as well as the boot itself.
       - name: Boot the exact harddrive image over NVMe
+        env:
+          CONFIG_NAME: ${{ inputs.config-name }}
         run: |
+          smoke_flags=()
+          if [ "$CONFIG_NAME" = "flashos-release" ]; then
+            smoke_flags+=(--expect-root-locked)
+          fi
           python3 ci/qemu_smoke.py \
             --image dist/image/FlashOS-x86_64-harddrive.img \
             --disk-interface nvme \
             --log dist/qemu-harddrive-smoke.log \
-            --timeout 180
+            --timeout 300 \
+            "${smoke_flags[@]}"
 
       - name: Boot the exact live image over USB
+        env:
+          CONFIG_NAME: ${{ inputs.config-name }}
         run: |
+          smoke_flags=()
+          if [ "$CONFIG_NAME" = "flashos-release" ]; then
+            smoke_flags+=(--expect-root-locked)
+          fi
           python3 ci/qemu_smoke.py \
             --image dist/image/FlashOS-x86_64-live.iso \
             --disk-interface usb \
             --log dist/qemu-live-usb-smoke.log \
-            --timeout 180
+            --timeout 300 \
+            "${smoke_flags[@]}"
 
       - name: Upload boot diagnostics on failure
         if: failure()
