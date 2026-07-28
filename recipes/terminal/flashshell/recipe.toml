@@ -3,7 +3,7 @@
 # default branch let the image build a different fsh than the tag it carried.
 # This revision must be bumped as part of preparing a release.
 git = "https://github.com/ajhahnde/FlashOS"
-rev = "80ea2ac276df44ececa05e270ffe4a7f1fd903cf"
+rev = "952dfaee5f429c6997ad4d925e02dc0afb735c13"
 
 [build]
 template = "cargo"
