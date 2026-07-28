@@ -208,6 +208,8 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      CONFIG_NAME: ${{ inputs.config-name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -226,21 +228,42 @@ jobs:
         working-directory: dist/image
         run: sha256sum --check SHA256SUMS
 
+      # A locked root account is a property of the release profile only, so the
+      # assertion is opt-in. Every other assertion holds for both profiles and
+      # needs no flag. An unrecognised profile fails rather than silently
+      # dropping the flag: a security assertion that can be skipped by a typo
+      # is worse than no assertion, because the run still reports success.
       - name: Boot the exact harddrive image over NVMe
         run: |
+          set -euo pipefail
+          smoke_flags=()
+          case "$CONFIG_NAME" in
+            flashos) ;;
+            flashos-release) smoke_flags+=(--expect-root-locked) ;;
+            *) echo "::error::unknown image profile: $CONFIG_NAME"; exit 1 ;;
+          esac
           python3 ci/qemu_smoke.py \
             --image dist/image/FlashOS-x86_64-harddrive.img \
             --disk-interface nvme \
             --log dist/qemu-harddrive-smoke.log \
-            --timeout 180
+            --timeout 180 \
+            "${smoke_flags[@]}"
 
       - name: Boot the exact live image over USB
         run: |
+          set -euo pipefail
+          smoke_flags=()
+          case "$CONFIG_NAME" in
+            flashos) ;;
+            flashos-release) smoke_flags+=(--expect-root-locked) ;;
+            *) echo "::error::unknown image profile: $CONFIG_NAME"; exit 1 ;;
+          esac
           python3 ci/qemu_smoke.py \
             --image dist/image/FlashOS-x86_64-live.iso \
             --disk-interface usb \
             --log dist/qemu-live-usb-smoke.log \
-            --timeout 180
+            --timeout 180 \
+            "${smoke_flags[@]}"
 
       - name: Upload boot diagnostics on failure
         if: failure()
