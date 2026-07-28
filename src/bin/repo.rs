@@ -2120,13 +2120,18 @@ fn handle_inspect_event(event: &Event, app: &mut TuiApp) -> bool {
 
 fn kill_everything() {
     let pid = std::process::id();
-    Command::new("bash")
+    let mut killer = Command::new("bash")
         .arg("-c")
         .arg(KILL_ALL_PID.replace("$PID", &pid.to_string()))
         .stdout(process::Stdio::null())
         .stderr(process::Stdio::null())
         .spawn()
         .expect("unable to spawn kill");
+    // The helper excludes its own pid from the descendants it signals, so it
+    // cannot kill itself and always exits. Reaping it matters because the
+    // interactive stop key can be pressed repeatedly during one cook, and an
+    // unreaped child per press accumulates zombies for the rest of the run.
+    let _ = killer.wait();
 }
 
 fn handle_prompt_input<'a>(
