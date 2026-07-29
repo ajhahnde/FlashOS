@@ -30,6 +30,14 @@ remains available in the archived `FlashOS-old` repository.
 
 ### Added
 
+- Added terminal signal handling to the interactive shell. An interrupt or a
+  stop typed at the keyboard reached the shell and its running command alike, so
+  Ctrl-C ended the whole session instead of the command. An interactive shell
+  that holds a terminal now arranges those signals for the life of the session,
+  every command it starts is given the default handling back before it runs, and
+  a job stopped from the keyboard is resumed in place so it still finishes. A
+  shell reading redirected input arranges nothing and is still interrupted along
+  with the terminal's foreground group.
 - Added a line editor to the console shell. `fsh` on the image read input in
   canonical mode, so a session had no in-line editing, no history recall, and no
   continuation prompt for an incomplete block. The shell now decodes keys
