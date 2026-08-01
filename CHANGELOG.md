@@ -8,8 +8,8 @@
 
 <p>
     <a href="README.md"><b>README</b></a> ·
-    <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
-    <a href="SETUP.md"><b>Setup</b></a> ·
+    <a href="docs/README.md"><b>Documentation</b></a> ·
+    <a href="docs/getting-started.md"><b>Getting Started</b></a> ·
     <a href="ci/README.md"><b>CI/CD</b></a> ·
     <b>Changelog</b> ·
     <a href="LICENSE"><b>License</b></a>

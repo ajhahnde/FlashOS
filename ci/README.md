@@ -8,8 +8,8 @@
 
 <p>
     <a href="../README.md"><b>README</b></a> ·
-    <a href="../DOCUMENTATION.md"><b>Documentation</b></a> ·
-    <a href="../SETUP.md"><b>Setup</b></a> ·
+    <a href="../docs/README.md"><b>Documentation</b></a> ·
+    <a href="../docs/getting-started.md"><b>Getting Started</b></a> ·
     <b>CI/CD</b> ·
     <a href="../CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="../LICENSE"><b>License</b></a>
@@ -65,4 +65,4 @@ can detach startup from removable mass storage before the kernel takes over.
 
 ---
 
-[← Back: Setup](../SETUP.md) · [Next: Changelog →](../CHANGELOG.md)
+[← Back: Getting Started](../docs/getting-started.md) · [Next: Changelog →](../CHANGELOG.md)

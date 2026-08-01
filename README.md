@@ -17,8 +17,8 @@
 
 <p>
     <b>README</b> ·
-    <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
-    <a href="SETUP.md"><b>Setup</b></a> ·
+    <a href="docs/README.md"><b>Documentation</b></a> ·
+    <a href="docs/getting-started.md"><b>Getting Started</b></a> ·
     <a href="ci/README.md"><b>CI/CD</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
     <a href="LICENSE"><b>License</b></a>
@@ -58,7 +58,7 @@ nonprofit.
 
 The QEMU gate covers both harddrive and live USB image paths, including login,
 the `>> ` prompt, and external pipelines. Device-specific validation scope
-and results are maintained in [Hardware Compatibility](HARDWARE.md).
+and results are maintained in [Hardware Compatibility](docs/hardware.md).
 
 ## Architecture
 
@@ -101,7 +101,7 @@ names, not product branding.
 ## Quick start
 
 Install the platform dependencies and create the local build configuration as
-described in [Setup](SETUP.md), then build the FlashOS development disk:
+described in [Getting Started](docs/getting-started.md), then build the FlashOS development disk:
 
 ```sh
 make CONFIG_NAME=flashos all
@@ -148,16 +148,27 @@ docs/upstream/                   retained Redox OS reference documents
 ```
 
 A deeper explanation of the system and build path is in
-[Documentation](DOCUMENTATION.md).
+[Documentation](docs/README.md).
 
-## Project links
+## Documentation and project links
 
-- [Setup](SETUP.md)
-- [CI/CD architecture](ci/README.md)
-- [Hardware compatibility](HARDWARE.md)
-- [Trademark and project identity](TRADEMARK.md)
-- [Upstream attribution](NOTICE)
-- [FlashShell documentation](components/flashshell/README.md)
+- **[General FlashOS documentation](docs/README.md)**
+  - [Getting Started](docs/getting-started.md)
+  - [Architecture](docs/architecture.md)
+  - [Development](docs/development.md)
+  - [Verification](docs/verification.md)
+  - [Hardware Compatibility](docs/hardware.md)
+  - [Roadmap](docs/roadmap.md)
+- **[FlashShell](components/flashshell/README.md)**
+  - [FlashShell Documentation Index](components/flashshell/docs/README.md)
+- **[CI and Verification](ci/README.md)**
+- **Project governance and security**
+  - [Changelog](CHANGELOG.md)
+  - [Security Policy](.github/SECURITY.md)
+- **Legal and attribution**
+  - [License](LICENSE)
+  - [Upstream Attribution (NOTICE)](NOTICE)
+  - [Trademark and Project Identity](TRADEMARK.md)
 
 ## Upstream and license
 
@@ -173,4 +184,4 @@ their own licenses. See [NOTICE](NOTICE) for attribution.
 
 ---
 
-[Next: Documentation →](DOCUMENTATION.md)
+[Next: Documentation →](docs/README.md)

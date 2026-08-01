@@ -10,7 +10,9 @@
 </p>
 
 <p>
-  <b>README</b> ·
+  <a href="../../README.md"><b>FlashOS README</b></a> ·
+  <b>FlashShell README</b> ·
+  <a href="docs/README.md"><b>Documentation</b></a> ·
   <a href="CHANGELOG.md"><b>Changelog</b></a> ·
   <a href="LICENSE"><b>License</b></a>
 </p>
@@ -113,4 +115,14 @@ fuzz/                               lexer/parser fuzz targets (separate workspac
 Dependency direction is strict: `syntax ← runtime ← cli`, with the platform
 adapters behind the platform contract.
 
+## Documentation
+
+Detailed documentation for FlashShell is available under [`docs/`](docs/README.md):
+
+- [Language Guide](docs/language-guide.md) — Syntax rules, values, and typed pipelines.
+- [Scripting and Execution](docs/scripting.md) — Scripts, direct execution, and status handling.
+- [Architecture](docs/architecture.md) — Crate layout and internal boundaries.
+- [Development and Testing](docs/development.md) — Build workflows, test suites, and fuzz targets.
+
 ---
+[← Back to FlashOS Main README](../../README.md) · [Next: FlashShell Documentation →](docs/README.md)
