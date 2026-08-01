@@ -1,29 +1,50 @@
 diff --git a/res/issue b/res/issue
-index 6a963d8..abbb5b8 100644
+index 6a963d8..8865aed 100644
 --- a/res/issue
 +++ b/res/issue
-@@ -1,5 +1,5 @@
+@@ -1,6 +1,18 @@
 -########## Redox OS ##########
 -# Login with the following:  #
 -# `user`                     #
 -# `root`:`password`          #
 -##############################
-+########### FlashOS ###########
-+# Login with the following:   #
-+# `user`                      #
-+# `root`:`password`           #
-+###############################
+- 
++
+++------------------------------------------------------------+
++|                                                            |
++|                          FlashOS                           |
++|                   by github.com/ajhahnde                   |
++|                             -                              |
++|            An unofficial Redox OS distribution             |
++|                                                            |
+++------------------------------------------------------------+
++|                                                            |
++|    Accounts:                                               |
++|                                                            |
++|      Username     Password                                 |
++|      user         user                                     |
++|      root         root                                     |
++|                                                            |
+++------------------------------------------------------------+
++
 diff --git a/res/motd b/res/motd
 index 5cd097a..13cd67a 100644
 --- a/res/motd
 +++ b/res/motd
-@@ -1 +1 @@
+@@ -1,2 +1,2 @@
 -Welcome to Redox OS!
-+Welcome to FlashOS!
++Login successful!
+ 
 diff --git a/src/bin/login.rs b/src/bin/login.rs
 index 83ad72d..c8117e6 100644
 --- a/src/bin/login.rs
 +++ b/src/bin/login.rs
-@@ -138 +138 @@ pub fn main() {
+@@ -135,7 +135,7 @@ pub fn main() {
+     loop {
+         let user = liner::Context::new()
+             .read_line(
 -                liner::Prompt::from("\x1B[1mredox login:\x1B[0m "),
-+                liner::Prompt::from("\x1B[1mflashos login:\x1B[0m "),
++                liner::Prompt::from("\x1B[1musername:\x1B[0m "),
+                 None,
+                 &mut liner::BasicCompleter::new(Vec::<String>::new()),
+             )

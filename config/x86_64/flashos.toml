@@ -13,13 +13,13 @@ coreutils = {}
 extrautils = {}
 
 [users.root]
-password = "password"
+password = "root"
 uid = 0
 gid = 0
 shell = "/usr/bin/fsh"
 
 [users.user]
-password = ""
+password = "user"
 shell = "/usr/bin/fsh"
 
 [[files]]

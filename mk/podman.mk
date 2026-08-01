@@ -30,6 +30,21 @@ endif
 
 ## Podman Home Directory
 PODMAN_HOME=$(ROOT)/build/podman
+
+# Detect whether the invoking shell has a real TTY on stdout.
+# When running non-interactively (CI, scripts, IDE tools) there is no TTY;
+# in that case omit --tty from podman and set CI=1 so that repo cook
+# automatically disables its TUI and uses plain log output instead.
+HAS_TTY := $(shell [ -t 1 ] && echo 1 || echo 0)
+
+ifeq ($(HAS_TTY),1)
+PODMAN_TTY_FLAGS=--interactive --tty
+PODMAN_CI_OVERRIDE=
+else
+PODMAN_TTY_FLAGS=
+PODMAN_CI_OVERRIDE=--env CI=1
+endif
+
 ## Podman command with its many arguments
 PODMAN_VOLUMES=--volume $(ROOT):$(CONTAINER_WORKDIR)$(PODMAN_VOLUME_FLAG) --volume $(PODMAN_HOME):/root$(PODMAN_VOLUME_FLAG)
 PODMAN_ENV=--env PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin --env PODMAN_BUILD=0
@@ -37,8 +52,8 @@ PODMAN_CONFIG=--env ARCH=$(ARCH) --env BOARD=$(BOARD) --env CONFIG_NAME=$(CONFIG
                --env CI=$(CI) --env COOKBOOK_MAKE_JOBS=$(COOKBOOK_MAKE_JOBS) --env COOKBOOK_LOGS=$(COOKBOOK_LOGS) --env COOKBOOK_VERBOSE=$(COOKBOOK_VERBOSE) --env COOKBOOK_COMPRESSED=$(COOKBOOK_COMPRESSED) \
                --env REPO_APPSTREAM=$(REPO_APPSTREAM) --env REPO_BINARY=$(REPO_BINARY) --env REPO_NONSTOP=$(REPO_NONSTOP) --env REPO_OFFLINE=$(REPO_OFFLINE) --env TESTBIN=$(TESTBIN) \
 			   --env HOSTED_REDOX=$(HOSTED_REDOX) --env PREFIX_USE_UPSTREAM_RUST_COMPILER=$(PREFIX_USE_UPSTREAM_RUST_COMPILER)
-PODMAN_OPTIONS=--rm --workdir $(CONTAINER_WORKDIR) --interactive --tty --cap-add SYS_ADMIN --device /dev/fuse --network=host --env TERM=$(TERM) --pids-limit=-1
-PODMAN_RUN=podman run $(PODMAN_OPTIONS) $(PODMAN_VOLUMES) $(PODMAN_ENV) $(PODMAN_CONFIG) $(IMAGE_TAG)
+PODMAN_OPTIONS=--rm --workdir $(CONTAINER_WORKDIR) $(PODMAN_TTY_FLAGS) --cap-add SYS_ADMIN --device /dev/fuse --network=host --env TERM=$(TERM) --pids-limit=-1
+PODMAN_RUN=podman run $(PODMAN_OPTIONS) $(PODMAN_VOLUMES) $(PODMAN_ENV) $(PODMAN_CONFIG) $(PODMAN_CI_OVERRIDE) $(IMAGE_TAG)
 
 container_shell: build/container.tag
 ifeq ($(PODMAN_BUILD),1)
