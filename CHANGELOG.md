@@ -30,6 +30,11 @@ remains available in the archived `FlashOS-old` repository.
 
 ### Added
 
+- Added an optional sourceable Bash and Zsh helper layer for common image build,
+  interactive QEMU, exact-artifact smoke, profile, FlashShell, Podman, and local
+  quality commands. The wrappers keep the x86_64 FlashOS profile and artifact
+  paths consistent without hiding the underlying tools or exposing Git and
+  physical-device writes.
 - Added interactive job control to FlashShell. Ctrl-C now interrupts the running
   command without ending the shell, while Ctrl-Z retains an exact external
   foreground command as an addressable job and returns the prompt. `jobs`

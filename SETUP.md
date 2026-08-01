@@ -89,6 +89,54 @@ REPO_NONSTOP?=1
 `.config` is local and ignored by Git. `REPO_BINARY=1` speeds up the
 transitional package build by using available binary packages.
 
+### Optional shell helpers
+
+The repository includes sourceable Bash and Zsh wrappers for common development
+commands. Add the shared helper to `~/.bashrc` with the path to your clone:
+
+```sh
+[[ -f /path/to/FlashOS/flashos.sh ]] && source /path/to/FlashOS/flashos.sh
+```
+
+For Zsh, source the Zsh entrypoint from `~/.zshrc`:
+
+```zsh
+[[ -f /path/to/FlashOS/flashos.zsh ]] && source /path/to/FlashOS/flashos.zsh
+```
+
+The Zsh entrypoint delegates to the same `flashos.sh` implementation and adds
+native completion. It can also be used by a directory-change auto-source hook.
+
+Start with:
+
+```sh
+flashos help
+flashos doctor
+flashos status
+flashos build disk
+flashos run disk
+flashos check quick
+```
+
+The same command surface covers the rest of the normal development loop:
+
+```sh
+flashos recipe rebuild NAME       # focused recipe iteration
+flashos artifacts hash disk       # inspect the generated output
+flashos logs disk                  # read the latest disk smoke log
+flashos changes stat              # read-only source overview
+flashos qualify disk              # checks, build, and exact-artifact smoke
+```
+
+Use `flashos <command> help` for the available actions and safe defaults.
+Cleanup requires an explicit scope; recipe pushes warn that QEMU must be
+stopped. `flashos list` also shows all directly callable wrapper functions.
+
+`flashos profile release` switches subsequent build, run, and smoke wrappers to
+`flashos-release`; `flashos profile dev` switches back. The helpers remain thin
+wrappers over the documented Make, Cargo, profile, and QEMU commands. They do
+not commit, push, tag, or write a physical device.
+
 Start the Podman virtual machine on macOS:
 
 ```sh
