@@ -155,7 +155,7 @@ def send(data: bytes) -> None:
 # typed text would sit between the prompt and the carriage return. The prompt
 # texts mirror DEFAULT_PRIMARY_PROMPT and DEFAULT_CONTINUATION_PROMPT in the
 # shell's editor module; a change there surfaces here as a timeout.
-EMPTY_PROMPT_ROW = b"\x1b[K>> \r"
+EMPTY_PROMPT_ROW = b"\x1b[Kfsh> \r"
 EMPTY_CONTINUATION_ROW = b"\x1b[K...> \r"
 
 # How long the interactive assertions may take once the image has booted. Kept
@@ -202,11 +202,11 @@ try:
     collect_until(b"password:", login_start)
     send(b"user\r")
     collect_until(b"Login successful!", login_start)
-    collect_until(b">> ", login_start)
+    collect_until(b"fsh> ", login_start)
     shell_start = len(captured)
     send(b"printf 'hallo\\nwelt\\n' | head -n 1\r")
     collect_until(b"hallo", shell_start)
-    collect_until(b">> ", shell_start)
+    collect_until(b"fsh> ", shell_start)
 
     # Boot is done. Re-arm the deadline so the assertions below get their own
     # budget: sharing one with the boot would report a merely slow boot as a
@@ -217,22 +217,22 @@ try:
     # Interactive editing. This is the only place the raw-mode editor is proven
     # on the real image: its selection is compiled for the target only, so no
     # host test can reach it.
-    edit_mark = submit_line(b"echo hallo\x7f\x7fx", b">> echo halx")
+    edit_mark = submit_line(b"echo hallo\x7f\x7fx", b"fsh> echo halx")
     collect_until(b"halx", edit_mark)
 
-    recall_mark = submit_line(b"\x1b[A", b">> echo halx")
+    recall_mark = submit_line(b"\x1b[A", b"fsh> echo halx")
     collect_until(b"halx", recall_mark)
 
     # A block spans three physical lines, so the continuation prompt has to
     # appear between them and the lines have to reach the parser joined. The two
     # mark-scoped continuation waits are what prove the join: an unjoined body
     # line would be a complete statement on its own and would re-prompt with
-    # `>> `. The absence of a diagnostic then proves the joined source was
+    # `fsh> `. The absence of a diagnostic then proves the joined source was
     # accepted rather than merely reassembled. The body is an assignment because
     # a block reaches the pure evaluator, which rejects command execution — and
     # a diagnostic reprints its own source line, so no marker may be a word that
     # was typed.
-    opening_mark = submit_line(b"if true {", b">> if true {")
+    opening_mark = submit_line(b"if true {", b"fsh> if true {")
     collect_until(EMPTY_CONTINUATION_ROW, opening_mark)
     body_mark = submit_line(b"let joined = 1", b"...> let joined = 1")
     collect_until(EMPTY_CONTINUATION_ROW, body_mark)
@@ -248,7 +248,7 @@ try:
     # mode: the terminal's own interrupt handling is switched off for the read.
     cancel_start = len(captured)
     send(b"echo never")
-    collect_until(b">> echo never", cancel_start)
+    collect_until(b"fsh> echo never", cancel_start)
     abandon_mark = len(captured)
     send(b"\x03")
     collect_until(EMPTY_PROMPT_ROW, abandon_mark)
@@ -261,7 +261,7 @@ try:
     # Exit status reaches the || branch. Host tests cover the semantics; this
     # proves the status survives a real process spawn through relibc.
     status_mark = submit_line(
-        b"^false || echo fellback", b">> ^false || echo fellback"
+        b"^false || echo fellback", b"fsh> ^false || echo fellback"
     )
     collect_until(b"fellback", status_mark)
 
@@ -270,20 +270,20 @@ try:
     # failed removal just as readily as a successful one.
     write_mark = submit_line(
         b"echo persisted > /home/user/smoke.txt",
-        b">> echo persisted > /home/user/smoke.txt",
+        b"fsh> echo persisted > /home/user/smoke.txt",
     )
     collect_until(EMPTY_PROMPT_ROW, write_mark)
     read_mark = submit_line(
-        b"cat /home/user/smoke.txt", b">> cat /home/user/smoke.txt"
+        b"cat /home/user/smoke.txt", b"fsh> cat /home/user/smoke.txt"
     )
     collect_until(b"persisted", read_mark)
     remove_mark = submit_line(
-        b"rm /home/user/smoke.txt", b">> rm /home/user/smoke.txt"
+        b"rm /home/user/smoke.txt", b"fsh> rm /home/user/smoke.txt"
     )
     collect_until(EMPTY_PROMPT_ROW, remove_mark)
     gone_mark = submit_line(
         b"cat /home/user/smoke.txt || echo removed",
-        b">> cat /home/user/smoke.txt || echo removed",
+        b"fsh> cat /home/user/smoke.txt || echo removed",
     )
     collect_until(b"removed", gone_mark)
 
@@ -293,13 +293,13 @@ try:
     # non-zero exit status does.
     denied_start = len(captured)
     send(b"echo nope > /etc/smoke.txt")
-    collect_until(b">> echo nope > /etc/smoke.txt", denied_start)
+    collect_until(b"fsh> echo nope > /etc/smoke.txt", denied_start)
     written_mark = len(captured)
     send(b"\r")
     collect_until(EMPTY_PROMPT_ROW, written_mark)
     absent_mark = submit_line(
         b"cat /etc/smoke.txt || echo denied",
-        b">> cat /etc/smoke.txt || echo denied",
+        b"fsh> cat /etc/smoke.txt || echo denied",
     )
     collect_until(b"denied", absent_mark)
 
