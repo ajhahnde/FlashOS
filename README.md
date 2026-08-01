@@ -1,112 +1,158 @@
 # FlashOS
 
-An x86_64 operating system based on the Redox kernel
-
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/flashos_logo_dark.png">
     <img src="assets/flashos_logo_light.png" alt="FlashOS" width="420">
   </picture>
+
+  <p>
+    <strong>An x86_64 operating system based on the Redox kernel, with a text-based user environment and FlashShell as its primary interface.</strong>
+  </p>
+
+  <p>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml">
+      <img src="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml/badge.svg" alt="CI">
+    </a>
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml">
+      <img src="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml/badge.svg" alt="Security">
+    </a>
+    <img src="https://img.shields.io/badge/version-0.1.0-f59e0b?style=flat-square" alt="FlashOS 0.1.0">
+    <img src="https://img.shields.io/badge/status-pre--alpha-f59e0b?style=flat-square" alt="Pre-alpha">
+    <img src="https://img.shields.io/badge/target-x86__64--unknown--redox-lightgrey?style=flat-square" alt="x86_64-unknown-redox">
+  </p>
+
+  <p>
+    <a href="docs/README.md"><strong>Documentation</strong></a> ·
+    <a href="docs/getting-started.md"><strong>Getting Started</strong></a> ·
+    <a href="components/flashshell/README.md"><strong>FlashShell</strong></a> ·
+    <a href="ci/README.md"><strong>CI</strong></a> ·
+    <a href="https://github.com/ajhahnde/FlashOS/releases"><strong>Releases</strong></a> ·
+    <a href=".github/SECURITY.md"><strong>Security</strong></a>
+  </p>
 </div>
 
-[Documentation](docs/README.md) · [Getting Started](docs/getting-started.md) · [CI/CD](ci/README.md) · [Changelog](CHANGELOG.md) · [License](LICENSE)
+> **Project status:** FlashOS is pre-alpha software. Interfaces, package boundaries, image formats, and supported workflows may change without compatibility guarantees. Documentation describes the source tree in which it is located; published releases may differ.
 
-> **Status:** FlashOS is pre-alpha software. Interfaces, package boundaries, and disk formats may change without compatibility guarantees.
+## About FlashOS
 
-## About
+FlashOS is a small, independent operating-system project focused on a keyboard-driven terminal environment. It is not an official Redox OS distribution and is not affiliated with or endorsed by the Redox OS nonprofit.
 
-FlashOS is a small, independent x86_64 operating-system project based on the Redox kernel. It produces a minimal image focused entirely on a keyboard-first terminal user interface (TUI) and uses [FlashShell](components/flashshell/README.md) (`fsh`) as the login shell for both regular and root accounts. FlashOS is a solo project with its own identity, roadmap, decisions, and releases; it is not an official Redox OS distribution and is not affiliated with or endorsed by the Redox OS nonprofit.
+The current system uses the Redox kernel and parts of the Redox ABI, toolchain, userspace, packaging, and image-building infrastructure. These dependencies are documented explicitly and do not imply that every upstream Redox capability is supported or qualified by FlashOS.
 
-## Current status
+[FlashShell](components/flashshell/README.md), whose executable is named `fsh`, is the primary interactive and scripting interface. FlashShell scripts use the `.fsh` file extension.
 
-| Attribute               | Current baseline                                     |
-| ----------------------- | ---------------------------------------------------- |
-| **Version**             | 0.1.0                                                |
-| **Development status**  | Pre-alpha                                            |
-| **Architecture**        | x86_64                                               |
-| **Target ABI**          | `x86_64-unknown-redox`                               |
-| **Primary test system** | QEMU `q35` with UEFI                                 |
-| **Login shell**         | FlashShell at `/usr/bin/fsh`                         |
-| **Image profile**       | TUI-only system without a GUI or desktop environment |
+## Current scope
 
-Device-specific physical hardware validation is maintained separately in [Hardware Compatibility](docs/hardware.md).
+| Area                           | Current project scope                                        |
+| ------------------------------ | ------------------------------------------------------------ |
+| Architecture                   | x86_64                                                       |
+| Target ABI                     | `x86_64-unknown-redox`                                       |
+| User environment               | Text-based interface without a graphical desktop environment |
+| Primary interface              | FlashShell at `/usr/bin/fsh`                                 |
+| Primary evaluation environment | QEMU `q35` with UEFI firmware                                |
+| Project maturity               | Pre-alpha                                                    |
 
-## Project principles
-
-- **TUI-first and TUI-only:** FlashOS concentrates exclusively on a powerful terminal interface without the overhead of graphical desktop stacks.
-- **Independent project identity:** Hostname, console issue, release metadata, image names, and system profiles are strictly owned by FlashOS.
-- **Verifiable system boundaries:** Changes are verified across distinct quality, target compilation, package cooking, image assembly, QEMU runtime, and physical hardware gates.
-- **FlashShell as the primary interface:** The command environment is built around `fsh`, providing safe execution and typed pipelines.
-- **Evidence-driven claims:** No support promises or release schedules are claimed without verifiable testing and code evidence.
-
-## Current capabilities
-
-- Minimal x86_64 image containing FlashShell, `coreutils`, and `extrautils`.
-- FlashShell (`fsh`) established as the default `/usr/bin/fsh` login shell for all sessions.
-- UEFI boot and interactive terminal execution verified in QEMU `q35`.
-- Audio driver support (`IHDA`) retained and qualified during runtime tests.
-- Self-contained live USB image (`redox-live.iso`) alongside standard installed-disk outputs (`harddrive.img`).
-- Fully automated CI/CD pipeline separating host quality gates, containerized clean-room builds, QEMU boot qualification, and SBOM generation.
+Device-specific test results and the limits of current hardware evidence are maintained in [Hardware Compatibility](docs/hardware.md).
 
 ## Quick start
 
-Ensure you have Git, Make, Podman, and QEMU installed as outlined in [Getting Started](docs/getting-started.md). Then, build the default development disk from the repository root:
+Complete the prerequisites and local configuration described in [Getting Started](docs/getting-started.md). From the repository root, build the development image with:
 
-```sh
+```bash
 make CONFIG_NAME=flashos all
 ```
 
-Start the interactive session in QEMU:
+Start the resulting system in QEMU with:
 
-```sh
+```bash
 make CONFIG_NAME=flashos qemu
 ```
 
-For the complete installation guide, live image building, and troubleshooting, consult the [Getting Started Guide](docs/getting-started.md).
+Instructions for live images, local configuration, login details, troubleshooting, and physical media are kept in the [Getting Started Guide](docs/getting-started.md).
 
-## Documentation
+## Documentation tree
 
-The project documentation is organized into focused, specialized guides:
+The following tree shows the canonical navigation paths between the central public Markdown documents. It intentionally excludes implementation-specific READMEs, test-fixture documentation, and individual historical files retained under `docs/upstream/`.
 
-- [General FlashOS documentation](docs/README.md) — System architecture, getting started, local development, verification, hardware compatibility, and public roadmap.
-- [FlashShell](components/flashshell/README.md) — The core command shell, scripting language guide, execution rules, and component architecture.
-- [CI/CD](ci/README.md) — Automated contracts, local runtime smoke verification, clean-room building, and release delivery.
-- [Security](.github/SECURITY.md) — Security policy, supported versions, known evaluation limitations, and vulnerability reporting.
-- [Changelog](CHANGELOG.md) — Chronological release notes and public change history.
-- [Legal and attribution](NOTICE) — Upstream attribution notices, trademark policy, and project licensing.
+- [`README.md`](README.md) — Project overview and main entry point
 
-## Repository overview
+  - [`docs/README.md`](docs/README.md) — General FlashOS documentation index
 
-```text
-config/             FlashOS TUI base configuration and active x86_64 image profile
-components/         In-tree FlashShell Cargo workspace
-recipes/            Package recipes including FlashShell, the kernel boundary, and inherited core utilities
-ci/                 Python verification contracts and QEMU runtime smoke automation
-mk/ and Makefile    Image, package, and emulator build orchestration
-src/                Root build-system support crate
-docs/               General public project documentation
-```
+    - [`docs/getting-started.md`](docs/getting-started.md) — Build, boot, and first-use instructions
+    - [`docs/architecture.md`](docs/architecture.md) — System layers, image configuration, and component boundaries
+    - [`docs/development.md`](docs/development.md) — Repository development workflow
+    - [`docs/verification.md`](docs/verification.md) — Testing and verification model
+    - [`docs/hardware.md`](docs/hardware.md) — Published FlashOS hardware evidence
+    - [`docs/roadmap.md`](docs/roadmap.md) — Public development direction
+    - [`docs/upstream/README.md`](docs/upstream/README.md) — Index of retained upstream reference documents
 
-## Project boundaries and upstream relationship
+  - [`components/flashshell/README.md`](components/flashshell/README.md) — FlashShell overview
 
-FlashOS is an independent project that currently leverages Redox OS infrastructure as a transitional build foundation. While FlashOS currently consumes the Redox kernel, target toolchain, relibc, and packaging utilities during this bootstrap phase, the intended permanent borrowed boundary is the operating-system kernel exclusively.
+    - [`components/flashshell/docs/README.md`](components/flashshell/docs/README.md) — FlashShell documentation index
 
-Compatibility identifiers such as `x86_64-unknown-redox`, `redoxer`, and `relibc` remain unaltered where they denote an active ABI or technical tool contract. The local `upstream` Git remote tracks [`redox-os/redox`](https://github.com/redox-os/redox) for attribution and comparison. FlashOS may modify its kernel independently and may eventually choose to diverge from upstream kernel updates. For historical reference documents, see [Upstream References](docs/upstream/README.md).
+      - [`components/flashshell/docs/language-guide.md`](components/flashshell/docs/language-guide.md) — Language concepts and syntax
+      - [`components/flashshell/docs/scripting.md`](components/flashshell/docs/scripting.md) — Script and process execution
+      - [`components/flashshell/docs/architecture.md`](components/flashshell/docs/architecture.md) — Internal crate and runtime architecture
+      - [`components/flashshell/docs/development.md`](components/flashshell/docs/development.md) — FlashShell development and testing
 
-## Contributing and security
+  - [`ci/README.md`](ci/README.md) — Technical contracts for local and hosted CI
+  - [`CHANGELOG.md`](CHANGELOG.md) — Public change history
+  - [`.github/SECURITY.md`](.github/SECURITY.md) — Security reporting and evaluation limits
+  - [`TRADEMARK.md`](TRADEMARK.md) — Trademark and project identity policy
 
-FlashOS is developed as an independent solo project. Because of its targeted architectural direction and solo maintainer model, we do not maintain open contribution workflows or require a formal contributing guide. If you are evaluating the operating system or reviewing its implementation, please consult our security guidelines and verification model:
+The root-level files [`DOCUMENTATION.md`](DOCUMENTATION.md), [`SETUP.md`](SETUP.md), and [`HARDWARE.md`](HARDWARE.md) are compatibility forwarders for older links. New documentation links should target the canonical files shown in the tree above.
 
-- [Security Policy](.github/SECURITY.md)
-- [Verification and Testing](docs/verification.md)
+## Repository map
+
+| Path                     | Responsibility                                      |
+| ------------------------ | --------------------------------------------------- |
+| `config/`                | FlashOS image profiles and system configuration     |
+| `components/flashshell/` | FlashShell source code and component documentation  |
+| `recipes/`               | Package recipes and transitional system components  |
+| `ci/`                    | Local verification contracts and QEMU smoke testing |
+| `.github/workflows/`     | Hosted CI, security, image, and release workflows   |
+| `mk/` and `Makefile`     | Package, image, and emulator build orchestration    |
+| `src/`                   | Root build-system support code                      |
+| `docs/`                  | General public FlashOS documentation                |
+
+Generated build outputs and local configuration files are not part of the public documentation tree.
+
+## Verification
+
+FlashOS verification is divided into separate layers so that source checks, target compilation, image construction, virtual-machine execution, and physical hardware evidence are not treated as equivalent.
+
+- [Verification and Testing](docs/verification.md) explains the overall verification model.
+- [CI Contracts](ci/README.md) documents the exact local scripts and their relationship to hosted workflows.
+- [Hardware Compatibility](docs/hardware.md) records device-specific physical test evidence.
+
+A successful upstream test or the existence of an upstream driver does not by itself qualify the corresponding hardware or behavior for FlashOS.
+
+## FlashOS and upstream Redox OS
+
+FlashOS currently relies on parts of the Redox ecosystem as a technical foundation. Compatibility identifiers such as `x86_64-unknown-redox`, `redoxer`, `relibc`, and inherited package names remain where they describe active interfaces or dependencies.
+
+FlashOS maintains its own project identity, system profile, documentation, decisions, and releases. The current boundaries and intended development direction are documented in:
+
+- [FlashOS Architecture](docs/architecture.md)
+- [Public Roadmap](docs/roadmap.md)
+- [Upstream References](docs/upstream/README.md)
+- [Attribution Notice](NOTICE)
+
+## Issues and security
+
+General bug reports, documentation problems, and reproducible hardware observations may be submitted through [GitHub Issues](https://github.com/ajhahnde/FlashOS/issues).
+
+Do not disclose suspected vulnerabilities in a public issue. Follow the reporting instructions and evaluation limits in the [Security Policy](.github/SECURITY.md).
+
+No response, review, acceptance, or release timeline is guaranteed.
 
 ## License and attribution
 
-The root build infrastructure is available under the [MIT License](LICENSE). FlashShell is available under the [Apache License 2.0](components/flashshell/LICENSE). Fetched third-party packages retain their own open-source licenses.
+The inherited root build infrastructure is available under the [MIT License](LICENSE). FlashShell is provided under the [Apache License 2.0](components/flashshell/LICENSE). Third-party packages and inherited components retain their respective licenses.
 
-- [Upstream Attribution and Notice](NOTICE)
+See the following files for attribution and project identity information:
+
+- [NOTICE](NOTICE)
 - [Trademark and Project Identity Policy](TRADEMARK.md)
-
----
-
-[Documentation index](docs/README.md) · [Next: Getting Started →](docs/getting-started.md)
+- [Upstream Reference Documentation](docs/upstream/README.md)
