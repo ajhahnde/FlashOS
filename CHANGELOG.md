@@ -66,6 +66,9 @@ remains available in the archived `FlashOS-old` repository.
 
 ### Changed
 
+- FlashShell now observes jobs continued by an external process, reports their
+  live running state, and removes the stale stopped notice at the next command
+  boundary.
 - Pinned every input the image is built from: the container base image by
   digest, the Rust toolchain and its installer by version and checksum, the
   build-system Git dependencies by revision, every package recipe that reaches
