@@ -1,106 +1,138 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/flashos_logo_dark.png">
-    <img src="../assets/flashos_logo_light.png" alt="FlashOS" width="280">
-  </picture>
+# Verification and Testing
 
-<h1>Verification and Testing</h1>
+[FlashOS](../README.md) › [Documentation](README.md) › Verification
 
-<p>
-    <a href="../README.md"><b>README</b></a> ·
-    <a href="README.md"><b>Documentation</b></a> ·
-    <a href="development.md"><b>Development</b></a> ·
-    <b>Verification</b> ·
-    <a href="../ci/README.md"><b>CI/CD</b></a> ·
-    <a href="../LICENSE"><b>License</b></a>
-  </p>
+This guide establishes the verification methodology, multi-layered testing model, local qualification scripts, and automated CI/CD alignment for FlashOS. It is intended for developers and release evaluators needing to prove code correctness and runtime image stability before proposing code changes or publishing artifacts. Technical script internals and GitHub Actions workflows are documented separately.
 
-</div>
+## On this page
 
----
+- [Verification principles](#verification-principles)
+- [Verification layers](#verification-layers)
+- [Local quality checks](#local-quality-checks)
+- [Product-profile verification](#product-profile-verification)
+- [QEMU runtime qualification](#qemu-runtime-qualification)
+- [Physical hardware qualification](#physical-hardware-qualification)
+- [CI/CD alignment](#cicd-alignment)
+- [Release evidence](#release-evidence)
+- [Interpreting failures](#interpreting-failures)
+- [Related documentation](#related-documentation)
 
-This document defines the testing layers, verification model, QEMU qualification checks, and CI/CD alignment for FlashOS.
+## Verification principles
 
-## Contents
+FlashOS enforces a rigorous distinction between code compilation and operational verification. In an agentic and solo-maintained operating system repository, a change is never assumed to be functional simply because it compiles without compiler errors. True verification mandates proving behavior across distinct execution boundaries:
+- **Compiled:** Source code satisfies compiler borrow checkers and type rules on the host machine.
+- **Package built:** A component cross-compiles cleanly for the target ABI (`x86_64-unknown-redox`) within an isolated sysroot.
+- **Image built:** Package recipe outputs integrate cleanly into an assembled, bootable disk partition image without dependency conflicts.
+- **Image booted:** The compiled filesystem successfully negotiates UEFI firmware and kernel initialization in a virtual machine without panicking.
+- **Runtime behavior checked:** Automated interactive sessions log into the console, verify terminal shell initialization (`fsh`), assert pipeline communication, and prove audio driver startup.
+- **Physical hardware checked:** Real-world machines confirm bare-metal USB boot, physical keyboard interaction, framebuffer output, and system power cycle stability.
 
-1. [Verification layers](#1-verification-layers)
-2. [CI-equivalent local checks](#2-ci-equivalent-local-checks)
-3. [CI/CD architecture](#3-cicd-architecture)
+## Verification layers
 
-## 1. Verification layers
+To enforce these principles systematically, quality verification progresses through an ordered hierarchy of test layers:
 
-Changes are accepted in layers:
+```text
+host checks
+→ target compilation
+→ package recipe
+→ image construction
+→ product profile
+→ QEMU runtime
+→ physical hardware
+→ release evidence
+```
 
-1. **Host shell** — FlashShell tests and clippy pass.
-2. **Target shell** — `fsh` builds for `x86_64-unknown-redox`.
-3. **Recipe** — the FlashShell package cooks from the intended source.
-4. **Image** — the `flashos` image builds with the expected identity, package,
-   user, and shell metadata.
-5. **QEMU** — login reaches `>> ` and an external-to-external pipeline runs.
-6. **Hardware** — a physical device is tested only after the migration and
-   image gates are complete.
+A downstream validation layer should only be engaged once all prerequisite upstream layers have completed without error.
 
-The physical qualification criteria and current matrix are maintained in
-[Hardware Compatibility](hardware.md).
+## Local quality checks
 
-## 2. CI-equivalent local checks
+When developing code changes locally, execute host-level quality gates before attempting long image compilations. To verify root build-system support crates:
 
-You can reproduce the exact automated product and runtime contracts locally without relying on hosted runners.
+```sh
+cargo check --locked
+```
 
-Validate the active TUI product boundary:
+When modifying FlashShell inside `components/flashshell/`, execute standard workspace unit tests and lint evaluations:
+
+```sh
+cd components/flashshell
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+redoxer build -p flashshell-cli --bin fsh
+```
+
+For specialized guidance on grammar test benches, property suites, and fuzz campaigns, consult the [FlashShell Development Guide](../components/flashshell/docs/development.md).
+
+## Product-profile verification
+
+Before initiating containerized image building, verify that repository configurations and package selections satisfy FlashOS product invariants:
 
 ```sh
 python3 ci/check_profile.py
 ```
 
-After building the image, run the same runtime contract used by CI:
+This gate ensures the active image remains strictly TUI-only, confirms `/usr/bin/fsh` is assigned as the default login shell, validates required audio scheme availability, and asserts version string lockstep across manifest files.
+
+## QEMU runtime qualification
+
+After building system images (`make CONFIG_NAME=flashos all`), verify runtime stability by executing the local headless QEMU smoke contracts:
 
 ```sh
 python3 ci/qemu_smoke.py \
   --image build/x86_64/flashos/harddrive.img \
   --disk-interface nvme \
-  --log build/x86_64/flashos/qemu-smoke.log
+  --log build/x86_64/flashos/qemu-harddrive-smoke.log
 ```
 
-Qualify the live image through an emulated USB mass-storage device:
+To verify removable USB booting and memory-cached root filesystem detachment, test the standalone live ISO image:
 
 ```sh
 python3 ci/qemu_smoke.py \
   --image build/x86_64/flashos/redox-live.iso \
   --disk-interface usb \
-  --log build/x86_64/flashos/qemu-live-usb.log
+  --log build/x86_64/flashos/qemu-live-usb-smoke.log
 ```
 
-The automation uses a null host audio backend but keeps an HDA controller in
-the virtual machine. The guest IHDA driver must start for the test to pass.
-The Docker build boundary, artefact handoff, security automation, and release
-flow are described in [CI/CD](../ci/README.md).
+These automated scripts control serial stdio execution, validating firmware boot, user login, prompt readiness (`>> `), external pipeline execution, and guest `IHDA` audio driver initialization (using a null host audio backend for compatibility with headless systems).
 
-## 3. CI/CD architecture
+## Physical hardware qualification
 
-The automation preserves a strict producer/consumer boundary:
+Testing compiled operating system images on physical bare-metal hardware represents an advanced qualification stage. Physical hardware verification occurs strictly after all local unit tests, package recipes, image compilations, and automated QEMU runtime smoke gates have passed cleanly.
 
-1. root build-system and FlashShell checks run independently;
-2. the active package, TUI, login-shell, and audio policy is checked without
-   building an image;
-3. a FlashOS-owned Docker environment performs the clean-room x86_64 disk and
-   live-image build;
-4. both images and their checksums are uploaded as one immutable workflow
-   artefact;
-5. a separate runner downloads those exact bytes and boots the disk over NVMe
-   and the live image over USB;
-6. the smoke test verifies FlashOS branding, the TUI login, FlashShell,
-   an external pipeline, and the IHDA audio driver;
-7. scheduled security automation evaluates advisories, licenses, dependency
-   sources, and newly introduced pull-request dependencies;
-8. a semantic-version tag rebuilds and qualifies the image, emits checksums
-   and a CycloneDX SBOM, records build provenance, and publishes the release.
+Consult [Hardware Compatibility](hardware.md) for official validation levels, device identification mandates, read-only drive selection rules, and practical bare-metal testing instructions. Never write raw disk images to physical storage media without rigorous prerequisite testing and explicit device target confirmation.
 
-The reusable image workflow is shared by continuous integration and release
-delivery. Releases therefore cannot bypass the same runtime qualification
-used on `main`. See [CI/CD](../ci/README.md) for the boundary table and local
-contract commands.
+## CI/CD alignment
+
+The testing commands executed during local developer workflows mirror the exact automation enforced by GitHub Actions. Hosted CI pipelines implement a strict producer/consumer model: containerized compile jobs synthesize and promote checksummed disk images, which subsequent independent test runners download and qualify over NVMe and USB emulation.
+
+For detailed boundary definitions, script responsibilities, and workflow orchestrations, refer to [CI/CD Contracts](../ci/README.md).
+
+## Release evidence
+
+Published FlashOS releases are bound to strict cryptographic and operational release evidence. Because GitHub Actions shares identical reusable workflows between standard pull request integration and tag-driven delivery, releases cannot bypass standard QEMU runtime qualification.
+
+Every valid release candidate automatically synthesizes and publishes:
+- Verified `harddrive.img` (NVMe disk format) and `redox-live.iso` (removable live format) image artifacts.
+- Complete serial stdio QEMU smoke boot and pipeline execution logs.
+- Immutable SHA-256 cryptographic image digests.
+- Standardized CycloneDX Software Bill of Materials (SBOM) manifests covering both source dependencies and final compiled image closures.
+- Verified cryptographic build-provenance attestations bound to the publishing GitHub release.
+
+## Interpreting failures
+
+When verification steps encounter errors, use this troubleshooting decision hierarchy to isolate root causes without guessing:
+- **Host test failed:** Look for syntax errors, failing assertions in unit tests, or Clippy warning violations inside Rust source files.
+- **Target build failed:** Indicates a cross-compilation linking error, missing target dependency in `Cargo.toml`, or ABI mismatch when running `redoxer`.
+- **Image build failed:** Points to syntax errors in TOML package recipes, missing compiler prefix tools, or exhausted disk space inside Podman container VMs.
+- **Product contract failed:** `ci/check_profile.py` detected an forbidden graphical dependency (SDL, OpenGL, Xfce), a mismatched login shell path, or out-of-sync release version numbering.
+- **QEMU boot failed:** Suggests missing host UEFI firmware (`edk2`), an incompatible machine flag, or an early kernel/relibc initialization panic before getty console startup.
+
+## Related documentation
+
+- [Development](development.md) — Comprehensive developer workflows and workspace configuration instructions.
+- [Hardware Compatibility](hardware.md) — Validation criteria and safety rules for physical bare-metal machine testing.
+- [CI/CD Contracts](../ci/README.md) — Technical deep dive into automated python scripts and pipeline stage separation.
 
 ---
 
-[← Back: Development](development.md) · [Next: Hardware Compatibility →](hardware.md)
+[← Previous: Development](development.md) · [Documentation index](README.md) · [Next: Hardware Compatibility →](hardware.md)

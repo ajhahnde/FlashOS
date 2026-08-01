@@ -1,4 +1,4 @@
-# Setup documentation moved
+# Setup guide moved
 
 The setup and getting-started instructions previously located here have been reorganized into specialized guides under `docs/`.
 

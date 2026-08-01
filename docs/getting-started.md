@@ -1,66 +1,59 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/flashos_logo_dark.png">
-    <img src="../assets/flashos_logo_light.png" alt="FlashOS" width="280">
-  </picture>
+# Getting Started
 
-<h1>Getting Started</h1>
+[FlashOS](../README.md) › [Documentation](README.md) › Getting Started
 
-<p>
-    <a href="../README.md"><b>README</b></a> ·
-    <a href="README.md"><b>Documentation</b></a> ·
-    <b>Getting Started</b> ·
-    <a href="../ci/README.md"><b>CI/CD</b></a> ·
-    <a href="../CHANGELOG.md"><b>Changelog</b></a> ·
-    <a href="../LICENSE"><b>License</b></a>
-  </p>
+This guide explains how to configure, build, and boot FlashOS for the first time. It is intended for users and developers who want to establish a clean toolchain and reach a working interactive QEMU session before diving deeper into system architecture. Development internals and automated verification scripts are documented separately.
 
-</div>
+## On this page
 
----
+- [Before you begin](#before-you-begin)
+- [Requirements](#requirements)
+- [Clone the repository](#clone-the-repository)
+- [Configure the build](#configure-the-build)
+- [Build the development image](#build-the-development-image)
+- [Build the live image](#build-the-live-image)
+- [Run FlashOS in QEMU](#run-flashos-in-qemu)
+- [Log in and verify the session](#log-in-and-verify-the-session)
+- [Prepare physical media](#prepare-physical-media)
+- [Common problems](#common-problems)
+- [Next steps](#next-steps)
 
-FlashOS currently uses the inherited Podman-based build pipeline. The primary
-development configuration is x86_64 with QEMU and UEFI.
+## Before you begin
 
-## Contents
+FlashOS currently leverages an inherited Podman-based build system to compile cross-target packages in a clean container environment. The supported and primary evaluation environment is an x86_64 target architecture running inside QEMU (`q35` machine model) using UEFI firmware (`edk2`). Building a full disk image requires compiling or retrieving binary target packages, assembling a bootable disk filesystem, and invoking local virtual machine execution.
 
-1. [Requirements](#1-requirements)
-2. [Cloning and configuring](#2-cloning-and-configuring)
-3. [Building the image](#3-building-the-image)
-4. [Running QEMU](#4-running-qemu)
-5. [Login](#5-login)
-6. [Hardware preparation](#6-hardware-preparation)
-7. [Troubleshooting](#7-troubleshooting)
+## Requirements
 
-## 1. Requirements
+The supported local build path requires:
+- Git
+- Rustup (to automatically provision toolchains)
+- GNU Make
+- Podman (for containerized package cooking)
+- QEMU with x86_64 system emulation and UEFI firmware (`edk2` / OVMF)
+- Sufficient available storage for cross-toolchain caches, target sysroots, and compiled images.
 
-The supported development path requires:
-
-- Git;
-- Rustup;
-- GNU Make;
-- Podman;
-- QEMU with x86_64 system emulation;
-- enough disk space for the target toolchain, package cache, and image.
-
-On macOS with Homebrew:
+On macOS using Homebrew, install the host dependencies:
 
 ```sh
 brew install git make podman qemu
 ```
 
-The bootstrap script can install the platform dependencies:
+Alternatively, use the included Podman bootstrap helper script from inside your repository clone to install required platform tools without attempting a redundant Git re-clone:
 
 ```sh
 ./podman_bootstrap.sh -d -e qemu
 ```
 
-`-d` is important inside an existing clone: it installs dependencies without
-trying to clone FlashOS again.
+On macOS, initialize and start your virtual machine for Podman before attempting a build:
 
-## 2. Cloning and configuring
+```sh
+podman machine init
+podman machine start
+```
 
-Clone the independent FlashOS repository:
+## Clone the repository
+
+Clone the standalone FlashOS repository directly:
 
 ```sh
 git clone https://github.com/ajhahnde/FlashOS.git
@@ -68,11 +61,11 @@ cd FlashOS
 git remote add upstream https://github.com/redox-os/redox.git
 ```
 
-The `upstream` remote is optional for building. It preserves attribution and
-allows comparison or selective kernel updates; it is not a requirement that
-FlashOS remain update-compatible.
+Adding the optional `upstream` remote preserves historical attribution to Redox OS and facilitates technical reference comparisons or selective kernel updates; update compatibility is not mandatory.
 
-Create `.config` in the repository root:
+## Configure the build
+
+Before launching Make, establish your local build parameters by creating a `.config` file in the repository root:
 
 ```make
 PODMAN_BUILD?=1
@@ -84,198 +77,156 @@ FSTOOLS_IN_PODMAN?=1
 REPO_NONSTOP?=1
 ```
 
-`.config` is local and ignored by Git. `REPO_BINARY=1` speeds up the
-transitional package build by using available binary packages.
+The `.config` file is local and ignored by Git. Setting `REPO_BINARY=1` substantially accelerates initial building by utilizing cached transitional binary packages where available.
 
-### Optional shell helpers
-
-The repository includes sourceable Bash and Zsh wrappers for common development
-commands. Add the shared helper to `~/.bashrc` with the path to your clone:
-
-```sh
-[[ -f /path/to/FlashOS/flashos.sh ]] && source /path/to/FlashOS/flashos.sh
-```
-
-For Zsh, source the Zsh entrypoint from `~/.zshrc`:
-
-```zsh
-[[ -f /path/to/FlashOS/flashos.zsh ]] && source /path/to/FlashOS/flashos.zsh
-```
-
-The Zsh entrypoint delegates to the same `flashos.sh` implementation and adds
-native completion. It can also be used by a directory-change auto-source hook.
-
-Start with:
-
-```sh
-flashos help
-flashos doctor
-flashos status
-flashos build disk
-flashos run disk
-flashos check quick
-```
-
-The same command surface covers the rest of the normal development loop:
-
-```sh
-flashos recipe rebuild NAME       # focused recipe iteration
-flashos artifacts hash disk       # inspect the generated output
-flashos logs disk                  # read the latest disk smoke log
-flashos changes stat              # read-only source overview
-flashos qualify disk              # checks, build, and exact-artifact smoke
-```
-
-Use `flashos <command> help` for the available actions and safe defaults.
-Cleanup requires an explicit scope; recipe pushes warn that QEMU must be
-stopped. `flashos list` also shows all directly callable wrapper functions.
-
-`flashos profile release` switches subsequent build, run, and smoke wrappers to
-`flashos-release`; `flashos profile dev` switches back. The helpers remain thin
-wrappers over the documented Make, Cargo, profile, and QEMU commands. They do
-not commit, push, tag, or write a physical device.
-
-Start the Podman virtual machine on macOS:
-
-```sh
-podman machine init
-podman machine start
-```
-
-If a machine already exists, only the second command is needed. On Apple
-Silicon, keep the terminal that started the Podman machine open while the
-build runs if the VM exits when its launching shell closes.
-
-## 3. Building the image
-
-From the repository root:
-
-```sh
-make CONFIG_NAME=flashos all
-```
-
-The first build may download or build the compiler prefix, packages, installer,
-and filesystem tools. Later builds reuse their caches.
-
-The development-disk output is:
-
-```text
-build/x86_64/flashos/harddrive.img
-```
-
-For removable USB media, build the self-contained live image:
-
-```sh
-make CONFIG_NAME=flashos build/x86_64/flashos/redox-live.iso
-```
-
-Its output is `build/x86_64/flashos/redox-live.iso`. Do not substitute
-`harddrive.img` for USB boot: the installed-disk image expects its RedoxFS
-root device to remain available after kernel startup, while USB mass storage
-is not an early-root path.
-
-Inspect the selected build environment without building:
+You can inspect the resulting build environment variables without triggering compilation:
 
 ```sh
 make CONFIG_NAME=flashos setenv
 ```
 
-It should report `ARCH=x86_64`, `CONFIG_NAME=flashos`, and the build directory
-`build/x86_64/flashos`.
+This command should report `ARCH=x86_64`, `CONFIG_NAME=flashos`, and an output build directory of `build/x86_64/flashos`.
 
-## 4. Running QEMU
+### Optional shell helpers
 
-Start the built image:
+The repository includes optional sourceable Bash and Zsh wrapper functions for streamlining frequent development commands. To integrate them in Bash, append to `~/.bashrc`:
+
+```sh
+[[ -f /path/to/FlashOS/flashos.sh ]] && source /path/to/FlashOS/flashos.sh
+```
+
+For Zsh, source the dedicated Zsh entrypoint from `~/.zshrc` (which includes native tab completion and directory hook compatibility):
+
+```zsh
+[[ -f /path/to/FlashOS/flashos.zsh ]] && source /path/to/FlashOS/flashos.zsh
+```
+
+Key helper operations include:
+- `flashos doctor` — Diagnose local toolchain and Podman health.
+- `flashos status` — Summarize active profile state.
+- `flashos build disk` — Assemble the default development disk image.
+- `flashos run disk` — Launch interactive QEMU execution.
+- `flashos qualify disk` — Run local verification gates and exact-artifact smoke tests.
+
+These helpers are thin abstractions over documented Make, Cargo, and Python verification contracts; they never execute Git commits, tags, pushes, or physical disk writes.
+
+## Build the development image
+
+To build the standard development disk image, execute from the repository root:
+
+```sh
+make CONFIG_NAME=flashos all
+```
+
+During the initial build, the container pipeline compiles or fetches the target toolchain prefix, cookbook packages, installer utilities, and filesystem creation tools. Subsequent iterations reuse these persistent local caches.
+
+Once complete, the bootable development hard drive image artifact is generated at:
+
+```text
+build/x86_64/flashos/harddrive.img
+```
+
+## Build the live image
+
+When testing removable USB media or evaluating ephemeral systems, compile the self-contained live ISO image:
+
+```sh
+make CONFIG_NAME=flashos build/x86_64/flashos/redox-live.iso
+```
+
+This command generates `build/x86_64/flashos/redox-live.iso`. Never substitute `harddrive.img` for USB removable booting; standard hard drive images require a persistent early-root block device after kernel startup, whereas `redox-live.iso` incorporates a specialized live bootloader that clones the complete root filesystem directly into RAM before initiating system startup.
+
+## Run FlashOS in QEMU
+
+Start your built hard drive disk image inside an interactive QEMU session:
 
 ```sh
 make CONFIG_NAME=flashos qemu
 ```
 
-The default x86_64 configuration uses a QEMU `q35` machine and UEFI. On an
-Apple Silicon host, QEMU emulates x86_64 rather than using native
-virtualization, so boot is slower than on an x86_64 host.
+The default x86_64 configuration launches a QEMU `q35` virtual machine using UEFI firmware. On Apple Silicon (M1/M2/M3) hosts, QEMU performs architecture emulation for x86_64 rather than native hardware virtualization, resulting in longer initial boot durations than on native x86_64 hardware.
 
-The Make configuration searches common Linux OVMF locations and the Homebrew
-edk2 firmware path. If QEMU reports missing firmware, confirm that the QEMU
-package installed its x86_64 edk2 files.
+## Log in and verify the session
 
-## 5. Login
+When the startup sequence reaches the console login prompt, authenticate using one of the evaluation accounts compiled into the development profile:
 
-The development image currently contains:
-
-| User | Password | Shell |
+| User Account | Password | Login Shell |
 | :-- | :-- | :-- |
-| `user` | blank | `/usr/bin/fsh` |
+| `user` | *(blank / no password)* | `/usr/bin/fsh` |
 | `root` | `password` | `/usr/bin/fsh` |
 
-These credentials are intentionally convenient for local testing and are not
-safe for a distributed or network-exposed image.
+> **Note:** These credentials and passwordless accounts are intentional evaluations shortcuts for local development only and are unsafe for untrusted networks or production deployments.
 
-A successful interactive gate reaches:
+A successful login drops directly into FlashShell, indicated by the primary prompt:
 
 ```text
 >>
 ```
 
-Then verify one external-to-external pipeline, for example with commands
-available in the image.
+To verify basic shell and operational integrity, test an external pipeline using tools installed on the image:
 
-## 6. Hardware preparation
+```fsh
+^ls -l | ^grep flash
+```
 
-Do not write the image to a physical disk as part of initial setup.
-[Hardware Compatibility](hardware.md) defines the qualification gate.
+## Prepare physical media
 
-Before any physical write:
+Do not write compiled images to physical media as part of an initial setup routine. Physical hardware testing is an advanced qualification gate governed by [Hardware Compatibility](hardware.md).
 
-1. finish the repository, recipe, image, and QEMU gates;
-2. identify the exact target device read-only by model, capacity, and mounts;
-3. unmount the correct device without guessing its name;
-4. obtain explicit approval for the exact write target;
-5. write and verify `redox-live.iso` for removable USB qualification.
+> **Warning:** Writing raw disk images to block devices is destructive and will irreversibly obliterate existing data if directed to the wrong drive.
 
-`harddrive.img` remains the QEMU or installed-disk artefact. The physical
-removable-media test starts only after both QEMU paths are green.
+When you are ready to evaluate FlashOS on physical machines, enforce the following safety mandates:
+1. Complete all local repository, recipe, and QEMU runtime qualification tests first.
+2. Verify device names before every write operation. Never assume or guess device node paths (such as `/dev/sdb` or `/dev/disk2`), as operating systems reassign device identifiers dynamically between reboots and insertions.
+3. Identify the destination media read-only by verifying its exact hardware model, storage capacity, and mount status using reliable system diagnostics.
+4. Ensure the correct target disk is unmounted cleanly before writing.
+5. Obtain explicit authorization before committing bytes to physical media.
+6. Write only `redox-live.iso` for USB thumb drives; never write `harddrive.img` to removable media.
 
-## 7. Troubleshooting
+## Common problems
 
-### Podman is not reachable
+### Podman is unreachable or stops immediately
 
-Check the machine state:
+Inspect your Podman virtual machine status:
 
 ```sh
 podman machine list
 podman info
 ```
 
-Start the machine if it is stopped. If it exits immediately on macOS, launch it
-from a terminal that remains open during the build.
+If stopped, restart it with `podman machine start`. On Apple Silicon hosts where background VMs close alongside their terminal parent, leave the launching terminal window open during compilation.
 
 ### The wrong image profile is selected
 
-Run:
+Verify your active Make target parameters:
 
 ```sh
 make CONFIG_NAME=flashos setenv
 ```
 
-Check `.config` for an old `CONFIG_NAME` or `ARCH` assignment.
+If an unwanted configuration appears, inspect root `.config` and remove any obsolete or conflicting assignments for `CONFIG_NAME` or `ARCH`.
 
-### QEMU cannot find UEFI firmware
+### QEMU cannot resolve UEFI firmware (`edk2`)
 
-Confirm that QEMU is installed and locate its edk2 x86_64 code image. Homebrew
-normally installs it under:
+Ensure QEMU architecture emulation binaries are installed. The Make build orchestration scans standard Linux OVMF directories and Homebrew's default macOS edk2 repository:
 
 ```text
 /opt/homebrew/opt/qemu/share/qemu/
 ```
 
-### A package still uses a Redox name
+Confirm that files such as `edk2-x86_64-code.fd` exist inside your QEMU share path.
 
-Do not rename target triples, ABI crates, relibc interfaces, or build artefacts
-only for appearance. First determine whether the name is an active
-compatibility interface. Product-facing FlashOS identity and inherited
-technical identifiers intentionally coexist during the transition.
+### Build outputs or packages reference Redox identifiers
+
+Do not rename internal target triples (`x86_64-unknown-redox`), compiler sysroots, `relibc` library interfaces, or intermediate build artifacts solely for branding aesthetics. Technical compatibility names explicitly remain in the source tree where they represent live build contracts during the bootstrap phase.
+
+## Next steps
+
+With a functioning QEMU image compiled and verified, explore deeper system topics:
+- Review [Architecture](architecture.md) to study layer separations and build-to-boot sequencing.
+- Consult [Development](development.md) for modifying package recipes and iterating on system crates.
+- Visit [Verification and Testing](verification.md) to execute automated product profile assertions and serial smoke tests locally.
 
 ---
 
-[← Back: Documentation Index](README.md) · [Next: Architecture →](architecture.md)
+[← Previous: Documentation Index](README.md) · [Documentation index](README.md) · [Next: Architecture →](architecture.md)

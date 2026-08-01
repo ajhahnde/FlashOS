@@ -1,27 +1,76 @@
-# FlashOS Documentation Index
+# FlashOS Documentation
 
-Welcome to the general documentation for FlashOS, an independent x86_64 operating system based on the Redox kernel.
+[FlashOS](../README.md) › Documentation
 
-## Overview and Guides
+Welcome to the central documentation index for FlashOS. This guide serves as the top-level directory for understanding system architecture, establishing build workflows, running quality verifications, and reviewing hardware compatibility. It is intended for all users, developers, and evaluators navigating the project repository.
 
-- [Getting Started](getting-started.md) — System requirements, cloning, configuring, building the initial image, running in QEMU, and logging in.
-- [Architecture](architecture.md) — Project boundaries, components, system layers, image configuration, build and boot path, FlashShell integration, and compatibility identifiers.
-- [Development](development.md) — Source tree layout, local workflow, build artifacts, development commands, and support tools.
-- [Verification](verification.md) — Quality layers, testing, profile verification, QEMU smoke testing, and local CI-equivalent gates.
-- [Hardware Compatibility](hardware.md) — Verified physical hardware status, validation levels, and reporting instructions.
-- [Roadmap](roadmap.md) — Public development direction, intended permanent borrowed-kernel boundary, and pruning goals.
+## Start here
 
-## Upstream References
+If you are new to FlashOS, choose your starting point based on your immediate goal:
+- **Try out FlashOS:** Follow [Getting Started](getting-started.md) to install dependencies, compile your first disk image, and boot into a live QEMU terminal session.
+- **Understand the system:** Read [Architecture](architecture.md) to understand the TUI-only project scope, current Redox kernel boundaries, and image configuration layers.
+- **Develop on the project:** Consult [Development](development.md) for workspace layout details, compilation wrappers, and daily developer practices.
+- **Check quality and hardware status:** Visit [Verification and Testing](verification.md) and [Hardware Compatibility](hardware.md) to learn how release candidates and physical machines are validated.
 
-- [Upstream Documentation and References](upstream/README.md) — Retained hardware compatibility lists and trademark references from the Redox OS origin.
+## Documentation paths
 
-## Legacy Compatibility Paths
+| Goal | Start with |
+|---|---|
+| Build and run FlashOS | [Getting Started](getting-started.md) |
+| Understand the system | [Architecture](architecture.md) |
+| Work on the repository | [Development](development.md) |
+| Reproduce quality checks | [Verification](verification.md) |
+| Check hardware support | [Hardware Compatibility](hardware.md) |
 
-For existing bookmarks or external references, transitional forwarding documents remain in the repository root:
+## Documentation map
 
+```text
+README.md
+└── docs/README.md
+    ├── getting-started.md
+    ├── architecture.md
+    ├── development.md
+    ├── verification.md
+    ├── hardware.md
+    ├── roadmap.md
+    └── upstream/README.md
+```
+
+## General FlashOS guides
+
+- [Getting Started](getting-started.md) — Prerequisites, repository setup, build configuration, QEMU boot instructions, and initial login verification.
+- [Architecture](architecture.md) — Architectural goals, system context layers, build-to-boot workflow, FlashShell integration, and long-term boundary definitions.
+- [Development](development.md) — Local developer tools, source layout, target compilation commands, generated disk artifacts, and documentation rules.
+- [Verification and Testing](verification.md) — Layered testing methodology, CI-equivalent local python gates, QEMU smoke execution, and GitHub Actions alignment.
+- [Hardware Compatibility](hardware.md) — Verification criteria, testing validation levels, physical device test matrix, and reporting templates.
+- [Roadmap](roadmap.md) — Public product evolution, permanent kernel boundaries, TUI package pruning goals, and production security direction.
+
+## Component documentation
+
+Specialized subsystems and automated testing contracts maintain independent documentation indices:
+- [FlashShell Overview](../components/flashshell/README.md) — Product introduction and design principles for the primary terminal interface.
+- [FlashShell Documentation Index](../components/flashshell/docs/README.md) — Deep technical reference covering language grammar, scripting rules, runtime AST evaluation, and workspace testing.
+- [CI/CD Contracts](../ci/README.md) — Technical details of automated verification boundaries, Docker clean-room compilation, and python smoke test scripts.
+
+## Project and policy documents
+
+- [Security Policy](../.github/SECURITY.md) — Coordinated vulnerability disclosure, evaluation credential limits, and supported release tags.
+- [Changelog](../CHANGELOG.md) — Complete release note history and tracked repository modifications.
+- [Upstream Attribution Notice](../NOTICE) and [Trademark Policy](../TRADEMARK.md) — Licensing and legal guidelines.
+
+## Upstream references
+
+- [Upstream Reference Documentation](upstream/README.md) — Preserved historical documents from the Redox OS origin, retained for driver insights and attribution without serving as active FlashOS support promises.
+
+## Legacy compatibility paths
+
+To preserve compatibility with existing bookmarks and external documentation references, short forwarding files remain in the project root:
 - [Legacy Documentation Forwarder](../DOCUMENTATION.md)
 - [Legacy Setup Forwarder](../SETUP.md)
 - [Legacy Hardware Forwarder](../HARDWARE.md)
 
+These files serve purely as redirection endpoints and should not be used as normal starting points for new documentation searches.
+
 ---
-[← Back to Main README](../README.md)
+
+[← Back to Main README](../README.md) · [Documentation index](README.md) · [Next: Getting Started →](getting-started.md)

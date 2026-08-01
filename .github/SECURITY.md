@@ -1,85 +1,73 @@
 # Security Policy
 
-## Project maturity
+[FlashOS](../README.md) › Security
 
-FlashOS is pre-alpha software built by a single maintainer. It has no security
-guarantees, no patch service-level agreement, and no long-term support branch.
-Published images are intended for evaluation on disposable hardware or in a
-virtual machine. Do not run FlashOS on a machine that holds data you care
-about, and do not expose it to an untrusted network.
+This document details the security policy, vulnerability reporting workflow, supported versions, and known evaluation limitations for FlashOS. It is intended for security researchers, evaluators, and contributors needing to report or understand system vulnerabilities.
 
 ## Supported versions
 
-Only the most recent published release receives fixes. Earlier tags are
-historical artifacts and are not patched.
+Only the most recent published release receives security evaluation and fixes. Earlier tags and legacy branches are historical artifacts and are not patched.
 
 | Version | Supported |
 |---|---|
 | Latest release | Yes |
 | Any earlier release | No |
 
-## Known weaknesses in published images
+## Security scope
 
-These are documented rather than silently shipped. They are properties of the
-current image profile, not vulnerabilities to report:
-
-- The `user` account has no password and belongs to the `sudo` group. Console
-  access to an unmodified image is therefore unauthenticated, and `sudo` will
-  escalate to root without a credential.
-- No network login service is installed, so this exposure is local rather than
-  remote.
-
-Releases are built from a profile that locks the root account, so root cannot
-be logged into directly. The passwordless `user` account is intentional while
-FlashOS is evaluation software: an image you boot from a USB stick to try the
-system should not stand between you and a prompt. It will be replaced by a
-credential set at first boot before FlashOS is presented as production
-software.
-
-The v0.1.0 release predates the release profile. Its images additionally
-contain a root account with a well-known password. Treat any published image
-as an unauthenticated system.
-
-## Scope
-
-In scope:
-
-- FlashShell (`components/flashshell/`) — parsing, evaluation, process
-  execution, redirection, and terminal handling.
-- The FlashOS image profile, product contract, and release pipeline
-  (`config/`, `ci/`, `.github/workflows/`).
-- FlashOS-authored patches under `recipes/`.
-
-Out of scope, and better reported upstream:
-
-- The Redox kernel, relibc, bootloader, and inherited userspace components.
-  These are transitional dependencies; report defects in them to the Redox OS
-  project, and feel free to open a FlashOS issue tracking the impact.
-- Anything that requires the reporter to already hold root on the target.
-- The known weaknesses listed above.
+The following components and repository surfaces are officially in scope for vulnerability evaluations:
+- FlashShell (`components/flashshell/`) — parsing, evaluation, process execution, redirection, and terminal handling.
+- The FlashOS image profile, product contract, and release pipeline (`config/`, `ci/`, `.github/workflows/`).
+- FlashOS-authored system packages and patches under `recipes/`.
 
 ## Reporting a vulnerability
 
-Report privately through GitHub's private vulnerability reporting on this
-repository: **Security → Report a vulnerability**. Do not open a public issue
-for an unfixed security defect.
+Report suspected security vulnerabilities privately through GitHub's private vulnerability reporting mechanism on this repository: navigate to **Security → Report a vulnerability**. Do not open a public issue or submit a standard pull request for an unfixed security defect.
 
-Please include:
+## Information to include
 
-- the FlashOS revision or release tag,
-- the image and firmware mode used,
-- the exact steps to reproduce,
-- what an attacker gains,
-- any serial or boot log that shows the failure.
+When filing a private vulnerability report, please provide:
+- The exact FlashOS revision, commit SHA, or release tag.
+- The built image format and firmware mode used during testing.
+- Step-by-step reproduction instructions.
+- A clear analysis of what an attacker gains or compromises.
+- Any relevant serial console output, panic dumps, or boot logs that demonstrate the failure.
 
 ## What to expect
 
-- An acknowledgement within 14 days.
-- An assessment of severity and scope once the report is reproduced.
-- Public credit in the changelog entry for the fix, unless you prefer
-  otherwise.
+When you submit a qualified private vulnerability report:
+- An initial acknowledgement within 14 days.
+- An assessment of severity and architectural scope once the reported behavior is reproduced locally.
+- Public credit in the release changelog entry for the fix, unless you request anonymity.
 
-Because this is a single-maintainer pre-alpha project, a fix may take
-considerably longer than acknowledgement. If a report is not reproducible or
-falls outside the scope above, that will be stated plainly rather than left
-open.
+Because FlashOS is a single-maintainer pre-alpha project, developing and validating a proper fix may take considerably longer than the initial acknowledgement. If a report cannot be reproduced or falls outside the project scope, that decision will be communicated clearly rather than leaving the report unresolved.
+
+## Coordinated disclosure
+
+We follow a coordinated disclosure process. Private reports remain confidential between the reporter and the maintainer while investigation and remediation are underway. Once a fix is verified and packaged in a public release or changelog update, public disclosure may follow. We ask researchers not to publicize vulnerability details until remediation or official assessment is finalized.
+
+## Known pre-alpha limitations
+
+FlashOS is pre-alpha evaluation software built by a solo maintainer. It currently provides no guaranteed production security SLAs, no verified memory-safe kernel isolation guarantees beyond the underlying Redox baseline, and no long-term support branches.
+
+Furthermore, published evaluation images contain known design properties that are documented rather than silently concealed (these are intentional evaluation characteristics, not reportable vulnerabilities):
+- The regular `user` account has no password and belongs to the `sudo` group. Console access to an unmodified image is therefore unauthenticated, and `sudo` will escalate to root without requiring a credential.
+- No network login service is installed by default, limiting this unauthenticated exposure to local console access.
+- Published release images are built from a profile that locks the root account, preventing direct root login. However, evaluation images intentionally retain a passwordless `user` account so evaluators booting from removable media can reach a prompt immediately. Proper credential bootstrapping will be introduced before FlashOS targets production environments.
+- Note: The historical v0.1.0 release predates the release profile and additionally contained a root account with a well-known default password. Treat all current published evaluation images as unauthenticated systems.
+
+## Out-of-scope reports
+
+The following components and issues are explicitly out of scope for FlashOS vulnerability reports:
+- The borrowed Redox kernel, relibc, bootloader, and inherited third-party userspace packages. These are transitional dependencies; report defects in them directly to the upstream Redox OS project, and optionally open a non-sensitive FlashOS tracking issue if it affects runtime stability.
+- Any vulnerability that requires an attacker to already hold root privileges on the target machine.
+- The documented evaluation credentials and pre-alpha limitations listed above.
+- Denial of service via normal command exhaustion or simple physical console interference.
+
+## Safe testing
+
+Published images are intended solely for evaluation in virtual machines (such as QEMU) or on disposable physical hardware. Never execute FlashOS evaluation images on production machines holding valuable data, and never attach an unauthenticated evaluation instance to an untrusted public network.
+
+---
+
+[← Back to Main README](../README.md) · [Documentation index](../docs/README.md)

@@ -1,45 +1,60 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/flashos_logo_dark.png">
-    <img src="../assets/flashos_logo_light.png" alt="FlashOS" width="280">
-  </picture>
+# Roadmap
 
-<h1>Roadmap and Future Direction</h1>
+[FlashOS](../README.md) › [Documentation](README.md) › Roadmap
 
-<p>
-    <a href="../README.md"><b>README</b></a> ·
-    <a href="README.md"><b>Documentation</b></a> ·
-    <a href="hardware.md"><b>Hardware</b></a> ·
-    <b>Roadmap</b> ·
-    <a href="../ci/README.md"><b>CI/CD</b></a> ·
-    <a href="../LICENSE"><b>License</b></a>
-  </p>
+This document summarizes the public development direction, architectural priorities, and long-term evolutionary milestones for FlashOS. It is intended for evaluators, developers, and contributors seeking to understand project trajectory and upcoming engineering initiatives. Note that as an independent solo project, this roadmap reflects strategic targets and intended technical outcomes rather than guaranteed release dates or contractual timelines.
 
-</div>
+## Current focus
+
+Our primary immediate focus centers on solidifying the independent FlashOS product architecture and simplifying repository workflows:
+- **Documentation and workflow maturity:** Establishing rigorous public documentation skeletons, unifying navigation structures, and publishing reproducible verification guidelines across all system layers.
+- **TUI profile baseline enforcement:** Ensuring that the active x86_64 system profile strictly adheres to a clean, keyboard-driven terminal user interface without inherited graphical desktop dependencies.
+- **Automated verification parity:** Maintaining separation between host quality gates, clean-room container builds, immutable release artifact promotion, and automated headless QEMU serial smoke testing.
+
+## Next priorities
+
+As current architectural foundations stabilize, immediate engineering efforts will shift toward deepening runtime quality and interface capabilities:
+- **FlashShell runtime and evaluation depth:** Expanding structured values, robust pipeline streaming, job control semantics, and interactive terminal line editing within `fsh`.
+- **Primary hardware qualification:** Advancing physical bare-metal testing on primary validated systems (such as the Sony VAIO VPCEB4L1E) beyond initial USB boot to encompass comprehensive driver checks, external pipeline execution, and clean ACPI shutdown qualification.
+- **System utility refinement:** Ensuring core terminal utilities (`coreutils` and `extrautils`) operate predictably with FlashShell's explicit execution and byte stream contracts.
+
+## Longer-term direction
+
+Over the longer term, FlashOS seeks to mature from evaluation software into a distinct, minimal operating system tailored for ergonomic terminal workflows:
+- **Production credential bootstrapping:** Replacing intentional passwordless evaluation accounts and blank user credentials in live USB images with secure, mandatory credential establishment during initial system boot.
+- **Secondary hardware target qualification:** Extending bare-metal testing and qualification protocols to secondary reference hardware targets, including modern EFI architectures.
+
+## System-boundary evolution
+
+FlashOS currently leverages Redox OS toolchains, userspace packaging, and boot utilities as a transitional bootstrap foundation. Our long-term architectural goal is to refine this relationship until the borrowed boundary is restricted exclusively to the operating system kernel:
+- **Base package pruning:** Systematically pruning unused services and legacy development daemons from the inherited base closure while strictly preserving necessary console display, keyboard input, audio driver (`IHDA`), and block storage enumeration paths.
+- **Kernel independence:** Preserving the freedom to independently patch, fork, or vendor the borrowed kernel to serve FlashOS requirements. Should future kernel customizations diverge from upstream Redox architecture, continuous update compatibility will remain optional rather than mandatory.
+- **Transitional infrastructure replacement:** Replacing technical compatibility identifiers (`redoxer`, `x86_64-unknown-redox`, and inherited artifact naming) only when native, fully verified FlashOS tooling alternatives are implemented and proven.
+
+## Hardware direction
+
+Physical hardware validation progresses systematically through verified empirical evidence rather than broad compatibility assertions:
+- We prioritize deep, reproducible qualification on a small set of primary physical reference devices over wide, superficial boot trials.
+- Driver support expectations are validated against exact live USB memory execution (`redox-live.iso`), ensuring consistent behavior across diverse storage controllers and physical consoles.
+
+## FlashShell direction
+
+As the hallmark user interface of FlashOS, FlashShell engineering prioritizes safe, composable execution over syntax legacy:
+- **Structured data composition:** Broadening support for typed internal pipelines and explicit byte conversion filters (`from json`, `to json`, structured record streaming) alongside traditional byte stream programs.
+- **Robust interactive ergonomics:** Refining multiline raw terminal input editing, context-aware command completion, searchable history persistence, and precise source span diagnostics.
+- **Predictable scripting symmetry:** Preserving absolute behavior parity between interactive console sessions and standalone `.fsh` script execution without falling back on implicit string evaluation or POSIX word-splitting rules.
+
+## Non-goals
+
+To preserve project clarity and manageable maintainer scope, several strategic directions are permanently established as non-goals:
+- **No graphical windowing stacks:** Developing or supporting graphical desktop environments, window managers (Orbital, COSMIC, X11, Wayland), graphical installers, or GUI client applications is permanently out of scope.
+- **No POSIX shell compliance:** We deliberately reject POSIX compatibility in FlashShell in favor of typed values, explicit expansion spreads, and non-exceptional status branching.
+- **No guaranteed timeline commitments:** As an independent project, we avoid claiming artificial release deadlines or unverified hardware driver compatibility promises.
+
+## How this roadmap is maintained
+
+This public roadmap represents the synthesized technical direction established in verifiable codebase implementations and published design invariants. It is curated directly by the repository maintainer during significant documentation updates and major version milestones. Detailed scheduling, internal experimentation notes, and fine-grained initiative mechanics remain managed independently to preserve public clarity and focus.
 
 ---
 
-This document summarizes the public future development direction of FlashOS as established in the technical documentation. This document is part of the ongoing public documentation restructuring; detailed initiative scheduling and milestones remain actively developed.
-
-## 1. Permanent System Boundary and Kernel Evolution
-
-FlashOS currently bootstraps from more of the Redox OS system than it intends to keep permanently. The intended long-term borrowed boundary is the kernel only.
-
-- **Kernel Freedom:** The kernel may later be patched, forked, or vendored for FlashOS. If that work makes later Redox kernel updates impractical, update compatibility is optional.
-- **Transitional Infrastructure:** Names such as `x86_64-unknown-redox`, `redoxer`, `relibc`, and inherited package identifiers remain during the bootstrap phase where they describe a real ABI or tool interface. Compatibility names disappear only when FlashOS owns a working replacement.
-- **Base Package Pruning:** The inherited `base` package still carries functions that the minimal image may not need, including a development daemon. These are tracked as pruning candidates, while preserving required console display, input, audio, storage, and hardware-enumeration paths.
-
-## 2. Hardware Qualification Goals
-
-Physical hardware validation progresses systematically beyond initial USB boot:
-
-- **Primary Device Qualification:** Full driver, pipeline, and shutdown qualification on primary target hardware (such as the Sony VAIO VPCEB4L1E) remains ongoing future work.
-- **Secondary Targets:** Additional target systems (such as the 21.5-inch iMac) remain secondary targets after primary validation is complete.
-
-## 3. Production Readiness and Security
-
-- **Credential Lifecycle:** The passwordless evaluation account in current development images will be replaced by a credential set at first boot before FlashOS is presented as production software.
-
----
-
-[← Back to Documentation Index](README.md)
+[← Previous: Hardware Compatibility](hardware.md) · [Back to Documentation Index →](README.md)

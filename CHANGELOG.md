@@ -1,30 +1,10 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/flashos_logo_dark.png">
-    <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
-  </picture>
+# Changelog
 
-<h1>Changelog</h1>
+[FlashOS](README.md) › Changelog
 
-<p>
-    <a href="README.md"><b>README</b></a> ·
-    <a href="docs/README.md"><b>Documentation</b></a> ·
-    <a href="docs/getting-started.md"><b>Getting Started</b></a> ·
-    <a href="ci/README.md"><b>CI/CD</b></a> ·
-    <b>Changelog</b> ·
-    <a href="LICENSE"><b>License</b></a>
-  </p>
+All notable changes to the current FlashOS source tree are recorded in this document. It serves as the chronological source of truth for public releases and significant system updates. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-</div>
-
----
-
-All notable changes to the current FlashOS source tree are recorded here. The
-format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-
-The `0.9.0` and older tags inherited with the Redox OS source history are
-upstream tags, not FlashOS releases. The former AArch64 FlashOS release history
-remains available in the archived `FlashOS-old` repository.
+The `0.9.0` and older tags inherited with the Redox OS source history are upstream tags, not FlashOS releases. The former AArch64 FlashOS release history remains available in the archived `FlashOS-old` repository.
 
 ## [Unreleased]
 
@@ -207,4 +187,4 @@ remains available in the archived `FlashOS-old` repository.
 
 ---
 
-[← Back: CI/CD](ci/README.md) · [Back to README](README.md)
+[← Back to Main README](README.md) · [Documentation index](docs/README.md)

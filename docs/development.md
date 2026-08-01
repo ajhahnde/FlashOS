@@ -1,115 +1,117 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/flashos_logo_dark.png">
-    <img src="../assets/flashos_logo_light.png" alt="FlashOS" width="280">
-  </picture>
+# Development
 
-<h1>Development</h1>
+[FlashOS](../README.md) › [Documentation](README.md) › Development
 
-<p>
-    <a href="../README.md"><b>README</b></a> ·
-    <a href="README.md"><b>Documentation</b></a> ·
-    <b>Development</b> ·
-    <a href="verification.md"><b>Verification</b></a> ·
-    <a href="../ci/README.md"><b>CI/CD</b></a> ·
-    <a href="../LICENSE"><b>License</b></a>
-  </p>
+This guide outlines the local developer environment, source tree structure, build operations, and documentation rules for modifying the FlashOS repository. It is intended for software engineers and maintainers actively extending build automation, system profiles, or userspace recipes. Subsystem testing suites and release verification gates are detailed in specialized accompanying guides.
 
-</div>
+## On this page
 
----
+- [Development environment](#development-environment)
+- [Repository layout](#repository-layout)
+- [Typical workflow](#typical-workflow)
+- [Build and maintenance commands](#build-and-maintenance-commands)
+- [Generated artifacts and caches](#generated-artifacts-and-caches)
+- [Working on system components](#working-on-system-components)
+- [Working on FlashShell](#working-on-flashshell)
+- [Documentation changes](#documentation-changes)
+- [Before submitting changes](#before-submitting-changes)
+- [Related guides](#related-guides)
 
-This document outlines the repository layout, local development workflow, developer tools, checks, and generated build artifacts for FlashOS.
+## Development environment
 
-## Contents
+Developing changes for FlashOS requires a host system provisioned with Git, Rustup, GNU Make, Podman, and QEMU as introduced in [Getting Started](getting-started.md). Ensure your container machine (`podman machine start`) is operational and that a local `.config` file is established in your repository root with `CONFIG_NAME?=flashos` and `ARCH?=x86_64` before compiling system images or invoking target package rebuilds.
 
-1. [Source layout](#1-source-layout)
-2. [Development checks](#2-development-checks)
-3. [Build artefacts](#3-build-artefacts)
-4. [FlashShell developer guidance](#4-flashshell-developer-guidance)
+## Repository layout
 
-## 1. Source layout
+The FlashOS source repository is organized into distinct build, recipe, and code workspaces:
 
 ```text
 config/
-  flashos-base.toml               TUI foundation without Orbital or /ui paths
-  x86_64/flashos.toml             active FlashOS image manifest
-
+  flashos-base.toml               TUI foundation without Orbital or legacy /ui paths
+  x86_64/flashos.toml             Active FlashOS image configuration profile
 components/
-  flashshell/                     nested FlashShell Cargo workspace
-
+  flashshell/                     In-tree FlashShell standalone Cargo workspace
 recipes/
-  core/kernel/                    current kernel source and build recipe
-  terminal/flashshell/            fsh package recipe
-  ...                             transitional inherited package recipes
-
-mk/                               Make build modules
-podman/                           container build environment
-scripts/                          build, boot, and maintenance helpers
-ci/                              product contracts and QEMU automation
-.github/workflows/               CI, security, reusable image, and release flows
-src/                              root build-system support crate
-versions.env                      live release version used by delivery gates
-Makefile                          top-level image and emulator entry point
+  core/kernel/                    Current operating-system kernel boundary recipe
+  terminal/flashshell/            Target recipe compiling /usr/bin/fsh from source
+  ...                             Transitional inherited core utilities and packaging
+ci/                               Python product-profile lints and QEMU smoke tests
+.github/workflows/                CI quality gates, container builds, and release flows
+mk/ and Makefile                  Make build modules and root compilation entrypoint
+scripts/ and podman/              Build helpers and clean-room container configurations
+src/                              Root build-system support crate (`flashos_build`)
+versions.env                      Live release version string for delivery gates
 ```
 
-The root Cargo package is named `flashos_build`. It supports the inherited
-package and image pipeline; it is not the operating-system kernel. FlashShell
-has its own workspace, toolchain file, libraries, tests, and license under
-`components/flashshell/`.
+The root Cargo package (`flashos_build` under `src/`) functions exclusively as a build-system support utility for image processing; it is not the operating-system kernel. FlashShell maintains an isolated workspace under `components/flashshell/` with its own toolchain definitions and licensing.
 
-## 2. Development checks
+## Typical workflow
 
-When modifying the build system or system components locally, run the appropriate check layers before assembling a full image.
+When contributing code or modifying configuration profiles, structure your daily engineering loop around progressive quality verification:
+1. Create a clean working branch off `main`.
+2. Implement targeted modifications inside the appropriate component workspace or recipe directory.
+3. Validate host unit tests and compiler linting on modified Rust code before launching long container builds.
+4. Execute local CI contract checks (`python3 ci/check_profile.py`) to verify profile invariants.
+5. Rebuild the x86_64 system image (`make CONFIG_NAME=flashos all`) and run an interactive QEMU session or automated serial smoke test (`python3 ci/qemu_smoke.py ...`).
 
-Run the root build-system check:
+## Build and maintenance commands
 
-```sh
-cargo check --locked
-```
+When executing root compilation and iteration tasks, rely on standard Make operations or the included shell wrapper scripts (`flashos.sh` / `flashos.zsh`):
+- `cargo check --locked` — Verify root build-system support crate compilation and dependency lockstep.
+- `make CONFIG_NAME=flashos all` — Assemble the complete default hard drive image in Podman.
+- `make CONFIG_NAME=flashos build/x86_64/flashos/redox-live.iso` — Build the standalone live USB image.
+- `make CONFIG_NAME=flashos qemu` — Launch the freshly built disk inside interactive QEMU UEFI emulation.
+- `flashos recipe rebuild <NAME>` — Trigger focused package recompilation during iterative recipe debugging without tearing down cached toolchains.
 
-Run the FlashShell host gates:
+## Generated artifacts and caches
 
-```sh
-cd components/flashshell
-cargo test -p flashshell-cli
-cargo clippy -p flashshell-cli --all-targets -- -D warnings
-```
-
-With the Redox-compatible target toolchain on `PATH`, test target compilation:
-
-```sh
-redoxer build -p flashshell-cli --bin fsh
-```
-
-Return to the repository root before building the image:
-
-```sh
-cd ../..
-make CONFIG_NAME=flashos all
-```
-
-## 3. Build artefacts
-
-Generated output is ignored by Git. The main paths are:
+Compiled output files, cross-toolchains, and intermediary caches are ignored by Git and written into isolated directories:
 
 ```text
-build/x86_64/flashos/harddrive.img     QEMU or installed-disk image
-build/x86_64/flashos/redox-live.iso    self-contained USB live image
-build/x86_64/flashos/filesystem/       assembled filesystem when mounted
-build/x86_64/flashos/repo.tag          package-repository completion marker
-prefix/x86_64-unknown-redox/           target toolchain and sysroot
-components/flashshell/target/          FlashShell host build output
+build/x86_64/flashos/harddrive.img     Installed-disk and NVMe QEMU boot image
+build/x86_64/flashos/redox-live.iso    Self-contained RAM-cached live USB image
+build/x86_64/flashos/filesystem/       Staged directory filesystem during image assembly
+build/x86_64/flashos/repo.tag          Package repository cache marker
+prefix/x86_64-unknown-redox/           Cross-compiled target toolchain and sysroot
+components/flashshell/target/          Host compiler artifacts for FlashShell
 ```
 
-Exact intermediate names may change while inherited tooling is replaced.
-Only the configured image identity and verified runtime behavior are product
-contracts.
+Never force-add or commit generated binaries, disk images, or compiled toolchain caches into repository git tracking.
 
-## 4. FlashShell developer guidance
+## Working on system components
 
-FlashShell (`fsh`) is built and tested as a standalone workspace in `components/flashshell/`. For component-specific instructions on unit tests, golden fixtures, fuzzing, and end-to-end PTY testing, see the [FlashShell Development Guide](../components/flashshell/docs/development.md).
+When modifying system packaging under `recipes/` or altering TUI profile rules in `config/`:
+- Test package builds individually before executing a complete image rebuild.
+- Confirm that new dependencies do not transitively drag in graphical client libraries (such as SDL, OpenGL, or windowing toolkits), as this will trigger failures in `ci/check_profile.py`.
+- Preserve required audio drivers (`IHDA`) and terminal device enumeration paths.
+
+## Working on FlashShell
+
+FlashShell (`fsh`) is engineered as an independent workspace in `components/flashshell/`. When altering shell grammar, built-in commands, or terminal line editing:
+- Follow the focused instructions in [FlashShell Development Guide](../components/flashshell/docs/development.md).
+- Ensure all unit tests, property suites, canonical formatters, and golden grammar manifests succeed locally before initiating target recipe recompilation.
+
+## Documentation changes
+
+When creating or refining public markdown documentation in the repository, strictly follow these editorial rules:
+- **Use relative links:** All internal markdown links and symbol references must use relative file paths pointing to valid repository targets. Never link to uncreated hosting websites or local `target/doc/` build folders.
+- **Honor one Source of Truth:** Each technical topic has one primary document. Do not duplicate verbose command sequences or deep architectural tables; summarize briefly and link to the responsible topic guide.
+- **Verify technical claims:** Every command, code snippet, syntax example, and hardware validation statement must reflect verified, demonstrable code or testing evidence.
+- **Check links and headings:** Verify that every modified guide retains exactly one Level 1 (`#`) title and that no internal markdown links are broken or orphaned.
+- **Separate public and private documentation:** Never mix internal management notes, personal timestamps, session identifiers, AI tooling notes, or private file paths into public docs.
+
+## Before submitting changes
+
+Before opening a pull request or requesting code review, confirm that your branch satisfies standard verification requirements:
+- Run `git status --short` and `git diff --check` to catch unintended file modifications or trailing whitespace formatting errors.
+- Ensure host tests and local Python CI contract checks pass cleanly.
+- Re-read your commit history to ensure generated compilation artifacts, temporary scratch files, or local `.config` overrides remain uncommitted.
+
+## Related guides
+
+- [Getting Started](getting-started.md) — Initial host setup, toolchain requirements, and first-time image building.
+- [Verification and Testing](verification.md) — Layered verification model, local Python test execution, and QEMU smoke automation.
 
 ---
 
-[← Back: Architecture](architecture.md) · [Next: Verification →](verification.md)
+[← Previous: Architecture](architecture.md) · [Documentation index](README.md) · [Next: Verification →](verification.md)
