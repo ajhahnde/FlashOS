@@ -1,8 +1,8 @@
 diff --git a/res/issue b/res/issue
-index 6a963d8..8865aed 100644
+index 6a963d8..812be49 100644
 --- a/res/issue
 +++ b/res/issue
-@@ -1,6 +1,18 @@
+@@ -1,6 +1,5 @@
 -########## Redox OS ##########
 -# Login with the following:  #
 -# `user`                     #
@@ -10,33 +10,19 @@ index 6a963d8..8865aed 100644
 -##############################
 - 
 +
-++------------------------------------------------------------+
-+|                                                            |
-+|                          FlashOS                           |
-+|                   by github.com/ajhahnde                   |
-+|                             -                              |
-+|            An unofficial Redox OS distribution             |
-+|                                                            |
-++------------------------------------------------------------+
-+|                                                            |
-+|    Accounts:                                               |
-+|                                                            |
-+|      Username     Password                                 |
-+|      user         user                                     |
-+|      root         root                                     |
-+|                                                            |
-++------------------------------------------------------------+
++FlashOS - by github.com/ajhahnde
++
++    > An unofficial Redox OS distribution
 +
 diff --git a/res/motd b/res/motd
-index 5cd097a..13cd67a 100644
+index 5cd097a..91475e8 100644
 --- a/res/motd
 +++ b/res/motd
-@@ -1,2 +1,2 @@
+@@ -1 +1 @@
 -Welcome to Redox OS!
 +Login successful!
- 
 diff --git a/src/bin/login.rs b/src/bin/login.rs
-index 83ad72d..c8117e6 100644
+index 83ad72d..9f281a9 100644
 --- a/src/bin/login.rs
 +++ b/src/bin/login.rs
 @@ -135,7 +135,7 @@ pub fn main() {
