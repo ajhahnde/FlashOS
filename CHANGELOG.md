@@ -30,14 +30,16 @@ remains available in the archived `FlashOS-old` repository.
 
 ### Added
 
-- Added terminal signal handling to the interactive shell. An interrupt or a
-  stop typed at the keyboard reached the shell and its running command alike, so
-  Ctrl-C ended the whole session instead of the command. An interactive shell
-  that holds a terminal now arranges those signals for the life of the session,
-  every command it starts is given the default handling back before it runs, and
-  a job stopped from the keyboard is resumed in place so it still finishes. A
-  shell reading redirected input arranges nothing and is still interrupted along
-  with the terminal's foreground group.
+- Added interactive job control to FlashShell. Ctrl-C now interrupts the running
+  command without ending the shell, while Ctrl-Z retains an exact external
+  foreground command as an addressable job and returns the prompt. `jobs`
+  exposes structured job state, `bg` and `fg` resume stopped work in the chosen
+  placement, `wait` consumes selected completions, and `kill` signals explicit
+  `%n` targets with termination as the default and forced termination available
+  through `--kill`. Foreground handoff and restoration keep subsequent terminal
+  input attached to the shell. A shell reading redirected input arranges no
+  interactive signal handling and remains part of its existing foreground
+  process group.
 - Added a line editor to the console shell. `fsh` on the image read input in
   canonical mode, so a session had no in-line editing, no history recall, and no
   continuation prompt for an incomplete block. The shell now decodes keys
