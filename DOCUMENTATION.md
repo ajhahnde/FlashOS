@@ -207,7 +207,7 @@ Changes are accepted in layers:
 3. **Recipe** — the FlashShell package cooks from the intended source.
 4. **Image** — the `flashos` image builds with the expected identity, package,
    user, and shell metadata.
-5. **QEMU** — login reaches `fsh> ` and an external-to-external pipeline runs.
+5. **QEMU** — login reaches `>> ` and an external-to-external pipeline runs.
 6. **Hardware** — a physical device is tested only after the migration and
    image gates are complete.
 

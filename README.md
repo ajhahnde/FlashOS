@@ -57,7 +57,7 @@ nonprofit.
 | **Primary development target** | QEMU `q35` with UEFI                                 |
 
 The QEMU gate covers both harddrive and live USB image paths, including login,
-the `fsh> ` prompt, and external pipelines. Device-specific validation scope
+the `>> ` prompt, and external pipelines. Device-specific validation scope
 and results are maintained in [Hardware Compatibility](HARDWARE.md).
 
 ## Architecture

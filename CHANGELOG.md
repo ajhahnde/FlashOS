@@ -187,7 +187,7 @@ remains available in the archived `FlashOS-old` repository.
 - FlashShell target compilation for `x86_64-unknown-redox`.
 - Root Cargo metadata and locked dependency check.
 - FlashOS build-environment selection for `x86_64` and the `flashos` profile.
-- QEMU boot, login to `fsh> `, and an external-to-external pipeline on the
+- QEMU boot, login to `>> `, and an external-to-external pipeline on the
   final rebranded image.
 - Automated QEMU contract including the FlashOS bootloader, kernel identity,
   login prompt, FlashShell pipeline, and retained IHDA audio driver.

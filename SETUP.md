@@ -168,7 +168,7 @@ safe for a distributed or network-exposed image.
 A successful interactive gate reaches:
 
 ```text
-fsh>
+>>
 ```
 
 Then verify one external-to-external pipeline, for example with commands

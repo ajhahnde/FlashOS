@@ -26,7 +26,7 @@ count as FlashOS qualification.
 ## Validation levels
 
 The physical release gate for v0.1.0 requires a successful live USB boot,
-working display and keyboard input, login, and the `fsh> ` prompt.
+working display and keyboard input, login, and the `>> ` prompt.
 
 A machine is fully qualified when it additionally:
 
