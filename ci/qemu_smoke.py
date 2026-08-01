@@ -206,7 +206,7 @@ try:
     shell_start = len(captured)
     send(b"printf 'hallo\\nwelt\\n' | head -n 1\r")
     collect_until(b"hallo", shell_start)
-    collect_until(b">> ", shell_start)
+    collect_until(EMPTY_PROMPT_ROW, shell_start)
 
     # Boot is done. Re-arm the deadline so the assertions below get their own
     # budget: sharing one with the boot would report a merely slow boot as a
@@ -219,9 +219,11 @@ try:
     # host test can reach it.
     edit_mark = submit_line(b"echo hallo\x7f\x7fx", b">> echo halx")
     collect_until(b"halx", edit_mark)
+    collect_until(EMPTY_PROMPT_ROW, edit_mark)
 
     recall_mark = submit_line(b"\x1b[A", b">> echo halx")
     collect_until(b"halx", recall_mark)
+    collect_until(EMPTY_PROMPT_ROW, recall_mark)
 
     # A block spans three physical lines, so the continuation prompt has to
     # appear between them and the lines have to reach the parser joined. The two
@@ -264,6 +266,7 @@ try:
         b"^false || echo fellback", b">> ^false || echo fellback"
     )
     collect_until(b"fellback", status_mark)
+    collect_until(EMPTY_PROMPT_ROW, status_mark)
 
     # RedoxFS write, read back, and remove, as the unprivileged user. Each step
     # is asserted by its own observable: a returning prompt would follow a
@@ -277,6 +280,7 @@ try:
         b"cat /home/user/smoke.txt", b">> cat /home/user/smoke.txt"
     )
     collect_until(b"persisted", read_mark)
+    collect_until(EMPTY_PROMPT_ROW, read_mark)
     remove_mark = submit_line(
         b"rm /home/user/smoke.txt", b">> rm /home/user/smoke.txt"
     )
@@ -286,6 +290,18 @@ try:
         b">> cat /home/user/smoke.txt || echo removed",
     )
     collect_until(b"removed", gone_mark)
+    collect_until(EMPTY_PROMPT_ROW, gone_mark)
+
+    # A direct non-zero external completion must return through the managed
+    # foreground path rather than relying on a conditional chain's synchronous
+    # wait. This is the real-image regression for a missing-file `cat` printing
+    # its diagnostic and then stranding the prompt on Redox.
+    missing_mark = submit_line(
+        b"cat /home/user/definitely-missing",
+        b">> cat /home/user/definitely-missing",
+    )
+    collect_until(b"No such file or directory", missing_mark)
+    collect_until(EMPTY_PROMPT_ROW, missing_mark)
 
     # The unprivileged user must not be able to write outside its home. A
     # failed redirection is a shell error, not a command status, so it cannot
@@ -302,6 +318,7 @@ try:
         b">> cat /etc/smoke.txt || echo denied",
     )
     collect_until(b"denied", absent_mark)
+    collect_until(EMPTY_PROMPT_ROW, absent_mark)
 
     if args.expect_root_locked:
         # Only the release profile locks root. `locked = true` writes an
