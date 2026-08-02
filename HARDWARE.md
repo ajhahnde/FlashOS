@@ -1,12 +1,13 @@
-# Hardware documentation moved
+# Hardware Documentation Moved
 
-The public hardware compatibility tracking previously located here has been moved under `docs/`.
+[FlashOS](README.md) › Hardware redirect
 
-Please refer to the updated hardware documentation:
+This compatibility page is retained for older links and bookmarks. The canonical source for current FlashOS hardware test evidence, qualification criteria, reporting guidance, and safety information is [Hardware Compatibility](docs/hardware.md).
 
-- [Hardware Compatibility](docs/hardware.md)
-- [Upstream Hardware Reference](docs/upstream/REDOX_HARDWARE.md)
-- [Documentation Index](docs/README.md)
+Historical Redox OS compatibility reports are retained separately as an [Upstream Hardware Reference](docs/upstream/REDOX_HARDWARE.md). Upstream reports may provide diagnostic context, but they do not constitute FlashOS hardware qualification.
+
+New links should target the canonical hardware documentation under `docs/` rather than this forwarding file.
 
 ---
-[← Back to Main README](README.md)
+
+[← Back to FlashOS](README.md) · [Open Hardware Compatibility →](docs/hardware.md)
