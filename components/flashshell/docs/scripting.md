@@ -1,88 +1,795 @@
-# Scripting and Execution
+# FlashShell Scripting
 
 [FlashOS](../../../README.md) › [FlashShell](../README.md) › [Documentation](README.md) › Scripting
 
-This document details script execution semantics, process invocation models, redirection mechanics, status handling, and interactive terminal job lifecycle management in FlashShell. It is intended for software engineers writing `.fsh` automation scripts or embedding the FlashShell runtime engine within external host environments. Basic language syntax and typed pipeline rules are documented in the companion language guide.
+This guide explains how to run `.fsh` programs, invoke external processes, connect pipeline stages, redirect file descriptors, handle command statuses, and manage background jobs. Language syntax, values, bindings, expressions, and structured-data operations are documented in the [Language Guide](language-guide.md).
 
 ## On this page
 
-- [Scripts versus prompt execution](#scripts-versus-prompt-execution)
-- [External command execution](#external-command-execution)
+- [Running scripts](#running-scripts)
+- [Script and interactive execution](#script-and-interactive-execution)
+- [Session state](#session-state)
+- [Invoking commands](#invoking-commands)
 - [Command substitution](#command-substitution)
-- [Pipeline boundaries](#pipeline-boundaries)
-- [Redirections and descriptors](#redirections-and-descriptors)
-- [Statuses and error handling](#statuses-and-error-handling)
-- [Job lifecycle and process groups](#job-lifecycle-and-process-groups)
-- [Interactive sessions and safe mode](#interactive-sessions-and-safe-mode)
-- [Portability considerations](#portability-considerations)
-- [Related documentation](#related-documentation)
+- [Pipelines](#pipelines)
+- [Redirections](#redirections)
+- [Statuses and failures](#statuses-and-failures)
+- [Background execution](#background-execution)
+- [Job commands](#job-commands)
+- [Interactive job control](#interactive-job-control)
+- [Portability and operational boundaries](#portability-and-operational-boundaries)
 
-## Scripts versus prompt execution
+## Running scripts
 
-FlashShell guarantees strict execution symmetry between interactive terminal sessions and automated scripts. The executable entry point is `fsh`, and script source files use the `.fsh` extension. Both execution contexts engage an identical parser, AST representation, and scoping evaluation runtime. A script statement executed via `fsh automation.fsh` behaves identically to submitting the same lines directly at an interactive `>> ` prompt.
+The FlashShell executable is named `fsh`. Run a UTF-8 source file by passing its path:
 
-## External command execution
+```bash
+fsh program.fsh
+```
 
-External host operating system utilities are invoked directly via argument vectors without intermediary interpretation:
-- **Direct process launch:** FlashShell constructs native operating system command structures and argument arrays immediately; command strings are never routed through `/bin/sh` or host default sub-shells.
-- **Forcing external commands:** To execute an external system binary without ambiguity or potential shadowing by identically named internal shell commands, prefix the invocation with the caret operator (`^`):
-  ```fsh
-  ^ls -lh /var/log/
-  ^git ...$args
-  ```
+A relative script path is resolved by the process that starts `fsh`. Commands inside the script begin with the caller's current working directory and inherited environment.
+
+Use `--` when a script path begins with a hyphen:
+
+```bash
+fsh -- --maintenance.fsh
+```
+
+The standard informational modes are:
+
+```bash
+fsh --help
+fsh --version
+```
+
+FlashShell reports command-line invocation errors before opening a script. File read failures, invalid UTF-8, parse failures, and runtime failures are reported separately.
+
+### Source files
+
+FlashShell scripts conventionally use the `.fsh` extension. Source files:
+
+- must contain UTF-8 text;
+- may use LF or CRLF line endings;
+- use the same grammar and evaluator as interactive submissions;
+- are parsed as FlashShell rather than POSIX shell source.
+
+A `.fsh` file is not a Bash or `sh` program. Do not use POSIX-specific syntax unless an external POSIX shell is invoked explicitly.
+
+## Script and interactive execution
+
+Interactive input and scripts share the FlashShell parser, value model, command planner, and evaluator. The surrounding session behavior is intentionally different.
+
+| Behavior                                  | Interactive session  | Script execution          |
+| ----------------------------------------- | -------------------- | ------------------------- |
+| Startup command                           | `fsh`                | `fsh program.fsh`         |
+| Language parser and evaluator             | Shared               | Shared                    |
+| Line editor and prompts                   | Enabled              | Not used                  |
+| Persistent interactive history            | Optional             | Not used                  |
+| Interactive startup configuration         | Considered once      | Never loaded              |
+| Recover after a source/runtime diagnostic | Return to the prompt | End the script            |
+| Background-job completion                 | Prompt-safe notices  | Joined before script exit |
+
+Interactive configuration cannot silently change the meaning of an automation script. A script starts from deterministic session defaults, its inherited environment, and its initial working directory.
+
+Running:
+
+```bash
+fsh --no-config
+```
+
+starts an interactive session without loading its startup configuration. The `--no-history` option similarly disables interactive history for that session. These policies do not turn script execution into an interactive session.
+
+## Session state
+
+A script owns session-local state that persists between its statements:
+
+- lexical bindings and functions;
+- a logical working directory;
+- the environment inherited by child processes;
+- session options;
+- the most recent normally completed command status;
+- background jobs started by the script.
+
+### Working directory
+
+Use `cd` to change the logical working directory:
+
+```text
+cd workspace
+```
+
+Later external commands and relative filesystem operations use the updated directory.
+
+With no argument, `cd` uses the inherited `HOME` environment entry:
+
+```text
+cd
+```
+
+Use `pwd` to produce the current directory as a structured `Path` value:
+
+```text
+pwd
+```
+
+A successful directory change updates the child environment entries `PWD` and `OLDPWD`.
+
+### Child environment
+
+Lexical bindings and child-process environment entries are separate.
+
+```text
+let mode = "release"
+export BUILD_MODE = $mode
+```
+
+The lexical binding `$mode` is available to FlashShell evaluation. The exported `BUILD_MODE` entry is included in the environment of external processes started later.
+
+Remove an environment entry with `unset`:
+
+```text
+unset BUILD_MODE
+```
+
+Environment changes belong to the running FlashShell session. They do not modify the environment of the process that started `fsh`.
+
+## Invoking commands
+
+A bare command name is resolved in this order:
+
+1. a registered FlashShell internal command;
+2. an external executable.
+
+```text
+pwd
+ls
+```
+
+In this example, `pwd` and `ls` select the FlashShell internal commands when those commands are registered.
+
+### Forcing external execution
+
+Prefix a command with `^` to bypass the internal-command registry:
+
+```text
+^ls -la
+```
+
+The caret is FlashShell syntax and is not included in the external process argument vector.
+
+Use `command` when the executable name is selected at runtime:
+
+```text
+let program = "compiler"
+let arguments = ["--mode", "release"]
+
+command $program ...$arguments
+```
+
+`command` also bypasses the internal registry.
+
+### Direct process launch
+
+FlashShell starts external executables directly. It constructs a native executable path, argument vector, environment, working directory, and descriptor map without passing rendered command text through `/bin/sh`.
+
+Consequently:
+
+- spaces inside one argument remain inside that argument;
+- pipeline and redirection characters produced by interpolation remain data;
+- an interpolated string cannot introduce another command;
+- external commands receive exactly the arguments produced by FlashShell expansion.
+
+Running another shell is always explicit:
+
+```text
+^sh -c "external shell source"
+```
+
+The quoted source in this example is interpreted by `sh`, not by FlashShell.
+
+### Executable lookup
+
+A command name containing `/` is treated as a path and is not searched through `PATH`:
+
+```text
+^./tools/check
+^/usr/bin/example
+```
+
+A bare external name is searched through the inherited `PATH` entries in source order:
+
+```text
+^example
+```
+
+Empty `PATH` entries do not mean the current working directory. Use an explicit relative path such as `./example` when that behavior is intended.
+
+Failure to locate an executable is a runtime error. FlashShell does not manufacture a successful process launch with a synthetic exit status such as `127`.
+
+### Argument cardinality
+
+Each ordinary command word produces exactly one argument:
+
+```text
+let label = "two words"
+command "example" $label
+```
+
+The value of `$label` remains one argument.
+
+Expand a list into separate arguments with explicit spread syntax:
+
+```text
+let flags = ["--verbose", "--check"]
+command "example" ...$flags
+```
+
+An empty list contributes no arguments. An empty string contributes one empty argument.
+
+Wildcard characters are literal in ordinary words:
+
+```text
+command "example" "*.fsh"
+```
+
+Use `glob` and spread the resulting list when filesystem matching is required:
+
+```text
+let scripts = glob("scripts/**/*.fsh")
+command "example" ...$scripts
+```
+
+For the complete expansion rules and eligible argument value types, see [Commands and argument expansion](language-guide.md#commands-and-argument-expansion).
 
 ## Command substitution
 
-FlashShell prevents code injection vulnerabilities by treating command substitution outputs purely as structured data values:
-- **No string evaluation:** The language deliberately omits dynamic string evaluation (`eval`).
-- **Safe capture:** Executing command substitutions captures stdout execution bytes or internal typed stream outputs directly into variable bindings or pipeline parameters without reparsing captured strings as executable source syntax.
+Command substitution captures standard output as one string:
 
-## Pipeline boundaries
+```text
+let directory = "$(pwd)"
+```
 
-Data streaming across pipelines adapts automatically based on stage composition and execution boundaries:
-- **External byte streams:** External-to-external pipeline edges operate as direct, shell-free OS file descriptor pipes.
-- **Mixed pipelines and pipefail:** When pipelines mix internal built-ins with external OS binaries, execution streams explicit byte boundaries across stages without intermediate buffering or text capture. Mixed pipelines preserve source-ordered stage statuses and honor strict `pipefail` semantics: if an external consumer terminates early or breaks a pipe, FlashShell immediately ceases pulling from internal producers without hanging or panicking.
+The `$(...)` form evaluates one foreground command or conditional chain. It does not start an intermediate shell.
 
-## Redirections and descriptors
+Successful text capture:
 
-I/O redirections follow strict source-ordered evaluation syntax:
-- Support standard input (`<`), output overwriting (`>`), output appending (`>>`), and error file descriptor routing (`2>`, `2>&1`).
-- Redirection evaluation occurs sequentially as specified in source order before executing target child processes.
-- If file opening, permission validation, or file descriptor duplication fails during redirection setup, execution halts immediately with a runtime error reporting precise source spans without launching the target executable.
+- reads standard output only;
+- requires valid UTF-8;
+- removes trailing LF and CRLF line-ending sequences;
+- preserves other whitespace and newlines;
+- produces exactly one `String`;
+- never reparses or splits the captured text.
 
-## Statuses and error handling
+An empty capture therefore produces one empty string rather than no value.
 
-Process termination and structural failures follow a strict operational separation:
-- **Statuses, not exceptions:** An external command returning a non-zero exit code does not trigger an unhandled exception or abort script execution by default. Instead, exit codes transform into first-class `Status` values. Logical branching operators (`&&`, `||`) evaluate directly on these status results:
-  ```fsh
-  ^make all && echo "Build succeeded" || echo "Build failed with errors"
-  ```
-- **Explicit checking:** To convert a non-zero status return into a catchable runtime execution error that halts pipeline progress, pass the result through the explicit `check` built-in command.
-- **Runtime errors:** Unlike process exit codes, structural faults—such as missing binaries, failing redirections, argument type mismatches, or invalid syntax—instantly emit fatal runtime errors with lossless compiler diagnostic spans.
+Standard error remains inherited unless the source redirects it:
 
-## Job lifecycle and process groups
+```text
+let version = "$(^program --version 2> version-errors.log)"
+```
 
-Process execution operates under a rigorous, checked job lifecycle foundation:
-- **Stable job identity:** Every executed pipeline or background process receives a stable, unique shell job identification handle.
-- **Startup barriers:** Multi-process pipelines utilize an all-members startup synchronization barrier before executing target binaries, preventing race conditions during pipeline assembly.
-- **Process group isolation:** Every external stage of a single pipeline spawns inside a shared operating system process group, ensuring that signals (such as `SIGTSTP` or `SIGINT`), background stops, and foreground resumptions target the entire pipeline collectively rather than as fragmented processes.
-- **Completion observations:** Per-process termination observations are retained securely and reported cleanly at prompt-safe boundaries until acknowledged and removed by the session user.
+A nonzero command exit still produces captured output paired with its actual status. It does not become a runtime error merely because the command was unsuccessful.
 
-## Interactive sessions and safe mode
+Capture is bounded by the session capture limit. If the output exceeds that limit, FlashShell continues draining and reaping the started processes before returning a capture-limit runtime error. This prevents the memory bound from causing a pipe deadlock.
 
-When invoked without script arguments (`fsh`), the engine initializes an interactive terminal console session:
-- **Terminal ownership transfer:** During foreground job execution, FlashShell transfers terminal control (`tcsetpgrp`) to the active pipeline's process group for exactly the duration of execution, reclaiming control before printing the next continuation prompt. If job execution panics or fails abruptly, terminal ownership releases cleanly back to the shell.
-- **Transactional configuration and safe mode:** Upon startup, interactive sessions load trusted user configuration scripts transactionally. If syntax errors or runtime faults fail configuration evaluation, FlashShell aborts modifications and enters a clearly visible **safe mode** prompt rather than crashing or stranding the user.
-- **Session options and interruption:** Startup flags `--no-config` and `--no-history` allow operators to cleanly bypass configuration loading or history database recording. During interactive editing, pressing `Ctrl-C` cleanly cancels the current multiline input buffer, while pressing `Ctrl-D` on an empty command line shuts down the session.
+Invalid UTF-8 similarly produces a runtime error rather than silently replacing bytes. Use byte-oriented pipelines and explicit decoding when arbitrary binary output is expected.
 
-## Portability considerations
+## Pipelines
 
-The runtime engine decouples core language evaluation from operating system primitives through the `flashshell-platform` contract. While `flashshell-platform-posix` supplies full POSIX process group, terminal ownership, and signal handling implementations for macOS and Linux hosts, platforms lacking sophisticated process groups or terminal job transfer simply execute pipelines within the shell's own process group without failing execution contracts.
+The `|` operator connects one stage to the next:
+
+```text
+^producer | ^consumer
+```
+
+External stages exchange byte streams through operating-system pipes. FlashShell starts the required stages before waiting for their completion, allowing producers and consumers to run concurrently.
+
+### Standard error pipelines
+
+Use `|&` to merge a stage's standard output and standard error into one byte stream:
+
+```text
+^program |& ^consumer
+```
+
+The merged stream is not tagged. Its byte order is the order produced by the underlying writes.
+
+`|&` requires a byte-oriented stage whose standard output and standard error can be redirected. Structured runtime values are not implicitly encoded or merged into a byte stream.
+
+### Structured stages
+
+Internal commands may exchange structured carriers:
+
+- one `Value`;
+- a lazy `ValueStream`;
+- a `ByteStream`;
+- no pipeline payload.
+
+For example:
+
+```text
+ls
+    | where {|entry| $entry.type == "file"}
+    | select name size
+    | sort name
+```
+
+The structured records in this pipeline are not converted to terminal-formatted text between stages.
+
+### Explicit representation changes
+
+Cross representation boundaries explicitly:
+
+```text
+open users.json
+    | from json
+    | where {|user| $user.active}
+    | select name email
+    | to json
+    | save active-users.json
+```
+
+Common conversion families are:
+
+| Command   | Boundary                                   |
+| --------- | ------------------------------------------ |
+| `decode`  | Byte stream to textual values              |
+| `encode`  | Textual values to bytes                    |
+| `from`    | Serialized bytes to structured values      |
+| `to`      | Structured values to serialized bytes      |
+| `collect` | Lazy value stream to one materialized list |
+
+FlashShell rejects incompatible pipeline edges rather than guessing a conversion.
+
+Interactive rendering of a record, list, or table is for human inspection. It is not a stable serialization format. Use an explicit encoder or formatter when a file or external process requires bytes.
+
+### Pipeline completion
+
+Every normally completed stage has its own status. A multi-stage pipeline additionally produces an aggregate status whose stage list remains in source order.
+
+By default, the last stage selects the aggregate result. When the session's `pipefail` option is enabled, the rightmost unsuccessful stage selects it instead. `pipefail` changes status selection only; it does not stop, reorder, or serialize pipeline stages.
+
+All required stages are reaped before a completed aggregate status is returned.
+
+## Redirections
+
+FlashShell supports source-ordered descriptor redirections.
+
+| Form       | Meaning                                        |
+| ---------- | ---------------------------------------------- |
+| `< file`   | Open `file` for standard input                 |
+| `> file`   | Create or truncate `file` for standard output  |
+| `>> file`  | Create or append to `file` for standard output |
+| `n< file`  | Open `file` for descriptor `n`                 |
+| `n> file`  | Create or truncate `file` for descriptor `n`   |
+| `n>> file` | Create or append to `file` for descriptor `n`  |
+| `n>&m`     | Duplicate the current descriptor `m` onto `n`  |
+| `n>&-`     | Close descriptor `n`                           |
+
+Examples:
+
+```text
+^program < input.dat > output.dat
+^program > output.log 2> error.log
+^program >> combined.log 2>&1
+```
+
+A descriptor number must be adjacent to the operator. These forms are different:
+
+```text
+^program 2> error.log
+^program 2 > output.log
+```
+
+The first redirects descriptor 2. The second passes `2` as an argument and redirects descriptor 1.
+
+### Source order matters
+
+Redirections are applied from left to right:
+
+```text
+^program > combined.log 2>&1
+```
+
+Both standard output and standard error end at `combined.log`.
+
+```text
+^program 2>&1 > output.log
+```
+
+Standard error keeps the destination that standard output had before the later `>` action. Only standard output ends at `output.log`.
+
+Descriptor duplication refers to the mapping that exists at that exact point. It is not deferred until process launch.
+
+### Pipelines and local redirections
+
+Pipeline descriptor assignments are installed before a stage's local redirections. A local redirection can therefore replace a pipeline endpoint:
+
+```text
+^program 2> errors.log |& ^consumer
+```
+
+Only the program's standard output reaches `consumer`.
+
+```text
+^program > output.log |& ^consumer
+```
+
+Only standard error reaches `consumer`.
+
+```text
+^producer | ^consumer < input.dat
+```
+
+The consumer reads `input.dat` instead of the pipe.
+
+An upstream process whose pipe no longer has a reader retains its real completion result, including a possible broken-pipe signal. This is not reported as a redirection setup failure.
+
+### Redirect targets
+
+A redirect target uses the same one-word expansion rule as a normal command argument:
+
+```text
+let output = "build output.log"
+^program > $output
+```
+
+The value remains one path. It is not split at the space.
+
+Redirect targets do not support implicit wildcard expansion or list spreading.
+
+### Preparation and failure
+
+FlashShell completes expansion and execution preflight before it opens redirect targets or starts pipeline stages. Once file actions begin, however, they are not a filesystem transaction.
+
+For example, an earlier `>` action may create or truncate a file even when a later redirection for the same stage fails. FlashShell closes resources and cancels or reaps already started sibling stages, but it does not pretend to roll back completed filesystem effects.
+
+A failed open, descriptor duplication, descriptor assignment, or descriptor close is a runtime error. The affected command is not represented as a normal nonzero process status.
+
+FlashShell does not implicitly provide POSIX here-documents, here-strings, `&>`, or a `noclobber` mode through these operators.
+
+## Statuses and failures
+
+FlashShell distinguishes normal unsuccessful completion from structural failure.
+
+| Outcome | Meaning | Selects `||`? |
+|---|---|---|
+| Successful `Status` | Command completed successfully | No |
+| Unsuccessful `Status` | Command completed with a nonzero code or signal | Yes |
+| Runtime error | Evaluation, planning, resolution, I/O, or platform operation failed | No |
+| Cancellation | Evaluation was interrupted or cancelled | No |
+| Parse failure | Source could not be executed | Not evaluated |
+
+### Conditional execution
+
+Use `&&` to continue after success:
+
+```text
+^build && ^deploy
+```
+
+Use `||` to continue after an unsuccessful status:
+
+```text
+^primary || ^fallback
+```
+
+`&&` binds more tightly than `||`:
+
+```text
+^build && ^deploy || ^report-failure
+```
+
+The fallback in this example runs when either the build is unsuccessful or the deployment is unsuccessful.
+
+A skipped branch is not expanded or planned. Its command substitutions, redirects, file opens, and process launches do not occur.
+
+Runtime errors and cancellation abort the chain. They are not treated as false statuses and do not activate `||`.
+
+### Status conditions
+
+A command or pipeline can be used as an `if` or `while` condition:
+
+```text
+if ^program --probe {
+    ^program --run
+} else {
+    ^fallback
+}
+```
+
+A successful status acts as true. A nonzero exit or signal status acts as false.
+
+Pure expression conditions must evaluate to `Bool`. FlashShell does not treat zero, an empty string, `null`, or an empty collection as implicitly false.
+
+### Converting failure into an error
+
+Use `check` when an unsuccessful status must propagate as a runtime error:
+
+```text
+^build | check
+```
+
+`check`:
+
+- requires an upstream stage;
+- accepts any pipeline carrier;
+- forwards the carrier unchanged;
+- inspects the completed upstream status;
+- produces a structured `UnsuccessfulStatus` error when that status is unsuccessful.
+
+It does not convert parse failures, command-resolution failures, redirection failures, decoding errors, cancellation, or other runtime errors. Those outcomes already propagate through their own error paths.
+
+Output delivered before a streaming failure or unsuccessful checked completion remains observable.
+
+### Explicit script exit
+
+Use `exit` to request script termination:
+
+```text
+exit
+exit 2
+```
+
+An explicit code must be an ASCII decimal value from `0` through `255`.
+
+Without an argument, `exit` uses the current representable command code. It uses zero when no status exists and one when the current completion cannot be represented as an ordinary exit code.
+
+The session boundary performs required background-job cleanup before the `fsh` process exits.
+
+## Background execution
+
+A trailing `&` backgrounds the complete conditional chain:
+
+```text
+^long-running-program &
+```
+
+```text
+^prepare && ^process || ^report-failure &
+```
+
+The launch returns immediately with a successful launch status once the job has been published. Its later completion does not asynchronously replace the current foreground status.
+
+Each background chain receives one stable, nonzero FlashShell job identity. A language job identity is distinct from operating-system process and process-group identifiers.
+
+### Redirect background output
+
+A background job can write while later script statements are running. Redirect output when interleaving would be undesirable:
+
+```text
+^long-running-program > task.log 2>&1 &
+```
+
+Background jobs do not receive foreground terminal ownership. Programs that require interactive terminal input should normally remain foreground jobs.
+
+### Script lifetime
+
+A script does not orphan jobs that it started. Before the script ends, FlashShell joins its remaining background jobs on every exit path, including:
+
+- normal end of source;
+- an explicit `exit`;
+- a runtime failure.
+
+A stopped background job is continued before the script waits for it. FlashShell then waits for all of its members to reach terminal completion.
+
+When every joined job succeeds, the script retains its foreground result. When a background job fails, that failure participates in the final script exit result; the first failing job in job-identity order is selected.
+
+The join does not impose an automatic timeout or destructive escalation. A program that repeatedly stops or refuses to terminate can therefore keep script shutdown open. Termination should be requested explicitly when the script owns such a process.
+
+## Job commands
+
+FlashShell provides five internal commands for addressable jobs:
+
+| Command | Purpose                                           |
+| ------- | ------------------------------------------------- |
+| `jobs`  | Produce a structured snapshot of addressable jobs |
+| `fg`    | Move an eligible job to the foreground            |
+| `bg`    | Continue a stopped job in the background          |
+| `wait`  | Wait for selected jobs                            |
+| `kill`  | Send a selected signal to job process groups      |
+
+A job reference has the exact form `%n`, where `n` is a nonzero decimal FlashShell job identity:
+
+```text
+%1
+%12
+```
+
+Bare numbers, `%+`, `%-`, signs, and suffixed forms are not aliases.
+
+### Inspecting jobs
+
+`jobs` accepts no arguments and produces one structured record per addressable job:
+
+```text
+jobs
+```
+
+Records include stable fields for:
+
+- `job`;
+- `state`;
+- `placement`;
+- `group`;
+- `command`;
+- `status`;
+- `signal`.
+
+Because `jobs` produces a `ValueStream`, it can participate in a structured pipeline:
+
+```text
+jobs
+    | where {|job| $job.state == "stopped"}
+    | select job command signal
+```
+
+Reading the snapshot does not resume jobs, acknowledge pending notices, or remove completed records.
+
+### Waiting
+
+With no arguments, `wait` waits for all addressable non-failed jobs selected at invocation time:
+
+```text
+wait
+```
+
+Wait for specific jobs by identity:
+
+```text
+wait %2 %5
+```
+
+Explicit targets are processed in source order. A stopped selected job is continued in background placement before waiting.
+
+The command returns the first unsuccessful selected aggregate status, or the last selected status when all selected jobs succeed.
+
+### Continuing a stopped job
+
+Continue the newest stopped job:
+
+```text
+bg
+```
+
+Continue one specific job:
+
+```text
+bg %3
+```
+
+`bg` does not transfer the terminal to the job.
+
+### Foregrounding a job
+
+Move the newest eligible stopped or running background job to the foreground:
+
+```text
+fg
+```
+
+Select a specific job:
+
+```text
+fg %3
+```
+
+`fg` requires a real foreground terminal. The shell transfers terminal ownership to the process group and restores it before the next prompt or session action.
+
+This command is primarily useful in an interactive session. Non-interactive automation should generally use `wait`, redirection, and explicit signal delivery instead.
+
+### Sending signals
+
+`kill` requires at least one explicit target:
+
+```text
+kill %3
+```
+
+The default signal is termination. A selector may choose another supported group-directed signal:
+
+```text
+kill --hangup %3
+kill --interrupt %3
+kill --terminate %3
+kill --kill %3
+kill --stop %3
+kill --continue %3
+```
+
+Multiple targets are processed in source order:
+
+```text
+kill --terminate %2 %4
+```
+
+Destructive escalation is explicit. FlashShell does not silently replace a failed graceful request with `--kill`.
+
+## Interactive job control
+
+Running `fsh` without a script starts an interactive session.
+
+On a terminal with job-control capabilities:
+
+- one external pipeline runs in one operating-system process group;
+- a foreground job owns the terminal while it runs;
+- FlashShell restores terminal ownership before drawing the next prompt;
+- terminal-generated interrupts target the foreground process group;
+- background jobs remain outside foreground terminal ownership;
+- stopped and completed job notices are displayed at prompt-safe boundaries.
+
+A top-level foreground chain consisting of exactly one all-external pipeline can be retained as an addressable stopped job when suspended from the terminal. It can later be inspected with `jobs`, continued with `bg`, or resumed with `fg`.
+
+More complex execution shapes, including mixed internal/external pipelines and longer conditional chains, do not claim identical suspend-and-retain behavior. FlashShell preserves cleanup and terminal ownership rather than pretending that every internal execution island can be suspended like an external process group.
+
+### Leaving an interactive session
+
+When live jobs exist, the first interactive exit attempt is refused and lists those jobs. A second consecutive attempt proceeds by continuing stopped jobs, sending hang-up to their process groups, and waiting for completion.
+
+Submitting another command between the two attempts resets the refusal. This ensures that the warning always describes the current job table.
+
+No implicit deadline or destructive fallback is applied during interactive shutdown. A process that ignores hang-up can delay exit; use an explicit `kill --kill %n` only when destructive termination is intended.
+
+### Interactive input control
+
+In the interactive editor:
+
+- `Ctrl-C` cancels the current edit buffer and starts a fresh prompt;
+- `Ctrl-D` on an empty buffer requests end of input;
+- parse and runtime diagnostics return control to the same session;
+- lexical scope, environment, working directory, options, and current status survive recoverable diagnostics.
+
+These editor behaviors do not apply to non-interactive script input.
+
+## Portability and operational boundaries
+
+### Language versus platform behavior
+
+FlashShell language parsing, expansion, values, control flow, and status rules are platform-independent contracts. Process execution, files, native paths, signals, process groups, terminal ownership, clocks, and configuration directories cross an explicit platform boundary.
+
+A target may support ordinary foreground execution while lacking a more advanced capability such as terminal ownership or process groups. FlashShell should report or deliberately degrade the affected capability rather than silently claim full job-control behavior.
+
+### Native paths and arguments
+
+FlashShell source is UTF-8, but operating-system paths, environment values, and external argument units are preserved through the native platform representation where supported.
+
+A value containing a null byte cannot cross an external process, environment, or filesystem boundary that rejects it. Such conversion failures are runtime errors rather than string truncation.
+
+### External program availability
+
+A script should not assume that every development-host utility is installed in FlashOS or on another host.
+
+Prefer:
+
+- FlashShell internal commands for behavior owned by the language;
+- explicit executable paths when the deployment layout guarantees them;
+- `which` when a script needs to inspect command resolution;
+- clear failure handling for optional external tools.
+
+Successful execution on macOS or Linux does not by itself establish that the same external executable or platform capability exists in a FlashOS image.
+
+### No implicit shell compatibility
+
+FlashShell deliberately does not provide:
+
+- POSIX source compatibility;
+- implicit whitespace splitting;
+- implicit wildcard expansion;
+- aliases that rewrite source tokens;
+- an `eval` operation that reparses strings as code;
+- automatic execution of project-local startup files;
+- hidden routing through a host default shell.
+
+These boundaries are part of the scripting model rather than optional safety modes.
 
 ## Related documentation
 
-- [Language Guide](language-guide.md) — Fundamental syntax rules, bindings, word expansion mechanics, and typed pipeline commands.
-- [Architecture and Crates](architecture.md) — Workspace crate modularity, parser design, and platform trait boundaries.
+- [Language Guide](language-guide.md) — Syntax, values, bindings, expressions, commands, expansion, functions, and structured pipelines.
+- [Architecture](architecture.md) — Parser, runtime, platform, process, and CLI boundaries.
+- [Development](development.md) — Build, test, lint, fuzz, and verification procedures for the FlashShell workspace.
+- [FlashShell overview](../README.md) — Component role, design boundaries, and integration with FlashOS.
+- [FlashOS Getting Started](../../../docs/getting-started.md) — Build and boot a FlashOS image.
+- [FlashOS Verification](../../../docs/verification.md) — Distinguish host checks, target builds, image validation, and runtime evidence.
 
 ---
 
