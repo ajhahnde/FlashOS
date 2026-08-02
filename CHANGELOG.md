@@ -62,7 +62,6 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   to be at build time, including the kernel and the shell.
 - Corrected the build-support crate license to `MIT`, matching the root license
   file and the upstream origin of every file under `src/`.
-
 - Changed the default build configuration from the inherited `desktop` profile
   to `flashos`, so an invocation without an explicit `CONFIG_NAME` builds the
   TUI-only product image instead of a graphical desktop image. The same default
@@ -187,4 +186,4 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ---
 
-[← Back to Main README](README.md) · [Documentation index](docs/README.md)
+[← Previous: CI/CD Contracts](ci/README.md) · [FlashOS README](README.md) · [Next: Security Policy →](.github/SECURITY.md)
