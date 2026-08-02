@@ -1,13 +1,11 @@
-# Setup guide moved
+# Setup Moved
 
-The setup and getting-started instructions previously located here have been reorganized into specialized guides under `docs/`.
+[FlashOS](README.md) › Setup redirect
 
-Please refer to the updated documentation pages:
+This compatibility page is retained for older links and bookmarks. The canonical instructions for configuring, building, booting, and first using FlashOS are available in the [Getting Started Guide](docs/getting-started.md).
 
-- [Getting Started](docs/getting-started.md)
-- [Development](docs/development.md)
-- [Verification](docs/verification.md)
-- [Documentation Index](docs/README.md)
+For repository development workflows beyond the initial setup, see [FlashOS Development](docs/development.md). New links should target the canonical guides under `docs/` rather than this forwarding file.
 
 ---
-[← Back to Main README](README.md)
+
+[← Back to FlashOS](README.md) · [Open Getting Started →](docs/getting-started.md)
