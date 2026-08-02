@@ -5,7 +5,6 @@
   </picture>
 
 <h1>Trademark and Project Identity</h1>
-
 <p>
     <a href="README.md"><b>README</b></a> ·
     <a href="docs/README.md"><b>Documentation</b></a> ·
@@ -20,7 +19,6 @@
 ---
 
 FlashOS is the name of this independent operating-system project.
-
 Redox OS and its logo are trademarks of the Redox OS nonprofit. FlashOS does
 not claim affiliation with or endorsement by the Redox OS nonprofit. References
 to Redox OS in this repository identify the origin of the borrowed kernel or a
@@ -28,3 +26,7 @@ transitional toolchain, ABI, or package dependency.
 
 The upstream Redox OS trademark policy is retained for reference in
 [docs/upstream/REDOX_TRADEMARK.md](docs/upstream/REDOX_TRADEMARK.md).
+
+---
+
+[← Previous: Security Policy](.github/SECURITY.md) · [FlashOS README](README.md) · [Next: Attribution Notice →](NOTICE)
