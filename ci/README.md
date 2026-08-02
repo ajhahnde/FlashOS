@@ -256,7 +256,7 @@ The smoke script waits for ordered markers and performs scoped serial interactio
 | History                 | The preceding command can be recalled                                              |
 | Multiline input         | Continuation prompts join and evaluate a block                                     |
 | Cancellation            | `Ctrl-C` abandons the current input without executing it                           |
-| Exit status             | A failing external command activates the tested `\|\|` fallback                    |
+| Exit status             | A failing external command activates the tested <code>&#124;&#124;</code> fallback          |
 | User filesystem         | The unprivileged account can create, read, and remove a file in its home directory |
 | Foreground completion   | A failing foreground command returns control to the prompt                         |
 | Permission boundary     | The unprivileged account cannot create the tested file under `/etc`                |

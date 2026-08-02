@@ -452,7 +452,7 @@ FlashShell does not implicitly provide POSIX here-documents, here-strings, `&>`,
 
 FlashShell distinguishes normal unsuccessful completion from structural failure.
 
-| Outcome | Meaning | Selects `||`? |
+| Outcome | Meaning | Selects <code>&#124;&#124;</code>? |
 |---|---|---|
 | Successful `Status` | Command completed successfully | No |
 | Unsuccessful `Status` | Command completed with a nonzero code or signal | Yes |

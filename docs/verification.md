@@ -356,26 +356,18 @@ The generated smoke log is diagnostic evidence from the session. It is not a rep
 
 ### Runtime assertions
 
-The current smoke contract checks observable markers and interactions in these areas:
+The QEMU smoke contract checks observable markers and interactive behavior across several general evidence classes. While [CI/CD Contracts](../ci/README.md) and [`ci/qemu_smoke.py`](../ci/qemu_smoke.py) remain the authoritative sources for exact serial markers, assertion sequences, parameters, and artifact paths, the qualification tests cover these interaction categories:
 
-| Area                  | Current assertion                                                |     |          |
-| --------------------- | ---------------------------------------------------------------- | --- | -------- |
-| Boot identity         | FlashOS bootloader markers appear                                |     |          |
-| Boot selection        | The boot entry can be submitted through serial input             |     |          |
-| Kernel path           | FlashOS startup and framebuffer-debug markers appear             |     |          |
-| Audio initialization  | The guest begins spawning the `ihdad` driver                     |     |          |
-| Login                 | The configured unprivileged session reaches successful login     |     |          |
-| Shell startup         | The FlashShell primary prompt appears                            |     |          |
-| External pipeline     | `printf` feeds `head` and produces the expected first line       |     |          |
-| Line editing          | Target-side backspace editing produces the expected command      |     |          |
-| History               | The previous line can be recalled                                |     |          |
-| Multiline input       | Continuation prompts join and evaluate a block                   |     |          |
-| Cancellation          | `Ctrl-C` abandons the current line without executing it          |     |          |
-| Exit status           | A nonzero external status reaches the `                          |     | ` branch |
-| User filesystem       | The unprivileged user can create, read, and remove a home file   |     |          |
-| Foreground completion | A failed external command returns control to the prompt          |     |          |
-| Permission boundary   | The unprivileged user cannot create the tested file under `/etc` |     |          |
-| Release root policy   | When requested, a root login attempt returns to the login prompt |     |          |
+| Category                             | Nature of tested interaction                                               |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| **Boot and kernel progress**         | Observable bootloader markers, serial boot submission, and kernel startup  |
+| **Service initialization**           | Driver spawn markers, such as guest audio driver (`ihdad`) initialization  |
+| **Authentication and basic access**  | Successful unprivileged console login and primary prompt display           |
+| **Interactive command editing**      | Target-side line editing, command history recall, and multiline input      |
+| **Pipelines and flow control**       | External command piping and exit-status branching (e.g., a nonzero external status reaches the fallback branch of a conditional chain) |
+| **Filesystem and security patterns** | Unprivileged file manipulation in user space versus required rejection under `/etc`, and release-profile root login rejection |
+
+For the complete line-by-line runtime contract and serial synchronization rules, consult [CI/CD Contracts](../ci/README.md#runtime-assertions).
 
 The contract verifies those specific interactions. It does not currently establish:
 

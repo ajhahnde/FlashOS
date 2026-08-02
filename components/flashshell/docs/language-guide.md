@@ -748,13 +748,13 @@ ls | where {|entry| $entry.type == "file"}
 
 ### Pipeline operators
 
-| Operator     | Behavior                                               |                                                                   |                                                    |
-| ------------ | ------------------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------- |
-| `            | `                                                      | Connect the standard output of one stage to the next              |                                                    |
-| `            | &`                                                     | Connect both standard output and standard error to the next stage |                                                    |
-| `&&`         | Continue only after a true or successful result        |                                                                   |                                                    |
-| `            |                                                        | `                                                                 | Continue only after a false or unsuccessful result |
-| trailing `&` | Run the complete conditional chain as a background job |                                                                   |                                                    |
+| Operator                 | Behavior                                                          |
+| ------------------------ | ----------------------------------------------------------------- |
+| <code>&#124;</code>      | Connect the standard output of one stage to the next              |
+| <code>&#124;&amp;</code> | Connect both standard output and standard error to the next stage |
+| `&&`                     | Continue only after a true or successful result                   |
+| <code>&#124;&#124;</code>| Continue only after a false or unsuccessful result                |
+| trailing `&`             | Run the complete conditional chain as a background job            |
 
 Redirection syntax, pipeline status aggregation, background jobs, and terminal control are documented in the [Scripting Guide](scripting.md).
 
