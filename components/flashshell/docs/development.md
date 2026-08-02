@@ -15,6 +15,7 @@ This guide describes the component-specific workflow for building, testing, docu
 - [Build and run `fsh`](#build-and-run-fsh)
 - [Test layers](#test-layers)
 - [Develop syntax and parsing](#develop-syntax-and-parsing)
+- [Develop v1 tooling](#develop-v1-tooling)
 - [Develop the runtime](#develop-the-runtime)
 - [Develop platform integration](#develop-platform-integration)
 - [Develop the CLI and interactive session](#develop-the-cli-and-interactive-session)
@@ -119,40 +120,21 @@ A developer working only on portable syntax or runtime code may begin with host 
 
 ## Workspace layout
 
-The component workspace contains five crates:
+The current workspace membership is defined by [`components/flashshell/Cargo.toml`](../Cargo.toml). Do not treat a fixed crate count as a permanent project contract.
 
-```text
-components/flashshell/
-├── crates/
-│   ├── flashshell-syntax/
-│   ├── flashshell-runtime/
-│   ├── flashshell-platform/
-│   ├── flashshell-platform-posix/
-│   └── flashshell-cli/
-├── docs/
-├── fuzz/
-├── tests/
-│   ├── e2e/
-│   ├── fixtures/
-│   └── golden/
-├── Cargo.toml
-├── Cargo.lock
-├── deny.toml
-├── rust-toolchain.toml
-└── rustfmt.toml
-```
+The principal implementation responsibilities are:
 
-Choose the owning crate before making a change:
+| Concern | Current owner |
+| --- | --- |
+| Source files, spans, lexer, parser, syntax trees, canonical formatting, and diagnostics | `flashshell-syntax` |
+| Values, scopes, evaluation, functions, command metadata, planning, pipelines, modules, sessions, and jobs | `flashshell-runtime` and shared analysis interfaces |
+| Portable operating-system capability contracts and deterministic test adapters | `flashshell-platform` |
+| Unix-like process, descriptor, filesystem, signal, and terminal operations | `flashshell-platform-posix` |
+| CLI modes, interactive editing, configuration, history, tooling entry points, and executable assembly | `flashshell-cli` |
 
-| Concern                                                                                | Primary crate               |
-| -------------------------------------------------------------------------------------- | --------------------------- |
-| Source files, spans, lexer, parser, syntax trees, formatting, and diagnostics          | `flashshell-syntax`         |
-| Values, scopes, evaluation, internal commands, planning, pipelines, sessions, and jobs | `flashshell-runtime`        |
-| Portable operating-system capability contracts and test adapters                       | `flashshell-platform`       |
-| Concrete process, descriptor, filesystem, signal, and terminal operations              | `flashshell-platform-posix` |
-| Command-line modes, interactive editing, configuration, history, and `fsh` assembly    | `flashshell-cli`            |
+Supporting directories hold component documentation, fuzz targets, end-to-end tests, fixture executables, and golden corpora. Inspect the workspace manifest and the relevant directory before documenting an exact package or test inventory.
 
-Read [FlashShell Architecture](architecture.md) before moving behavior across crate boundaries or introducing a dependency in the opposite direction.
+Read [FlashShell Architecture](architecture.md) before moving behavior across responsibility boundaries or introducing a dependency in the opposite direction.
 
 ## Local development loop
 
@@ -368,6 +350,62 @@ Also verify:
 - diagnostics remain specific enough to identify the failed construct.
 
 Changes to public syntax must also update the [Language Guide](language-guide.md) and, where execution behavior changes, the [Scripting Guide](scripting.md).
+
+## Develop v1 tooling
+
+The v1 formatter, static checker, help system, and language server are different frontends over shared language and analysis services. They must not duplicate the grammar, syntax tree, module resolver, function metadata, pipeline validation, or diagnostic model.
+
+### Formatter contract
+
+Formatter changes must preserve all of the following:
+
+- parsing succeeds before formatting;
+- the formatted result parses to the same supported program structure;
+- formatting is idempotent;
+- check mode detects noncanonical source without rewriting it;
+- write mode produces canonical source;
+- comments and documentation metadata remain attached to the intended constructs;
+- golden fixtures cover representative valid, incomplete, and invalid boundaries where formatting interacts with parsing.
+
+Do not document or test invented CLI flags. Formatter command spelling must come from the implemented CLI contract.
+
+### Static checker contract
+
+`fsh check` performs non-executing analysis. Checker development must cover:
+
+- parsing and incomplete-input handling;
+- canonical module resolution;
+- import-cycle diagnostics;
+- local, imported, exported, private, and missing names;
+- function and command signatures;
+- pipeline carrier compatibility;
+- stable source spans and deterministic diagnostic ordering;
+- success and failure behavior suitable for CI.
+
+Checker tests must prove that analysis does not start external processes, apply redirections, mutate the caller's environment, change the working directory, or require interactive terminal state.
+
+### Help and documentation metadata
+
+Built-in and user-function help must use the same names, signatures, and documentation metadata consumed by static analysis and editor tooling. Tests should prevent help text, checker signatures, and language-server information from drifting into separate incompatible definitions.
+
+Help lookup is inspection-only and must not execute the documented callable.
+
+### Language-server contract
+
+The FlashShell language server is required for the v1 tooling surface. It must reuse the shared parser, syntax tree, module graph, name resolution, signatures, and diagnostics rather than implementing another version of the language.
+
+Language-server development should include:
+
+- document open, change, and close behavior;
+- deterministic diagnostics;
+- cross-file module and name resolution;
+- signature and help information;
+- completion and navigation based on shared analysis;
+- protocol request and response tests;
+- cancellation and stale-document handling;
+- tests proving that requests do not execute user programs.
+
+Existing editor-local highlighting or completion does not replace the language-server contract.
 
 ## Develop the runtime
 
@@ -785,14 +823,14 @@ Build output under `target/` is ignored by Git and must not be committed.
 
 A behavior change may require updates in more than one document.
 
-| Change                                                                | Documentation to inspect                              |
-| --------------------------------------------------------------------- | ----------------------------------------------------- |
-| Tokens, grammar, values, expressions, or functions                    | [Language Guide](language-guide.md)                   |
-| Script execution, arguments, redirections, statuses, or jobs          | [Scripting](scripting.md)                             |
-| Crate ownership, data flow, platform interfaces, or process lifecycle | [Architecture](architecture.md)                       |
-| Build commands, tests, fixtures, fuzzing, or integration workflow     | This guide                                            |
-| Component purpose or public boundaries                                | [FlashShell overview](../README.md)                   |
-| Image package, target evidence, or system integration                 | Main [FlashOS documentation](../../../docs/README.md) |
+| Change | Documentation to inspect |
+| --- | --- |
+| Tokens, grammar, values, expressions, functions, signatures, modules, imports, exports, or name resolution | [Language Guide](language-guide.md) |
+| Script execution, script arguments, checking, formatting, redirections, statuses, or jobs | [Scripting](scripting.md) |
+| Dependency direction, analysis services, platform interfaces, adapters, or process lifecycle | [Architecture](architecture.md) |
+| Formatter, checker, help, language-server, test, fixture, fuzzing, or integration workflow | This guide |
+| Component purpose, v1 boundary, or public availability wording | [FlashShell overview](../README.md) |
+| Image package, target evidence, or system integration | Main [FlashOS documentation](../../../docs/README.md) |
 
 Examples in public documentation must use supported FlashShell syntax. Verify them against the parser, runtime, tests, or executable behavior rather than adapting POSIX shell examples by appearance.
 
@@ -822,6 +860,44 @@ Also verify:
 - formatter and property invariants;
 - the bounded fuzz smoke campaign;
 - language documentation.
+
+### Formatter change
+
+Also verify:
+
+- focused formatter tests;
+- parse-format-parse structural stability;
+- formatter idempotence;
+- check mode without writes;
+- write mode on representative fixtures;
+- preservation of comments and documentation metadata;
+- relevant Language and Scripting documentation.
+
+### Static checker or module-analysis change
+
+Also verify:
+
+- checking performs no execution;
+- module path canonicalization;
+- import-cycle diagnostics;
+- local, imported, exported, private, duplicate, and missing-name cases;
+- function and command signatures;
+- pipeline compatibility;
+- deterministic diagnostics and CI-facing status behavior;
+- relevant Language, Scripting, and Architecture documentation.
+
+### Language-server or help change
+
+Also verify:
+
+- reuse of shared parser and analysis APIs;
+- protocol request and response tests;
+- multi-file module and name resolution;
+- signature and documentation information;
+- deterministic diagnostics;
+- cancellation or stale-document behavior where applicable;
+- no execution of user source during inspection;
+- relevant Language and Architecture documentation.
 
 ### Runtime or command change
 

@@ -2,14 +2,16 @@
 
 [FlashOS](../../../README.md) › [FlashShell](../README.md) › [Documentation](README.md) › Scripting
 
-This guide explains how to run `.fsh` programs, invoke external processes, connect pipeline stages, redirect file descriptors, handle command statuses, and manage background jobs. Language syntax, values, bindings, expressions, and structured-data operations are documented in the [Language Guide](language-guide.md).
+This guide explains how to run and inspect `.fsh` programs, pass script arguments, use non-executing checks and canonical formatting, invoke external processes, connect pipeline stages, redirect file descriptors, handle command statuses, and manage background jobs. Language syntax, values, bindings, expressions, modules, function metadata, and structured-data operations are documented in the [Language Guide](language-guide.md).
 
 > **Project status:** FlashOS as a complete operating system remains pre-alpha software. However, this FlashShell Scripting Guide defines the intended stable FlashShell v1.0 contract for scripting and execution. Note that not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
 
 ## On this page
 
 - [Running scripts](#running-scripts)
+- [Script arguments](#script-arguments)
 - [Script and interactive execution](#script-and-interactive-execution)
+- [Checking and formatting without execution](#checking-and-formatting-without-execution)
 - [Session state](#session-state)
 - [Invoking commands](#invoking-commands)
 - [Command substitution](#command-substitution)
@@ -57,6 +59,14 @@ FlashShell scripts conventionally use the `.fsh` extension. Source files:
 
 A `.fsh` file is not a Bash or `sh` program. Do not use POSIX-specific syntax unless an external POSIX shell is invoked explicitly.
 
+## Script arguments
+
+FlashShell v1 exposes arguments supplied to a `.fsh` program through its script-argument interface. The interface preserves argument order and cardinality so that an empty argument remains one argument and multiple arguments do not collapse into one string.
+
+Script arguments are data. They are not reparsed as FlashShell source, do not undergo implicit whitespace splitting, and do not trigger implicit wildcard expansion. A script must request any later parsing, conversion, or explicit collection expansion itself.
+
+The `fsh` command-line parser distinguishes shell options, the script path, and the arguments belonging to that script. An option terminator may be used where an operand could otherwise be interpreted as an `fsh` option. Concrete argument-access syntax follows the language grammar and must not be inferred from POSIX-shell conventions.
+
 ## Script and interactive execution
 
 Interactive input and scripts share the FlashShell parser, value model, command planner, and evaluator. The surrounding session behavior is intentionally different.
@@ -80,6 +90,26 @@ fsh --no-config
 ```
 
 starts an interactive session without loading its startup configuration. The `--no-history` option similarly disables interactive history for that session. These policies do not turn script execution into an interactive session.
+
+## Checking and formatting without execution
+
+FlashShell v1 provides inspection modes for validating and normalizing source without running the program.
+
+### Static checking
+
+The `fsh check` mode parses supplied source and performs the available module, name, signature, and pipeline-compatibility analysis without executing script statements. It must not start external processes, apply redirections, change the working directory, mutate the caller's environment, or run imported module initialization as a substitute for analysis.
+
+A successful check means that the supported non-executing analyses completed without diagnostics classified as errors. It does not prove that external programs exist, that a target platform provides every requested capability, or that runtime data will satisfy conditions that cannot be established statically.
+
+Checker diagnostics and process status are intended for local development, editor integration, and CI use.
+
+### Canonical formatting
+
+The FlashShell formatter provides a check mode and a write mode. Check mode reports source that differs from canonical formatting without rewriting it. Write mode rewrites source to the canonical representation.
+
+Formatting must be idempotent: formatting already formatted source must not produce another change. The formatted result must preserve the parsed program structure and must remain valid FlashShell source.
+
+The exact command-line spelling of formatter options belongs to the `fsh` CLI contract and must match the executable's help and tests; it must not be inferred from another formatter.
 
 ## Session state
 
@@ -786,9 +816,9 @@ These boundaries are part of the scripting model rather than optional safety mod
 
 ## Related documentation
 
-- [Language Guide](language-guide.md) — Syntax, values, bindings, expressions, commands, expansion, functions, and structured pipelines.
+- [Language Guide](language-guide.md) — Syntax, values, bindings, expressions, commands, expansion, functions, function metadata, modules, and structured pipelines.
 - [Architecture](architecture.md) — Parser, runtime, platform, process, and CLI boundaries.
-- [Development](development.md) — Build, test, lint, fuzz, and verification procedures for the FlashShell workspace.
+- [Development](development.md) — Build, test, lint, fuzz, checker, formatter, language-server gates, and verification procedures for the FlashShell workspace.
 - [FlashShell overview](../README.md) — Component role, design boundaries, and integration with FlashOS.
 - [FlashOS Getting Started](../../../docs/getting-started.md) — Build and boot a FlashOS image.
 - [FlashOS Verification](../../../docs/verification.md) — Distinguish host checks, target builds, image validation, and runtime evidence.

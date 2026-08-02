@@ -89,7 +89,7 @@ Some supporting work, such as documentation, dependency maintenance, security re
 
 ## Now: Complete FlashShell
 
-FlashShell is the defining user-facing component of FlashOS. The current priority is to complete it as a maintainable interactive shell and scripting language before beginning another major user-interface component in parallel.
+FlashShell is the defining user-facing component of FlashOS. The current priority is to complete it as a maintainable interactive shell, scripting language, and analysis surface before beginning another major user-interface component in parallel.
 
 Existing functionality such as direct external execution, explicit argument expansion, byte-stream pipelines, structured values, target-side line editing, history, multiline input, status branching, and interactive job control forms the baseline for this work.
 
@@ -97,69 +97,69 @@ Existing functionality such as direct external execution, explicit argument expa
 
 Planned work includes:
 
-- canonical module loading;
+- canonical module loading without relying on import spelling;
 - explicit imports and exports;
-- cycle detection with useful diagnostics;
-- script arguments;
+- import-cycle rejection with actionable diagnostics;
+- script arguments that preserve cardinality, order, and data semantics;
 - typed function signatures;
-- stable name and signature resolution across files;
-- clear separation between module scope and ambient shell state.
+- stable name, signature, and pipeline resolution across files;
+- clear separation between module scopes and ambient shell state.
 
-Module loading should not introduce wildcard mutation of unrelated scopes or rely on implicit execution of strings as source code.
+Module loading does not introduce wildcard mutation of unrelated scopes, does not depend on side effects from runtime execution, and does not reparse strings as source code.
 
-### Discoverability and static checks
+### Discoverability, static checking, formatting, and editor tooling
 
-FlashShell should make nontrivial scripts understandable without requiring their execution.
+FlashShell should make nontrivial scripts discoverable, validatable, and inspectable without requiring their execution.
 
-The planned tooling direction includes:
+The required v1 tooling surface includes:
 
 - documentation comments;
 - discoverable help for built-ins, functions, and signatures;
-- formatter check and write modes;
+- formatter check mode and idempotent write mode;
 - a non-executing `fsh check` path;
-- parse, name, signature, and pipeline diagnostics;
-- exit and error reporting suitable for CI use;
-- stable source spans for editors and automated tools.
+- source-anchored parse, name, signature, module, and pipeline diagnostics;
+- deterministic process statuses suitable for CI;
+- a required language server built on shared syntax and semantic analysis APIs rather than duplicate editor-specific interpretations.
 
-A language server is part of the intended FlashShell v1 toolchain. It should be built on stable parser and runtime-facing APIs rather than duplicating language behavior inside individual editor integrations.
+### Runtime, host, and target consistency
 
-### Runtime and target consistency
-
-Interactive sessions and `.fsh` scripts should share the same language and evaluation rules wherever their input models permit it.
+Interactive sessions, non-interactive evaluation, and `.fsh` scripts share the same language, parser, and evaluation rules wherever their session input models permit it.
 
 Work in this area includes:
 
-- preserving exact argument-vector semantics;
+- preserving exact argument-vector semantics without host shell routing;
 - preserving explicit structured-to-byte conversion boundaries;
-- aligning host and FlashOS behavior without hiding unsupported target capabilities;
+- aligning host and FlashOS behavior without hiding or emulating unsupported target capabilities;
 - keeping redirected, non-interactive, and terminal-attached sessions distinct where the operating system requires it;
-- validating configuration, history, cancellation, redirection, process lifetime, and terminal restoration on the target system.
+- validating configuration, history, cancellation, redirection, process lifetime, and terminal restoration on target systems;
+- mapping FlashShell capabilities to the actual FlashOS target ABI through the reserved FlashOS platform adapter role.
 
-Host behavior must not be presented as FlashOS behavior until the target build and image path have been exercised.
+Host behavior on Linux or macOS must not be presented as FlashOS behavior until the target build and image verification path have been exercised.
 
-### Hardening toward a stable language release
+### Hardening toward a stable v1 contract and release
 
-While FlashShell component documentation describes the intended stable FlashShell v1.0 contract, before FlashShell can declare a completed v1 runtime release across all target platforms, the project intends to:
+While FlashShell component documentation defines the stable FlashShell v1.0 contract, before the project declares a completed v1 runtime release across all target platforms, it intends to:
 
-- expand lexer, parser, formatter, and evaluator fuzzing;
+- expand lexer, parser, formatter, checker, and evaluator fuzzing;
 - stress pipelines, cancellation, jobs, and terminal transitions;
-- audit NUL handling, non-UTF-8 paths, environment handling, command lookup, redirection order, descriptor ownership, and close-on-exec behavior;
-- audit configuration and history ownership and permissions;
-- document invariants around platform-specific `unsafe` code;
+- audit NUL handling, non-UTF-8 paths, environment boundaries, command lookup, redirection order, descriptor ownership, and close-on-exec behavior;
+- audit configuration and history ownership, paths, and permissions;
+- document invariants around platform-specific `unsafe` code in concrete adapters;
 - execute public documentation examples in CI where practical;
-- define evidence-based performance budgets;
-- freeze the v1 grammar and public runtime contracts only after implementation and documentation agree.
+- enforce explicit analysis and execution boundaries;
+- freeze the v1 grammar, syntax analysis, tooling CLI flags, and public runtime contracts after implementation and documentation agree.
 
 ### Completion criteria
 
-FlashShell can move from the primary implementation initiative when:
+FlashShell moves from the primary implementation initiative when:
 
-- maintainable multi-file scripts can be loaded, checked, formatted, and documented;
-- the claimed host and FlashOS feature matrices are explicit;
-- the language server and other required v1 tooling operate against stable language APIs;
+- maintainable multi-file programs can be resolved, loaded, statically checked, canonically formatted, and documented;
+- explicit module imports, exports, and script arguments behave according to the v1 contract;
+- the claimed host and FlashOS capability matrices are explicit;
+- `fsh check` and the required language server operate against shared syntax and semantic APIs without execution;
 - host, target-build, QEMU, fuzzing, and security-relevant gates cover the supported surface;
 - no known critical command-injection, descriptor-lifetime, terminal-corruption, process-lifetime, or data-loss defect remains open;
-- public language and scripting documentation matches executable behavior.
+- public language, scripting, architecture, and toolchain documentation matches executable behavior.
 
 This is a product-completion boundary, not a promise that FlashShell will stop evolving after v1.
 

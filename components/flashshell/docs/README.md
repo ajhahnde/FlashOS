@@ -8,12 +8,12 @@ This page is the central index for the public FlashShell documentation. It direc
 
 ## Guides
 
-| Goal                           | Guide                               | Scope                                                                                                                 |
-| ------------------------------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Learn the FlashShell language  | [Language Guide](language-guide.md) | Source structure, values, bindings, expressions, commands, expansion rules, and the pipeline model                    |
-| Create and run `.fsh` programs | [Scripting](scripting.md)           | Script execution, command-line modes, external processes, redirections, statuses, jobs, and portability boundaries    |
-| Understand the implementation  | [Architecture](architecture.md)     | Workspace crates, dependency direction, parser and runtime responsibilities, platform interfaces, and CLI integration |
-| Modify and verify FlashShell   | [Development](development.md)       | Toolchain setup, build commands, formatting, linting, tests, golden corpora, fuzzing, and local Rustdoc generation    |
+| Goal                           | Guide                               | Scope                                                                                                                                        |
+| ------------------------------ | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Learn the FlashShell language  | [Language Guide](language-guide.md) | Source structure, values, bindings, expressions, functions, modules, imports, exports, name resolution, commands, and typed pipelines        |
+| Create and verify `.fsh` files | [Scripting](scripting.md)           | Script execution, script arguments, non-executing checks, canonical formatting, external processes, redirections, statuses, jobs, and limits |
+| Understand the implementation  | [Architecture](architecture.md)     | Dependency direction, source and module analysis, shared tooling services, runtime planning, platform capabilities, adapters, and lifecycle  |
+| Modify and qualify FlashShell  | [Development](development.md)       | Toolchains, formatter and checker gates, language-server development, tests, fixtures, fuzzing, target builds, and documentation validation   |
 
 Readers who are new to FlashShell should begin with the [component overview](../README.md), continue with the [Language Guide](language-guide.md), and then use the [Scripting Guide](scripting.md) for practical program execution. Developers changing the implementation should also read the [Architecture](architecture.md) and [Development](development.md) guides.
 
@@ -21,13 +21,19 @@ Readers who are new to FlashShell should begin with the [component overview](../
 
 Each guide has a distinct responsibility:
 
-- The [FlashShell overview](../README.md) introduces the component, its role in FlashOS, its implementation boundaries, and the available documentation.
-- The [Language Guide](language-guide.md) documents language concepts and evaluation semantics. It is not the primary reference for build procedures or internal crate organization.
-- The [Scripting Guide](scripting.md) covers practical `.fsh` execution and interaction with external programs. It does not duplicate the complete language reference.
-- The [Architecture Guide](architecture.md) explains internal component boundaries and data flow rather than general FlashOS system architecture.
-- The [Development Guide](development.md) owns component-specific build and verification procedures. Repository-wide verification layers remain documented in [FlashOS Verification](../../../docs/verification.md).
+- The [FlashShell overview](../README.md) introduces the component, its role in FlashOS, the v1 contract boundary, implementation responsibilities, and the available documentation.
+- The [Language Guide](language-guide.md) owns language semantics, functions, modules, imports and exports, name resolution, typed function metadata, and structured pipelines. It is not the primary reference for build procedures.
+- The [Scripting Guide](scripting.md) owns practical `.fsh` execution, script arguments, non-executing checks, formatting modes, external processes, redirections, statuses, and jobs. It does not duplicate the complete language reference.
+- The [Architecture Guide](architecture.md) explains implementation responsibilities, source and module analysis, shared tooling services, runtime data flow, platform capabilities, adapters, and process lifecycle.
+- The [Development Guide](development.md) owns component-specific build and verification procedures, including formatter, checker, and language-server quality gates. Repository-wide verification layers remain documented in [FlashOS Verification](../../../docs/verification.md).
 
 When documentation and implementation appear to disagree, inspect the current source, tests, and configuration before relying on a behavior or changing a public claim.
+
+## Contract and release availability
+
+These guides describe the intended FlashShell v1 contract. They do not imply that every current binary, FlashOS image, or target exposes every part of that contract.
+
+Language and tooling responsibilities remain stable at the documentation level, while release notes, target evidence, and capability qualification determine which functions are available in a particular build. Host execution, target compilation, image integration, and runtime qualification are separate forms of evidence.
 
 ## Supporting technical references
 

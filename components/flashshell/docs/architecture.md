@@ -12,6 +12,8 @@ This document describes the internal architecture of FlashShell: crate boundarie
 - [Design principles](#design-principles)
 - [Workspace and dependency direction](#workspace-and-dependency-direction)
 - [Source and syntax front end](#source-and-syntax-front-end)
+- [Modules and static analysis](#modules-and-static-analysis)
+- [Shared tooling services](#shared-tooling-services)
 - [Runtime and session state](#runtime-and-session-state)
 - [Command resolution and execution planning](#command-resolution-and-execution-planning)
 - [Pipeline execution](#pipeline-execution)
@@ -101,31 +103,19 @@ Streams remain lazy wherever the operation permits it. Operations that must reta
 
 ## Workspace and dependency direction
 
-FlashShell is a nested Cargo workspace rooted at [`components/flashshell/`](../Cargo.toml).
+FlashShell is a nested Cargo workspace rooted at [`components/flashshell/`](../Cargo.toml). The workspace manifest is authoritative for current package membership. The architecture is defined by responsibilities and dependency direction rather than by a permanent number of crates.
 
-| Crate                                                               | Primary responsibility                                                                                                            |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| [`flashshell-syntax`](../crates/flashshell-syntax/)                 | Source files, spans, lexical analysis, parsing, syntax trees, classification, formatting, and diagnostics                         |
-| [`flashshell-runtime`](../crates/flashshell-runtime/)               | Values, scopes, evaluation, command registry, planning, internal commands, pipelines, sessions, jobs, and presentation selection  |
-| [`flashshell-platform`](../crates/flashshell-platform/)             | Platform-neutral capability contracts and deterministic test adapters                                                             |
-| [`flashshell-platform-posix`](../crates/flashshell-platform-posix/) | Concrete Unix-like process, descriptor, filesystem, signal, and terminal operations                                               |
-| [`flashshell-cli`](../crates/flashshell-cli/)                       | Command-line modes, the interactive loop, editor adapters, configuration, history, completion, highlighting, and the `fsh` binary |
+| Responsibility | Current owner |
+| --- | --- |
+| Source representation, spans, lexical analysis, parsing, syntax trees, formatting, and source diagnostics | [`flashshell-syntax`](../crates/flashshell-syntax/) |
+| Values, scopes, evaluation, functions, command metadata, planning, pipelines, sessions, jobs, module analysis, and shared semantic services | [`flashshell-runtime`](../crates/flashshell-runtime/) and syntax-owned analysis interfaces |
+| Portable operating-system capability contracts and deterministic test adapters | [`flashshell-platform`](../crates/flashshell-platform/) |
+| Unix-like process, descriptor, filesystem, signal, and terminal integration | [`flashshell-platform-posix`](../crates/flashshell-platform-posix/) |
+| Command-line modes, interactive front ends, configuration, history, tooling entry points, and `fsh` assembly | [`flashshell-cli`](../crates/flashshell-cli/) |
 
-The dependency direction is acyclic:
+Portable language semantics depend on syntax and abstract platform contracts, not on a concrete operating-system adapter. Concrete adapters depend on the abstract capability interface. The executable selects and assembles the appropriate adapter and user-facing services.
 
-```text
-flashshell-syntax ───────────────┐
-                                ├──▶ flashshell-runtime ──┐
-flashshell-platform ─────────────┘                        │
-        │                                                │
-        └──▶ flashshell-platform-posix ──────────────────┤
-                                                         ▼
-                                              flashshell-cli (`fsh`)
-```
-
-The CLI also depends directly on the syntax and platform contracts because editor services inspect source text and the executable binds a concrete platform adapter.
-
-The runtime depends on the abstract platform crate, not on the concrete adapter. Its development-only use of the POSIX adapter does not make host system calls part of the runtime API.
+New crates may be introduced as implementation responsibilities grow, but they must preserve this dependency direction and must not create an alternative grammar, evaluator, name resolver, or platform contract.
 
 ## Source and syntax front end
 
@@ -168,6 +158,31 @@ This distinction is reused by interactive validation rather than approximated wi
 Syntax highlighting, completion context, formatter behavior, and multiline validation are built from FlashShell tokens, spans, parse outcomes, and command metadata.
 
 These services may present different user interfaces on different targets, but they do not define alternative language semantics.
+
+## Modules and static analysis
+
+Multi-file programs are represented as a graph of canonically identified source modules. Module resolution records the importing source, the requested path, the canonical module identity, and the source spans required for diagnostics.
+
+The analysis layer is responsible for:
+
+- resolving explicit imports and exports;
+- constructing the module graph;
+- rejecting import cycles with source-anchored diagnostics;
+- resolving local, imported, exported, and private names;
+- collecting function and command metadata;
+- checking call signatures where sufficient information is available;
+- validating typed pipeline connections;
+- exposing the same results to the checker, help system, and language server.
+
+Analysis must not depend on executing user code to discover names or signatures. It produces inspectable program information that execution can consume after validation.
+
+## Shared tooling services
+
+The formatter, `fsh check`, help output, interactive editor features, and language server use the same source model, parser, syntax tree, module graph, name resolution, function metadata, and diagnostic types.
+
+No tooling frontend may maintain a second FlashShell grammar or a competing name resolver. A language change is implemented in the shared language services first and then exposed through the relevant CLI, editor, and protocol adapters.
+
+Execution remains a separate stage. Formatting, checking, help lookup, completion, navigation, and language-server requests must not start external commands or mutate the active shell session merely to obtain analysis results.
 
 ## Runtime and session state
 
@@ -418,13 +433,15 @@ Platform resources use ownership rather than shared raw identifiers wherever pos
 
 Restoration is also performed when a guard is dropped, providing a cleanup boundary for early returns and propagated errors.
 
-### Concrete adapter
+### Adapter roles
 
-[`flashshell-platform-posix`](../crates/flashshell-platform-posix/src/lib.rs) implements the concrete process, descriptor, filesystem, signal, process-group, and terminal operations used by the current executable.
+A concrete adapter implements the abstract platform capability contract for one operating-system environment.
 
-The runtime does not depend on this crate. The [`flashshell-cli`](../crates/flashshell-cli/) crate selects the adapter when assembling `fsh`.
+[`flashshell-platform-posix`](../crates/flashshell-platform-posix/src/lib.rs) provides the Unix-like host and target integration used by the current executable where that adapter is selected. Its behavior on Linux or macOS is host evidence, not automatic FlashOS qualification.
 
-Target compilation alone does not prove that every adapter capability behaves correctly in a FlashOS image. Target-side terminal, process, filesystem, and job-control behavior remains subject to image and runtime verification.
+The v1 architecture also reserves a FlashOS-specific adapter role. That adapter maps FlashShell capabilities to the actual FlashOS ABI and classifies each capability as native, adapted, deliberately unsupported, temporarily unavailable, or not yet qualified. Do not link to a FlashOS-adapter crate unless that path exists in the current public workspace.
+
+The runtime depends only on the abstract capability contract. It must not silently emulate a missing target capability with weaker POSIX behavior. Release and target evidence determine which adapter capabilities may be claimed publicly.
 
 ### Test adapters
 

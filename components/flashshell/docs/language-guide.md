@@ -2,7 +2,7 @@
 
 [FlashOS](../../../README.md) › [FlashShell](../README.md) › [Documentation](README.md) › Language Guide
 
-This guide documents the FlashShell 1.0 language: source text, runtime values, bindings, expressions, commands, expansion, control flow, functions, and typed pipelines. Practical process execution, redirection, status handling, and job control are covered in the [Scripting Guide](scripting.md).
+This guide documents the FlashShell 1.0 language: source text, runtime values, bindings, expressions, commands, expansion, control flow, functions, function metadata, modules, name resolution, and typed pipelines. Practical script invocation, process execution, redirection, static checking, formatting, status handling, and job control are covered in the [Scripting Guide](scripting.md).
 
 > **Project status:** FlashOS as a complete operating system remains pre-alpha software. However, this FlashShell Language Guide defines the intended stable FlashShell v1.0 contract. Note that not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
 
@@ -16,6 +16,7 @@ This guide documents the FlashShell 1.0 language: source text, runtime values, b
 - [Commands and argument expansion](#commands-and-argument-expansion)
 - [Control flow](#control-flow)
 - [Functions and closures](#functions-and-closures)
+- [Modules and name resolution](#modules-and-name-resolution)
 - [Pipelines and structured data](#pipelines-and-structured-data)
 - [Status values and errors](#status-values-and-errors)
 - [Related documentation](#related-documentation)
@@ -746,6 +747,42 @@ Closures are commonly passed to structured commands:
 ls | where {|entry| $entry.type == "file"}
 ```
 
+### Typed function metadata
+
+FlashShell v1 associates functions with parameter and result information that can be inspected without executing the function. The metadata supports name and signature validation, help output, editor tooling, and pipeline analysis.
+
+A signature describes the callable contract exposed to analysis tools. It does not turn every runtime value into a fully statically proven value, and documentation must not claim stronger type guarantees than the language specification defines.
+
+Call sites are checked against the available function metadata before execution where the required information is known. Diagnostics should identify the callable, the incompatible argument or result expectation, and the relevant source span.
+
+### Documentation comments and help
+
+Built-ins and user-defined functions can provide documentation metadata for discoverability. The same metadata supplies human-readable help, signature presentation, static analysis, and language-server features rather than being maintained as separate descriptions with different behavior.
+
+Help must remain inspection-only. Requesting help must not execute a function body, start an external command, or mutate session state.
+
+## Modules and name resolution
+
+FlashShell v1 supports maintainable multi-file programs through explicit module boundaries. Module loading and name resolution are analysis responsibilities that must be understandable before program execution begins.
+
+### Canonical module identity
+
+A module is identified through a canonical resolved path rather than the spelling of an individual import. Different relative paths that resolve to the same source file refer to the same module identity.
+
+Resolution errors must identify both the importing source and the requested module path. Import cycles must be rejected with diagnostics that show the relevant cycle rather than failing later through partial execution.
+
+### Explicit imports and exports
+
+Names cross module boundaries only through explicit imports and exports. A module does not mutate unrelated caller scopes, and importing a module does not create ambient wildcard access to all of its internal bindings.
+
+An export makes a declared public name available to importers. Internal bindings remain private to the module unless the language contract marks them for export.
+
+### Static module analysis
+
+The module graph, exported names, imported names, function metadata, and cross-file references are available to non-executing analysis. This allows `fsh check`, help tooling, and the language server to use one consistent view of the program.
+
+Name resolution must be deterministic and source-anchored. Missing names, duplicate declarations, inaccessible private names, incompatible signatures, and import cycles must produce diagnostics without relying on side effects from program execution.
+
 ## Pipelines and structured data
 
 ### Pipeline operators
@@ -878,7 +915,7 @@ Diagnostics preserve source locations where available so that syntax and evaluat
 
 ## Related documentation
 
-- [Scripting](scripting.md) — Run `.fsh` files, invoke external processes, redirect streams, inspect statuses, and manage jobs.
+- [Scripting](scripting.md) — Run `.fsh` files, pass script arguments, perform non-executing `fsh check` validation, apply canonical formatting, invoke external processes, redirect streams, inspect statuses, and manage jobs.
 - [Architecture](architecture.md) — Understand parser, runtime, platform, and CLI boundaries.
 - [Development](development.md) — Build, test, lint, fuzz, and maintain the FlashShell workspace.
 - [FlashShell overview](../README.md) — Review the component's role in FlashOS and its implementation boundaries.

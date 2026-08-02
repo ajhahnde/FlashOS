@@ -10,6 +10,7 @@ FlashShell (`fsh`) is the primary interactive shell and scripting interface of F
 
 - [Role in FlashOS](#role-in-flashos)
 - [Design boundaries](#design-boundaries)
+- [FlashShell v1 contract](#flashshell-v1-contract)
 - [Current implementation](#current-implementation)
 - [Using `fsh`](#using-fsh)
 - [Development and verification](#development-and-verification)
@@ -35,9 +36,17 @@ The component follows several implementation boundaries:
 - External executables are launched directly through the platform interface rather than by translating FlashShell source into another shell language.
 - Successful behavior on a macOS or Linux development host does not by itself establish equivalent behavior in a FlashOS image. Target compilation and image-level execution require separate verification.
 
+## FlashShell v1 contract
+
+The public FlashShell documentation defines the intended v1 language, runtime, and tooling contract. That contract covers the existing value, command, pipeline, status, and job model together with maintainable multi-file scripts, explicit module boundaries, script arguments, typed function metadata, discoverable help, canonical formatting, non-executing static checks, language-server integration, and explicit platform capabilities.
+
+A particular FlashOS release may expose only the parts of that contract that are implemented and qualified for its target environment. Unsupported or unqualified capabilities must remain visible rather than being silently replaced with weaker host-specific behavior.
+
+The detailed responsibilities are divided between the [Language Guide](docs/language-guide.md), [Scripting Guide](docs/scripting.md), [Architecture Guide](docs/architecture.md), and [Development Guide](docs/development.md).
+
 ## Current implementation
 
-FlashShell is maintained as an independent Rust workspace inside the FlashOS repository.
+FlashShell is maintained as an independent Rust workspace inside the FlashOS repository. The workspace manifest at [`Cargo.toml`](Cargo.toml) is authoritative for current membership; the table below describes the principal implementation responsibilities rather than a permanent crate count.
 
 | Path                                | Responsibility                                                                          |
 | ----------------------------------- | --------------------------------------------------------------------------------------- |
@@ -97,10 +106,10 @@ For the component-specific workflow, test layout, and maintenance guidance, see 
 The FlashShell documentation is organized as follows:
 
 - [FlashShell documentation index](docs/README.md) — entry point for the component documentation
-- [Language Guide](docs/language-guide.md) — language concepts, syntax, values, commands, and evaluation behavior
-- [Scripting Guide](docs/scripting.md) — practical creation and execution of `.fsh` programs
-- [Architecture](docs/architecture.md) — internal crate boundaries, data flow, and platform abstractions
-- [Development](docs/development.md) — workspace setup, tests, target builds, and maintenance workflow
+- [Language Guide](docs/language-guide.md) — language concepts, modules, name resolution, function metadata, commands, and typed pipelines
+- [Scripting Guide](docs/scripting.md) — `.fsh` execution, script arguments, static checking, formatting, external processes, statuses, and jobs
+- [Architecture](docs/architecture.md) — internal responsibilities, analysis services, platform capabilities, adapters, and lifecycle boundaries
+- [Development](docs/development.md) — workspace setup, tests, formatter and checker gates, language-server development, target builds, and maintenance workflow
 
 For building and booting FlashOS as a complete system, begin with the [FlashOS Getting Started Guide](../../docs/getting-started.md).
 
