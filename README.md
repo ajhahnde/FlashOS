@@ -38,7 +38,8 @@ FlashOS is a small, independent operating-system project focused on a keyboard-d
 
 The current system uses the Redox kernel and parts of the Redox ABI, toolchain, userspace, packaging, and image-building infrastructure. These dependencies are documented explicitly and do not imply that every upstream Redox capability is supported or qualified by FlashOS.
 
-[FlashShell](components/flashshell/README.md), whose executable is named `fsh`, is the primary interactive and scripting interface. FlashShell scripts use the `.fsh` file extension.
+[FlashShell](components/flashshell/README.md), whose executable is named `fsh`, is the primary interactive and scripting interface. FlashShell
+scripts use the `.fsh` file extension.
 
 ## Current scope
 
@@ -49,19 +50,20 @@ The current system uses the Redox kernel and parts of the Redox ABI, toolchain, 
 | User environment               | Text-based interface without a graphical desktop environment |
 | Primary interface              | FlashShell at `/usr/bin/fsh`                                 |
 | Primary evaluation environment | QEMU `q35` with UEFI firmware                                |
-| Project maturity               | Pre-alpha                                                    |
 
 Device-specific test results and the limits of current hardware evidence are maintained in [Hardware Compatibility](docs/hardware.md).
 
 ## Quick start
 
-Complete the prerequisites and local configuration described in [Getting Started](docs/getting-started.md). From the repository root, build the development image with:
+Complete the prerequisites and local configuration described in [Getting Started](docs/getting-started.md).
+
+Build the development image with:
 
 ```bash
 make CONFIG_NAME=flashos all
 ```
 
-Start the resulting system in QEMU with:
+Start FlashOS in QEMU with:
 
 ```bash
 make CONFIG_NAME=flashos qemu
@@ -98,8 +100,6 @@ The following tree shows the canonical navigation paths between the central publ
   - [`CHANGELOG.md`](CHANGELOG.md) — Public change history
   - [`.github/SECURITY.md`](.github/SECURITY.md) — Security reporting and evaluation limits
   - [`TRADEMARK.md`](TRADEMARK.md) — Trademark and project identity policy
-
-The root-level files [`DOCUMENTATION.md`](DOCUMENTATION.md), [`SETUP.md`](SETUP.md), and [`HARDWARE.md`](HARDWARE.md) are compatibility forwarders for older links. New documentation links should target the canonical files shown in the tree above.
 
 ## Repository map
 
