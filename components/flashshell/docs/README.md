@@ -1,48 +1,56 @@
-# FlashShell Documentation Index
+# FlashShell Documentation
 
-[FlashOS](../../../README.md) › [FlashShell](../README.md) › [Documentation](README.md) › Index
+[FlashOS](../../../README.md) › [FlashShell](../README.md) › Documentation
 
-Welcome to the detailed technical documentation index for FlashShell (`fsh`), a modern command shell and structured scripting language written in Rust. This directory provides comprehensive language guides, architectural breakdowns, and testing manuals for developers working on or embedding the shell. It serves as the authoritative technical reference for all components under `components/flashshell/`.
+This page is the central index for the public FlashShell documentation. It directs users, script authors, and component developers to the appropriate guide; system-wide FlashOS build, image, verification, and hardware documentation remains under the main [FlashOS documentation](../../../docs/README.md).
 
-## Overview and scope
+> **Project status:** FlashShell is pre-alpha software. These guides describe the current repository behavior and development contracts without providing backward-compatibility or production-readiness guarantees.
 
-These guides focus exclusively on the mechanics, syntax, runtime semantics, and crate architecture of FlashShell. While FlashShell serves as the official console login shell for FlashOS, its core evaluation engine functions independently of any single operating system and can be compiled, tested, and utilized on standard POSIX host systems (macOS and Linux).
+## Guides
 
-## Documentation map
+| Goal                           | Guide                               | Scope                                                                                                                 |
+| ------------------------------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Learn the FlashShell language  | [Language Guide](language-guide.md) | Source structure, values, bindings, expressions, commands, expansion rules, and the pipeline model                    |
+| Create and run `.fsh` programs | [Scripting](scripting.md)           | Script execution, command-line modes, external processes, redirections, statuses, jobs, and portability boundaries    |
+| Understand the implementation  | [Architecture](architecture.md)     | Workspace crates, dependency direction, parser and runtime responsibilities, platform interfaces, and CLI integration |
+| Modify and verify FlashShell   | [Development](development.md)       | Toolchain setup, build commands, formatting, linting, tests, golden corpora, fuzzing, and local Rustdoc generation    |
 
-```text
-components/flashshell/
-├── README.md
-└── docs/
-    ├── README.md
-    ├── language-guide.md
-    ├── scripting.md
-    ├── architecture.md
-    └── development.md
-```
+Readers who are new to FlashShell should begin with the [component overview](../README.md), continue with the [Language Guide](language-guide.md), and then use the [Scripting Guide](scripting.md) for practical program execution. Developers changing the implementation should also read the [Architecture](architecture.md) and [Development](development.md) guides.
 
-## Core documentation topics
+## Documentation boundaries
 
-- [Language Guide](language-guide.md) — Comprehensive explanation of core syntax rules, immutable/mutable bindings, predictable expansion semantics, explicit globbing, expressions, and typed value streams.
-- [Scripting and Execution](scripting.md) — Standalone `.fsh` scripting, symmetry between interactive prompts and scripts, direct external process execution (`^`), command substitution, job lifecycle management, and non-exceptional status handling.
-- [Architecture and Crates](architecture.md) — Detailed internal layout covering `syntax`, `runtime`, `platform`, `platform-posix`, and `cli` crate boundaries, dependency flow, and platform abstraction layers.
-- [Development and Testing](development.md) — Host toolchain setup, Cargo build workflows, unit and integration suites, rustdoc generation, golden grammar manifests, and libFuzzer campaigns.
+Each guide has a distinct responsibility:
 
-## Verification resources
+- The [FlashShell overview](../README.md) introduces the component, its role in FlashOS, its implementation boundaries, and the available documentation.
+- The [Language Guide](language-guide.md) documents language concepts and evaluation semantics. It is not the primary reference for build procedures or internal crate organization.
+- The [Scripting Guide](scripting.md) covers practical `.fsh` execution and interaction with external programs. It does not duplicate the complete language reference.
+- The [Architecture Guide](architecture.md) explains internal component boundaries and data flow rather than general FlashOS system architecture.
+- The [Development Guide](development.md) owns component-specific build and verification procedures. Repository-wide verification layers remain documented in [FlashOS Verification](../../../docs/verification.md).
 
-Specialized test harnesses and normative corpora maintain focused technical READMEs directly inside their verification subdirectories:
-- [Fuzz Targets](../fuzz/README.md) — Guidance on executing bounded smoke campaigns (`./fuzz/run-smoke.sh`) for grammar and lexer fuzz targets.
-- [End-to-End Tests](../tests/e2e/README.md) — Black-box and pseudoterminal (PTY) interactive shell execution fixtures.
-- [Test Fixtures](../tests/fixtures/README.md) — Dedicated shell-free Rust child helper programs used during POSIX adapter and process interaction tests.
-- [Grammar Golden Corpus](../tests/golden/grammar/README.md) — Normative inventory and tab-delimited classification manifest for v0.1 grammar testing.
-- [Lexical Golden Corpus](../tests/golden/lexical/README.md) — Normative inventory and manifest defining complete, incomplete, and invalid lexical contracts.
+When documentation and implementation appear to disagree, inspect the current source, tests, and configuration before relying on a behavior or changing a public claim.
 
-## Relationship to FlashOS documentation
+## Supporting technical references
 
-When exploring system integration beyond standard shell parsing and execution:
-- To see how `fsh` builds into the operating system image, consult the [FlashOS Architecture Guide](../../../docs/architecture.md) and the packaging recipe at [`recipes/terminal/flashshell/recipe.toml`](../../../recipes/terminal/flashshell/recipe.toml).
-- For complete OS disk building and virtual machine evaluation, return to [FlashOS Getting Started](../../../docs/getting-started.md).
+Focused implementation and verification areas maintain narrower README files beside the corresponding source or fixtures:
+
+- [Cargo workspace manifest](../Cargo.toml) — Workspace membership and shared package metadata.
+- [Fuzz targets](../fuzz/README.md) — Lexer and parser fuzz inputs, smoke campaigns, and corpus handling.
+- [End-to-end tests](../tests/e2e/README.md) — Location of black-box and pseudoterminal test fixtures.
+- [Test fixtures](../tests/fixtures/README.md) — Rust child programs used to observe process, descriptor, status, and stream behavior.
+- [Grammar golden corpus](../tests/golden/grammar/README.md) — Parser fixture inventory and expected classifications.
+- [Lexical golden corpus](../tests/golden/lexical/README.md) — Lexer fixture inventory and completeness classifications.
+
+These references document specific test or implementation contracts. The [Development Guide](development.md) remains the main entry point for deciding which checks to run and what their results establish.
+
+## Related FlashOS documentation
+
+FlashShell is developed as a component of FlashOS, but several integration topics belong to the system-wide documentation:
+
+- [Getting Started](../../../docs/getting-started.md) — Build a FlashOS image, boot it in QEMU, and reach the initial shell session.
+- [FlashOS Architecture](../../../docs/architecture.md) — Understand system layers, image configuration, package integration, and component boundaries.
+- [FlashOS Development](../../../docs/development.md) — Work with the repository, build system, configuration profiles, and general development workflow.
+- [Verification and Testing](../../../docs/verification.md) — Distinguish host checks, target compilation, package and image construction, QEMU qualification, and physical hardware evidence.
 
 ---
 
-[← Back to FlashShell Overview](../README.md) · [FlashShell documentation](README.md) · [Next: Language Guide →](language-guide.md)
+[← Back to FlashShell Overview](../README.md) · [Next: Language Guide →](language-guide.md)
