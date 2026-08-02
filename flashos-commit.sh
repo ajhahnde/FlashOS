@@ -9,13 +9,19 @@ _flashos_commit_error() {
   printf '%s\n' "flashos: $*" >&2
 }
 
+_flashos_commit_require_command() {
+  local command_name="$1"
+
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    _flashos_commit_error "$command_name is not installed or not available in PATH"
+    return 1
+  fi
+}
+
 _flashos_commit_init_repo() {
   local repo
 
-  if ! command -v git >/dev/null 2>&1; then
-    _flashos_commit_error "git is not installed or not available in PATH"
-    return 1
-  fi
+  _flashos_commit_require_command git || return 1
 
   repo="$(
     command git -C "$_FLASHOS_COMMIT_DIR" rev-parse --show-toplevel 2>/dev/null
@@ -74,10 +80,7 @@ _flashos_commit_context_file() {
 _flashos_commit_validate_context() {
   local context_file
 
-  if ! command -v python3 >/dev/null 2>&1; then
-    _flashos_commit_error "python3 is not installed or not available in PATH"
-    return 1
-  fi
+  _flashos_commit_require_command python3 || return 1
 
   context_file="$(_flashos_commit_context_file)"
 
@@ -132,8 +135,7 @@ policy = context.get("commit_subject_policy")
 if not isinstance(policy, dict):
     fail("commit_subject_policy must be an object")
 
-line_count = policy.get("line_count")
-if line_count != 1:
+if policy.get("line_count") != 1:
     fail("commit_subject_policy.line_count must be 1")
 
 maximum_characters = policy.get("maximum_characters")
@@ -150,7 +152,10 @@ if (
     or not core_prefixes
     or not all(isinstance(prefix, str) and prefix for prefix in core_prefixes)
 ):
-    fail("commit_subject_policy.flashos_core_prefixes must be a non-empty string array")
+    fail(
+        "commit_subject_policy.flashos_core_prefixes must be "
+        "a non-empty string array"
+    )
 
 component_rules = policy.get("component_prefix_rules", {})
 if not isinstance(component_rules, dict):
@@ -255,13 +260,12 @@ PY
 }
 
 _flashos_commit_diff_size() {
-  FLASHOS_COMMIT_REPO="$_FLASHOS_COMMIT_REPO" command python3 - <<'PYTHON'
+  FLASHOS_COMMIT_REPO="$_FLASHOS_COMMIT_REPO" command python3 - <<'PY'
 import os
 import subprocess
 import sys
 
 repo_path = os.environ["FLASHOS_COMMIT_REPO"]
-
 process = subprocess.run(
     [
         "git",
@@ -286,12 +290,18 @@ if process.returncode != 0:
     sys.exit(1)
 
 print(len(process.stdout))
-PYTHON
+PY
 }
 
 _flashos_commit_call_gemini() {
+  local prompt_file="$1"
   local api_key
   local model="${FLASHOS_COMMIT_MODEL:-gemini-3.6-flash}"
+
+  if [ ! -r "$prompt_file" ]; then
+    _flashos_commit_error "Gemini prompt file is not readable: $prompt_file"
+    return 1
+  fi
 
   api_key="$(_flashos_commit_get_gemini_api_key)" || {
     _flashos_commit_error "Gemini API key not found"
@@ -302,8 +312,15 @@ _flashos_commit_call_gemini() {
 
   GEMINI_API_KEY="$api_key" \
   FLASHOS_COMMIT_MODEL="$model" \
+  FLASHOS_COMMIT_PROMPT_FILE="$prompt_file" \
+  FLASHOS_COMMIT_API_URL="${FLASHOS_COMMIT_API_URL:-https://generativelanguage.googleapis.com/v1/interactions}" \
   FLASHOS_COMMIT_API_ATTEMPTS="${FLASHOS_COMMIT_API_ATTEMPTS:-3}" \
-    command python3 -c '
+  FLASHOS_COMMIT_MAX_OUTPUT_TOKENS="${FLASHOS_COMMIT_MAX_OUTPUT_TOKENS:-512}" \
+  FLASHOS_COMMIT_MAX_RETRY_OUTPUT_TOKENS="${FLASHOS_COMMIT_MAX_RETRY_OUTPUT_TOKENS:-4096}" \
+  FLASHOS_COMMIT_THINKING_LEVEL="${FLASHOS_COMMIT_THINKING_LEVEL:-minimal}" \
+  FLASHOS_COMMIT_TIMEOUT_SECONDS="${FLASHOS_COMMIT_TIMEOUT_SECONDS:-120}" \
+  FLASHOS_COMMIT_DEBUG="${FLASHOS_COMMIT_DEBUG:-0}" \
+    command python3 - <<'PY'
 import json
 import os
 import socket
@@ -311,24 +328,151 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
+from typing import Any
 
-prompt = sys.stdin.read()
-if not prompt:
-    print("flashos: Gemini prompt is empty", file=sys.stderr)
-    sys.exit(1)
 
-try:
-    max_attempts = int(os.environ["FLASHOS_COMMIT_API_ATTEMPTS"])
-except ValueError:
-    print("flashos: FLASHOS_COMMIT_API_ATTEMPTS must be an integer", file=sys.stderr)
-    sys.exit(1)
+def fail(message: str, exit_code: int = 1) -> None:
+    print(f"flashos: {message}", file=sys.stderr)
+    sys.exit(exit_code)
 
-if max_attempts < 1 or max_attempts > 10:
-    print(
-        "flashos: FLASHOS_COMMIT_API_ATTEMPTS must be between 1 and 10",
-        file=sys.stderr,
+
+def env_int(name: str, minimum: int, maximum: int) -> int:
+    raw = os.environ[name]
+    try:
+        value = int(raw)
+    except ValueError:
+        fail(f"{name} must be an integer")
+
+    if value < minimum or value > maximum:
+        fail(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+def extract_error_message(error: urllib.error.HTTPError, raw: bytes) -> str:
+    try:
+        details = json.loads(raw)
+        if isinstance(details, list):
+            details = details[0] if details else {}
+        if isinstance(details, dict):
+            api_error = details.get("error", {})
+            if isinstance(api_error, dict):
+                message = api_error.get("message")
+                if isinstance(message, str) and message:
+                    return message
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        pass
+
+    return raw.decode("utf-8", errors="replace").strip() or str(error)
+
+
+def retry_delay(attempt: int, headers: Any = None) -> float:
+    if headers is not None:
+        retry_after = headers.get("Retry-After")
+        if retry_after:
+            try:
+                return min(max(float(retry_after), 0.0), 30.0)
+            except ValueError:
+                pass
+
+    return min(float(2 ** (attempt - 1)), 8.0)
+
+
+def usage_summary(data: dict[str, Any]) -> str:
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return "usage unavailable"
+
+    fields = (
+        ("input", "total_input_tokens"),
+        ("output", "total_output_tokens"),
+        ("thought", "total_thought_tokens"),
+        ("total", "total_tokens"),
     )
-    sys.exit(1)
+    values = []
+    for label, key in fields:
+        value = usage.get(key)
+        if isinstance(value, int):
+            values.append(f"{label}={value}")
+
+    return ", ".join(values) if values else "usage unavailable"
+
+
+def status_detail(data: dict[str, Any]) -> str:
+    error = data.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message:
+            return message
+
+    for key in ("incomplete_details", "failure_details", "status_details"):
+        value = data.get(key)
+        if value:
+            try:
+                return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            except TypeError:
+                return str(value)
+
+    return ""
+
+
+def extract_text(data: dict[str, Any]) -> str:
+    output_text = data.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    texts: list[str] = []
+    steps = data.get("steps", [])
+    if not isinstance(steps, list):
+        return ""
+
+    for step in steps:
+        if not isinstance(step, dict) or step.get("type") != "model_output":
+            continue
+
+        content = step.get("content", [])
+        if not isinstance(content, list):
+            continue
+
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "text":
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                texts.append(text)
+
+    return "".join(texts).strip()
+
+
+prompt_path = Path(os.environ["FLASHOS_COMMIT_PROMPT_FILE"])
+try:
+    prompt = prompt_path.read_text(encoding="utf-8")
+except OSError as error:
+    fail(f"unable to read the Gemini prompt: {error}")
+
+if not prompt:
+    fail("Gemini prompt is empty")
+
+max_attempts = env_int("FLASHOS_COMMIT_API_ATTEMPTS", 1, 10)
+max_output_tokens = env_int("FLASHOS_COMMIT_MAX_OUTPUT_TOKENS", 64, 65536)
+max_retry_output_tokens = env_int(
+    "FLASHOS_COMMIT_MAX_RETRY_OUTPUT_TOKENS",
+    max_output_tokens,
+    65536,
+)
+timeout_seconds = env_int("FLASHOS_COMMIT_TIMEOUT_SECONDS", 1, 600)
+
+thinking_level = os.environ["FLASHOS_COMMIT_THINKING_LEVEL"]
+if thinking_level not in {"minimal", "low", "medium", "high"}:
+    fail(
+        "FLASHOS_COMMIT_THINKING_LEVEL must be one of: "
+        "minimal, low, medium, high"
+    )
+
+debug = os.environ["FLASHOS_COMMIT_DEBUG"] in {"1", "true", "TRUE", "yes", "YES"}
+api_url = os.environ["FLASHOS_COMMIT_API_URL"]
+model = os.environ["FLASHOS_COMMIT_MODEL"]
+api_key = os.environ["GEMINI_API_KEY"]
 
 system_instruction = """You are the FlashOS commit-subject generator.
 
@@ -355,52 +499,35 @@ Interpretation contract:
 - Summarize the primary coherent effect instead of listing touched files.
 """
 
-payload = json.dumps(
-    {
-        "model": os.environ["FLASHOS_COMMIT_MODEL"],
-        "store": False,
-        "system_instruction": system_instruction,
-        "input": prompt,
-        "generation_config": {
-            "max_output_tokens": 64,
-            "seed": 42,
-            "thinking_level": "low",
-        },
-    }
-).encode("utf-8")
+retryable_http_statuses = {429, 500, 502, 503, 504}
+retryable_interaction_statuses = {"incomplete", "budget_exceeded"}
+current_output_tokens = max_output_tokens
+last_data: dict[str, Any] | None = None
 
-url = "https://generativelanguage.googleapis.com/v1/interactions"
-retryable_statuses = {429, 500, 502, 503, 504}
-
-
-def error_message(error: urllib.error.HTTPError, raw: bytes) -> str:
-    try:
-        details = json.loads(raw)
-        if isinstance(details, list):
-            details = details[0] if details else {}
-        return details.get("error", {}).get("message", str(error))
-    except Exception:
-        return raw.decode("utf-8", errors="replace").strip() or str(error)
-
-
-def retry_delay(attempt: int, headers=None) -> float:
-    if headers is not None:
-        retry_after = headers.get("Retry-After")
-        if retry_after:
-            try:
-                return min(max(float(retry_after), 0.0), 30.0)
-            except ValueError:
-                pass
-    return min(float(2 ** (attempt - 1)), 8.0)
-
-
-data = None
 for attempt in range(1, max_attempts + 1):
+    payload = json.dumps(
+        {
+            "model": model,
+            "store": False,
+            "system_instruction": system_instruction,
+            "input": prompt,
+            "generation_config": {
+                "max_output_tokens": current_output_tokens,
+                "seed": 42,
+                "stop_sequences": ["\n"],
+                "thinking_level": thinking_level,
+                "thinking_summaries": "none",
+            },
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
     request = urllib.request.Request(
-        url,
+        api_url,
         data=payload,
         headers={
-            "x-goog-api-key": os.environ["GEMINI_API_KEY"],
+            "x-goog-api-key": api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
@@ -408,81 +535,106 @@ for attempt in range(1, max_attempts + 1):
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             data = json.load(response)
-        break
     except urllib.error.HTTPError as error:
         raw = error.read()
-        message = error_message(error, raw)
-        if error.code in retryable_statuses and attempt < max_attempts:
-            delay = retry_delay(attempt, error.headers)
+        message = extract_error_message(error, raw)
+        if error.code in retryable_http_statuses and attempt < max_attempts:
             print(
-                f"flashos: Gemini API returned HTTP {error.code}; retrying",
+                f"flashos: Gemini API returned HTTP {error.code}; retrying "
+                f"({attempt}/{max_attempts})",
                 file=sys.stderr,
             )
-            time.sleep(delay)
+            time.sleep(retry_delay(attempt, error.headers))
             continue
-        print(f"flashos: Gemini API error: {message}", file=sys.stderr)
-        sys.exit(1)
+        fail(f"Gemini API error: {message}")
     except (urllib.error.URLError, TimeoutError, socket.timeout) as error:
         reason = getattr(error, "reason", error)
         if attempt < max_attempts:
             print(
-                f"flashos: Gemini request failed ({reason}); retrying",
+                f"flashos: Gemini request failed ({reason}); retrying "
+                f"({attempt}/{max_attempts})",
                 file=sys.stderr,
             )
             time.sleep(retry_delay(attempt))
             continue
-        print(f"flashos: Gemini request failed: {reason}", file=sys.stderr)
-        sys.exit(1)
+        fail(f"Gemini request failed: {reason}")
     except (OSError, ValueError, json.JSONDecodeError) as error:
-        print(f"flashos: Gemini request failed: {error}", file=sys.stderr)
-        sys.exit(1)
+        fail(f"Gemini request failed: {error}")
     except KeyboardInterrupt:
-        print("flashos: Gemini request interrupted", file=sys.stderr)
-        sys.exit(130)
+        fail("Gemini request interrupted", 130)
 
-if not isinstance(data, dict):
-    print("flashos: Gemini returned an invalid response", file=sys.stderr)
-    sys.exit(1)
+    if not isinstance(data, dict):
+        fail("Gemini returned an invalid response")
 
-if data.get("status") != "completed":
+    last_data = data
     status = data.get("status", "unknown")
-    print(
-        f"flashos: Gemini interaction did not complete: {status}",
-        file=sys.stderr,
-    )
-    sys.exit(1)
 
-texts = []
-for step in data.get("steps", []):
-    if step.get("type") != "model_output":
+    if debug:
+        print(
+            f"flashos: Gemini status={status}; model={model}; "
+            f"max_output_tokens={current_output_tokens}; {usage_summary(data)}",
+            file=sys.stderr,
+        )
+
+    if status == "completed":
+        result = extract_text(data)
+        if not result:
+            fail("Gemini returned no text")
+        sys.stdout.write(result)
+        sys.exit(0)
+
+    if status in retryable_interaction_statuses and attempt < max_attempts:
+        next_output_tokens = min(current_output_tokens * 2, max_retry_output_tokens)
+        detail = status_detail(data)
+        detail_suffix = f"; {detail}" if detail else ""
+        print(
+            f"flashos: Gemini interaction returned {status} "
+            f"({usage_summary(data)}; max_output_tokens={current_output_tokens})"
+            f"{detail_suffix}; retrying with max_output_tokens={next_output_tokens} "
+            f"({attempt}/{max_attempts})",
+            file=sys.stderr,
+        )
+        current_output_tokens = next_output_tokens
+        time.sleep(retry_delay(attempt))
         continue
-    for item in step.get("content", []):
-        if item.get("type") == "text":
-            texts.append(item.get("text", ""))
 
-result = "".join(texts).strip()
-if not result:
-    print("flashos: Gemini returned no text", file=sys.stderr)
-    sys.exit(1)
+    detail = status_detail(data)
+    detail_suffix = f"; {detail}" if detail else ""
+    fail(
+        f"Gemini interaction did not complete: {status}; "
+        f"{usage_summary(data)}; max_output_tokens={current_output_tokens}"
+        f"{detail_suffix}"
+    )
 
-sys.stdout.write(result)
-'
+if last_data is not None:
+    status = last_data.get("status", "unknown")
+    fail(
+        f"Gemini interaction did not complete after {max_attempts} attempts: "
+        f"{status}; {usage_summary(last_data)}"
+    )
+
+fail(f"Gemini request failed after {max_attempts} attempts")
+PY
 }
 
 _flashos_commit_validate_generated_message() {
   local context_file
+  local message
 
   context_file="$(_flashos_commit_context_file)"
+  message="$(command cat)"
 
-  FLASHOS_COMMIT_CONTEXT_FILE="$context_file" command python3 -c '
+  FLASHOS_COMMIT_CONTEXT_FILE="$context_file" \
+  FLASHOS_COMMIT_MESSAGE="$message" \
+    command python3 - <<'PY'
 import json
 import os
 import sys
 from pathlib import Path
 
-message = sys.stdin.read().strip()
+message = os.environ["FLASHOS_COMMIT_MESSAGE"].strip()
 context_path = Path(os.environ["FLASHOS_COMMIT_CONTEXT_FILE"])
 
 try:
@@ -497,7 +649,10 @@ maximum_characters = policy["maximum_characters"]
 
 
 def fail(message_text: str) -> None:
-    print(f"flashos: Gemini returned an invalid commit subject: {message_text}", file=sys.stderr)
+    print(
+        f"flashos: Gemini returned an invalid commit subject: {message_text}",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -512,7 +667,7 @@ if any(ord(character) < 32 or ord(character) == 127 for character in message):
 if policy.get("trailing_period") is False and message.endswith("."):
     fail("the subject ends with a period")
 if policy.get("quotes_or_backticks_allowed") is False and any(
-    character in message for character in ("\"", "\047", "`")
+    character in message for character in ('"', "'", "`")
 ):
     fail("the subject contains a quote or backtick")
 
@@ -526,7 +681,7 @@ if not any(message.startswith(f"{prefix} ") for prefix in allowed_prefixes):
     fail("the subject does not use an allowed commit prefix")
 
 sys.stdout.write(message)
-'
+PY
 }
 
 _flashos_commit_usage() {
@@ -534,7 +689,6 @@ _flashos_commit_usage() {
     "usage: flashos commit [options] [message]" \
     "" \
     "Create a Git commit using a supplied or Gemini-generated message." \
-    "This AI command is implemented by its own script and context file." \
     "" \
     "options:" \
     "  -a, -add-all       stage all repository changes" \
@@ -543,26 +697,32 @@ _flashos_commit_usage() {
     "  -h, --help         show this help" \
     "" \
     "environment:" \
-    "  GEMINI_API_KEY                 Gemini API key" \
-    "  FLASHOS_COMMIT_MODEL           Gemini model override" \
-    "  FLASHOS_COMMIT_CONTEXT_FILE    project context file override" \
-    "  FLASHOS_COMMIT_MAX_DIFF_BYTES  upload limit; default: 1048576" \
-    "  FLASHOS_COMMIT_API_ATTEMPTS    API attempts; default: 3" \
+    "  GEMINI_API_KEY                         Gemini API key" \
+    "  FLASHOS_COMMIT_MODEL                   model; default: gemini-3.6-flash" \
+    "  FLASHOS_COMMIT_API_URL                 Interactions API endpoint" \
+    "  FLASHOS_COMMIT_CONTEXT_FILE            project context file override" \
+    "  FLASHOS_COMMIT_MAX_DIFF_BYTES          diff limit; default: 1048576" \
+    "  FLASHOS_COMMIT_API_ATTEMPTS            attempts; default: 3" \
+    "  FLASHOS_COMMIT_MAX_OUTPUT_TOKENS       initial limit; default: 512" \
+    "  FLASHOS_COMMIT_MAX_RETRY_OUTPUT_TOKENS retry ceiling; default: 4096" \
+    "  FLASHOS_COMMIT_THINKING_LEVEL          minimal|low|medium|high" \
+    "  FLASHOS_COMMIT_TIMEOUT_SECONDS         request timeout; default: 120" \
+    "  FLASHOS_COMMIT_DEBUG                   set to 1 for API diagnostics" \
     "" \
     "The default project context file is:" \
     "  ${_FLASHOS_COMMIT_DIR}/contexts/flashos-commit-context.json" \
     "" \
-    "Git operations are always anchored to the repository containing this script." \
-    "The execution order is always:" \
-    "  add -> inspect -> generate -> approve commit -> commit -> push" \
+    "Git operations are anchored to the repository containing this script." \
+    "The execution order is:" \
+    "  add -> inspect -> generate -> approve -> commit -> push" \
     "" \
     "examples:" \
-    '  flashos commit "Add commit helper"' \
-    '  flashos commit -a "Stage and commit changes"' \
+    '  flashos commit "docs: update project documentation"' \
+    '  flashos commit -a "fix: correct image configuration"' \
     '  flashos commit -g' \
     '  flashos commit -a -g' \
-    '  flashos commit -p -generate -add-all' \
-    '  printf "y\n" | flashos commit -g'
+    '  flashos commit -a -g -p' \
+    '  FLASHOS_COMMIT_DEBUG=1 flashos commit -g'
 }
 
 _flashos_commit_generate_message() (
@@ -606,7 +766,6 @@ _flashos_commit_generate_message() (
   _flashos_commit_validate_context || return 1
 
   diff_bytes="$(_flashos_commit_diff_size)" || return 1
-
   if [ "$diff_bytes" -gt "$max_diff_bytes" ]; then
     _flashos_commit_error \
       "staged diff is ${diff_bytes} bytes; upload limit is ${max_diff_bytes} bytes"
@@ -622,12 +781,12 @@ _flashos_commit_generate_message() (
   trap 'command rm -rf -- "$temp_dir"' EXIT HUP INT TERM
 
   prompt_file="${temp_dir}/prompt.json"
-  _flashos_commit_build_prompt > "$prompt_file" || {
+  _flashos_commit_build_prompt >"$prompt_file" || {
     _flashos_commit_error "unable to build the Gemini prompt"
     return 1
   }
 
-  generated_message="$(_flashos_commit_call_gemini < "$prompt_file")" || {
+  generated_message="$(_flashos_commit_call_gemini "$prompt_file")" || {
     _flashos_commit_error "failed to generate a commit message"
     return 1
   }
@@ -727,24 +886,19 @@ _flashos_commit_main() {
 
   _flashos_commit_init_repo || return 1
 
-  # Priority 1: stage changes from the repository root.
   if [ "$add_changes" -eq 1 ]; then
     _flashos_commit_git add --all -- . || return 1
   fi
 
-  # Priority 2: inspect, generate, and approve the message.
   if [ "$generate_message" -eq 1 ]; then
     commit_message="$(_flashos_commit_generate_message)" || return 1
 
     printf '%s\n' "$commit_message"
-
     _flashos_commit_confirm_message || return 1
   fi
 
-  # Priority 3: create the commit in the repository containing this helper.
   _flashos_commit_git commit -m "$commit_message" || return 1
 
-  # Priority 4: push only after a successful commit.
   if [ "$push_after_commit" -eq 1 ]; then
     _flashos_commit_git push || return 1
   fi
