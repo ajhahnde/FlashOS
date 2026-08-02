@@ -4,6 +4,8 @@
 
 This document describes the internal architecture of FlashShell: crate boundaries, source processing, runtime state, command planning, pipeline execution, platform capabilities, interactive front ends, and process lifecycle management. It is intended for maintainers and developers extending the implementation; language usage belongs in the [Language Guide](language-guide.md), while build and test procedures belong in [Development](development.md).
 
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. However, this FlashShell Architecture Guide describes the intended stable FlashShell v1.0 architecture and component contracts. Note that not every v1 feature or platform capability is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
+
 ## On this page
 
 - [Architectural scope](#architectural-scope)

@@ -4,6 +4,8 @@
 
 This guide documents the FlashShell 1.0 language: source text, runtime values, bindings, expressions, commands, expansion, control flow, functions, and typed pipelines. Practical process execution, redirection, status handling, and job control are covered in the [Scripting Guide](scripting.md).
 
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. However, this FlashShell Language Guide defines the intended stable FlashShell v1.0 contract. Note that not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
+
 ## On this page
 
 - [Language model](#language-model)

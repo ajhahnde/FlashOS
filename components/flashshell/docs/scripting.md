@@ -4,6 +4,8 @@
 
 This guide explains how to run `.fsh` programs, invoke external processes, connect pipeline stages, redirect file descriptors, handle command statuses, and manage background jobs. Language syntax, values, bindings, expressions, and structured-data operations are documented in the [Language Guide](language-guide.md).
 
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. However, this FlashShell Scripting Guide defines the intended stable FlashShell v1.0 contract for scripting and execution. Note that not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
+
 ## On this page
 
 - [Running scripts](#running-scripts)

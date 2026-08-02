@@ -4,7 +4,7 @@
 
 FlashShell (`fsh`) is the primary interactive shell and scripting interface of FlashOS. It is a non-POSIX command language built around structured runtime values, explicit process invocation, and a shared syntax and execution core for interactive input and `.fsh` scripts. This page provides a component overview; detailed language, scripting, architecture, and development documentation is available under [`docs/`](docs/README.md).
 
-> **Project status:** FlashShell is part of pre-alpha FlashOS. Language semantics, command-line behavior, platform capabilities, and internal interfaces may change without compatibility guarantees.
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. However, FlashShell component documentation defines the intended stable FlashShell v1.0 contract. Note that not every v1 feature is automatically available in every current FlashOS image or on every target platform, and execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
 
 ## On this page
 

@@ -4,6 +4,8 @@
 
 This roadmap describes the intended public development direction for FlashOS, from the current pre-alpha system toward a more complete terminal-native operating environment. It communicates priorities and completion criteria rather than release dates, internal task tracking, or guarantees that every listed initiative will ship unchanged.
 
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. While FlashShell component documentation describes the intended stable FlashShell v1.0 contract, not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
+
 ## On this page
 
 - [How to read this roadmap](#how-to-read-this-roadmap)
@@ -137,7 +139,7 @@ Host behavior must not be presented as FlashOS behavior until the target build a
 
 ### Hardening toward a stable language release
 
-Before FlashShell can declare a stable v1 contract, the project intends to:
+While FlashShell component documentation describes the intended stable FlashShell v1.0 contract, before FlashShell can declare a completed v1 runtime release across all target platforms, the project intends to:
 
 - expand lexer, parser, formatter, and evaluator fuzzing;
 - stress pipelines, cancellation, jobs, and terminal transitions;

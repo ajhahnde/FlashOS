@@ -4,6 +4,8 @@
 
 This guide describes the component-specific workflow for building, testing, documenting, and integrating FlashShell. It is intended for developers changing the language implementation, runtime, platform adapters, interactive front end, or `fsh` executable; repository-wide image development and verification policy remain documented under the main FlashOS documentation.
 
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. However, this FlashShell Development Guide supports the intended stable FlashShell v1.0 contract. Note that not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful test execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
+
 ## On this page
 
 - [Development scope](#development-scope)

@@ -4,7 +4,7 @@
 
 This page is the central index for the public FlashShell documentation. It directs users, script authors, and component developers to the appropriate guide; system-wide FlashOS build, image, verification, and hardware documentation remains under the main [FlashOS documentation](../../../docs/README.md).
 
-> **Project status:** FlashShell is pre-alpha software. These guides describe the current repository behavior and development contracts without providing backward-compatibility or production-readiness guarantees.
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. However, these FlashShell component guides describe the intended stable FlashShell v1.0 contract. Note that not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
 
 ## Guides
 
