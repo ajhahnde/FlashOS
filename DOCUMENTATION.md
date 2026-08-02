@@ -1,16 +1,11 @@
-# Documentation moved
+# Documentation Moved
 
-The FlashOS documentation previously located here has been reorganized into specialized guides under `docs/`.
+[FlashOS](README.md) › Documentation redirect
 
-Please refer to the updated documentation pages:
+This compatibility page is retained for older links and bookmarks. The canonical entry point for current FlashOS system, component, automation, release, and policy documentation is the [FlashOS Documentation Index](docs/README.md).
 
-- [Documentation Index](docs/README.md)
-- [Getting Started](docs/getting-started.md)
-- [Architecture](docs/architecture.md)
-- [Development](docs/development.md)
-- [Verification](docs/verification.md)
-- [Hardware Compatibility](docs/hardware.md)
-- [Roadmap](docs/roadmap.md)
+New links should target the canonical documentation pages rather than this forwarding file.
 
 ---
-[← Back to Main README](README.md)
+
+[← Back to FlashOS](README.md) · [Open Documentation Index →](docs/README.md)
