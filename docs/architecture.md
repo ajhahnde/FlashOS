@@ -2,143 +2,386 @@
 
 [FlashOS](../README.md) › [Documentation](README.md) › Architecture
 
-This document describes the structural architecture of FlashOS, including system layers, build-to-boot execution sequencing, image profiles, and technical boundaries between FlashOS and inherited upstream components. It is intended for software architects, developers, and maintainers working across system components and packaging layers. The former AArch64 implementation is preserved separately in the archived `FlashOS-old` repository and does not apply to this architecture.
+This document describes the current FlashOS system layers, image composition, build-to-boot path, and boundaries between project-owned components and inherited infrastructure. It is intended for developers and evaluators who need to understand how the x86_64 product profile is assembled without treating every capability present in the wider repository or upstream Redox ecosystem as a supported FlashOS feature.
 
 ## On this page
 
-- [Architectural goals](#architectural-goals)
+- [Architectural scope](#architectural-scope)
 - [System context](#system-context)
+- [Ownership and dependency model](#ownership-and-dependency-model)
 - [Current system layers](#current-system-layers)
-- [Component boundaries](#component-boundaries)
 - [Image configuration](#image-configuration)
-- [Build-to-boot flow](#build-to-boot-flow)
+- [Build-to-image flow](#build-to-image-flow)
+- [Boot-to-shell flow](#boot-to-shell-flow)
 - [FlashShell integration](#flashshell-integration)
-- [Compatibility and upstream boundaries](#compatibility-and-upstream-boundaries)
-- [Architectural non-goals](#architectural-non-goals)
+- [Verification boundaries](#verification-boundaries)
+- [What this architecture does not imply](#what-this-architecture-does-not-imply)
 - [Sources of truth](#sources-of-truth)
 
-## Architectural goals
+## Architectural scope
 
-FlashOS engineering centers around four core architectural tenets:
-- **Small, compact TUI system:** Providing an efficient, keyboard-driven operating environment free from visual windowing overhead.
-- **Clear component ownership and boundaries:** Explicitly distinguishing FlashOS-owned user surface, configuration, and shell implementations from transitional build-system infrastructure.
-- **Verifiable image compilation:** Producing reproducible disk and live memory images backed by cryptographic SBOMs, SHA-256 digests, and automated runtime qualification.
-- **FlashShell as the primary interface:** Deploying `fsh` as the exclusive console command language and execution engine for all interactive and automated logins.
+The current FlashOS product architecture is defined by the following boundaries:
+
+| Area                        | Current boundary                     |
+| --------------------------- | ------------------------------------ |
+| Product architecture        | x86_64                               |
+| Target ABI                  | `x86_64-unknown-redox`               |
+| Primary environment         | Text-based console interface         |
+| Primary user interface      | FlashShell at `/usr/bin/fsh`         |
+| Primary evaluation platform | QEMU `q35` with x86_64 UEFI firmware |
+| System maturity             | Pre-alpha                            |
+
+The repository retains inherited build-system branches and recipes that refer to architectures other than x86_64. Their presence does not establish a FlashOS product profile, tested image, release target, or hardware-support commitment for those architectures.
+
+The current product profiles are located under [`config/x86_64/`](../config/x86_64/). Hardware qualification is documented separately in [Hardware Compatibility](hardware.md), while future architectural direction belongs in the [Roadmap](roadmap.md).
 
 ## System context
 
-At a high level, the FlashOS engineering workflow traverses six sequential stages from compilation to interactive operational readiness:
+FlashOS spans two distinct execution environments: the host-side build system and the target system contained in the generated image.
 
 ```text
-build host
-→ image build system
-→ bootable FlashOS image
-→ kernel and system services
-→ console login
-→ FlashShell
+Host environment
+┌──────────────────────────────────────────────────────────────┐
+│ Local configuration                                         │
+│        ↓                                                     │
+│ Make and container orchestration                             │
+│        ↓                                                     │
+│ Cross-toolchain and target sysroot                           │
+│        ↓                                                     │
+│ Cookbook recipes and package repository                      │
+│        ↓                                                     │
+│ Installer and filesystem tooling                             │
+└───────────────────────────┬──────────────────────────────────┘
+                            ↓
+                  Bootable image artifact
+                            ↓
+Target environment
+┌──────────────────────────────────────────────────────────────┐
+│ Firmware                                                     │
+│        ↓                                                     │
+│ Bootloader                                                   │
+│        ↓                                                     │
+│ Kernel                                                       │
+│        ↓                                                     │
+│ Drivers, schemes, and system services                        │
+│        ↓                                                     │
+│ Console login                                                │
+│        ↓                                                     │
+│ FlashShell and external userspace commands                   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-The host toolchain processes recipes inside a clean container to generate bootable disk artifacts; once launched on virtual or physical machine hardware, underlying kernel and system daemons initialize terminal consoles, prompting user authentication before launching FlashShell.
+The host environment produces an image for the target environment. Host-side utilities, container dependencies, and development-only FlashShell integrations are not automatically part of the generated operating-system image.
+
+## Ownership and dependency model
+
+FlashOS currently combines project-owned product components with inherited and external infrastructure. These categories must remain distinguishable.
+
+| Category                               | Meaning                                                                                    | Examples                                                            |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| **FlashOS-owned component**            | Source or configuration maintained as a direct FlashOS product responsibility              | Image profiles, FlashShell, documentation, CI contracts             |
+| **Pinned upstream component**          | External source fetched at a specific revision and built as part of the image              | Kernel, bootloader, `relibc`, base services, utilities              |
+| **Locally patched upstream component** | Pinned upstream source modified by repository-maintained patches                           | Kernel, bootloader, installer, and login branding or policy changes |
+| **Inherited build infrastructure**     | Repository-local orchestration derived from the Redox build system and adapted for FlashOS | Root Cargo build crate, `Makefile`, `mk/`, Cookbook integration     |
+| **Compatibility interface**            | A technical name that remains because the active ABI or tool still uses it                 | `x86_64-unknown-redox`, `relibc`, `redox_installer`, RedoxFS        |
+
+A local patch does not convert the complete upstream component into a FlashOS-native implementation. For example, the kernel recipe applies FlashOS-specific visible branding to a pinned Redox kernel revision, but the kernel architecture, system-call model, driver framework, and most implementation code remain upstream dependencies.
+
+Similarly, preserving an inherited technical identifier does not determine project identity. Names such as `x86_64-unknown-redox` describe active compatibility contracts and must remain until the corresponding interface is replaced, not merely renamed.
 
 ## Current system layers
 
-During the current bootstrap phase, FlashOS utilizes proven Redox OS system infrastructure while steadily expanding independent project ownership:
+### Host build orchestration
 
-| Layer | Current implementation | FlashOS ownership | Long-term direction |
-|---|---|---|---|
-| **Kernel** | Redox OS kernel baseline | Borrowed dependency | Retain as a borrowed kernel; an independent FlashOS fork may eventually diverge |
-| **Target ABI and libc** | `x86_64-unknown-redox` target and `relibc` | Borrowed compatibility layer | Transitional compatibility boundary during system bootstrap |
-| **Boot and image tooling** | Inherited Redox bootloader and installer | Transitional infrastructure | Transitional foundation for assembling bootable filesystem images |
-| **System profile and identity** | FlashOS x86_64 manifests (`flashos.toml`) | Fully owned | Permanent independent FlashOS user and configuration domain |
-| **Interactive shell** | FlashShell (`/usr/bin/fsh`) | Fully owned | Permanent core FlashOS command execution language and interface |
+The root [`Makefile`](../Makefile) and files under [`mk/`](../mk/) coordinate:
 
-## Component boundaries
+- local configuration resolution;
+- containerized or native build execution;
+- cross-toolchain provisioning;
+- package fetching and compilation;
+- filesystem-tool compilation;
+- image assembly;
+- QEMU execution.
 
-Each operational subsystem maintains defined organizational responsibilities within the repository structure:
-- **Kernel (`recipes/core/kernel/`):** Establishes basic hardware virtualization, process scheduling, system calls, and device drivers.
-- **Target ABI and libc (`prefix/`):** Provides the standard C library runtime (`relibc`) and compiler target specifications required to cross-compile userspace binaries.
-- **Boot and image tooling (`mk/`, `scripts/`):** Drives disk formatting, live ISO staging, RedoxFS partition assembly, and UEFI bootloader installation.
-- **System profile (`config/`):** Declares required userspace package sets, user accounts, networking schemes, and console initialization rules.
-- **Userspace (`recipes/`):** Contains essential GNU/Linux terminal utility replacements (`coreutils`, `extrautils`) and system libraries.
-- **FlashShell (`components/flashshell/`):** Implements language syntax, parsing ASTs, pipeline execution, and terminal line editing.
-- **CI verification (`ci/`, `.github/workflows/`):** Guards architecture invariants by running strict profile lints and headless QEMU serial smoke tests.
+The default local path uses Podman, while hosted image qualification uses a dedicated container workflow. Containerization isolates many host dependencies, but it is a build boundary rather than a runtime feature of FlashOS.
+
+### Cross-toolchain and target ABI
+
+The build system targets:
+
+```text
+x86_64-unknown-redox
+```
+
+The prefix stage supplies the Rust, GCC, Clang, linker, runtime-library, and sysroot components needed to compile target packages. `relibc`, target support libraries, and the target triple remain part of the inherited Redox compatibility boundary.
+
+The target ABI is therefore not a FlashOS-designed ABI. Code that compiles for a general Unix-like host does not automatically compile or behave identically on the FlashOS target.
+
+### Bootloader and kernel
+
+The bootloader and kernel are fetched through pinned recipes:
+
+- [`recipes/core/bootloader/`](../recipes/core/bootloader/)
+- [`recipes/core/kernel/`](../recipes/core/kernel/)
+
+Both apply local patches for FlashOS-visible identity. The bootloader provides BIOS and UEFI outputs for architectures supported by its upstream recipe, but the active FlashOS product path uses the x86_64 UEFI output.
+
+The kernel provides the low-level process, memory, scheme, interrupt, and hardware-driver foundation. FlashOS does not currently maintain an independent kernel implementation.
+
+### Base system and services
+
+The `base` and `userutils` packages provide inherited system initialization, login, and service infrastructure. The active profile supplements these packages with FlashOS-owned configuration for:
+
+- console initialization;
+- system hostname and release identity;
+- login shells;
+- scheme permissions;
+- filesystem layout;
+- development-network defaults.
+
+Runtime drivers and services are selected through the package set and initialized by the installed system scripts. Their presence in an upstream source tree is not sufficient to classify them as active or qualified FlashOS functionality.
+
+### Userspace utilities
+
+The active image selects a small console-oriented userspace. It includes a mixture of Redox utilities, uutils-based commands, networking support, runtime libraries, and FlashShell.
+
+These programs remain separate processes. FlashShell coordinates command execution but does not reimplement every external utility included in the image.
+
+### FlashShell
+
+FlashShell is the primary FlashOS-owned user-facing component. Its executable is named `fsh`, and the active system profiles assign `/usr/bin/fsh` as the login shell for both configured accounts.
+
+FlashShell is a userspace process. It does not replace the kernel, system initialization, authentication service, filesystem, package manager, or external command implementations.
 
 ## Image configuration
 
-The active system image is driven by two FlashOS-owned configuration files that replace graphical desktop defaults:
-- [`config/flashos-base.toml`](../config/flashos-base.toml) defines the foundational TUI baseline. It preserves essential framebuffer display, input keyboard, audio controller, networking, and standard filesystem access while strictly stripping out `orbital` display scheme permissions and legacy `/ui` graphical compatibility symlinks.
-- [`config/x86_64/flashos.toml`](../config/x86_64/flashos.toml) inherits the TUI base and specifies the exact package closure and runtime identity.
+FlashOS image composition is defined by three central configuration files:
 
-The configured package set is minimal by design, excluding all windowing toolkits and GUI clients:
-- `flashshell`
-- `coreutils`
-- `extrautils`
+| File                                                                          | Responsibility                        |
+| ----------------------------------------------------------------------------- | ------------------------------------- |
+| [`config/flashos-base.toml`](../config/flashos-base.toml)                     | Shared TUI-oriented system foundation |
+| [`config/x86_64/flashos.toml`](../config/x86_64/flashos.toml)                 | Development image profile             |
+| [`config/x86_64/flashos-release.toml`](../config/x86_64/flashos-release.toml) | Release image profile                 |
 
-When compiled, the installer applies independent project branding and configuration directly into the filesystem:
-- Configures `/usr/bin/fsh` as the exclusive login shell for both `root` and `user`.
-- Writes system hostname `/etc/hostname` as `flashos`.
-- Populates `/usr/lib/os-release` and `/etc/issue` with version 0.1.0 identity strings.
-- Sets up console init daemons to launch interactive terminal login prompts (`getty`).
+### Shared base profile
 
-## Build-to-boot flow
+`flashos-base.toml` is a standalone base configuration rather than an extension of a graphical desktop profile. It defines the common package selection, filesystem structure, scheme access, networking defaults, and sudo-group membership used by both x86_64 profiles.
 
-The operational transition from host build compilation to an active terminal prompt follows a clear execution sequence:
-1. Local variables or root `.config` specify `ARCH=x86_64` and `CONFIG_NAME=flashos`.
-2. The compiler prefix stage builds or restores the `x86_64-unknown-redox` cross-compiler and target sysroot.
-3. The package cookbook cooks or fetches binary artifacts for FlashShell and selected core utilities.
-4. The image installer constructs the RedoxFS partition, installs package binaries, and configures users and system identity files.
-5. Make produces `build/x86_64/flashos/harddrive.img` (installed disk format) and `build/x86_64/flashos/redox-live.iso` (self-contained removable media format).
-6. When launched via QEMU or physical firmware, UEFI executes the bootloader, loading the operating system kernel into memory.
-7. Kernel initialization triggers console service startup; authentication at the login prompt launches `/usr/bin/fsh` and displays the `>> ` prompt.
+The declared base package set includes:
 
-Detailed building commands and troubleshooting steps remain focused inside [Getting Started](getting-started.md).
+```text
+base
+bootloader
+kernel
+libgcc
+libstdcxx
+netdb
+netutils
+relibc
+userutils
+uutils
+```
+
+The base profile retains interfaces needed by the current console system, including framebuffer display, input, networking, audio, terminals, processes, and files. It does not grant the unprivileged account access to the Orbital scheme and does not recreate the inherited `/ui` compatibility path.
+
+### Product-specific profile
+
+The development and release profiles add:
+
+```text
+flashshell
+coreutils
+extrautils
+```
+
+They also define:
+
+- the x86_64 filesystem size;
+- the `flashos` hostname;
+- FlashOS release identity files;
+- console startup through `inputd` and `getty`;
+- `/usr/bin/fsh` as the configured login shell.
+
+These names are the packages explicitly selected by the image manifests. Cookbook may resolve additional recipe dependencies required to build and install them.
+
+### Development and release variants
+
+The development and release profiles are required to remain identical in their general settings, package selection, and installed files. Their intentional difference is the credential model.
+
+The development profile contains convenience credentials for local evaluation. The release profile locks direct root login and removes the development passwords. This separation is enforced by the product-profile check, but it is not yet a complete first-boot account-provisioning system or a claim of production-ready access control.
+
+Credential details belong in [Getting Started](getting-started.md) and the [Security Policy](../.github/SECURITY.md), rather than being duplicated throughout the architecture documentation.
+
+## Build-to-image flow
+
+The normal image build follows these stages:
+
+1. **Configuration resolution**
+   `.config`, command-line Make variables, and [`mk/config.mk`](../mk/config.mk) select the architecture, product profile, output directory, package-source policy, and container behavior.
+
+2. **Cross-toolchain provisioning**
+   [`mk/prefix.mk`](../mk/prefix.mk) prepares the compilers, linkers, runtime libraries, and target sysroot for `x86_64-unknown-redox`.
+
+3. **Recipe resolution**
+   The selected filesystem configuration is passed to the repository build tool. Cookbook resolves the explicitly selected packages and their recipe dependencies.
+
+4. **Package construction or retrieval**
+   Recipes fetch pinned source revisions, apply local patches where declared, and compile or retrieve target package artifacts.
+
+5. **Host filesystem tools**
+   The build compiles the host-side installer and RedoxFS tools used to create and populate the target image.
+
+6. **Image assembly**
+   [`mk/disk.mk`](../mk/disk.mk) creates a temporary image, invokes the installer with the selected configuration, and moves the completed temporary file to its final artifact path only after installation succeeds.
+
+7. **Artifact output**
+   The principal outputs are:
+
+   ```text
+   build/x86_64/<profile>/harddrive.img
+   build/x86_64/<profile>/redox-live.iso
+   ```
+
+The installed disk and live image share the same product configuration but use different bootloader paths. The live-image target invokes the installer in live mode with the live bootloader, while the ordinary disk image is assembled as the persistent development or release disk.
+
+The `.iso` suffix in `redox-live.iso` is an inherited build-interface name. It should not be renamed independently of the build, verification, and release contracts that consume it.
+
+## Boot-to-shell flow
+
+For the primary x86_64 path, the runtime sequence is:
+
+```text
+x86_64 UEFI firmware
+→ FlashOS-branded bootloader
+→ pinned Redox kernel with local branding patch
+→ schemes, drivers, and init services
+→ framebuffer console and input service
+→ getty and login
+→ /usr/bin/fsh
+→ FlashShell built-ins or external userspace processes
+```
+
+The current QEMU configuration uses the `q35` machine model and normally exposes the main disk through an emulated NVMe interface. The live-image qualification path exposes the live artifact as USB mass storage.
+
+After the kernel starts, installed initialization scripts launch the required services and console login process. Authentication reads the configured user data and starts the shell path associated with the selected account.
+
+This sequence is verified automatically for the defined QEMU configurations. It does not establish equivalent behavior on arbitrary physical hardware.
 
 ## FlashShell integration
 
-FlashShell is developed directly inside the repository tree as an independent Cargo workspace located at [`components/flashshell/`](../components/flashshell/). Its architectural separation of syntax parsing, runtime evaluation, and platform interfaces is thoroughly documented in the [FlashShell Documentation Index](../components/flashshell/docs/README.md).
+FlashShell source is maintained as a nested Cargo workspace under [`components/flashshell/`](../components/flashshell/). The workspace separates syntax processing, runtime evaluation, platform contracts, platform adaptation, and the `fsh` command-line binary.
 
-To embed the shell into the operating system image, the target package recipe at [`recipes/terminal/flashshell/recipe.toml`](../recipes/terminal/flashshell/recipe.toml) builds the executable from `components/flashshell/crates/flashshell-cli` and installs it to `/usr/bin/fsh`.
+The system-image package is defined by:
 
-Developers maintain a clear separation between host-level component validation and cross-target system compilation:
-
-```sh
-cd components/flashshell
-cargo test -p flashshell-cli
-cargo clippy -p flashshell-cli --all-targets -- -D warnings
-redoxer build -p flashshell-cli --bin fsh
+```text
+recipes/terminal/flashshell/recipe.toml
 ```
 
-The standard `cargo` commands confirm core language logic and safety on the host, while `redoxer build` verifies target ABI binary compilation against the Redox sysroot.
+That recipe:
 
-## Compatibility and upstream boundaries
+- fetches the FlashOS repository at a pinned commit;
+- selects `components/flashshell/crates/flashshell-cli`;
+- builds the binary named `fsh`;
+- installs the resulting package into the target image.
 
-While user-facing identity, network boot filenames, QEMU window titles, and documentation strictly reflect the FlashOS brand, specific technical identifiers inherited from Redox OS are preserved deliberately:
+The package input is therefore the revision pinned by the recipe, not automatically every uncommitted or newer change present in a developer's current working tree. Updating FlashShell in a produced image requires keeping the component source, recipe revision, version metadata, and verification expectations aligned.
 
-| Name | Why it remains |
-|---|---|
-| `x86_64-unknown-redox` | Represents the actual cross-compiler target triple and compiled toolchain ABI |
-| `redoxer` | Identifies the containerized cross-compilation execution wrapper |
-| `relibc` and `redox_*` crates | Designates required underlying C standard libraries and kernel interface bindings |
-| Selected `redox-*` artifact names | Identifies inherited filesystem tools, Disk layouts, or live ISO branding scripts |
-| `upstream` remote | Facilitates proper legal attribution, diff comparisons, and optional kernel syncing |
+FlashShell also distinguishes host and target integrations at compile time. macOS and Linux development builds use host-oriented configuration, history, and line-editing integrations, while the Redox target selects its target terminal editor path. A feature demonstrated in a host build must therefore not be documented as available inside FlashOS until the target path and image have been checked.
 
-Attempting to rename an active binary interface or target triple without engineering an independent replacement would obscure technical dependencies rather than remove them. Compatibility identifiers remain until FlashOS implements native architectural substitutes.
+Detailed language behavior and internal crate design belong in the [FlashShell Documentation](../components/flashshell/docs/README.md) and [FlashShell Architecture](../components/flashshell/docs/architecture.md).
 
-## Architectural non-goals
+## Verification boundaries
 
-To protect the maintainer model and preserve operational clarity, several features are explicitly rejected as architectural non-goals:
-- **No graphical desktop environment:** Desktop environments, window managers (Orbital, COSMIC, X11, Wayland), and GUI client software are permanently out of scope.
-- **No POSIX shell compliance:** FlashShell prioritizes predictable, typed value streams and structured job control over backward compatibility with POSIX or `/bin/sh` word-splitting syntax.
-- **No unverified hardware expansion:** We avoid making broad, generalized physical device support claims without exact read-only identification, live testing, and published qualification evidence.
+Architecture, build success, runtime qualification, and hardware support are separate claims.
+
+### Product-profile contract
+
+[`ci/check_profile.py`](../ci/check_profile.py) statically verifies repository-level product invariants, including:
+
+- the exact declared package set;
+- inclusion of the shared base profile;
+- exclusion of selected graphical-stack identifiers;
+- FlashShell login-shell paths;
+- development and release profile alignment;
+- release credential restrictions;
+- required framebuffer, terminal, and audio scheme access;
+- absence of Orbital and `/ui` profile paths;
+- version alignment;
+- immutable revisions for shipped Git recipes;
+- presence of required local branding patches.
+
+This check validates configuration and repository structure. It does not boot an image.
+
+### Runtime contract
+
+[`ci/qemu_smoke.py`](../ci/qemu_smoke.py) boots an already-built image and checks the observable x86_64 QEMU path. Its assertions cover firmware and bootloader progress, kernel startup, selected driver initialization, login, the FlashShell prompt, external pipelines, and target-side interactive editing behavior.
+
+The smoke test consumes image bytes in snapshot mode and does not use a successful boot as permission to modify the promoted artifact.
+
+### Artifact and release evidence
+
+Hosted image workflows build both image forms, generate checksums and an image inventory, then pass the promoted artifacts to a separate QEMU consumer. Release workflows additionally package and attest the qualified release candidate.
+
+These mechanisms provide traceability and evidence for specific artifacts. They should not be described as a blanket guarantee that every local build on every host is bit-for-bit identical.
+
+The overall evidence model is documented in [Verification and Testing](verification.md), while exact script and workflow contracts belong in [CI/CD Contracts](../ci/README.md).
+
+## What this architecture does not imply
+
+### Other repository architectures are supported FlashOS targets
+
+They are not. Generic inherited code paths for other architectures remain in the build system, but the current FlashOS profiles, CI qualification, public scope, and release path are x86_64-specific.
+
+### Every upstream Redox feature is available
+
+It is not. An upstream driver, package, architecture, or documented behavior becomes a FlashOS capability only when it is selected by the active profile and supported by appropriate FlashOS evidence.
+
+### FlashOS has an independent kernel and userspace stack
+
+It does not. The project currently owns its product profile, identity, FlashShell, documentation, verification contracts, and selected patches while relying extensively on pinned upstream kernel, ABI, library, service, utility, packaging, and image-building components.
+
+### Branding patches replace technical dependencies
+
+They do not. Branding patches change selected user-visible strings and identifiers. They do not by themselves alter the ownership or underlying architecture of the patched component.
+
+### TUI-only means no display, input, or audio support
+
+It does not. The active profile excludes graphical desktop and windowing stacks while retaining the framebuffer console, keyboard input, terminal, networking, and audio paths required by the current product contract.
+
+### FlashShell is POSIX shell compatible
+
+It is not intended to be a drop-in implementation of Bash or `/bin/sh`. Scripts and commands must follow the syntax and execution model documented for FlashShell.
+
+### A successful QEMU boot qualifies physical hardware
+
+It does not. Physical-machine support requires device-specific evidence maintained in [Hardware Compatibility](hardware.md).
 
 ## Sources of truth
 
-When inspecting or extending system contracts, rely directly on the primary source-of-truth configuration files:
-- **TUI Base Configuration:** [`config/flashos-base.toml`](../config/flashos-base.toml)
-- **Active Image Profile:** [`config/x86_64/flashos.toml`](../config/x86_64/flashos.toml)
-- **FlashShell Workspace:** [`components/flashshell/`](../components/flashshell/)
-- **FlashShell Recipe:** [`recipes/terminal/flashshell/recipe.toml`](../recipes/terminal/flashshell/recipe.toml)
-- **Kernel Boundary Recipe:** [`recipes/core/kernel/`](../recipes/core/kernel/)
+Use the following files when evaluating or changing an architectural contract:
+
+| Concern                        | Primary source                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------------- |
+| Public product scope           | [`README.md`](../README.md)                                                             |
+| Documentation responsibilities | [`docs/README.md`](README.md)                                                           |
+| Shared image foundation        | [`config/flashos-base.toml`](../config/flashos-base.toml)                               |
+| Development image profile      | [`config/x86_64/flashos.toml`](../config/x86_64/flashos.toml)                           |
+| Release image profile          | [`config/x86_64/flashos-release.toml`](../config/x86_64/flashos-release.toml)           |
+| Build-variable resolution      | [`mk/config.mk`](../mk/config.mk)                                                       |
+| Cross-toolchain and sysroot    | [`mk/prefix.mk`](../mk/prefix.mk)                                                       |
+| Package construction           | [`mk/repo.mk`](../mk/repo.mk) and package recipes under [`recipes/`](../recipes/)       |
+| Image assembly                 | [`mk/disk.mk`](../mk/disk.mk)                                                           |
+| QEMU device model              | [`mk/qemu.mk`](../mk/qemu.mk)                                                           |
+| FlashShell source architecture | [`components/flashshell/`](../components/flashshell/)                                   |
+| FlashShell image package       | [`recipes/terminal/flashshell/recipe.toml`](../recipes/terminal/flashshell/recipe.toml) |
+| Product-profile invariants     | [`ci/check_profile.py`](../ci/check_profile.py)                                         |
+| Runtime qualification          | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                                               |
+| Release version                | [`versions.env`](../versions.env)                                                       |
+| Hardware evidence              | [Hardware Compatibility](hardware.md)                                                   |
+| Future direction               | [Roadmap](roadmap.md)                                                                   |
+| Upstream reference material    | [Upstream References](upstream/README.md)                                               |
+
+When these sources disagree, configuration, recipes, executable checks, and current code take precedence over descriptive text. The documentation should then be corrected without treating an outdated statement as an implemented system contract.
 
 ---
 
