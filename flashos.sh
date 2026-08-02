@@ -703,6 +703,23 @@ flashos-changes() {
   esac
 }
 
+flashos-commit() {
+  local commit_script="${_FLASHOS_DIR}/flashos-commit.sh"
+
+  if [ ! -f "$commit_script" ]; then
+    _flashos_error "commit helper not found: $commit_script"
+    return 1
+  fi
+
+  if [ ! -x "$commit_script" ]; then
+    _flashos_error "commit helper is not executable: $commit_script"
+    _flashos_error "run: chmod +x \"$commit_script\""
+    return 1
+  fi
+
+  _flashos_root command "$commit_script" "$@"
+}
+
 # -- Maintenance and end-to-end qualification ------------------------------
 
 flashos-clean() {
@@ -834,6 +851,7 @@ _flashos_usage() {
     "  artifacts [action]        list, locate, or hash image artifacts" \
     "  logs [action]             inspect or follow QEMU smoke logs" \
     "  changes [action]          inspect Git state without writing it" \
+    "  commit [arguments]        run the private commit helper" \
     "  check [scope]             run repository checks" \
     "  shell [scope]             run FlashShell host/target checks" \
     "" \
@@ -866,6 +884,7 @@ flashos() {
     artifacts)        flashos-artifacts "$@" ;;
     logs|log)         flashos-logs "$@" ;;
     changes|change)   flashos-changes "$@" ;;
+    commit)           flashos-commit "$@" ;;
     check)            flashos-check "$@" ;;
     shell)            flashshell-check "$@" ;;
     podman)           flashos-podman "$@" ;;
@@ -892,7 +911,7 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
     previous="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-      choices="status doctor version versions profile env build run smoke qualify recipe artifacts logs changes check shell podman clean root list help"
+      choices="status doctor version versions profile env build run smoke qualify recipe artifacts logs changes commit check shell podman clean root list help"
     else
       case "$previous" in
         profile) choices="dev release" ;;
@@ -905,6 +924,7 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
         artifacts) choices="list path hash" ;;
         logs) choices="list disk live follow" ;;
         changes) choices="status diff stat staged recent" ;;
+        commit)  choices="help" ;;
         check)   choices="quick profile root shell target python docs ci all" ;;
         shell)   choices="fmt clippy test target all" ;;
         podman)  choices="status start stop info" ;;
@@ -920,3 +940,4 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
   }
   complete -F _flashos_bash_completion flashos fos
 fi
+
