@@ -367,7 +367,7 @@ Formatter changes must preserve all of the following:
 - comments and documentation metadata remain attached to the intended constructs;
 - golden fixtures cover representative valid, incomplete, and invalid boundaries where formatting interacts with parsing.
 
-Do not document or test invented CLI flags. Formatter command spelling must come from the implemented CLI contract.
+Formatter commands and options must remain synchronized with the implemented CLI contract and its tests.
 
 ### Static checker contract
 

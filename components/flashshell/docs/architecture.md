@@ -439,7 +439,7 @@ A concrete adapter implements the abstract platform capability contract for one 
 
 [`flashshell-platform-posix`](../crates/flashshell-platform-posix/src/lib.rs) provides the Unix-like host and target integration used by the current executable where that adapter is selected. Its behavior on Linux or macOS is host evidence, not automatic FlashOS qualification.
 
-The v1 architecture also reserves a FlashOS-specific adapter role. That adapter maps FlashShell capabilities to the actual FlashOS ABI and classifies each capability as native, adapted, deliberately unsupported, temporarily unavailable, or not yet qualified. Do not link to a FlashOS-adapter crate unless that path exists in the current public workspace.
+The v1 architecture also reserves a FlashOS-specific adapter role. That adapter maps FlashShell capabilities to the actual FlashOS ABI and classifies each capability as native, adapted, deliberately unsupported, temporarily unavailable, or not yet qualified. A concrete public implementation is referenced only when it is part of the current workspace.
 
 The runtime depends only on the abstract capability contract. It must not silently emulate a missing target capability with weaker POSIX behavior. Release and target evidence determine which adapter capabilities may be claimed publicly.
 

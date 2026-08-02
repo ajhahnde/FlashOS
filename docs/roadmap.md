@@ -11,7 +11,7 @@ This roadmap describes the intended public development direction for FlashOS, fr
 - [How to read this roadmap](#how-to-read-this-roadmap)
 - [Current foundation](#current-foundation)
 - [Development sequence](#development-sequence)
-- [Now: Complete FlashShell](#now-complete-flashshell)
+- [Now: Complete and qualify FlashShell v1](#now-complete-and-qualify-flashshell-v1)
 - [Next: Qualify the next release](#next-qualify-the-next-release)
 - [Next: Expand the terminal environment](#next-expand-the-terminal-environment)
 - [Later: Reduce transitional dependencies](#later-reduce-transitional-dependencies)
@@ -52,6 +52,7 @@ The roadmap begins from the following established product boundaries:
 - FlashOS targets x86_64.
 - The user environment is text-based and does not include a graphical desktop stack.
 - FlashShell is installed as `/usr/bin/fsh` and serves as the primary interactive and scripting interface.
+- The public FlashShell guides define the intended v1 language, runtime, tooling, and platform-capability contract; individual releases still require implementation and target-qualification evidence.
 - Development and live images are built through separate persistent-disk and removable-media paths.
 - Both image forms have automated x86_64 QEMU qualification contracts.
 - Physical hardware claims are limited to individually recorded evidence.
@@ -59,7 +60,7 @@ The roadmap begins from the following established product boundaries:
 - The current kernel, ABI, libc, boot, package, installer, and build foundations still depend substantially on the Redox ecosystem.
 - The intended long-term borrowed boundary is the kernel, but replacement of other dependencies remains incremental rather than immediate.
 
-These boundaries describe the starting point, not a claim that the operating system or FlashShell is complete.
+These boundaries describe the starting point. They do not claim that FlashOS is complete or that every part of the documented FlashShell v1 contract is already implemented and qualified for every target.
 
 For the exact current state, consult:
 
@@ -74,7 +75,7 @@ For the exact current state, consult:
 The intended high-level sequence is:
 
 ```text
-complete FlashShell as a coherent product
+complete and qualify the documented FlashShell v1 contract
                 ↓
 qualify and publish an exact release candidate
                 ↓
@@ -87,9 +88,9 @@ broaden physical hardware and architecture evidence
 
 Some supporting work, such as documentation, dependency maintenance, security review, and hardware investigation, may occur throughout this sequence. The sequence indicates which product initiative should remain primary rather than requiring every supporting activity to stop.
 
-## Now: Complete FlashShell
+## Now: Complete and qualify FlashShell v1
 
-FlashShell is the defining user-facing component of FlashOS. The current priority is to complete it as a maintainable interactive shell, scripting language, and analysis surface before beginning another major user-interface component in parallel.
+FlashShell is the defining user-facing component of FlashOS. The current priority is to complete the implementation of the documented v1 contract, align its tests and tooling with that contract, and qualify the supported host and FlashOS target surfaces before beginning another major user-interface component in parallel.
 
 Existing functionality such as direct external execution, explicit argument expansion, byte-stream pipelines, structured values, target-side line editing, history, multiline input, status branching, and interactive job control forms the baseline for this work.
 
@@ -136,7 +137,7 @@ Work in this area includes:
 
 Host behavior on Linux or macOS must not be presented as FlashOS behavior until the target build and image verification path have been exercised.
 
-### Hardening toward a stable v1 contract and release
+### Hardening and release evidence
 
 While FlashShell component documentation defines the stable FlashShell v1.0 contract, before the project declares a completed v1 runtime release across all target platforms, it intends to:
 
@@ -147,7 +148,7 @@ While FlashShell component documentation defines the stable FlashShell v1.0 cont
 - document invariants around platform-specific `unsafe` code in concrete adapters;
 - execute public documentation examples in CI where practical;
 - enforce explicit analysis and execution boundaries;
-- freeze the v1 grammar, syntax analysis, tooling CLI flags, and public runtime contracts after implementation and documentation agree.
+- ensure that the implementation, tests, tooling CLI behavior, and public documentation conform to the defined v1 grammar and runtime contracts.
 
 ### Completion criteria
 

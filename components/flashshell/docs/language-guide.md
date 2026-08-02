@@ -751,7 +751,7 @@ ls | where {|entry| $entry.type == "file"}
 
 FlashShell v1 associates functions with parameter and result information that can be inspected without executing the function. The metadata supports name and signature validation, help output, editor tooling, and pipeline analysis.
 
-A signature describes the callable contract exposed to analysis tools. It does not turn every runtime value into a fully statically proven value, and documentation must not claim stronger type guarantees than the language specification defines.
+A signature describes the callable contract exposed to analysis tools. It does not turn every runtime value into a fully statically proven value or provide stronger static type guarantees than those defined by the language specification.
 
 Call sites are checked against the available function metadata before execution where the required information is known. Diagnostics should identify the callable, the incompatible argument or result expectation, and the relevant source span.
 
