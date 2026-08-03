@@ -304,6 +304,10 @@ _flashos_check_quick() {
     _flashos_root command git diff --check
 }
 
+_flashos_check_python() {
+  _flashos_root command ruff check flashos-commit.py flashos_ai.py ci/ "$@"
+}
+
 _flashos_check_root() {
   _flashos_root command cargo fmt --all --check &&
     _flashos_root command cargo test --locked
@@ -318,14 +322,14 @@ flashos-check() {
     profile) _flashos_root command python3 ci/check_profile.py "$@" ;;
     root)    _flashos_check_root ;;
     shell)   flashshell-check all "$@" ;;
-    python)  _flashos_root command ruff check ci/ "$@" ;;
+    python)  _flashos_check_python "$@" ;;
     docs)    _flashos_check_docs ;;
     target)  flashshell-check target "$@" ;;
     ci)
       _flashos_check_quick &&
         _flashos_check_root &&
         flashshell-check all &&
-        _flashos_root command ruff check ci/
+        _flashos_check_python
       ;;
     all)
       flashos-check ci && _flashos_check_docs
@@ -338,7 +342,7 @@ flashos-check() {
         "  root     root Rust workspace formatting and tests" \
         "  shell    FlashShell formatting, Clippy, and host tests" \
         "  target   FlashShell Redox target build" \
-        "  python   lint release-critical CI scripts" \
+        "  python   lint FlashOS-owned Python" \
         "  docs     private documentation drift check when available" \
         "  ci       local equivalent of the host CI quality jobs" \
         "  all      CI gates plus the private documentation drift check"
@@ -703,6 +707,23 @@ flashos-changes() {
   esac
 }
 
+flashos-commit() {
+  local commit_script="${_FLASHOS_DIR}/flashos-commit.py"
+
+  if [ ! -f "$commit_script" ]; then
+    _flashos_error "commit helper not found: $commit_script"
+    return 1
+  fi
+
+  if [ ! -x "$commit_script" ]; then
+    _flashos_error "commit helper is not executable: $commit_script"
+    _flashos_error "run: chmod +x \"$commit_script\""
+    return 1
+  fi
+
+  _flashos_root command "$commit_script" "$@"
+}
+
 # -- Maintenance and end-to-end qualification ------------------------------
 
 flashos-clean() {
@@ -834,6 +855,7 @@ _flashos_usage() {
     "  artifacts [action]        list, locate, or hash image artifacts" \
     "  logs [action]             inspect or follow QEMU smoke logs" \
     "  changes [action]          inspect Git state without writing it" \
+    "  commit [arguments]        create a manual or generated Git commit" \
     "  check [scope]             run repository checks" \
     "  shell [scope]             run FlashShell host/target checks" \
     "" \
@@ -866,6 +888,7 @@ flashos() {
     artifacts)        flashos-artifacts "$@" ;;
     logs|log)         flashos-logs "$@" ;;
     changes|change)   flashos-changes "$@" ;;
+    commit)           flashos-commit "$@" ;;
     check)            flashos-check "$@" ;;
     shell)            flashshell-check "$@" ;;
     podman)           flashos-podman "$@" ;;
@@ -892,7 +915,7 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
     previous="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-      choices="status doctor version versions profile env build run smoke qualify recipe artifacts logs changes check shell podman clean root list help"
+      choices="status doctor version versions profile env build run smoke qualify recipe artifacts logs changes commit check shell podman clean root list help"
     else
       case "$previous" in
         profile) choices="dev release" ;;
@@ -905,6 +928,7 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
         artifacts) choices="list path hash" ;;
         logs) choices="list disk live follow" ;;
         changes) choices="status diff stat staged recent" ;;
+        commit)  choices="-a -g -p --add-all --generate --push help" ;;
         check)   choices="quick profile root shell target python docs ci all" ;;
         shell)   choices="fmt clippy test target all" ;;
         podman)  choices="status start stop info" ;;
@@ -920,3 +944,4 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
   }
   complete -F _flashos_bash_completion flashos fos
 fi
+

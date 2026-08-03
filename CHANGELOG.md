@@ -1,30 +1,10 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/flashos_logo_dark.png">
-    <img src="assets/flashos_logo_light.png" alt="FlashOS" width="280">
-  </picture>
+# Changelog
 
-<h1>Changelog</h1>
+[FlashOS](README.md) › Changelog
 
-<p>
-    <a href="README.md"><b>README</b></a> ·
-    <a href="DOCUMENTATION.md"><b>Documentation</b></a> ·
-    <a href="SETUP.md"><b>Setup</b></a> ·
-    <a href="ci/README.md"><b>CI/CD</b></a> ·
-    <b>Changelog</b> ·
-    <a href="LICENSE"><b>License</b></a>
-  </p>
+All notable changes to the current FlashOS source tree are recorded in this document. It serves as the chronological source of truth for public releases and significant system updates. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-</div>
-
----
-
-All notable changes to the current FlashOS source tree are recorded here. The
-format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-
-The `0.9.0` and older tags inherited with the Redox OS source history are
-upstream tags, not FlashOS releases. The former AArch64 FlashOS release history
-remains available in the archived `FlashOS-old` repository.
+The `0.9.0` and older tags inherited with the Redox OS source history are upstream tags, not FlashOS releases. The former AArch64 FlashOS release history remains available in the archived `FlashOS-old` repository.
 
 ## [Unreleased]
 
@@ -82,7 +62,6 @@ remains available in the archived `FlashOS-old` repository.
   to be at build time, including the kernel and the shell.
 - Corrected the build-support crate license to `MIT`, matching the root license
   file and the upstream origin of every file under `src/`.
-
 - Changed the default build configuration from the inherited `desktop` profile
   to `flashos`, so an invocation without an explicit `CONFIG_NAME` builds the
   TUI-only product image instead of a graphical desktop image. The same default
@@ -207,4 +186,4 @@ remains available in the archived `FlashOS-old` repository.
 
 ---
 
-[← Back: CI/CD](ci/README.md) · [Back to README](README.md)
+[← Previous: CI/CD Contracts](ci/README.md) · [FlashOS README](README.md) · [Next: Security Policy →](.github/SECURITY.md)

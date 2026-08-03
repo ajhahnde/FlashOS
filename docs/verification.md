@@ -1,0 +1,690 @@
+# Verification and Testing
+
+[FlashOS](../README.md) › [Documentation](README.md) › Verification
+
+This guide explains how FlashOS distinguishes source checks, target compilation, product-profile validation, image construction, virtual-machine qualification, physical hardware evidence, and release evidence. It is intended for developers and evaluators deciding which claims a particular test result supports; exact CI script and workflow behavior is documented in [CI/CD Contracts](../ci/README.md).
+
+## On this page
+
+- [Verification model](#verification-model)
+- [Evidence layers](#evidence-layers)
+- [Host and source checks](#host-and-source-checks)
+- [Target compilation](#target-compilation)
+- [Product-profile verification](#product-profile-verification)
+- [Image construction](#image-construction)
+- [QEMU runtime qualification](#qemu-runtime-qualification)
+- [Hosted CI and artifact promotion](#hosted-ci-and-artifact-promotion)
+- [Security checks](#security-checks)
+- [Release evidence](#release-evidence)
+- [Physical hardware qualification](#physical-hardware-qualification)
+- [Local verification workflows](#local-verification-workflows)
+- [Interpreting results and failures](#interpreting-results-and-failures)
+- [Changing a verification contract](#changing-a-verification-contract)
+- [Sources of truth](#sources-of-truth)
+
+## Verification model
+
+FlashOS treats every check as evidence for a bounded claim. Passing one layer does not imply that the later layers also pass.
+
+| Layer                | Primary evidence                                                  | Supported claim                                                               | Not established                                          |
+| -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Source quality       | Formatting, linting, and host tests                               | The checked source satisfies its host-side quality rules                      | Target compilation or image behavior                     |
+| Target compilation   | Redox-target build                                                | The selected component compiles for the current target ABI                    | Package installation or runtime behavior                 |
+| Product profile      | `ci/check_profile.py`                                             | Declared profiles and selected repository contracts satisfy static invariants | Successful package or image construction                 |
+| Package construction | Cookbook recipe build                                             | The selected recipe can produce its package output                            | Inclusion in a clean image                               |
+| Image construction   | Completed disk or live artifact                                   | The selected profile can be assembled into an image                           | Successful boot or interactive behavior                  |
+| QEMU runtime         | `ci/qemu_smoke.py`                                                | The tested image satisfies the defined emulated x86_64 runtime contract       | Physical hardware compatibility                          |
+| Physical hardware    | Device-specific test record                                       | The tested image and revision reached the recorded state on that device       | Compatibility with other devices or revisions            |
+| Release evidence     | Qualified artifacts, checksums, SBOMs, and provenance attestation | The published candidate is connected to a specific workflow and artifact set  | Formal security assurance or bit-for-bit reproducibility |
+
+Verification should therefore be described precisely. Prefer statements such as:
+
+```text
+The image passed the NVMe QEMU smoke contract.
+```
+
+Do not replace them with broader statements such as:
+
+```text
+The operating system is fully stable.
+```
+
+FlashOS is pre-alpha software. Passing the current contracts means that the tested revision met the assertions encoded by those contracts, not that all behavior has been tested.
+
+## Evidence layers
+
+The normal progression for an image-affecting change is:
+
+```text
+source checks
+→ target compilation where applicable
+→ product-profile verification
+→ package construction
+→ image construction
+→ QEMU runtime qualification
+→ physical hardware qualification where required
+→ release evidence
+```
+
+Not every change requires every layer. A documentation-only edit does not require an image build, while a kernel, profile, login, filesystem, driver, FlashShell target-integration, or image-assembly change normally requires downstream image and runtime evidence.
+
+A later layer does not make earlier failures irrelevant. For example, an image that happens to boot does not justify ignoring a failed product-profile check.
+
+## Host and source checks
+
+Run inexpensive host-side checks before building packages or images.
+
+### Root build-system workspace
+
+From the repository root:
+
+```bash
+cargo fmt --all --check
+cargo test --locked
+```
+
+These commands check the host-side `flashos_build` package and its committed dependency resolution. The root package supports the build system; it is not the FlashOS kernel.
+
+### FlashShell workspace
+
+From `components/flashshell/`:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
+```
+
+These checks cover the FlashShell host workspace, including its syntax, runtime, platform abstractions, and command-line packages as exercised by their tests.
+
+Host tests cannot reach every target-specific path. In particular, the FlashOS image selects target-side terminal and process integrations that require separate target compilation and runtime qualification.
+
+Detailed FlashShell test organization belongs in the [FlashShell Development Guide](../components/flashshell/docs/development.md).
+
+### CI Python
+
+The product-profile and QEMU scripts are release-relevant code. Lint them with:
+
+```bash
+ruff check ci/
+```
+
+The command requires Ruff to be available on the host. Hosted CI installs its configured version before running the check.
+
+### Shell helpers and whitespace
+
+The public helper scripts can be syntax-checked with the shells available on the host:
+
+```bash
+bash -n flashos.sh
+```
+
+When Zsh is installed:
+
+```bash
+zsh -n flashos.sh
+zsh -n flashos.zsh
+```
+
+Check the working-tree diff for whitespace errors:
+
+```bash
+git diff --check
+```
+
+These checks do not inspect Markdown links or prove the technical correctness of documentation claims.
+
+### Consolidated helper command
+
+After loading the repository helper:
+
+```bash
+source ./flashos.sh
+```
+
+Run the public host-side gate collection with:
+
+```bash
+flashos check ci
+```
+
+This command combines helper syntax checks, the product-profile contract, root workspace checks, FlashShell host checks, CI Python linting, and whitespace validation.
+
+It does not:
+
+- build FlashShell for the target ABI;
+- build a package or system image;
+- boot QEMU;
+- reproduce the hosted Docker image workflow;
+- run dependency-policy workflows.
+
+## Target compilation
+
+Changes that affect target-specific FlashShell code should also compile the `fsh` binary for the Redox target:
+
+```bash
+cd components/flashshell
+redoxer build -p flashshell-cli --bin fsh
+```
+
+With the root helper loaded, the equivalent command is:
+
+```bash
+flashos check target
+```
+
+A successful target build proves that the selected binary compiles through the configured target toolchain. It does not prove that:
+
+- the FlashShell recipe uses the tested source revision;
+- the binary is installed in an image;
+- login starts the binary;
+- external commands and terminal editing work inside FlashOS.
+
+Those claims require recipe, image, and runtime evidence.
+
+## Product-profile verification
+
+Run the static FlashOS product contract from the repository root:
+
+```bash
+python3 ci/check_profile.py
+```
+
+The script reads the development profile, release profile, shared base configuration, selected manifests, recipes, workflow files, and related repository metadata.
+
+Its current checks include:
+
+- inclusion of the shared FlashOS base profile;
+- the exact declared package set;
+- exclusion of selected graphical-stack identifiers;
+- disabled graphical XDG user-directory creation;
+- `/usr/bin/fsh` as the configured shell for `root` and `user`;
+- alignment of development and release profile structure;
+- a locked root account in the release profile;
+- rejection of well-known release-profile passwords;
+- required user access to the audio, display, event, and PTY schemes;
+- exclusion of Orbital scheme access;
+- absence of the legacy `/ui` configuration path;
+- version alignment between `versions.env`, Cargo metadata, system identity, the root README, and release workflow contracts;
+- presence of the expected image artifacts and image-oriented SBOM contract in the hosted workflow;
+- NVMe and USB runtime paths;
+- QEMU snapshot use;
+- immutable Git revisions for shipped Git-based recipes;
+- full commit pins for external GitHub Actions;
+- presence of the required local branding patch files.
+
+The script combines parsed TOML checks with selected repository-text assertions. It does not:
+
+- compile any Rust source;
+- resolve the complete transitive package graph;
+- apply or validate the behavior of a patch;
+- build either image;
+- execute a GitHub Actions workflow;
+- boot FlashOS.
+
+A successful result means that the repository satisfies the static invariants currently encoded by the script.
+
+When a product rule intentionally changes, update the implementation, the contract, and the responsible documentation together. Do not weaken the script only to make an unrelated change pass.
+
+## Image construction
+
+### Development disk
+
+Build the standard development disk:
+
+```bash
+make CONFIG_NAME=flashos all
+```
+
+Expected artifact:
+
+```text
+build/x86_64/flashos/harddrive.img
+```
+
+### Live image
+
+Build the corresponding live image:
+
+```bash
+make CONFIG_NAME=flashos live
+```
+
+Expected artifact:
+
+```text
+build/x86_64/flashos/redox-live.iso
+```
+
+### Build both through the helper
+
+With `flashos.sh` loaded:
+
+```bash
+flashos build both
+```
+
+An image build exercises more than ordinary host compilation. It requires the selected configuration, target toolchain, package repository, recipes, installer, filesystem tooling, and image-assembly path to complete together.
+
+A successful build supports the claim that an artifact was assembled. It does not prove that the artifact:
+
+- reaches the bootloader;
+- starts the kernel successfully;
+- reaches login;
+- starts FlashShell;
+- satisfies filesystem or permission expectations;
+- behaves identically to a hosted clean-container build.
+
+Local builds may reuse fetched sources, toolchains, compiled recipes, and other cached state. Hosted qualification therefore performs a separate containerized image build.
+
+## QEMU runtime qualification
+
+The executable runtime contract is:
+
+```text
+ci/qemu_smoke.py
+```
+
+It boots an existing x86_64 image through QEMU and evaluates the serial interaction produced by that exact input artifact.
+
+### Requirements
+
+The host must provide:
+
+- Python 3;
+- `qemu-system-x86_64`;
+- compatible x86_64 OVMF or edk2 firmware;
+- an already-built image.
+
+The firmware path can be supplied explicitly:
+
+```bash
+python3 ci/qemu_smoke.py \
+  --ovmf /path/to/OVMF_CODE.fd \
+  --image /path/to/image
+```
+
+Use an actual firmware file on the current host. Do not commit host-specific absolute paths.
+
+### Development disk over NVMe
+
+```bash
+python3 ci/qemu_smoke.py \
+  --image build/x86_64/flashos/harddrive.img \
+  --disk-interface nvme \
+  --log build/x86_64/flashos/qemu-harddrive-smoke.log
+```
+
+### Live image over USB mass storage
+
+```bash
+python3 ci/qemu_smoke.py \
+  --image build/x86_64/flashos/redox-live.iso \
+  --disk-interface usb \
+  --log build/x86_64/flashos/qemu-live-usb-smoke.log
+```
+
+The USB mode verifies the defined QEMU USB mass-storage boot path. It does not prove that a physical USB controller, storage device, firmware implementation, or computer can boot the image.
+
+### Helper command
+
+After both images have been built:
+
+```bash
+flashos smoke all
+```
+
+The helper selects:
+
+| Image            | QEMU interface   | Default log                |
+| ---------------- | ---------------- | -------------------------- |
+| `harddrive.img`  | NVMe             | `qemu-harddrive-smoke.log` |
+| `redox-live.iso` | USB mass storage | `qemu-live-usb-smoke.log`  |
+
+When the selected profile is `flashos-release`, the helper also requests the locked-root assertion.
+
+### Image immutability
+
+The smoke harness attaches the input image with QEMU snapshot behavior. Guest writes therefore do not modify the source artifact.
+
+This matters for two reasons:
+
+1. both smoke modes begin from the supplied image bytes rather than state left by an earlier test;
+2. runtime testing does not silently change the artifact whose checksum or provenance may later be evaluated.
+
+The generated smoke log is diagnostic evidence from the session. It is not a replacement for the tested image or its checksum.
+
+### Runtime assertions
+
+The QEMU smoke contract checks observable markers and interactive behavior across several general evidence classes. While [CI/CD Contracts](../ci/README.md) and [`ci/qemu_smoke.py`](../ci/qemu_smoke.py) remain the authoritative sources for exact serial markers, assertion sequences, parameters, and artifact paths, the qualification tests cover these interaction categories:
+
+| Category                             | Nature of tested interaction                                               |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| **Boot and kernel progress**         | Observable bootloader markers, serial boot submission, and kernel startup  |
+| **Service initialization**           | Driver spawn markers, such as guest audio driver (`ihdad`) initialization  |
+| **Authentication and basic access**  | Successful unprivileged console login and primary prompt display           |
+| **Interactive command editing**      | Target-side line editing, command history recall, and multiline input      |
+| **Pipelines and flow control**       | External command piping and exit-status branching (e.g., a nonzero external status reaches the fallback branch of a conditional chain) |
+| **Filesystem and security patterns** | Unprivileged file manipulation in user space versus required rejection under `/etc`, and release-profile root login rejection |
+
+For the complete line-by-line runtime contract and serial synchronization rules, consult [CI/CD Contracts](../ci/README.md#runtime-assertions).
+
+The contract verifies those specific interactions. It does not currently establish:
+
+- real audio playback or recording;
+- visible framebuffer rendering quality;
+- graphical desktop behavior;
+- end-to-end networking;
+- suspend, resume, reboot, or shutdown behavior;
+- long-duration stability;
+- package installation after boot;
+- performance characteristics;
+- general FlashShell language conformance;
+- physical hardware compatibility.
+
+The `ihdad` marker proves that the expected guest driver path began initialization under the emulated controller. It does not prove that sound was produced.
+
+### Timeouts and logs
+
+The smoke harness uses a boot timeout and a separate interactive-test budget. A timeout reports that an expected marker was not observed within the configured interval; it does not by itself identify the underlying cause.
+
+Override the initial timeout when investigating a substantially slower host:
+
+```bash
+python3 ci/qemu_smoke.py \
+  --image build/x86_64/flashos/harddrive.img \
+  --disk-interface nvme \
+  --timeout 300 \
+  --log build/x86_64/flashos/qemu-harddrive-smoke.log
+```
+
+Increasing a timeout can help distinguish a slow machine from an immediate failure. It must not be used to hide a repeatable hang.
+
+The complete captured serial stream is written to the requested log even when an assertion fails.
+
+## Hosted CI and artifact promotion
+
+The primary CI workflow separates source checks, static product validation, image production, and runtime consumption.
+
+### Host-quality jobs
+
+The standard CI workflow runs independent jobs for:
+
+- root workspace formatting and tests;
+- FlashShell formatting, Clippy, and host tests;
+- CI Python linting;
+- the product-profile contract;
+- whitespace validation.
+
+The image workflow begins only after these required jobs succeed.
+
+### Clean-container image producer
+
+The reusable image workflow:
+
+1. builds the repository-owned CI container;
+2. builds the x86_64 disk and live images inside that container;
+3. collects staged target package payloads;
+4. generates an image-oriented CycloneDX SBOM;
+5. copies the disk, live image, and SBOM into a promotion directory;
+6. records SHA-256 checksums;
+7. verifies those checksums;
+8. uploads the files as one workflow artifact.
+
+The hosted build uses a dedicated Docker environment and explicit Make variables. A normal local Podman build exercises related repository logic but is not an identical execution environment.
+
+### Independent runtime consumer
+
+A separate job:
+
+1. checks out the same repository revision;
+2. installs QEMU and UEFI firmware;
+3. downloads the promoted image artifact;
+4. verifies its `SHA256SUMS`;
+5. boots the downloaded disk image over NVMe;
+6. boots the downloaded live image over USB mass storage.
+
+The consumer does not rebuild the images before testing them. This connects runtime results to the checksummed bytes produced by the image job.
+
+If a boot job fails, the workflow attempts to upload:
+
+```text
+qemu-harddrive-smoke.log
+qemu-live-usb-smoke.log
+SHA256SUMS
+```
+
+These are failure diagnostics. They are not regular release assets.
+
+### Rebuildability and reproducibility
+
+The repository uses lockfiles, pinned recipe revisions, pinned GitHub Actions, checksums, and a controlled hosted build environment to reduce uncontrolled drift and improve traceability.
+
+The current workflow does not perform two independent builds and compare their output bytes. It therefore must not be described as proving bit-for-bit reproducible images.
+
+A checksum proves the identity and integrity of a particular byte sequence. It does not prove how independently reproducible, correct, secure, or hardware-compatible that sequence is.
+
+## Security checks
+
+The security workflow is separate from the ordinary build and runtime pipeline.
+
+Its current jobs include:
+
+- pull-request dependency review that rejects newly introduced dependencies at or above the configured severity threshold;
+- Cargo advisory, license, ban, and source-policy checks for the root workspace;
+- equivalent Cargo policy checks for the FlashShell workspace.
+
+The workflow runs on the configured repository events and schedule. A passing dependency-policy workflow does not constitute a full security audit of FlashOS, its upstream operating-system components, or produced images.
+
+Security vulnerabilities must be handled through the process in the [Security Policy](../.github/SECURITY.md), not through public verification logs alone.
+
+## Release evidence
+
+The release workflow uses the `flashos-release` image profile and reuses the image qualification workflow before packaging a candidate.
+
+### Version binding
+
+For a tagged release, the tag must equal:
+
+```text
+v<FLASHOS_RELEASE_VERSION>
+```
+
+where the version is read from `versions.env`.
+
+A mismatched tag fails before release packaging.
+
+### Candidate contents
+
+After image qualification, the packaging job:
+
+- downloads the qualified disk, live image, image SBOM, and image checksums;
+- verifies the incoming checksums;
+- compresses the disk and live image;
+- generates a source-oriented CycloneDX SBOM for the repository;
+- promotes the image-oriented SBOM produced with the images;
+- creates and verifies release-candidate SHA-256 checksums;
+- creates a build-provenance attestation for the compressed images, both SBOMs, and checksum file;
+- uploads the resulting candidate as a workflow artifact.
+
+The two SBOMs have different scopes:
+
+| SBOM        | Intended scope                                                                               |
+| ----------- | -------------------------------------------------------------------------------------------- |
+| Source SBOM | The repository and source dependency view scanned during release packaging                   |
+| Image SBOM  | Staged target package payloads and recipe metadata associated with the built image artifacts |
+
+Neither document should be interpreted outside its stated scope. An SBOM is an inventory artifact, not proof that every component is vulnerability-free.
+
+### Publication boundary
+
+Release publication occurs only under the workflow's tag and publication conditions. Before creating or updating the GitHub Release, the publication job downloads the packaged candidate and verifies its checksums again.
+
+The published assets consist of:
+
+- compressed x86_64 disk image;
+- compressed x86_64 live image;
+- source SBOM;
+- image SBOM;
+- `SHA256SUMS`.
+
+The build-provenance attestation is associated with the candidate subjects through GitHub's attestation mechanism. It records workflow provenance; it does not prove bit-for-bit reproducibility or independent review of the resulting operating system.
+
+Successful QEMU qualification is represented by the prerequisite workflow result. Serial smoke logs are not included in the normal published asset set.
+
+## Physical hardware qualification
+
+QEMU qualification and physical hardware qualification are separate evidence classes.
+
+Before testing physical media:
+
+1. complete the relevant source, profile, image, and QEMU checks;
+2. retain the exact image checksum and repository revision;
+3. follow safe device-selection and image-writing procedures;
+4. record only behavior actually observed on the identified machine.
+
+Physical qualification belongs in [Hardware Compatibility](hardware.md), which defines the accepted status terms, required device information, current results, and reporting format.
+
+The following do not qualify a device:
+
+- an upstream Redox compatibility report by itself;
+- the presence of a matching driver in source;
+- a successful QEMU boot;
+- a successful boot on a different model;
+- an unrecorded personal test without an identifiable image revision.
+
+## Local verification workflows
+
+### Fast host-side gate
+
+Use this before a package or image build:
+
+```bash
+source ./flashos.sh
+flashos check ci
+```
+
+Add target compilation when target-specific FlashShell code changed:
+
+```bash
+flashos check target
+```
+
+### End-to-end development-profile qualification
+
+Select the development profile:
+
+```bash
+flashos profile dev
+```
+
+Then run:
+
+```bash
+flashos qualify all
+```
+
+The helper performs its local quality checks, builds both selected-profile images, and smoke-tests the resulting disk and live artifacts.
+
+### End-to-end release-profile qualification
+
+Select the release profile:
+
+```bash
+flashos profile release
+```
+
+Then run:
+
+```bash
+flashos qualify all
+```
+
+For this profile, the smoke helper enables the locked-root assertion.
+
+Return the current shell session to the development profile when finished:
+
+```bash
+flashos profile dev
+```
+
+### Scope of the helper
+
+`flashos qualify all` is a local convenience workflow. It does not perform:
+
+- the hosted Docker clean-container build;
+- workflow artifact upload and download;
+- hosted checksum promotion;
+- SBOM generation;
+- dependency-review jobs;
+- provenance attestation;
+- GitHub Release publication.
+
+Use local qualification to find failures before pushing a change. Use the hosted workflow result as evidence for the hosted pipeline and promoted artifacts.
+
+## Interpreting results and failures
+
+A failure identifies the boundary at which an expected condition was not met. Start with that boundary rather than assuming a root cause.
+
+| Failure point              | What is known                                                      | First investigation area                                                 |
+| -------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Formatting                 | Tracked source differs from formatter output                       | The reported files and workspace toolchain                               |
+| Root tests                 | A host-side build-system assertion failed                          | Test output, recent root workspace changes, lockfile                     |
+| FlashShell Clippy or tests | A host-side FlashShell quality rule failed                         | Reported crate, target, fixture, or warning                              |
+| Target compilation         | The selected binary did not compile for the target                 | Target-only code, dependencies, ABI, `redoxer` environment               |
+| Python lint                | A CI script violates the configured lint rules                     | Reported file and diagnostic                                             |
+| Product contract           | A static repository invariant failed                               | Exact `profile contract:` message and owning configuration               |
+| Recipe build               | A package could not be produced                                    | Recipe source, revision, patch, dependencies, toolchain                  |
+| Image build                | Installer or image assembly did not complete                       | Build log, package repository, filesystem tools, available storage       |
+| Checksum verification      | Downloaded or staged bytes differ from the recorded digest         | Artifact transfer, staging, file replacement, incomplete download        |
+| Boot marker timeout        | The expected serial marker did not appear                          | Earlier serial output, firmware, QEMU command, kernel or service startup |
+| Interactive assertion      | Boot progressed, but a tested interaction failed                   | The scoped smoke log near the failed marker                              |
+| Release root assertion     | The release image accepted or did not reject the tested root login | Release profile, installed account database, login implementation        |
+| Physical test              | The recorded device did not reach the expected state               | Device-specific firmware, controller, driver, and boot observations      |
+
+Common categories are diagnostic starting points, not automatic explanations. For example, an absent login prompt could result from an earlier kernel failure, a service configuration change, a serial-routing problem, or simply a timeout on a slow host.
+
+Preserve the complete failing log before rebuilding. A subsequent successful run may overwrite or replace the most useful evidence.
+
+## Changing a verification contract
+
+Verification code defines current product expectations. Change it deliberately.
+
+When an intended system change requires a contract update:
+
+1. identify the exact old assertion and why it is no longer correct;
+2. update the implementation or profile that owns the behavior;
+3. update `ci/check_profile.py` or `ci/qemu_smoke.py`;
+4. keep failure messages specific enough to identify the violated boundary;
+5. update the hosted workflow when orchestration or artifact flow changes;
+6. update [CI/CD Contracts](../ci/README.md) with exact script or workflow behavior;
+7. update this guide when the overall evidence model or public procedure changes;
+8. rebuild and test both affected image forms;
+9. test both development and release profiles when their shared contract is affected.
+
+A contract may be broadened only when the new assertion is supported by executable evidence. Planned functionality must not be added to a verification table as though it already passes.
+
+Do not remove an assertion solely because a change fails it. First determine whether the implementation regressed or the product requirement genuinely changed.
+
+## Sources of truth
+
+| Concern                                  | Primary source                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| Overall verification model               | This document                                                         |
+| General development workflow             | [Development](development.md)                                         |
+| Static product-profile contract          | [`ci/check_profile.py`](../ci/check_profile.py)                       |
+| QEMU runtime contract                    | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                             |
+| Public local helper behavior             | [`flashos.sh`](../flashos.sh)                                         |
+| Standard hosted CI orchestration         | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             |
+| Image production and runtime consumption | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)     |
+| Dependency-policy workflow               | [`.github/workflows/security.yml`](../.github/workflows/security.yml) |
+| Release packaging and publication        | [`.github/workflows/release.yml`](../.github/workflows/release.yml)   |
+| Exact CI and artifact contracts          | [CI/CD Contracts](../ci/README.md)                                    |
+| Physical device evidence                 | [Hardware Compatibility](hardware.md)                                 |
+| Security reporting                       | [Security Policy](../.github/SECURITY.md)                             |
+
+When descriptive documentation conflicts with an executable script or active workflow, inspect the implementation and correct the outdated documentation. A passing check should be described only in terms of the behavior that the check actually observes.
+
+---
+
+[← Previous: Development](development.md) · [Documentation index](README.md) · [Next: Hardware Compatibility →](hardware.md)
