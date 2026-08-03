@@ -118,6 +118,10 @@ def usage(script_dir: Path) -> str:
             "  FLASHOS_COMMIT_MAX_OUTPUT_TOKENS",
             "                                  output budget; default: 512",
             "",
+            "privacy:",
+            "  -g sends staged file names and diff content to Gemini.",
+            "  Review staged changes before generating a commit message.",
+            "",
             "The default project context file is:",
             f"  {context_path}",
             "",
@@ -478,21 +482,55 @@ def generate_commit_message(repository: Path, script_dir: Path) -> str:
         seed=42,
         thinking_level="minimal",
     )
-    try:
-        response = call_gemini(
-            prompt,
-            system_instruction=SYSTEM_INSTRUCTION,
-            config=config,
-            retry_notice=error,
-        )
-        subject = interaction_text(response)
-    except FlashOSAIError as exc:
-        if str(exc):
-            error(str(exc))
-        error("failed to generate a commit message")
-        raise FlashOSError("", exit_code=exc.exit_code) from exc
+    generation_prompt = prompt
+    subject_attempts = 2
 
-    return validate_generated_subject(subject, policy)
+    for subject_attempt in range(1, subject_attempts + 1):
+        try:
+            response = call_gemini(
+                generation_prompt,
+                system_instruction=SYSTEM_INSTRUCTION,
+                config=config,
+                retry_notice=error,
+            )
+            subject = interaction_text(response)
+        except FlashOSAIError as exc:
+            if str(exc):
+                error(str(exc))
+            error("failed to generate a commit message")
+            raise FlashOSError("", exit_code=exc.exit_code) from exc
+
+        try:
+            return validate_generated_subject(subject, policy)
+        except FlashOSError as exc:
+            if subject_attempt >= subject_attempts:
+                raise
+
+            error(
+                f"{exc}; asking Gemini to generate a shorter replacement"
+            )
+
+            repair_request = json.loads(prompt)
+            repair_request["repair"] = {
+                "previous_subject": subject,
+                "validation_error": str(exc),
+                "required_maximum_characters": policy.maximum_characters,
+                "target_maximum_characters": max(
+                    1,
+                    policy.maximum_characters - 8,
+                ),
+                "instruction": (
+                    "Return a new subject that preserves the primary meaning "
+                    "while satisfying every commit-subject rule."
+                ),
+            }
+            generation_prompt = json.dumps(
+                repair_request,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+
+    fail("failed to generate a valid commit subject")
 
 
 def confirm_commit_message() -> None:

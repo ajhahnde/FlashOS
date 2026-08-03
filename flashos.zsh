@@ -23,7 +23,7 @@ _flashos_zsh_completion() {
     'artifacts:list, locate, or hash image artifacts'
     'logs:inspect or follow QEMU smoke logs'
     'changes:inspect Git state without writing it'
-    'commit:create a Git commit from staged changes'
+    'commit:create a manual or generated Git commit'
     'check:run repository checks'
     'shell:run FlashShell checks'
     'podman:inspect or control the Podman machine'
@@ -47,7 +47,16 @@ _flashos_zsh_completion() {
       artifacts) _values 'action' list path hash ;;
       logs)    _values 'action' list disk live follow ;;
       changes) _values 'action' status diff stat staged recent ;;
-      commit)  _values 'action' help ;;
+      commit)
+        _values 'commit option' \
+          '-a[stage all repository changes]' \
+          '-g[generate the commit subject with Gemini]' \
+          '-p[push after a successful commit]' \
+          '--add-all[stage all repository changes]' \
+          '--generate[generate the commit subject with Gemini]' \
+          '--push[push after a successful commit]' \
+          'help[show commit help]'
+        ;;
       check)   _values 'scope' quick profile root shell target python docs ci all ;;
       shell)   _values 'scope' fmt clippy test target all ;;
       podman)  _values 'action' status start stop info ;;
