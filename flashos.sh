@@ -305,7 +305,7 @@ _flashos_check_quick() {
 }
 
 _flashos_check_python() {
-  _flashos_root command ruff check flashos-commit.py ci/ "$@"
+  _flashos_root command ruff check flashos-commit.py flashos_ai.py ci/ "$@"
 }
 
 _flashos_check_root() {

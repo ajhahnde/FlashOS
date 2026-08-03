@@ -8,18 +8,23 @@ import os
 import shutil
 import subprocess
 import sys
-import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
+from flashos_ai import (
+    FlashOSAIError,
+    GeminiConfig,
+    call_gemini,
+    integer_environment,
+    interaction_text,
+    load_json_object,
+)
+
 DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_MAX_DIFF_BYTES = 1_048_576
 DEFAULT_API_ATTEMPTS = 3
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1/interactions"
-RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
+DEFAULT_MAX_OUTPUT_TOKENS = 512
 
 SYSTEM_INSTRUCTION = """You are the FlashOS commit-subject generator.
 
@@ -110,6 +115,8 @@ def usage(script_dir: Path) -> str:
             "  FLASHOS_COMMIT_CONTEXT_FILE    project context file override",
             "  FLASHOS_COMMIT_MAX_DIFF_BYTES  upload limit; default: 1048576",
             "  FLASHOS_COMMIT_API_ATTEMPTS    API attempts; default: 3",
+            "  FLASHOS_COMMIT_MAX_OUTPUT_TOKENS",
+            "                                  output budget; default: 512",
             "",
             "The default project context file is:",
             f"  {context_path}",
@@ -249,25 +256,10 @@ def git_bytes(repository: Path, *arguments: str) -> bytes:
 
 
 def load_project_context(context_path: Path) -> dict[str, Any]:
-    if not context_path.is_file():
-        fail(f"project context not found: {context_path}")
-    if not os.access(context_path, os.R_OK):
-        fail(f"project context is not readable: {context_path}")
-
     try:
-        with context_path.open("r", encoding="utf-8") as handle:
-            context = json.load(handle)
-    except json.JSONDecodeError as exc:
-        fail(
-            "invalid project context JSON at "
-            f"{context_path}:{exc.lineno}:{exc.colno}: {exc.msg}"
-        )
-    except OSError as exc:
-        fail(f"unable to read project context: {exc}")
-
-    if not isinstance(context, dict):
-        fail("invalid project context: the root value must be an object")
-    return context
+        return load_json_object(context_path, label="project context")
+    except FlashOSAIError as exc:
+        fail(str(exc), exit_code=exc.exit_code)
 
 
 def invalid_context(message: str) -> NoReturn:
@@ -365,28 +357,34 @@ def ensure_staged_changes(repository: Path) -> None:
 
 
 def positive_integer_environment(name: str, default: int) -> int:
-    raw_value = os.environ.get(name) or str(default)
     try:
-        value = int(raw_value, 10)
-    except ValueError:
-        fail(f"{name} must be a positive integer")
-    if value < 1:
-        fail(f"{name} must be a positive integer")
-    return value
+        return integer_environment(name, default, minimum=1)
+    except FlashOSAIError as exc:
+        fail(str(exc), exit_code=exc.exit_code)
 
 
 def api_attempts() -> int:
-    raw_value = (
-        os.environ.get("FLASHOS_COMMIT_API_ATTEMPTS")
-        or str(DEFAULT_API_ATTEMPTS)
-    )
     try:
-        attempts = int(raw_value, 10)
-    except ValueError:
-        fail("FLASHOS_COMMIT_API_ATTEMPTS must be an integer")
-    if attempts < 1 or attempts > 10:
-        fail("FLASHOS_COMMIT_API_ATTEMPTS must be between 1 and 10")
-    return attempts
+        return integer_environment(
+            "FLASHOS_COMMIT_API_ATTEMPTS",
+            DEFAULT_API_ATTEMPTS,
+            minimum=1,
+            maximum=10,
+        )
+    except FlashOSAIError as exc:
+        fail(str(exc), exit_code=exc.exit_code)
+
+
+def max_output_tokens() -> int:
+    try:
+        return integer_environment(
+            "FLASHOS_COMMIT_MAX_OUTPUT_TOKENS",
+            DEFAULT_MAX_OUTPUT_TOKENS,
+            minimum=64,
+            maximum=8192,
+        )
+    except FlashOSAIError as exc:
+        fail(str(exc), exit_code=exc.exit_code)
 
 
 def build_prompt(
@@ -412,170 +410,6 @@ def build_prompt(
         "staged_diff": diff.decode("utf-8", errors="replace"),
     }
     return json.dumps(request, ensure_ascii=False, separators=(",", ":"))
-
-
-def keychain_account() -> str | None:
-    account = os.environ.get("USER", "")
-    if account:
-        return account
-    if shutil.which("id") is None:
-        return None
-
-    process = run_process(["id", "-un"], capture_output=True)
-    if process.returncode != 0:
-        return None
-    account = process.stdout.strip()
-    return account or None
-
-
-def gemini_api_key() -> str:
-    environment_key = os.environ.get("GEMINI_API_KEY")
-    if environment_key:
-        return environment_key
-
-    if shutil.which("security") is not None:
-        account = keychain_account()
-        if account:
-            process = run_process(
-                [
-                    "security",
-                    "find-generic-password",
-                    "-a",
-                    account,
-                    "-s",
-                    "GEMINI_API_KEY",
-                    "-w",
-                ],
-                capture_output=True,
-            )
-            if process.returncode == 0 and process.stdout.strip():
-                return process.stdout.strip()
-
-    error("Gemini API key not found")
-    fail("set GEMINI_API_KEY or add GEMINI_API_KEY to the macOS keychain")
-
-
-def http_error_message(exc: urllib.error.HTTPError, raw: bytes) -> str:
-    try:
-        details = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        details = None
-
-    if isinstance(details, list):
-        details = details[0] if details else {}
-    if isinstance(details, dict):
-        api_error = details.get("error")
-        if isinstance(api_error, dict):
-            message = api_error.get("message")
-            if isinstance(message, str) and message:
-                return message
-
-    decoded = raw.decode("utf-8", errors="replace").strip()
-    return decoded or str(exc)
-
-
-def retry_delay(attempt: int, headers: Any = None) -> float:
-    if headers is not None:
-        retry_after = headers.get("Retry-After")
-        if retry_after:
-            try:
-                return min(max(float(retry_after), 0.0), 30.0)
-            except ValueError:
-                pass
-    return min(float(2 ** (attempt - 1)), 8.0)
-
-
-def request_payload(prompt: str, model: str) -> bytes:
-    payload = {
-        "model": model,
-        "store": False,
-        "system_instruction": SYSTEM_INSTRUCTION,
-        "input": prompt,
-        "generation_config": {
-            "max_output_tokens": 64,
-            "seed": 42,
-            "thinking_level": "low",
-        },
-    }
-    return json.dumps(payload).encode("utf-8")
-
-
-def call_gemini(prompt: str) -> dict[str, Any]:
-    if not prompt:
-        fail("Gemini prompt is empty")
-
-    key = gemini_api_key()
-    model = os.environ.get("FLASHOS_COMMIT_MODEL") or DEFAULT_MODEL
-    attempts = api_attempts()
-    payload = request_payload(prompt, model)
-
-    for attempt in range(1, attempts + 1):
-        request = urllib.request.Request(
-            GEMINI_URL,
-            data=payload,
-            headers={
-                "x-goog-api-key": key,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                data = json.load(response)
-            if not isinstance(data, dict):
-                fail("Gemini returned an invalid response")
-            return data
-        except urllib.error.HTTPError as exc:
-            raw = exc.read()
-            message = http_error_message(exc, raw)
-            if exc.code in RETRYABLE_HTTP_STATUSES and attempt < attempts:
-                error(f"Gemini API returned HTTP {exc.code}; retrying")
-                time.sleep(retry_delay(attempt, exc.headers))
-                continue
-            fail(f"Gemini API error: {message}")
-        except (urllib.error.URLError, TimeoutError) as exc:
-            reason = getattr(exc, "reason", exc)
-            if attempt < attempts:
-                error(f"Gemini request failed ({reason}); retrying")
-                time.sleep(retry_delay(attempt))
-                continue
-            fail(f"Gemini request failed: {reason}")
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            fail(f"Gemini request failed: {exc}")
-        except KeyboardInterrupt:
-            fail("Gemini request interrupted", exit_code=130)
-
-    fail("Gemini request failed")
-
-
-def generated_text(data: dict[str, Any]) -> str:
-    if data.get("status") != "completed":
-        status = data.get("status", "unknown")
-        fail(f"Gemini interaction did not complete: {status}")
-
-    texts: list[str] = []
-    steps = data.get("steps", [])
-    if not isinstance(steps, list):
-        fail("Gemini returned an invalid response")
-
-    for step in steps:
-        if not isinstance(step, dict) or step.get("type") != "model_output":
-            continue
-        content = step.get("content", [])
-        if not isinstance(content, list):
-            continue
-        for item in content:
-            if not isinstance(item, dict) or item.get("type") != "text":
-                continue
-            text = item.get("text", "")
-            if isinstance(text, str):
-                texts.append(text)
-
-    result = "".join(texts).strip()
-    if not result:
-        fail("Gemini returned no text")
-    return result
 
 
 def invalid_generated_subject(message: str) -> NoReturn:
@@ -636,10 +470,23 @@ def generate_commit_message(repository: Path, script_dir: Path) -> str:
         error("unable to build the Gemini prompt")
         raise FlashOSError("", exit_code=exc.exit_code) from exc
 
+    config = GeminiConfig(
+        model=os.environ.get("FLASHOS_COMMIT_MODEL") or DEFAULT_MODEL,
+        attempts=api_attempts(),
+        timeout_seconds=120.0,
+        max_output_tokens=max_output_tokens(),
+        seed=42,
+        thinking_level="minimal",
+    )
     try:
-        response = call_gemini(prompt)
-        subject = generated_text(response)
-    except FlashOSError as exc:
+        response = call_gemini(
+            prompt,
+            system_instruction=SYSTEM_INSTRUCTION,
+            config=config,
+            retry_notice=error,
+        )
+        subject = interaction_text(response)
+    except FlashOSAIError as exc:
         if str(exc):
             error(str(exc))
         error("failed to generate a commit message")
