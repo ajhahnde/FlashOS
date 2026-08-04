@@ -280,6 +280,12 @@ flash-check() {
   esac
 }
 
+flashshell-check() {
+  printf '%s\n' \
+    'warning: flashshell-check is deprecated; use flash-check' >&2
+  flash-check "$@"
+}
+
 _flashos_check_shell_helpers() {
   local checked=0
 
@@ -828,7 +834,7 @@ flashos-status() {
 flashos-list() {
   _flashos_usage
   _flashos_heading "Direct helper functions"
-  command grep -E '^(flashos(-[[:alnum:]-]+)?|flash-check|fos)\(\)' \
+  command grep -E '^(flashos(-[[:alnum:]-]+)?|flash-check|flashshell-check|fos)\(\)' \
     "$_FLASHOS_DIR/flashos.sh" | command sed 's/().*//' | command sort -u
 }
 

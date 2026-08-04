@@ -52,7 +52,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 ### Changed
 
 - Renamed FlashShell to Flash across the source tree while preserving the
-  `fsh` executable, `/usr/bin/fsh`, `.fsh` scripts, and prompt protocol.
+  `fsh` executable, `/usr/bin/fsh`, `.fsh` scripts, and prompt protocol. Added
+  concrete fallback strategies for configuration and history:
+  - Configuration paths: `<config_dir>/flash/config.fsh` and `<config_dir>/flashshell/config.fsh`.
+  - History paths: `<state_dir>/flash/history` and `<state_dir>/flashshell/history`.
+  - Fallback rules: if the new canonical path exists, it has exclusive priority; if only the legacy path exists, it continues to be used; if neither path exists, only the new canonical path is created or expected; invalid, incomplete, or unsafe files at the canonical path always fail as an error, with no fallback and no creation of replacement paths.
+  - The shell helper `flashshell-check` is a deprecated compatibility alias for `flash-check`.
 - Flash now observes jobs continued by an external process, reports their
   live running state, and removes the stale stopped notice at the next command
   boundary.

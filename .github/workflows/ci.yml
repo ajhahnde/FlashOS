@@ -82,6 +82,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       # The product contract and the QEMU harness are release-critical scripts
       # and are held to the same standard as the Rust workspaces.

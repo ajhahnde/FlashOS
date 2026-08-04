@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -61,6 +62,19 @@ def fail(message: str) -> None:
 def load(path: Path) -> dict:
     with path.open("rb") as source:
         return tomllib.load(source)
+
+
+def git_output(args: list[str], *, check: bool = True) -> str | None:
+    result = subprocess.run(
+        ["git", *args],
+        check=check,
+        text=True,
+        capture_output=True,
+        cwd=ROOT,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
 
 
 def release_version() -> str:
@@ -250,6 +264,32 @@ for package in sorted(packages):
             "shipped recipe is not pinned to an immutable revision: "
             f"{recipe_path.relative_to(ROOT)}"
         )
+    if package == "flash":
+        rev_arg = f"{revision}^{{commit}}"
+        if git_output(["rev-parse", "--verify", rev_arg], check=False) is None:
+            print(
+                "profile contract: skipping recipe-tree verification; "
+                f"commit SHA {revision} not available locally",
+                file=sys.stderr,
+            )
+        else:
+            pinned_tree = git_output(["ls-tree", revision, "components/flash"])
+            if not pinned_tree:
+                fail(f"components/flash is missing in pinned commit {revision}")
+            current_tree = git_output(["ls-tree", "HEAD", "components/flash"])
+            if not current_tree:
+                fail("components/flash is missing in current HEAD")
+            pinned_hash = (
+                pinned_tree.split()[2] if len(pinned_tree.split()) >= 3 else ""
+            )
+            current_hash = (
+                current_tree.split()[2] if len(current_tree.split()) >= 3 else ""
+            )
+            if pinned_hash != current_hash:
+                fail(
+                    f"Flash recipe tree ({pinned_hash}) does not match current "
+                    f"tree ({current_hash}); update recipe.toml to match"
+                )
 
 qemu_smoke = (ROOT / "ci/qemu_smoke.py").read_text()
 for expected in ('choices=("nvme", "usb")', "snapshot=on"):
