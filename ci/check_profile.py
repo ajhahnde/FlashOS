@@ -94,9 +94,7 @@ flash_manifest = load(ROOT / "components/flash/Cargo.toml")
 
 if root_manifest.get("package", {}).get("version") != version:
     fail("root Cargo package version drifted from versions.env")
-flash_version = (
-    flash_manifest.get("workspace", {}).get("package", {}).get("version")
-)
+flash_version = flash_manifest.get("workspace", {}).get("package", {}).get("version")
 if flash_version != version:
     fail("Flash workspace version drifted from versions.env")
 
@@ -167,8 +165,7 @@ if "orbital" in user_schemes:
     fail("Orbital scheme access must not be present")
 
 configured_paths = {
-    item.get("path", "")
-    for item in base.get("files", []) + profile.get("files", [])
+    item.get("path", "") for item in base.get("files", []) + profile.get("files", [])
 }
 if any(path == "/ui" or path.startswith("/ui/") for path in configured_paths):
     fail("legacy /ui compatibility path returned")
@@ -249,47 +246,61 @@ for expected in (
 RECIPE_ROOTS = ("core", "libs", "terminal")
 for package in sorted(packages):
     recipe_paths = [
-        ROOT / "recipes" / section / package / "recipe.toml"
-        for section in RECIPE_ROOTS
+        ROOT / "recipes" / section / package / "recipe.toml" for section in RECIPE_ROOTS
     ]
     recipe_path = next((path for path in recipe_paths if path.is_file()), None)
     if recipe_path is None:
         continue
+
     source = load(recipe_path).get("source")
     if source is None or "git" not in source:
         continue
+
     revision = source.get("rev")
     if revision is None or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         fail(
             "shipped recipe is not pinned to an immutable revision: "
             f"{recipe_path.relative_to(ROOT)}"
         )
+
     if package == "flash":
-        rev_arg = f"{revision}^{{commit}}"
-        if git_output(["rev-parse", "--verify", rev_arg], check=False) is None:
-            print(
-                "profile contract: skipping recipe-tree verification; "
-                f"commit SHA {revision} not available locally",
-                file=sys.stderr,
+        commit_arg = f"{revision}^{{commit}}"
+        if (
+            git_output(
+                ["rev-parse", "--verify", commit_arg],
+                check=False,
             )
-        else:
-            pinned_tree = git_output(["ls-tree", revision, "components/flash"])
-            if not pinned_tree:
-                fail(f"components/flash is missing in pinned commit {revision}")
-            current_tree = git_output(["ls-tree", "HEAD", "components/flash"])
-            if not current_tree:
-                fail("components/flash is missing in current HEAD")
-            pinned_hash = (
-                pinned_tree.split()[2] if len(pinned_tree.split()) >= 3 else ""
+            is None
+        ):
+            fail(f"pinned Flash commit {revision} is not available locally")
+
+        pinned_tree = git_output(
+            [
+                "rev-parse",
+                "--verify",
+                f"{revision}:components/flash",
+            ],
+            check=False,
+        )
+        if pinned_tree is None:
+            fail(f"components/flash is missing in pinned commit {revision}")
+
+        current_tree = git_output(
+            [
+                "rev-parse",
+                "--verify",
+                "HEAD:components/flash",
+            ],
+            check=False,
+        )
+        if current_tree is None:
+            fail("components/flash is missing in current HEAD")
+
+        if pinned_tree != current_tree:
+            fail(
+                f"Flash recipe tree ({pinned_tree}) does not match current "
+                f"tree ({current_tree}); update recipe.toml to match"
             )
-            current_hash = (
-                current_tree.split()[2] if len(current_tree.split()) >= 3 else ""
-            )
-            if pinned_hash != current_hash:
-                fail(
-                    f"Flash recipe tree ({pinned_hash}) does not match current "
-                    f"tree ({current_hash}); update recipe.toml to match"
-                )
 
 qemu_smoke = (ROOT / "ci/qemu_smoke.py").read_text()
 for expected in ('choices=("nvme", "usb")', "snapshot=on"):
@@ -302,9 +313,11 @@ for workflow_path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         match = uses_pattern.match(line)
         if match is None:
             continue
+
         action = match.group(1)
         if action.startswith("./"):
             continue
+
         _, separator, revision = action.rpartition("@")
         if separator != "@" or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
             fail(
