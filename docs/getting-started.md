@@ -32,7 +32,7 @@ The default configuration used here is:
 | Target architecture     | `x86_64`                              |
 | Target ABI              | `x86_64-unknown-redox`                |
 | Image profile           | `flashos`                             |
-| Primary interface       | Flash at `/usr/bin/fsh`          |
+| Primary interface       | Flash at `/usr/bin/fsh`               |
 | Primary virtual machine | QEMU `q35`                            |
 | Firmware path           | x86_64 UEFI through OVMF or edk2      |
 | Development disk        | `build/x86_64/flashos/harddrive.img`  |

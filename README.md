@@ -48,7 +48,7 @@ scripts use the `.fsh` file extension.
 | Architecture                   | x86_64                                                       |
 | Target ABI                     | `x86_64-unknown-redox`                                       |
 | User environment               | Text-based interface without a graphical desktop environment |
-| Primary interface              | Flash at `/usr/bin/fsh`                                 |
+| Primary interface              | Flash at `/usr/bin/fsh`                                      |
 | Primary evaluation environment | QEMU `q35` with UEFI firmware                                |
 
 Device-specific test results and the limits of current hardware evidence are maintained in [Hardware Compatibility](docs/hardware.md).
@@ -103,16 +103,16 @@ The following tree shows the canonical navigation paths between the central publ
 
 ## Repository map
 
-| Path                     | Responsibility                                      |
-| ------------------------ | --------------------------------------------------- |
-| `config/`                | FlashOS image profiles and system configuration     |
-| `components/flash/` | Flash source code and component documentation  |
-| `recipes/`               | Package recipes and transitional system components  |
-| `ci/`                    | Local verification contracts and QEMU smoke testing |
-| `.github/workflows/`     | Hosted CI, security, image, and release workflows   |
-| `mk/` and `Makefile`     | Package, image, and emulator build orchestration    |
-| `src/`                   | Root build-system support code                      |
-| `docs/`                  | General public FlashOS documentation                |
+| Path                 | Responsibility                                      |
+| -------------------- | --------------------------------------------------- |
+| `config/`            | FlashOS image profiles and system configuration     |
+| `components/flash/`  | Flash source code and component documentation       |
+| `recipes/`           | Package recipes and transitional system components  |
+| `ci/`                | Local verification contracts and QEMU smoke testing |
+| `.github/workflows/` | Hosted CI, security, image, and release workflows   |
+| `mk/` and `Makefile` | Package, image, and emulator build orchestration    |
+| `src/`               | Root build-system support code                      |
+| `docs/`              | General public FlashOS documentation                |
 
 Generated build outputs and local configuration files are not part of the public documentation tree.
 

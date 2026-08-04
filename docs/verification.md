@@ -630,7 +630,7 @@ A failure identifies the boundary at which an expected condition was not met. St
 | -------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | Formatting                 | Tracked source differs from formatter output                       | The reported files and workspace toolchain                               |
 | Root tests                 | A host-side build-system assertion failed                          | Test output, recent root workspace changes, lockfile                     |
-| Flash Clippy or tests | A host-side Flash quality rule failed                         | Reported crate, target, fixture, or warning                              |
+| Flash Clippy or tests      | A host-side Flash quality rule failed                              | Reported crate, target, fixture, or warning                              |
 | Target compilation         | The selected binary did not compile for the target                 | Target-only code, dependencies, ABI, `redoxer` environment               |
 | Python lint                | A CI script violates the configured lint rules                     | Reported file and diagnostic                                             |
 | Product contract           | A static repository invariant failed                               | Exact `profile contract:` message and owning configuration               |

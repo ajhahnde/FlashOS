@@ -138,7 +138,7 @@ The following table summarizes the present relationship without replacing the de
 | System services and utilities  | Selected inherited packages built through repository recipes                | [`config/flashos-base.toml`](../../config/flashos-base.toml), [`recipes/`](../../recipes/) |
 | Package and image construction | Inherited and adapted Cookbook, installer, RedoxFS, and Make infrastructure | [`Makefile`](../../Makefile), [`mk/`](../../mk/), [`src/`](../../src/)                     |
 | System profile and identity    | Maintained by FlashOS                                                       | [`config/`](../../config/)                                                                 |
-| Primary shell                  | FlashOS-owned Flash component                                          | [`components/flash/`](../../components/flash/)                                   |
+| Primary shell                  | FlashOS-owned Flash component                                               | [`components/flash/`](../../components/flash/)                                             |
 | Verification and releases      | Maintained by FlashOS                                                       | [`ci/`](../../ci/), [`.github/workflows/`](../../.github/workflows/)                       |
 
 This is an architectural summary, not a complete software bill of materials. Individual images can also include third-party packages that are neither developed by FlashOS nor part of the Redox OS project.

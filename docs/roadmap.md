@@ -541,7 +541,7 @@ The following files own the current facts behind this direction:
 | Development workflow           | [Development](development.md)                                       |
 | Verification model             | [Verification and Testing](verification.md)                         |
 | Physical hardware evidence     | [Hardware Compatibility](hardware.md)                               |
-| Flash behavior            | [Flash Documentation](../components/flash/docs/README.md) |
+| Flash behavior                 | [Flash Documentation](../components/flash/docs/README.md)           |
 | Release and evaluation limits  | [Security Policy](../.github/SECURITY.md)                           |
 | Technical CI contracts         | [CI/CD Contracts](../ci/README.md)                                  |
 

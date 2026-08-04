@@ -30,7 +30,7 @@ FlashOS development spans several distinct layers:
 | Product configuration  | `config/`                                     | Changes to installed packages, users, files, services, or permissions          |
 | Package integration    | `recipes/`                                    | Target packages consumed by the image                                          |
 | Build orchestration    | `Makefile`, `mk/`, `src/`, `podman/`          | Changes to package cooking, toolchains, image assembly, or container execution |
-| Flash             | `components/flash/`                      | Changes to the primary interactive and scripting interface                     |
+| Flash                  | `components/flash/`                           | Changes to the primary interactive and scripting interface                     |
 | Verification contracts | `ci/`, `.github/workflows/`                   | Changes to repository, image, or runtime qualification                         |
 | Public documentation   | `README.md`, `docs/`, component documentation | Changes to public usage and technical guidance                                 |
 
@@ -809,7 +809,7 @@ Place detailed information in its primary location:
 | Exact CI behavior            | [CI/CD Contracts](../ci/README.md)                                  |
 | Hardware evidence            | [Hardware Compatibility](hardware.md)                               |
 | Future direction             | [Roadmap](roadmap.md)                                               |
-| Flash details           | [Flash Documentation](../components/flash/docs/README.md) |
+| Flash details                | [Flash Documentation](../components/flash/docs/README.md)           |
 
 Other documents should provide a short summary and link to the primary source rather than duplicating a full procedure.
 

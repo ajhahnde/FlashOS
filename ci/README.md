@@ -250,7 +250,7 @@ The smoke script waits for ordered markers and performs scoped serial interactio
 | Bootloader              | FlashOS bootloader identity and boot-selection markers appear                      |
 | Kernel and service path | FlashOS startup, framebuffer-debug, and audio-driver spawn markers appear          |
 | Login                   | The configured unprivileged account reaches a successful login                     |
-| Shell startup           | The Flash primary prompt appears                                              |
+| Shell startup           | The Flash primary prompt appears                                                   |
 | Pipeline                | `printf` feeds `head` and produces the expected first line                         |
 | Editing                 | Backspace editing changes the submitted command as expected                        |
 | History                 | The preceding command can be recalled                                              |
@@ -360,7 +360,7 @@ The independent prerequisite jobs are:
 | Job                    | Contract                                                                                  |
 | ---------------------- | ----------------------------------------------------------------------------------------- |
 | `build-system-quality` | Root workspace formatting and locked host tests                                           |
-| `flash-quality`   | Flash formatting, Clippy with warnings denied, and locked workspace tests            |
+| `flash-quality`        | Flash formatting, Clippy with warnings denied, and locked workspace tests                 |
 | `tui-product-contract` | Ruff checks for `ci/`, the static product-profile contract, and Git whitespace validation |
 
 The root and Flash workspaces use their own pinned toolchain files and separate Cargo caches.

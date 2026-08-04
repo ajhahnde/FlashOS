@@ -65,7 +65,7 @@ The overall status summarizes the highest physical test stage supported by the r
 | **Boot failed**     | Firmware attempted to load the image, but the FlashOS bootloader, kernel, or console path did not reach the next expected stage.                                                                    |
 | **Boot observed**   | FlashOS bootloader or kernel output was observed, but a usable console session was not established.                                                                                                 |
 | **Console reached** | A visible text console and at least one usable keyboard input path reached the login interface.                                                                                                     |
-| **Interactive**     | Login succeeded, Flash started, and the prompt accepted an interactive command.                                                                                                                |
+| **Interactive**     | Login succeeded, Flash started, and the prompt accepted an interactive command.                                                                                                                     |
 | **Validated**       | The interactive baseline, an external pipeline, a non-destructive home-directory write/read/remove cycle, and a recorded shutdown or reboot outcome all completed on the exact identified artifact. |
 
 `Validated` is a console baseline, not a statement that every hardware subsystem works. Audio, networking, internal storage, pointing devices, power management, and other functions retain separate results.
@@ -95,7 +95,7 @@ Only devices with recorded physical FlashOS evidence are listed in this section.
 
 | Device              | FlashOS artifact           | Boot medium      | Recorded evidence                                                    | Not recorded                                                                                                | Overall status  |
 | ------------------- | -------------------------- | ---------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------- |
-| Sony VAIO VPCEB4L1E | FlashOS `0.1.0` live image | USB mass storage | Physical boot, display output, keyboard input, login, and Flash | Firmware mode, image checksum, external pipeline, internal storage, networking, audio, shutdown, and reboot | **Interactive** |
+| Sony VAIO VPCEB4L1E | FlashOS `0.1.0` live image | USB mass storage | Physical boot, display output, keyboard input, login, and Flash      | Firmware mode, image checksum, external pipeline, internal storage, networking, audio, shutdown, and reboot | **Interactive** |
 
 ### Sony VAIO VPCEB4L1E
 

@@ -27,7 +27,7 @@ The current FlashOS product architecture is defined by the following boundaries:
 | Product architecture        | x86_64                               |
 | Target ABI                  | `x86_64-unknown-redox`               |
 | Primary environment         | Text-based console interface         |
-| Primary user interface      | Flash at `/usr/bin/fsh`         |
+| Primary user interface      | Flash at `/usr/bin/fsh`              |
 | Primary evaluation platform | QEMU `q35` with x86_64 UEFI firmware |
 | System maturity             | Pre-alpha                            |
 
@@ -79,7 +79,7 @@ FlashOS currently combines project-owned product components with inherited and e
 
 | Category                               | Meaning                                                                                    | Examples                                                            |
 | -------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| **FlashOS-owned component**            | Source or configuration maintained as a direct FlashOS product responsibility              | Image profiles, Flash, documentation, CI contracts             |
+| **FlashOS-owned component**            | Source or configuration maintained as a direct FlashOS product responsibility              | Image profiles, Flash, documentation, CI contracts                  |
 | **Pinned upstream component**          | External source fetched at a specific revision and built as part of the image              | Kernel, bootloader, `relibc`, base services, utilities              |
 | **Locally patched upstream component** | Pinned upstream source modified by repository-maintained patches                           | Kernel, bootloader, installer, and login branding or policy changes |
 | **Inherited build infrastructure**     | Repository-local orchestration derived from the Redox build system and adapted for FlashOS | Root Cargo build crate, `Makefile`, `mk/`, Cookbook integration     |
@@ -372,8 +372,8 @@ Use the following files when evaluating or changing an architectural contract:
 | Package construction           | [`mk/repo.mk`](../mk/repo.mk) and package recipes under [`recipes/`](../recipes/)       |
 | Image assembly                 | [`mk/disk.mk`](../mk/disk.mk)                                                           |
 | QEMU device model              | [`mk/qemu.mk`](../mk/qemu.mk)                                                           |
-| Flash source architecture | [`components/flash/`](../components/flash/)                                   |
-| Flash image package       | [`recipes/terminal/flash/recipe.toml`](../recipes/terminal/flash/recipe.toml) |
+| Flash source architecture      | [`components/flash/`](../components/flash/)                                             |
+| Flash image package            | [`recipes/terminal/flash/recipe.toml`](../recipes/terminal/flash/recipe.toml)           |
 | Product-profile invariants     | [`ci/check_profile.py`](../ci/check_profile.py)                                         |
 | Runtime qualification          | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                                               |
 | Release version                | [`versions.env`](../versions.env)                                                       |

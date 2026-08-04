@@ -7,8 +7,7 @@ All notable changes to the current FlashOS source tree are recorded in this docu
 The `0.9.0` and older tags inherited with the Redox OS source history are upstream tags, not FlashOS releases. The former AArch64 FlashOS release history remains available in the archived `FlashOS-old` repository.
 
 ## [Unreleased]
-### Changed
-- Renamed FlashShell to Flash across the codebase.
+
 ### Added
 
 - Added an optional sourceable Bash and Zsh helper layer for common image build,
@@ -52,6 +51,8 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Renamed FlashShell to Flash across the source tree while preserving the
+  `fsh` executable, `/usr/bin/fsh`, `.fsh` scripts, and prompt protocol.
 - Flash now observes jobs continued by an external process, reports their
   live running state, and removes the stale stopped notice at the next command
   boundary.
@@ -123,9 +124,9 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   scope.
 - Made graphical XDG home directories optional in the inherited installer and
   disabled their creation for the FlashOS image.
-- Added Flash to the active source tree and installed `fsh` as the login
+- Added FlashShell to the active source tree and installed `fsh` as the login
   shell for both development accounts.
-- Added the Flash target recipe and target-build verification.
+- Added the FlashShell target recipe and target-build verification.
 - Added FlashOS hostname, release metadata, console issue, QEMU title, network
   boot filename, and image build path.
 - Restored the English documentation suite with the original FlashOS
@@ -133,10 +134,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 - Added public hardware, trademark, attribution, and upstream reference
   documents.
 - Restored GitHub Actions as an x86_64-native CI/CD architecture with
-  independent build-system, Flash, and TUI product-contract gates.
+  independent build-system, FlashShell, and TUI product-contract gates.
 - Added a FlashOS-owned Docker clean-room build, immutable checksummed image
   promotion, and a separate QEMU consumer that verifies FlashOS identity,
-  TUI login, Flash pipelines, and the IHDA audio driver.
+  TUI login, FlashShell pipelines, and the IHDA audio driver.
 - Added a self-contained live image for removable USB media and qualified its
   exact promoted bytes through an emulated USB mass-storage boot.
 - Added scheduled dependency policy, Dependabot, tag-driven release
@@ -158,7 +159,7 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 - Made future kernel divergence explicit: FlashOS may stop consuming Redox
   kernel updates when its kernel requirements differ.
 - Extended the product contract to enforce release-version lockstep across
-  the root crate, Flash workspace, README, `os-release`, console issue,
+  the root crate, FlashShell workspace, README, `os-release`, console issue,
   and release artefact names.
 - Moved build-provenance attestation into release-candidate packaging so a
   non-publishing dry run exercises the same attestation used by tagged
@@ -171,18 +172,18 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Verified
 
-- Flash host tests and clippy checks.
-- Flash target compilation for `x86_64-unknown-redox`.
+- FlashShell host tests and clippy checks.
+- FlashShell target compilation for `x86_64-unknown-redox`.
 - Root Cargo metadata and locked dependency check.
 - FlashOS build-environment selection for `x86_64` and the `flashos` profile.
 - QEMU boot, login to `>> `, and an external-to-external pipeline on the
   final rebranded image.
 - Automated QEMU contract including the FlashOS bootloader, kernel identity,
-  login prompt, Flash pipeline, and retained IHDA audio driver.
+  login prompt, FlashShell pipeline, and retained IHDA audio driver.
 - Non-publishing release workflow: clean-room rebuild of both images, separate
   NVMe and USB QEMU qualification, compression, checksum verification,
   CycloneDX SBOM generation, and build-provenance attestation.
-- Physical live USB boot, display, keyboard, login, and Flash validation
+- Physical live USB boot, display, keyboard, login, and FlashShell validation
   on a Sony VAIO VPCEB4L1E.
 
 ---
