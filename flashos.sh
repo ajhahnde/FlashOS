@@ -72,8 +72,8 @@ _flashos_root() {
   (builtin cd -- "$_FLASHOS_DIR" && "$@")
 }
 
-_flashshell_root() {
-  (builtin cd -- "$_FLASHOS_DIR/components/flashshell" && "$@")
+_flash_root() {
+  (builtin cd -- "$_FLASHOS_DIR/components/flash" && "$@")
 }
 
 _flashos_make() {
@@ -256,28 +256,34 @@ flashos-smoke() {
 
 # -- Host and target quality gates -----------------------------------------
 
-flashshell-check() {
+flash-check() {
   local scope="${1:-all}"
   [ "$#" -eq 0 ] || shift
 
   case "$scope" in
-    fmt)    _flashshell_root command cargo fmt --all --check "$@" ;;
-    clippy) _flashshell_root command cargo clippy --workspace --all-targets "$@" -- -D warnings ;;
-    test)   _flashshell_root command cargo test --workspace --locked "$@" ;;
-    target) _flashshell_root command redoxer build -p flashshell-cli --bin fsh "$@" ;;
+    fmt)    _flash_root command cargo fmt --all --check "$@" ;;
+    clippy) _flash_root command cargo clippy --workspace --all-targets "$@" -- -D warnings ;;
+    test)   _flash_root command cargo test --workspace --locked "$@" ;;
+    target) _flash_root command redoxer build -p flash-cli --bin fsh "$@" ;;
     all)
-      _flashshell_root command cargo fmt --all --check "$@" &&
-        _flashshell_root command cargo clippy --workspace --all-targets -- -D warnings &&
-        _flashshell_root command cargo test --workspace --locked
+      _flash_root command cargo fmt --all --check "$@" &&
+        _flash_root command cargo clippy --workspace --all-targets -- -D warnings &&
+        _flash_root command cargo test --workspace --locked
       ;;
     help|-h|--help)
       printf '%s\n' "usage: flashos shell [fmt|clippy|test|target|all] [arguments]"
       ;;
     *)
-      _flashos_error "unknown FlashShell check: $scope"
+      _flashos_error "unknown Flash check: $scope"
       return 1
       ;;
   esac
+}
+
+flashshell-check() {
+  printf '%s\n' \
+    'warning: flashshell-check is deprecated; use flash-check' >&2
+  flash-check "$@"
 }
 
 _flashos_check_shell_helpers() {
@@ -321,14 +327,14 @@ flashos-check() {
     quick)   _flashos_check_quick ;;
     profile) _flashos_root command python3 ci/check_profile.py "$@" ;;
     root)    _flashos_check_root ;;
-    shell)   flashshell-check all "$@" ;;
+    shell)   flash-check all "$@" ;;
     python)  _flashos_check_python "$@" ;;
     docs)    _flashos_check_docs ;;
-    target)  flashshell-check target "$@" ;;
+    target)  flash-check target "$@" ;;
     ci)
       _flashos_check_quick &&
         _flashos_check_root &&
-        flashshell-check all &&
+        flash-check all &&
         _flashos_check_python
       ;;
     all)
@@ -340,8 +346,8 @@ flashos-check() {
         "" \
         "  quick    helper syntax, product profile, and whitespace" \
         "  root     root Rust workspace formatting and tests" \
-        "  shell    FlashShell formatting, Clippy, and host tests" \
-        "  target   FlashShell Redox target build" \
+        "  shell    Flash formatting, Clippy, and host tests" \
+        "  target   Flash Redox target build" \
         "  python   lint FlashOS-owned Python" \
         "  docs     private documentation drift check when available" \
         "  ci       local equivalent of the host CI quality jobs" \
@@ -403,7 +409,7 @@ flashos-doctor() {
     printf '[ %sOK%s ] %-14s %s\n' \
       "$_FLASHOS_GREEN" "$_FLASHOS_RESET" redoxer "$(command -v redoxer)"
   else
-    printf '[ %sOPT%s ] %-14s needed only for FlashShell target builds\n' \
+    printf '[ %sOPT%s ] %-14s needed only for Flash target builds\n' \
       "$_FLASHOS_YELLOW" "$_FLASHOS_RESET" redoxer
   fi
 
@@ -828,7 +834,7 @@ flashos-status() {
 flashos-list() {
   _flashos_usage
   _flashos_heading "Direct helper functions"
-  command grep -E '^(flashos(-[[:alnum:]-]+)?|flashshell-check|fos)\(\)' \
+  command grep -E '^(flashos(-[[:alnum:]-]+)?|flash-check|flashshell-check|fos)\(\)' \
     "$_FLASHOS_DIR/flashos.sh" | command sed 's/().*//' | command sort -u
 }
 
@@ -857,7 +863,7 @@ _flashos_usage() {
     "  changes [action]          inspect Git state without writing it" \
     "  commit [arguments]        create a manual or generated Git commit" \
     "  check [scope]             run repository checks" \
-    "  shell [scope]             run FlashShell host/target checks" \
+    "  shell [scope]             run Flash host/target checks" \
     "" \
     "Maintenance" \
     "  podman [action]           inspect or control the Podman machine" \
@@ -890,7 +896,7 @@ flashos() {
     changes|change)   flashos-changes "$@" ;;
     commit)           flashos-commit "$@" ;;
     check)            flashos-check "$@" ;;
-    shell)            flashshell-check "$@" ;;
+    shell)            flash-check "$@" ;;
     podman)           flashos-podman "$@" ;;
     clean)            flashos-clean "$@" ;;
     root)             builtin cd -- "$_FLASHOS_DIR" || return 1 ;;

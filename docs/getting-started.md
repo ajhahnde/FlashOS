@@ -16,7 +16,7 @@ This guide takes you from a fresh repository clone to an interactive FlashOS ses
 - [Check the environment](#check-the-environment)
 - [Build the development image](#build-the-development-image)
 - [Boot FlashOS in QEMU](#boot-flashos-in-qemu)
-- [Log in and verify FlashShell](#log-in-and-verify-flashshell)
+- [Log in and verify Flash](#log-in-and-verify-flash)
 - [Build and run the live image](#build-and-run-the-live-image)
 - [Optional shell helpers](#optional-shell-helpers)
 - [Physical media](#physical-media)
@@ -32,7 +32,7 @@ The default configuration used here is:
 | Target architecture     | `x86_64`                              |
 | Target ABI              | `x86_64-unknown-redox`                |
 | Image profile           | `flashos`                             |
-| Primary interface       | FlashShell at `/usr/bin/fsh`          |
+| Primary interface       | Flash at `/usr/bin/fsh`               |
 | Primary virtual machine | QEMU `q35`                            |
 | Firmware path           | x86_64 UEFI through OVMF or edk2      |
 | Development disk        | `build/x86_64/flashos/harddrive.img`  |
@@ -170,7 +170,7 @@ flashos doctor
 
 The check reports whether the principal host tools, local `.config`, Podman runtime, QEMU executable, and UEFI firmware are available.
 
-A missing optional `redoxer` installation does not prevent the normal image build. It is required for specific target-side FlashShell compilation workflows documented elsewhere.
+A missing optional `redoxer` installation does not prevent the normal image build. It is required for specific target-side Flash compilation workflows documented elsewhere.
 
 ## Build the development image
 
@@ -214,7 +214,7 @@ Ctrl+A, then X
 
 Closing the QEMU display window also ends an ordinary interactive run.
 
-## Log in and verify FlashShell
+## Log in and verify Flash
 
 The development profile provides two local evaluation accounts:
 
@@ -232,7 +232,7 @@ password: user
 
 > **Security warning:** These credentials are compiled into the development profile for local testing. Do not expose this image to an untrusted environment or distribute it as a secure release image.
 
-A successful login starts FlashShell and displays its primary prompt:
+A successful login starts Flash and displays its primary prompt:
 
 ```text
 >>
@@ -262,10 +262,10 @@ The expected output is:
 fallback
 ```
 
-FlashShell is not a POSIX shell. Do not assume that Bash or POSIX syntax has the same meaning. The component documentation describes the supported language and execution model:
+Flash is not a POSIX shell. Do not assume that Bash or POSIX syntax has the same meaning. The component documentation describes the supported language and execution model:
 
-- [FlashShell Overview](../components/flashshell/README.md)
-- [FlashShell Documentation](../components/flashshell/docs/README.md)
+- [Flash Overview](../components/flash/README.md)
+- [Flash Documentation](../components/flash/docs/README.md)
 
 ## Build and run the live image
 
@@ -507,13 +507,13 @@ The separate `flashos-release` profile intentionally uses a different credential
 
 ## Next steps
 
-After reaching a working FlashShell prompt:
+After reaching a working Flash prompt:
 
 - read [Architecture](architecture.md) for system layers, image configuration, and component boundaries;
 - use [Development](development.md) for repository modification and package iteration;
 - follow [Verification and Testing](verification.md) before treating a build as qualified;
 - consult [Hardware Compatibility](hardware.md) before drawing conclusions about physical-device support;
-- open the [FlashShell Documentation](../components/flashshell/docs/README.md) for language and scripting details.
+- open the [Flash Documentation](../components/flash/docs/README.md) for language and scripting details.
 
 ---
 

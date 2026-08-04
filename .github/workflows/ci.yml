@@ -42,27 +42,27 @@ jobs:
       - name: Build-system tests
         run: cargo test --locked
 
-  flashshell:
-    name: flashshell-quality
+  flash:
+    name: flash-quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: components/flashshell
+        working-directory: components/flash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Cache FlashShell Cargo downloads
+      - name: Cache Flash Cargo downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: flashshell-cargo-${{ runner.os }}-${{ hashFiles('components/flashshell/Cargo.lock') }}
-          restore-keys: flashshell-cargo-${{ runner.os }}-
+          key: flash-cargo-${{ runner.os }}-${{ hashFiles('components/flash/Cargo.lock') }}
+          restore-keys: flash-cargo-${{ runner.os }}-
 
-      - name: Activate the pinned FlashShell toolchain
+      - name: Activate the pinned Flash toolchain
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustc --version
@@ -82,6 +82,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       # The product contract and the QEMU harness are release-critical scripts
       # and are held to the same standard as the Rust workspaces.
@@ -98,7 +100,7 @@ jobs:
 
   image:
     name: image-and-runtime
-    needs: [quality, flashshell, product-contract]
+    needs: [quality, flash, product-contract]
     uses: ./.github/workflows/_image.yml
     with:
       artifact-name: flashos-x86_64-ci-${{ github.sha }}
@@ -109,14 +111,14 @@ jobs:
   required:
     name: required
     if: always()
-    needs: [quality, flashshell, product-contract, image]
+    needs: [quality, flash, product-contract, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Summarize and enforce every gate
         env:
           ROOT_RESULT: ${{ needs.quality.result }}
-          SHELL_RESULT: ${{ needs.flashshell.result }}
+          SHELL_RESULT: ${{ needs.flash.result }}
           CONTRACT_RESULT: ${{ needs.product-contract.result }}
           IMAGE_RESULT: ${{ needs.image.result }}
         run: |
@@ -127,7 +129,7 @@ jobs:
             echo "| gate | result |"
             echo "|:--|:--|"
             echo "| build system | ${ROOT_RESULT} |"
-            echo "| FlashShell | ${SHELL_RESULT} |"
+            echo "| Flash | ${SHELL_RESULT} |"
             echo "| TUI product contract | ${CONTRACT_RESULT} |"
             echo "| Docker image + QEMU runtime | ${IMAGE_RESULT} |"
           } >> "${GITHUB_STEP_SUMMARY}"

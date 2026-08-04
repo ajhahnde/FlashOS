@@ -8,7 +8,7 @@ target-version = "py311"
 exclude = [
     "build",
     "prefix",
-    "components/flashshell/target",
+    "components/flash/target",
 ]
 
 [lint]

@@ -25,5 +25,7 @@ source.tar
 source.tar.tmp
 target
 wget-log
+# Local QEMU smoke-test output
+/qemu-smoke.log
 # context for flashos-*.sh files
 contexts/

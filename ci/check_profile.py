@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -32,7 +33,7 @@ EXPECTED_PACKAGES = {
     "bootloader",
     "coreutils",
     "extrautils",
-    "flashshell",
+    "flash",
     "kernel",
     "libgcc",
     "libstdcxx",
@@ -63,6 +64,19 @@ def load(path: Path) -> dict:
         return tomllib.load(source)
 
 
+def git_output(args: list[str], *, check: bool = True) -> str | None:
+    result = subprocess.run(
+        ["git", *args],
+        check=check,
+        text=True,
+        capture_output=True,
+        cwd=ROOT,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
 def release_version() -> str:
     for line in (ROOT / "versions.env").read_text().splitlines():
         if line.startswith("FLASHOS_RELEASE_VERSION="):
@@ -76,15 +90,13 @@ release_profile = load(RELEASE_PROFILE_PATH)
 base = load(BASE_PATH)
 version = release_version()
 root_manifest = load(ROOT / "Cargo.toml")
-flashshell_manifest = load(ROOT / "components/flashshell/Cargo.toml")
+flash_manifest = load(ROOT / "components/flash/Cargo.toml")
 
 if root_manifest.get("package", {}).get("version") != version:
     fail("root Cargo package version drifted from versions.env")
-flashshell_version = (
-    flashshell_manifest.get("workspace", {}).get("package", {}).get("version")
-)
-if flashshell_version != version:
-    fail("FlashShell workspace version drifted from versions.env")
+flash_version = flash_manifest.get("workspace", {}).get("package", {}).get("version")
+if flash_version != version:
+    fail("Flash workspace version drifted from versions.env")
 
 if profile.get("include") != ["../flashos-base.toml"]:
     fail("the x86_64 profile must include only ../flashos-base.toml")
@@ -153,8 +165,7 @@ if "orbital" in user_schemes:
     fail("Orbital scheme access must not be present")
 
 configured_paths = {
-    item.get("path", "")
-    for item in base.get("files", []) + profile.get("files", [])
+    item.get("path", "") for item in base.get("files", []) + profile.get("files", [])
 }
 if any(path == "/ui" or path.startswith("/ui/") for path in configured_paths):
     fail("legacy /ui compatibility path returned")
@@ -235,21 +246,61 @@ for expected in (
 RECIPE_ROOTS = ("core", "libs", "terminal")
 for package in sorted(packages):
     recipe_paths = [
-        ROOT / "recipes" / section / package / "recipe.toml"
-        for section in RECIPE_ROOTS
+        ROOT / "recipes" / section / package / "recipe.toml" for section in RECIPE_ROOTS
     ]
     recipe_path = next((path for path in recipe_paths if path.is_file()), None)
     if recipe_path is None:
         continue
+
     source = load(recipe_path).get("source")
     if source is None or "git" not in source:
         continue
+
     revision = source.get("rev")
     if revision is None or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         fail(
             "shipped recipe is not pinned to an immutable revision: "
             f"{recipe_path.relative_to(ROOT)}"
         )
+
+    if package == "flash":
+        commit_arg = f"{revision}^{{commit}}"
+        if (
+            git_output(
+                ["rev-parse", "--verify", commit_arg],
+                check=False,
+            )
+            is None
+        ):
+            fail(f"pinned Flash commit {revision} is not available locally")
+
+        pinned_tree = git_output(
+            [
+                "rev-parse",
+                "--verify",
+                f"{revision}:components/flash",
+            ],
+            check=False,
+        )
+        if pinned_tree is None:
+            fail(f"components/flash is missing in pinned commit {revision}")
+
+        current_tree = git_output(
+            [
+                "rev-parse",
+                "--verify",
+                "HEAD:components/flash",
+            ],
+            check=False,
+        )
+        if current_tree is None:
+            fail("components/flash is missing in current HEAD")
+
+        if pinned_tree != current_tree:
+            fail(
+                f"Flash recipe tree ({pinned_tree}) does not match current "
+                f"tree ({current_tree}); update recipe.toml to match"
+            )
 
 qemu_smoke = (ROOT / "ci/qemu_smoke.py").read_text()
 for expected in ('choices=("nvme", "usb")', "snapshot=on"):
@@ -262,9 +313,11 @@ for workflow_path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         match = uses_pattern.match(line)
         if match is None:
             continue
+
         action = match.group(1)
         if action.startswith("./"):
             continue
+
         _, separator, revision = action.rpartition("@")
         if separator != "@" or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
             fail(

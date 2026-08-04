@@ -5,7 +5,7 @@
   </picture>
 
   <p>
-    <strong>An x86_64 operating system based on the Redox kernel, with a text-based user environment and FlashShell as its primary interface.</strong>
+    <strong>An x86_64 operating system based on the Redox kernel, with a text-based user environment and Flash as its primary interface.</strong>
   </p>
 
   <p>
@@ -23,7 +23,7 @@
   <p>
     <a href="docs/README.md"><strong>Documentation</strong></a> ·
     <a href="docs/getting-started.md"><strong>Getting Started</strong></a> ·
-    <a href="components/flashshell/README.md"><strong>FlashShell</strong></a> ·
+    <a href="components/flash/README.md"><strong>Flash</strong></a> ·
     <a href="ci/README.md"><strong>CI</strong></a> ·
     <a href="https://github.com/ajhahnde/FlashOS/releases"><strong>Releases</strong></a> ·
     <a href=".github/SECURITY.md"><strong>Security</strong></a>
@@ -38,7 +38,7 @@ FlashOS is a small, independent operating-system project focused on a keyboard-d
 
 The current system uses the Redox kernel and parts of the Redox ABI, toolchain, userspace, packaging, and image-building infrastructure. These dependencies are documented explicitly and do not imply that every upstream Redox capability is supported or qualified by FlashOS.
 
-[FlashShell](components/flashshell/README.md), whose executable is named `fsh`, is the primary interactive and scripting interface. FlashShell
+[Flash](components/flash/README.md), whose executable is named `fsh`, is the primary interactive and scripting interface. Flash
 scripts use the `.fsh` file extension.
 
 ## Current scope
@@ -48,7 +48,7 @@ scripts use the `.fsh` file extension.
 | Architecture                   | x86_64                                                       |
 | Target ABI                     | `x86_64-unknown-redox`                                       |
 | User environment               | Text-based interface without a graphical desktop environment |
-| Primary interface              | FlashShell at `/usr/bin/fsh`                                 |
+| Primary interface              | Flash at `/usr/bin/fsh`                                      |
 | Primary evaluation environment | QEMU `q35` with UEFI firmware                                |
 
 Device-specific test results and the limits of current hardware evidence are maintained in [Hardware Compatibility](docs/hardware.md).
@@ -87,14 +87,14 @@ The following tree shows the canonical navigation paths between the central publ
     - [`docs/roadmap.md`](docs/roadmap.md) — Public development direction
     - [`docs/upstream/README.md`](docs/upstream/README.md) — Index of retained upstream reference documents
 
-  - [`components/flashshell/README.md`](components/flashshell/README.md) — FlashShell overview
+  - [`components/flash/README.md`](components/flash/README.md) — Flash overview
 
-    - [`components/flashshell/docs/README.md`](components/flashshell/docs/README.md) — FlashShell documentation index
+    - [`components/flash/docs/README.md`](components/flash/docs/README.md) — Flash documentation index
 
-      - [`components/flashshell/docs/language-guide.md`](components/flashshell/docs/language-guide.md) — Language concepts and syntax
-      - [`components/flashshell/docs/scripting.md`](components/flashshell/docs/scripting.md) — Script and process execution
-      - [`components/flashshell/docs/architecture.md`](components/flashshell/docs/architecture.md) — Internal crate and runtime architecture
-      - [`components/flashshell/docs/development.md`](components/flashshell/docs/development.md) — FlashShell development and testing
+      - [`components/flash/docs/language-guide.md`](components/flash/docs/language-guide.md) — Language concepts and syntax
+      - [`components/flash/docs/scripting.md`](components/flash/docs/scripting.md) — Script and process execution
+      - [`components/flash/docs/architecture.md`](components/flash/docs/architecture.md) — Internal crate and runtime architecture
+      - [`components/flash/docs/development.md`](components/flash/docs/development.md) — Flash development and testing
 
   - [`ci/README.md`](ci/README.md) — Technical contracts for local and hosted CI
   - [`CHANGELOG.md`](CHANGELOG.md) — Public change history
@@ -103,16 +103,16 @@ The following tree shows the canonical navigation paths between the central publ
 
 ## Repository map
 
-| Path                     | Responsibility                                      |
-| ------------------------ | --------------------------------------------------- |
-| `config/`                | FlashOS image profiles and system configuration     |
-| `components/flashshell/` | FlashShell source code and component documentation  |
-| `recipes/`               | Package recipes and transitional system components  |
-| `ci/`                    | Local verification contracts and QEMU smoke testing |
-| `.github/workflows/`     | Hosted CI, security, image, and release workflows   |
-| `mk/` and `Makefile`     | Package, image, and emulator build orchestration    |
-| `src/`                   | Root build-system support code                      |
-| `docs/`                  | General public FlashOS documentation                |
+| Path                 | Responsibility                                      |
+| -------------------- | --------------------------------------------------- |
+| `config/`            | FlashOS image profiles and system configuration     |
+| `components/flash/`  | Flash source code and component documentation       |
+| `recipes/`           | Package recipes and transitional system components  |
+| `ci/`                | Local verification contracts and QEMU smoke testing |
+| `.github/workflows/` | Hosted CI, security, image, and release workflows   |
+| `mk/` and `Makefile` | Package, image, and emulator build orchestration    |
+| `src/`               | Root build-system support code                      |
+| `docs/`              | General public FlashOS documentation                |
 
 Generated build outputs and local configuration files are not part of the public documentation tree.
 
@@ -147,7 +147,7 @@ No response, review, acceptance, or release timeline is guaranteed.
 
 ## License and attribution
 
-The inherited root build infrastructure is available under the [MIT License](LICENSE). FlashShell is provided under the [Apache License 2.0](components/flashshell/LICENSE). Third-party packages and inherited components retain their respective licenses.
+The inherited root build infrastructure is available under the [MIT License](LICENSE). Flash is provided under the [Apache License 2.0](components/flash/LICENSE). Third-party packages and inherited components retain their respective licenses.
 
 See the following files for attribution and project identity information:
 

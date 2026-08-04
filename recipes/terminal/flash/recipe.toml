@@ -1,0 +1,13 @@
+[source]
+# Pinned so a tagged image ships the shell from a known commit. Fetching the
+# default branch let the image build a different fsh than the tag it carried.
+# This revision must be bumped as part of preparing a release.
+git = "https://github.com/ajhahnde/FlashOS"
+rev = "d83e5dfe18316158a2380882c25205a7847aaa7d"
+
+[build]
+template = "cargo"
+cargopath = "components/flash/crates/flash-cli"
+cargoflags = [
+    "--bin fsh",
+]

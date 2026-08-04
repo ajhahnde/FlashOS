@@ -2,7 +2,7 @@
 
 [FlashOS](../README.md) › Documentation
 
-This page is the central index for the public FlashOS documentation. It directs users, developers, and evaluators to the appropriate system-wide guide; component-specific details for FlashShell and CI are maintained in their own documentation areas.
+This page is the central index for the public FlashOS documentation. It directs users, developers, and evaluators to the appropriate system-wide guide; component-specific details for Flash and CI are maintained in their own documentation areas.
 
 ## General guides
 
@@ -20,8 +20,8 @@ This page is the central index for the public FlashOS documentation. It directs 
 
 Some areas maintain separate documentation because their responsibilities extend beyond the general operating-system guides:
 
-- [FlashShell Overview](../components/flashshell/README.md) — Entry point for FlashShell (`fsh`), its design, usage, and component documentation.
-- [FlashShell Documentation Index](../components/flashshell/docs/README.md) — Language, scripting, internal architecture, development, and testing guides for FlashShell.
+- [Flash Overview](../components/flash/README.md) — Entry point for Flash (`fsh`), its design, usage, and component documentation.
+- [Flash Documentation Index](../components/flash/docs/README.md) — Language, scripting, internal architecture, development, and testing guides for Flash.
 - [CI/CD Contracts](../ci/README.md) — Technical contracts implemented by the local CI scripts and their integration with hosted workflows.
 
 ## Project records and policies

@@ -11,7 +11,7 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: cargo
-    directory: /components/flashshell
+    directory: /components/flash
     schedule:
       interval: weekly
       day: monday
