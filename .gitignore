@@ -4,9 +4,9 @@
 **/my_*
 __pycache__/
 *.py[cod]
-# Finder metadata created on macOS build hosts
+# Finder metadata
 .DS_Store
-# Neovim swap, backup, session, and tag files
+# Neovim
 *.sw[a-p]
 *~
 Session.vim
@@ -27,5 +27,5 @@ target
 wget-log
 # Local QEMU smoke-test output
 /qemu-smoke.log
-# context for flashos-*.sh files
+# context for flashos*.* files
 contexts/

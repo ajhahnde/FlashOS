@@ -38,8 +38,7 @@ FlashOS is a small, independent operating-system project focused on a keyboard-d
 
 The current system uses the Redox kernel and parts of the Redox ABI, toolchain, userspace, packaging, and image-building infrastructure. These dependencies are documented explicitly and do not imply that every upstream Redox capability is supported or qualified by FlashOS.
 
-[Flash](components/flash/README.md), whose executable is named `fsh`, is the primary interactive and scripting interface. Flash
-scripts use the `.fsh` file extension.
+[Flash](components/flash/README.md), is the primary interactive and scripting interface. Flash scripts use the `.fsh` file extension.
 
 ## Current scope
 
