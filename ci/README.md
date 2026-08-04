@@ -80,7 +80,7 @@ and exits nonzero.
 The script reads or inspects repository state including:
 
 - `versions.env`;
-- the root and FlashShell Cargo manifests;
+- the root and Flash Cargo manifests;
 - `config/flashos-base.toml`;
 - `config/x86_64/flashos.toml`;
 - `config/x86_64/flashos-release.toml`;
@@ -136,7 +136,7 @@ These are static configuration checks. They do not prove that every retained sch
 The profile contract compares that version with selected public and installed identity surfaces, including:
 
 - the root Cargo package;
-- the FlashShell workspace package metadata;
+- the Flash workspace package metadata;
 - `/usr/lib/os-release`;
 - `/etc/issue`;
 - the root README;
@@ -250,7 +250,7 @@ The smoke script waits for ordered markers and performs scoped serial interactio
 | Bootloader              | FlashOS bootloader identity and boot-selection markers appear                      |
 | Kernel and service path | FlashOS startup, framebuffer-debug, and audio-driver spawn markers appear          |
 | Login                   | The configured unprivileged account reaches a successful login                     |
-| Shell startup           | The FlashShell primary prompt appears                                              |
+| Shell startup           | The Flash primary prompt appears                                              |
 | Pipeline                | `printf` feeds `head` and produces the expected first line                         |
 | Editing                 | Backspace editing changes the submitted command as expected                        |
 | History                 | The preceding command can be recalled                                              |
@@ -266,7 +266,7 @@ The audio assertion observes the expected guest driver-spawn marker while an HDA
 
 ### Serial synchronization
 
-The FlashShell target editor redraws its input row while reading keystrokes. The smoke harness therefore does not treat the appearance of a bare prompt as sufficient proof that a command completed.
+The Flash target editor redraws its input row while reading keystrokes. The smoke harness therefore does not treat the appearance of a bare prompt as sufficient proof that a command completed.
 
 For interactive assertions, it waits for prompt rows and output markers scoped to offsets in the serial capture. This distinguishes command output from echoed input and reduces false success caused by terminal redraw sequences.
 
@@ -306,7 +306,7 @@ The current contract does not qualify:
 - long-duration stability;
 - package installation after boot;
 - performance;
-- complete FlashShell language conformance;
+- complete Flash language conformance;
 - all filesystem operations or security boundaries.
 
 The USB mode qualifies the defined QEMU USB mass-storage path only.
@@ -318,7 +318,7 @@ The active workflow relationship is:
 ```text
 ci.yml
 ├── build-system-quality
-├── flashshell-quality
+├── flash-quality
 ├── tui-product-contract
 └── _image.yml
     ├── docker-clean-room-build
@@ -360,12 +360,12 @@ The independent prerequisite jobs are:
 | Job                    | Contract                                                                                  |
 | ---------------------- | ----------------------------------------------------------------------------------------- |
 | `build-system-quality` | Root workspace formatting and locked host tests                                           |
-| `flashshell-quality`   | FlashShell formatting, Clippy with warnings denied, and locked workspace tests            |
+| `flash-quality`   | Flash formatting, Clippy with warnings denied, and locked workspace tests            |
 | `tui-product-contract` | Ruff checks for `ci/`, the static product-profile contract, and Git whitespace validation |
 
-The root and FlashShell workspaces use their own pinned toolchain files and separate Cargo caches.
+The root and Flash workspaces use their own pinned toolchain files and separate Cargo caches.
 
-The standard CI workflow does not run the FlashShell Redox target-build command as a separate job. Target compilation remains an additional evidence layer for changes that affect target-selected code.
+The standard CI workflow does not run the Flash Redox target-build command as a separate job. Target compilation remains an additional evidence layer for changes that affect target-selected code.
 
 ### Image prerequisite
 
@@ -384,7 +384,7 @@ The final job is named `required`.
 It runs after every ordinary gate, including when an earlier gate fails or is skipped. It writes a summary table and exits nonzero unless all of these results are `success`:
 
 - root build-system quality;
-- FlashShell quality;
+- Flash quality;
 - product contract;
 - image and runtime qualification.
 
@@ -520,7 +520,7 @@ This job evaluates dependency changes visible to GitHub's dependency graph. It i
 Separate jobs run Cargo policy checks for:
 
 - the root workspace;
-- the nested FlashShell workspace.
+- the nested Flash workspace.
 
 Both evaluate the configured categories:
 
@@ -691,7 +691,7 @@ Artifact names and retention periods are workflow-owned values. Read the active 
 
 The current automation uses several independent drift and integrity controls:
 
-- root and FlashShell Rust toolchains are pinned separately;
+- root and Flash Rust toolchains are pinned separately;
 - Cargo lockfiles record the selected Rust dependency resolution;
 - Cargo policies check advisories, licenses, bans, and sources;
 - shipped Git-based package recipes require full immutable revisions;
@@ -729,7 +729,7 @@ This command runs:
 - the static product-profile contract;
 - whitespace validation;
 - root workspace formatting and tests;
-- FlashShell formatting, Clippy, and host tests;
+- Flash formatting, Clippy, and host tests;
 - Ruff over `ci/`.
 
 It does not build an image, boot QEMU, reproduce the hosted Docker handoff, generate SBOMs, run dependency review, or create attestations.
@@ -816,9 +816,9 @@ Local qualification is not identical to hosted qualification. It does not reprod
 - provenance attestation;
 - GitHub Release publication.
 
-### FlashShell target compilation
+### Flash target compilation
 
-Target compilation is not part of `flashos check ci`. Run it separately when target-selected FlashShell code changes:
+Target compilation is not part of `flashos check ci`. Run it separately when target-selected Flash code changes:
 
 ```bash
 flashos check target
@@ -827,8 +827,8 @@ flashos check target
 or:
 
 ```bash
-cd components/flashshell
-redoxer build -p flashshell-cli --bin fsh
+cd components/flash
+redoxer build -p flash-cli --bin fsh
 ```
 
 A successful target build remains distinct from image and runtime qualification.
@@ -841,8 +841,8 @@ Start with the failing contract boundary rather than assuming a cause.
 | ------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Root formatting                 | Root source differs from formatter output                             | Reported file and pinned root toolchain                                     |
 | Root tests                      | A host-side build-system assertion failed                             | Test output, root workspace changes, lockfile                               |
-| FlashShell formatting or Clippy | FlashShell source or lint policy failed                               | Reported crate, target, warning, or formatter output                        |
-| FlashShell tests                | A host-side component test failed                                     | Test target, fixture, platform path, recent language or runtime change      |
+| Flash formatting or Clippy | Flash source or lint policy failed                               | Reported crate, target, warning, or formatter output                        |
+| Flash tests                | A host-side component test failed                                     | Test target, fixture, platform path, recent language or runtime change      |
 | Ruff                            | A CI Python source rule failed                                        | Reported `ci/` file and diagnostic                                          |
 | Product profile                 | A static repository invariant failed                                  | Exact `profile contract:` message and owning manifest or workflow           |
 | Container build                 | The hosted tool boundary could not be constructed                     | Base image, package installation, installer download, checksum              |
@@ -904,7 +904,7 @@ When changing a third-party Action, preserve a full commit pin. When changing a 
 | Dependency-policy orchestration       | [`.github/workflows/security.yml`](../.github/workflows/security.yml)         |
 | Release qualification and publication | [`.github/workflows/release.yml`](../.github/workflows/release.yml)           |
 | Root Cargo policy                     | [`deny.toml`](../deny.toml)                                                   |
-| FlashShell Cargo policy               | [`components/flashshell/deny.toml`](../components/flashshell/deny.toml)       |
+| Flash Cargo policy               | [`components/flash/deny.toml`](../components/flash/deny.toml)       |
 | Product version                       | [`versions.env`](../versions.env)                                             |
 | Development image profile             | [`config/x86_64/flashos.toml`](../config/x86_64/flashos.toml)                 |
 | Release image profile                 | [`config/x86_64/flashos-release.toml`](../config/x86_64/flashos-release.toml) |
@@ -915,11 +915,11 @@ When changing a third-party Action, preserve a full commit pin. When changing a 
 
 - [Verification and Testing](../docs/verification.md) — Evidence layers, qualification boundaries, and supported claims.
 - [Development](../docs/development.md) — Repository setup, image building, profiles, and local helper usage.
-- [FlashShell Development](../components/flashshell/docs/development.md) — FlashShell workspace checks, tests, fuzzing, target compilation, and package integration.
+- [Flash Development](../components/flash/docs/development.md) — Flash workspace checks, tests, fuzzing, target compilation, and package integration.
 - [Architecture](../docs/architecture.md) — System layers, profile composition, package boundaries, and image construction.
 - [Security Policy](../.github/SECURITY.md) — Private vulnerability-reporting instructions and supported security scope.
 - [Changelog](../CHANGELOG.md) — Published project and release changes.
 
 ---
 
-[← Previous: FlashShell Development](../components/flashshell/docs/development.md) · [Documentation index](../docs/README.md) · [Next: Changelog →](../CHANGELOG.md)
+[← Previous: Flash Development](../components/flash/docs/development.md) · [Documentation index](../docs/README.md) · [Next: Changelog →](../CHANGELOG.md)

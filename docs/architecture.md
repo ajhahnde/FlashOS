@@ -13,7 +13,7 @@ This document describes the current FlashOS system layers, image composition, bu
 - [Image configuration](#image-configuration)
 - [Build-to-image flow](#build-to-image-flow)
 - [Boot-to-shell flow](#boot-to-shell-flow)
-- [FlashShell integration](#flashshell-integration)
+- [Flash integration](#flash-integration)
 - [Verification boundaries](#verification-boundaries)
 - [What this architecture does not imply](#what-this-architecture-does-not-imply)
 - [Sources of truth](#sources-of-truth)
@@ -27,7 +27,7 @@ The current FlashOS product architecture is defined by the following boundaries:
 | Product architecture        | x86_64                               |
 | Target ABI                  | `x86_64-unknown-redox`               |
 | Primary environment         | Text-based console interface         |
-| Primary user interface      | FlashShell at `/usr/bin/fsh`         |
+| Primary user interface      | Flash at `/usr/bin/fsh`         |
 | Primary evaluation platform | QEMU `q35` with x86_64 UEFI firmware |
 | System maturity             | Pre-alpha                            |
 
@@ -67,11 +67,11 @@ Target environment
 │        ↓                                                     │
 │ Console login                                                │
 │        ↓                                                     │
-│ FlashShell and external userspace commands                   │
+│ Flash and external userspace commands                   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The host environment produces an image for the target environment. Host-side utilities, container dependencies, and development-only FlashShell integrations are not automatically part of the generated operating-system image.
+The host environment produces an image for the target environment. Host-side utilities, container dependencies, and development-only Flash integrations are not automatically part of the generated operating-system image.
 
 ## Ownership and dependency model
 
@@ -79,7 +79,7 @@ FlashOS currently combines project-owned product components with inherited and e
 
 | Category                               | Meaning                                                                                    | Examples                                                            |
 | -------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| **FlashOS-owned component**            | Source or configuration maintained as a direct FlashOS product responsibility              | Image profiles, FlashShell, documentation, CI contracts             |
+| **FlashOS-owned component**            | Source or configuration maintained as a direct FlashOS product responsibility              | Image profiles, Flash, documentation, CI contracts             |
 | **Pinned upstream component**          | External source fetched at a specific revision and built as part of the image              | Kernel, bootloader, `relibc`, base services, utilities              |
 | **Locally patched upstream component** | Pinned upstream source modified by repository-maintained patches                           | Kernel, bootloader, installer, and login branding or policy changes |
 | **Inherited build infrastructure**     | Repository-local orchestration derived from the Redox build system and adapted for FlashOS | Root Cargo build crate, `Makefile`, `mk/`, Cookbook integration     |
@@ -143,15 +143,15 @@ Runtime drivers and services are selected through the package set and initialize
 
 ### Userspace utilities
 
-The active image selects a small console-oriented userspace. It includes a mixture of Redox utilities, uutils-based commands, networking support, runtime libraries, and FlashShell.
+The active image selects a small console-oriented userspace. It includes a mixture of Redox utilities, uutils-based commands, networking support, runtime libraries, and Flash.
 
-These programs remain separate processes. FlashShell coordinates command execution but does not reimplement every external utility included in the image.
+These programs remain separate processes. Flash coordinates command execution but does not reimplement every external utility included in the image.
 
-### FlashShell
+### Flash
 
-FlashShell is the primary FlashOS-owned user-facing component. Its executable is named `fsh`, and the active system profiles assign `/usr/bin/fsh` as the login shell for both configured accounts.
+Flash is the primary FlashOS-owned user-facing component. Its executable is named `fsh`, and the active system profiles assign `/usr/bin/fsh` as the login shell for both configured accounts.
 
-FlashShell is a userspace process. It does not replace the kernel, system initialization, authentication service, filesystem, package manager, or external command implementations.
+Flash is a userspace process. It does not replace the kernel, system initialization, authentication service, filesystem, package manager, or external command implementations.
 
 ## Image configuration
 
@@ -189,7 +189,7 @@ The base profile retains interfaces needed by the current console system, includ
 The development and release profiles add:
 
 ```text
-flashshell
+flash
 coreutils
 extrautils
 ```
@@ -258,7 +258,7 @@ x86_64 UEFI firmware
 → framebuffer console and input service
 → getty and login
 → /usr/bin/fsh
-→ FlashShell built-ins or external userspace processes
+→ Flash built-ins or external userspace processes
 ```
 
 The current QEMU configuration uses the `q35` machine model and normally exposes the main disk through an emulated NVMe interface. The live-image qualification path exposes the live artifact as USB mass storage.
@@ -267,28 +267,28 @@ After the kernel starts, installed initialization scripts launch the required se
 
 This sequence is verified automatically for the defined QEMU configurations. It does not establish equivalent behavior on arbitrary physical hardware.
 
-## FlashShell integration
+## Flash integration
 
-FlashShell source is maintained as a nested Cargo workspace under [`components/flashshell/`](../components/flashshell/). The workspace separates syntax processing, runtime evaluation, platform contracts, platform adaptation, and the `fsh` command-line binary.
+Flash source is maintained as a nested Cargo workspace under [`components/flash/`](../components/flash/). The workspace separates syntax processing, runtime evaluation, platform contracts, platform adaptation, and the `fsh` command-line binary.
 
 The system-image package is defined by:
 
 ```text
-recipes/terminal/flashshell/recipe.toml
+recipes/terminal/flash/recipe.toml
 ```
 
 That recipe:
 
 - fetches the FlashOS repository at a pinned commit;
-- selects `components/flashshell/crates/flashshell-cli`;
+- selects `components/flash/crates/flash-cli`;
 - builds the binary named `fsh`;
 - installs the resulting package into the target image.
 
-The package input is therefore the revision pinned by the recipe, not automatically every uncommitted or newer change present in a developer's current working tree. Updating FlashShell in a produced image requires keeping the component source, recipe revision, version metadata, and verification expectations aligned.
+The package input is therefore the revision pinned by the recipe, not automatically every uncommitted or newer change present in a developer's current working tree. Updating Flash in a produced image requires keeping the component source, recipe revision, version metadata, and verification expectations aligned.
 
-FlashShell also distinguishes host and target integrations at compile time. macOS and Linux development builds use host-oriented configuration, history, and line-editing integrations, while the Redox target selects its target terminal editor path. A feature demonstrated in a host build must therefore not be documented as available inside FlashOS until the target path and image have been checked.
+Flash also distinguishes host and target integrations at compile time. macOS and Linux development builds use host-oriented configuration, history, and line-editing integrations, while the Redox target selects its target terminal editor path. A feature demonstrated in a host build must therefore not be documented as available inside FlashOS until the target path and image have been checked.
 
-Detailed language behavior and internal crate design belong in the [FlashShell Documentation](../components/flashshell/docs/README.md) and [FlashShell Architecture](../components/flashshell/docs/architecture.md).
+Detailed language behavior and internal crate design belong in the [Flash Documentation](../components/flash/docs/README.md) and [Flash Architecture](../components/flash/docs/architecture.md).
 
 ## Verification boundaries
 
@@ -301,7 +301,7 @@ Architecture, build success, runtime qualification, and hardware support are sep
 - the exact declared package set;
 - inclusion of the shared base profile;
 - exclusion of selected graphical-stack identifiers;
-- FlashShell login-shell paths;
+- Flash login-shell paths;
 - development and release profile alignment;
 - release credential restrictions;
 - required framebuffer, terminal, and audio scheme access;
@@ -314,7 +314,7 @@ This check validates configuration and repository structure. It does not boot an
 
 ### Runtime contract
 
-[`ci/qemu_smoke.py`](../ci/qemu_smoke.py) boots an already-built image and checks the observable x86_64 QEMU path. Its assertions cover firmware and bootloader progress, kernel startup, selected driver initialization, login, the FlashShell prompt, external pipelines, and target-side interactive editing behavior.
+[`ci/qemu_smoke.py`](../ci/qemu_smoke.py) boots an already-built image and checks the observable x86_64 QEMU path. Its assertions cover firmware and bootloader progress, kernel startup, selected driver initialization, login, the Flash prompt, external pipelines, and target-side interactive editing behavior.
 
 The smoke test consumes image bytes in snapshot mode and does not use a successful boot as permission to modify the promoted artifact.
 
@@ -338,7 +338,7 @@ It is not. An upstream driver, package, architecture, or documented behavior bec
 
 ### FlashOS has an independent kernel and userspace stack
 
-It does not. The project currently owns its product profile, identity, FlashShell, documentation, verification contracts, and selected patches while relying extensively on pinned upstream kernel, ABI, library, service, utility, packaging, and image-building components.
+It does not. The project currently owns its product profile, identity, Flash, documentation, verification contracts, and selected patches while relying extensively on pinned upstream kernel, ABI, library, service, utility, packaging, and image-building components.
 
 ### Branding patches replace technical dependencies
 
@@ -348,9 +348,9 @@ They do not. Branding patches change selected user-visible strings and identifie
 
 It does not. The active profile excludes graphical desktop and windowing stacks while retaining the framebuffer console, keyboard input, terminal, networking, and audio paths required by the current product contract.
 
-### FlashShell is POSIX shell compatible
+### Flash is POSIX shell compatible
 
-It is not intended to be a drop-in implementation of Bash or `/bin/sh`. Scripts and commands must follow the syntax and execution model documented for FlashShell.
+It is not intended to be a drop-in implementation of Bash or `/bin/sh`. Scripts and commands must follow the syntax and execution model documented for Flash.
 
 ### A successful QEMU boot qualifies physical hardware
 
@@ -372,8 +372,8 @@ Use the following files when evaluating or changing an architectural contract:
 | Package construction           | [`mk/repo.mk`](../mk/repo.mk) and package recipes under [`recipes/`](../recipes/)       |
 | Image assembly                 | [`mk/disk.mk`](../mk/disk.mk)                                                           |
 | QEMU device model              | [`mk/qemu.mk`](../mk/qemu.mk)                                                           |
-| FlashShell source architecture | [`components/flashshell/`](../components/flashshell/)                                   |
-| FlashShell image package       | [`recipes/terminal/flashshell/recipe.toml`](../recipes/terminal/flashshell/recipe.toml) |
+| Flash source architecture | [`components/flash/`](../components/flash/)                                   |
+| Flash image package       | [`recipes/terminal/flash/recipe.toml`](../recipes/terminal/flash/recipe.toml) |
 | Product-profile invariants     | [`ci/check_profile.py`](../ci/check_profile.py)                                         |
 | Runtime qualification          | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                                               |
 | Release version                | [`versions.env`](../versions.env)                                                       |

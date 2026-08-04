@@ -2,7 +2,7 @@
 
 [FlashOS](../README.md) › [Documentation](README.md) › Development
 
-This guide describes the repository-wide workflow for modifying FlashOS system profiles, build infrastructure, packages, and component integration. It assumes that the host environment and first development image already work as described in [Getting Started](getting-started.md); detailed verification contracts and FlashShell-internal development procedures are documented separately.
+This guide describes the repository-wide workflow for modifying FlashOS system profiles, build infrastructure, packages, and component integration. It assumes that the host environment and first development image already work as described in [Getting Started](getting-started.md); detailed verification contracts and Flash-internal development procedures are documented separately.
 
 ## On this page
 
@@ -15,7 +15,7 @@ This guide describes the repository-wide workflow for modifying FlashOS system p
 - [Develop packages and recipes](#develop-packages-and-recipes)
 - [Modify system profiles](#modify-system-profiles)
 - [Modify the build infrastructure](#modify-the-build-infrastructure)
-- [Develop FlashShell](#develop-flashshell)
+- [Develop Flash](#develop-flash)
 - [Manage generated state](#manage-generated-state)
 - [Maintain versions and pinned sources](#maintain-versions-and-pinned-sources)
 - [Update documentation](#update-documentation)
@@ -30,7 +30,7 @@ FlashOS development spans several distinct layers:
 | Product configuration  | `config/`                                     | Changes to installed packages, users, files, services, or permissions          |
 | Package integration    | `recipes/`                                    | Target packages consumed by the image                                          |
 | Build orchestration    | `Makefile`, `mk/`, `src/`, `podman/`          | Changes to package cooking, toolchains, image assembly, or container execution |
-| FlashShell             | `components/flashshell/`                      | Changes to the primary interactive and scripting interface                     |
+| Flash             | `components/flash/`                      | Changes to the primary interactive and scripting interface                     |
 | Verification contracts | `ci/`, `.github/workflows/`                   | Changes to repository, image, or runtime qualification                         |
 | Public documentation   | `README.md`, `docs/`, component documentation | Changes to public usage and technical guidance                                 |
 
@@ -124,8 +124,8 @@ config/
 recipes/
     Package recipes, fetched source trees, patches, and package build rules
 
-components/flashshell/
-    Independent FlashShell Cargo workspace and component documentation
+components/flash/
+    Independent Flash Cargo workspace and component documentation
 
 ci/
     Executable local product and runtime contracts
@@ -146,7 +146,7 @@ versions.env
 
 The root Rust package, `flashos_build`, supports package and image construction. It is not the operating-system kernel.
 
-FlashShell is an independent Cargo workspace under `components/flashshell/`. It has its own lockfile, Rust toolchain, package metadata, tests, and development documentation.
+Flash is an independent Cargo workspace under `components/flash/`. It has its own lockfile, Rust toolchain, package metadata, tests, and development documentation.
 
 ## Choose the correct development path
 
@@ -193,9 +193,9 @@ Edit `Makefile`, `mk/`, `src/`, or `podman/` when the change concerns:
 
 These paths are inherited build infrastructure adapted for FlashOS. Preserve active compatibility interfaces unless the change deliberately replaces the corresponding dependency.
 
-### Change FlashShell behavior
+### Change Flash behavior
 
-Edit `components/flashshell/` when the change concerns:
+Edit `components/flash/` when the change concerns:
 
 - syntax or parsing;
 - runtime evaluation;
@@ -205,7 +205,7 @@ Edit `components/flashshell/` when the change concerns:
 - terminal input or line editing;
 - the `fsh` command-line interface.
 
-Use the component-specific [FlashShell Development Guide](../components/flashshell/docs/development.md) for its internal workflow.
+Use the component-specific [Flash Development Guide](../components/flash/docs/development.md) for its internal workflow.
 
 ### Change a verification requirement
 
@@ -349,7 +349,7 @@ The repository build tool resolves recipes through Cookbook. Recipe names, sourc
 Locate a recipe:
 
 ```bash
-flashos recipe find flashshell
+flashos recipe find flash
 ```
 
 Show the configured cook tree:
@@ -361,13 +361,13 @@ flashos recipe tree
 Show the dependency tree for a specific recipe:
 
 ```bash
-flashos recipe tree flashshell
+flashos recipe tree flash
 ```
 
 Inspect what would be pushed into the image:
 
 ```bash
-flashos recipe image-tree flashshell
+flashos recipe image-tree flash
 ```
 
 These commands are useful before changing package dependencies or assuming that a package is part of the active profile.
@@ -377,13 +377,13 @@ These commands are useful before changing package dependencies or assuming that 
 Cook a package without first cleaning its existing build output:
 
 ```bash
-flashos recipe build flashshell
+flashos recipe build flash
 ```
 
 Clean and cook it again:
 
 ```bash
-flashos recipe rebuild flashshell
+flashos recipe rebuild flash
 ```
 
 Multiple recipe names may be supplied as a comma-separated list where the underlying recipe command supports it:
@@ -406,13 +406,13 @@ Use a clean rebuild after changing:
 Clean compiled output while retaining fetched source:
 
 ```bash
-flashos recipe clean flashshell
+flashos recipe clean flash
 ```
 
 Remove fetched source:
 
 ```bash
-flashos recipe unfetch flashshell
+flashos recipe unfetch flash
 ```
 
 Unfetching is broader than cleaning. Use it when changing a source URL, revision, archive, or patch input that requires the recipe to fetch a fresh source tree.
@@ -422,19 +422,19 @@ Unfetching is broader than cleaning. Use it when changing a source URL, revision
 A built package can be pushed into an existing development disk:
 
 ```bash
-flashos recipe push flashshell
+flashos recipe push flash
 ```
 
 Build and push in one operation:
 
 ```bash
-flashos recipe build-push flashshell
+flashos recipe build-push flash
 ```
 
 Clean, rebuild, and push:
 
 ```bash
-flashos recipe rebuild-push flashshell
+flashos recipe rebuild-push flash
 ```
 
 > **Warning:** Stop QEMU before pushing packages into an image. Modifying an image while QEMU is using it can corrupt the filesystem.
@@ -576,7 +576,7 @@ cargo fmt --all --check
 cargo test --locked
 ```
 
-The root workspace uses the toolchain selected by the root `rust-toolchain.toml`. Do not assume that it uses the same compiler channel as FlashShell.
+The root workspace uses the toolchain selected by the root `rust-toolchain.toml`. Do not assume that it uses the same compiler channel as Flash.
 
 ### Podman behavior
 
@@ -597,12 +597,12 @@ Disk assembly writes to a temporary `.partial` file and promotes it to the final
 
 Preserve this behavior when changing image generation. A failed assembly must not silently replace a previously complete artifact with a partial image.
 
-## Develop FlashShell
+## Develop Flash
 
-FlashShell is maintained in:
+Flash is maintained in:
 
 ```text
-components/flashshell/
+components/flash/
 ```
 
 Its workspace currently separates syntax, runtime, platform contracts, POSIX-oriented host integration, and the `fsh` executable.
@@ -616,7 +616,7 @@ flashos shell all
 Equivalent component-local commands are:
 
 ```bash
-cd components/flashshell
+cd components/flash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
@@ -631,30 +631,30 @@ flashos shell target
 Or from the component workspace:
 
 ```bash
-redoxer build -p flashshell-cli --bin fsh
+redoxer build -p flash-cli --bin fsh
 ```
 
-Host success does not prove target success. FlashShell selects platform-specific terminal and process integrations, so behavior demonstrated on Linux or macOS must be checked separately on the Redox target and in the FlashOS image where applicable.
+Host success does not prove target success. Flash selects platform-specific terminal and process integrations, so behavior demonstrated on Linux or macOS must be checked separately on the Redox target and in the FlashOS image where applicable.
 
-For parser fixtures, golden corpora, fuzzing, runtime tests, and crate responsibilities, use the [FlashShell Development Guide](../components/flashshell/docs/development.md).
+For parser fixtures, golden corpora, fuzzing, runtime tests, and crate responsibilities, use the [Flash Development Guide](../components/flash/docs/development.md).
 
-### Image integration of FlashShell
+### Image integration of Flash
 
 The image package is controlled by:
 
 ```text
-recipes/terminal/flashshell/recipe.toml
+recipes/terminal/flash/recipe.toml
 ```
 
 That recipe fetches the FlashOS repository at a pinned Git revision and builds:
 
 ```text
-components/flashshell/crates/flashshell-cli
+components/flash/crates/flash-cli
 ```
 
 Uncommitted edits in the current checkout are therefore not automatically consumed by a normal recipe build.
 
-When integrating a FlashShell revision into an image:
+When integrating a Flash revision into an image:
 
 1. complete the component-level checks;
 2. confirm the target build where required;
@@ -787,7 +787,7 @@ Retain and update the appropriate lockfile for the workspace being changed:
 
 ```text
 Cargo.lock
-components/flashshell/Cargo.lock
+components/flash/Cargo.lock
 ```
 
 Use `--locked` for checks intended to reproduce the committed dependency resolution. Do not regenerate unrelated lockfile entries without reviewing the resulting dependency changes.
@@ -809,7 +809,7 @@ Place detailed information in its primary location:
 | Exact CI behavior            | [CI/CD Contracts](../ci/README.md)                                  |
 | Hardware evidence            | [Hardware Compatibility](hardware.md)                               |
 | Future direction             | [Roadmap](roadmap.md)                                               |
-| FlashShell details           | [FlashShell Documentation](../components/flashshell/docs/README.md) |
+| Flash details           | [Flash Documentation](../components/flash/docs/README.md) |
 
 Other documents should provide a short summary and link to the primary source rather than duplicating a full procedure.
 
@@ -824,7 +824,7 @@ Before documenting a command, path, syntax form, or runtime claim:
 - distinguish current behavior from planned work;
 - avoid turning inherited upstream behavior into a FlashOS support claim.
 
-FlashShell examples require particular care because it is not a POSIX shell and uses platform-specific integrations.
+Flash examples require particular care because it is not a POSIX shell and uses platform-specific integrations.
 
 ### Preserve navigation
 
@@ -872,7 +872,7 @@ cargo fmt --all --check
 cargo test --locked
 ```
 
-### FlashShell changes
+### Flash changes
 
 ```bash
 flashos shell all

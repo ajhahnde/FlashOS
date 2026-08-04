@@ -4,14 +4,14 @@
 
 This roadmap describes the intended public development direction for FlashOS, from the current pre-alpha system toward a more complete terminal-native operating environment. It communicates priorities and completion criteria rather than release dates, internal task tracking, or guarantees that every listed initiative will ship unchanged.
 
-> **Project status:** FlashOS as a complete operating system remains pre-alpha software. While FlashShell component documentation describes the intended stable FlashShell v1.0 contract, not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. While Flash component documentation describes the intended stable Flash v1.0 contract, not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
 
 ## On this page
 
 - [How to read this roadmap](#how-to-read-this-roadmap)
 - [Current foundation](#current-foundation)
 - [Development sequence](#development-sequence)
-- [Now: Complete and qualify FlashShell v1](#now-complete-and-qualify-flashshell-v1)
+- [Now: Complete and qualify Flash v1](#now-complete-and-qualify-flash-v1)
 - [Next: Qualify the next release](#next-qualify-the-next-release)
 - [Next: Expand the terminal environment](#next-expand-the-terminal-environment)
 - [Later: Reduce transitional dependencies](#later-reduce-transitional-dependencies)
@@ -51,8 +51,8 @@ The roadmap begins from the following established product boundaries:
 
 - FlashOS targets x86_64.
 - The user environment is text-based and does not include a graphical desktop stack.
-- FlashShell is installed as `/usr/bin/fsh` and serves as the primary interactive and scripting interface.
-- The public FlashShell guides define the intended v1 language, runtime, tooling, and platform-capability contract; individual releases still require implementation and target-qualification evidence.
+- Flash is installed as `/usr/bin/fsh` and serves as the primary interactive and scripting interface.
+- The public Flash guides define the intended v1 language, runtime, tooling, and platform-capability contract; individual releases still require implementation and target-qualification evidence.
 - Development and live images are built through separate persistent-disk and removable-media paths.
 - Both image forms have automated x86_64 QEMU qualification contracts.
 - Physical hardware claims are limited to individually recorded evidence.
@@ -60,14 +60,14 @@ The roadmap begins from the following established product boundaries:
 - The current kernel, ABI, libc, boot, package, installer, and build foundations still depend substantially on the Redox ecosystem.
 - The intended long-term borrowed boundary is the kernel, but replacement of other dependencies remains incremental rather than immediate.
 
-These boundaries describe the starting point. They do not claim that FlashOS is complete or that every part of the documented FlashShell v1 contract is already implemented and qualified for every target.
+These boundaries describe the starting point. They do not claim that FlashOS is complete or that every part of the documented Flash v1 contract is already implemented and qualified for every target.
 
 For the exact current state, consult:
 
 - [Architecture](architecture.md)
 - [Verification and Testing](verification.md)
 - [Hardware Compatibility](hardware.md)
-- [FlashShell Documentation](../components/flashshell/docs/README.md)
+- [Flash Documentation](../components/flash/docs/README.md)
 - [Changelog](../CHANGELOG.md)
 
 ## Development sequence
@@ -75,7 +75,7 @@ For the exact current state, consult:
 The intended high-level sequence is:
 
 ```text
-complete and qualify the documented FlashShell v1 contract
+complete and qualify the documented Flash v1 contract
                 ↓
 qualify and publish an exact release candidate
                 ↓
@@ -88,9 +88,9 @@ broaden physical hardware and architecture evidence
 
 Some supporting work, such as documentation, dependency maintenance, security review, and hardware investigation, may occur throughout this sequence. The sequence indicates which product initiative should remain primary rather than requiring every supporting activity to stop.
 
-## Now: Complete and qualify FlashShell v1
+## Now: Complete and qualify Flash v1
 
-FlashShell is the defining user-facing component of FlashOS. The current priority is to complete the implementation of the documented v1 contract, align its tests and tooling with that contract, and qualify the supported host and FlashOS target surfaces before beginning another major user-interface component in parallel.
+Flash is the defining user-facing component of FlashOS. The current priority is to complete the implementation of the documented v1 contract, align its tests and tooling with that contract, and qualify the supported host and FlashOS target surfaces before beginning another major user-interface component in parallel.
 
 Existing functionality such as direct external execution, explicit argument expansion, byte-stream pipelines, structured values, target-side line editing, history, multiline input, status branching, and interactive job control forms the baseline for this work.
 
@@ -110,7 +110,7 @@ Module loading does not introduce wildcard mutation of unrelated scopes, does no
 
 ### Discoverability, static checking, formatting, and editor tooling
 
-FlashShell should make nontrivial scripts discoverable, validatable, and inspectable without requiring their execution.
+Flash should make nontrivial scripts discoverable, validatable, and inspectable without requiring their execution.
 
 The required v1 tooling surface includes:
 
@@ -133,13 +133,13 @@ Work in this area includes:
 - aligning host and FlashOS behavior without hiding or emulating unsupported target capabilities;
 - keeping redirected, non-interactive, and terminal-attached sessions distinct where the operating system requires it;
 - validating configuration, history, cancellation, redirection, process lifetime, and terminal restoration on target systems;
-- mapping FlashShell capabilities to the actual FlashOS target ABI through the reserved FlashOS platform adapter role.
+- mapping Flash capabilities to the actual FlashOS target ABI through the reserved FlashOS platform adapter role.
 
 Host behavior on Linux or macOS must not be presented as FlashOS behavior until the target build and image verification path have been exercised.
 
 ### Hardening and release evidence
 
-While FlashShell component documentation defines the stable FlashShell v1.0 contract, before the project declares a completed v1 runtime release across all target platforms, it intends to:
+While Flash component documentation defines the stable Flash v1.0 contract, before the project declares a completed v1 runtime release across all target platforms, it intends to:
 
 - expand lexer, parser, formatter, checker, and evaluator fuzzing;
 - stress pipelines, cancellation, jobs, and terminal transitions;
@@ -152,7 +152,7 @@ While FlashShell component documentation defines the stable FlashShell v1.0 cont
 
 ### Completion criteria
 
-FlashShell moves from the primary implementation initiative when:
+Flash moves from the primary implementation initiative when:
 
 - maintainable multi-file programs can be resolved, loaded, statically checked, canonically formatted, and documented;
 - explicit module imports, exports, and script arguments behave according to the v1 contract;
@@ -162,11 +162,11 @@ FlashShell moves from the primary implementation initiative when:
 - no known critical command-injection, descriptor-lifetime, terminal-corruption, process-lifetime, or data-loss defect remains open;
 - public language, scripting, architecture, and toolchain documentation matches executable behavior.
 
-This is a product-completion boundary, not a promise that FlashShell will stop evolving after v1.
+This is a product-completion boundary, not a promise that Flash will stop evolving after v1.
 
 ## Next: Qualify the next release
 
-After the active FlashShell scope reaches a coherent release boundary, FlashOS should qualify one exact candidate rather than treating independently rebuilt artifacts as interchangeable.
+After the active Flash scope reaches a coherent release boundary, FlashOS should qualify one exact candidate rather than treating independently rebuilt artifacts as interchangeable.
 
 ### Candidate definition
 
@@ -189,7 +189,7 @@ Version selection should follow the user-visible and architectural change set. I
 The exact candidate should pass the applicable layers in order:
 
 1. source formatting, linting, and tests;
-2. FlashShell target compilation;
+2. Flash target compilation;
 3. product-profile and credential contracts;
 4. clean-container image construction;
 5. checksum and artifact-inventory verification;
@@ -217,7 +217,7 @@ A successful evaluation release does not imply production readiness, long-term s
 
 ## Next: Expand the terminal environment
 
-After FlashShell completion, the next major product workstream is the broader FlashOS-owned terminal environment.
+After Flash completion, the next major product workstream is the broader FlashOS-owned terminal environment.
 
 The objective is not to add a graphical desktop. It is to make the text interface feel like a coherent operating environment rather than a shell placed on top of an inherited collection of utilities.
 
@@ -251,7 +251,7 @@ The preferred model is a small set of composable, keyboard-driven tools rather t
 
 ### Utility integration
 
-Inherited `coreutils`, `extrautils`, and other terminal programs should continue to be tested against FlashShell's execution model.
+Inherited `coreutils`, `extrautils`, and other terminal programs should continue to be tested against Flash's execution model.
 
 Priority should be given to:
 
@@ -261,7 +261,7 @@ Priority should be given to:
 - non-UTF-8 and binary data where supported;
 - useful diagnostics;
 - operation through serial and framebuffer consoles;
-- predictable interaction with FlashShell pipelines and job control.
+- predictable interaction with Flash pipelines and job control.
 
 Replacing a utility is justified by a concrete FlashOS requirement, not by branding alone.
 
@@ -271,7 +271,7 @@ The terminal environment can be considered established when:
 
 - common workflows are possible without relying on undocumented host assumptions;
 - shared text-interface behavior is target-tested;
-- utilities compose predictably through FlashShell;
+- utilities compose predictably through Flash;
 - failure and recovery behavior is documented;
 - the environment remains usable over the supported console paths;
 - the package and dependency cost of each application is understood.
@@ -356,7 +356,7 @@ Useful additional evidence includes:
 
 - exact artifact and firmware identification;
 - repeated live-image boots;
-- external FlashShell pipeline execution;
+- external Flash pipeline execution;
 - home-directory write, read, and removal;
 - internal storage-controller observation without destructive testing;
 - network-controller detection and configuration;
@@ -436,7 +436,7 @@ Future security work should include:
 
 - a concise threat model;
 - a maintained record of accepted security debt;
-- review of FlashShell input, process, descriptor, history, and configuration boundaries;
+- review of Flash input, process, descriptor, history, and configuration boundaries;
 - review of artifact substitution and dependency replacement risks;
 - regression tests for reproducible findings;
 - least-privilege release automation;
@@ -464,7 +464,7 @@ Framebuffer use for the text console does not change this boundary.
 
 ### POSIX shell source compatibility
 
-FlashShell does not aim to become a drop-in implementation of `/bin/sh`, Bash, or another POSIX shell.
+Flash does not aim to become a drop-in implementation of `/bin/sh`, Bash, or another POSIX shell.
 
 The roadmap does not include:
 
@@ -541,7 +541,7 @@ The following files own the current facts behind this direction:
 | Development workflow           | [Development](development.md)                                       |
 | Verification model             | [Verification and Testing](verification.md)                         |
 | Physical hardware evidence     | [Hardware Compatibility](hardware.md)                               |
-| FlashShell behavior            | [FlashShell Documentation](../components/flashshell/docs/README.md) |
+| Flash behavior            | [Flash Documentation](../components/flash/docs/README.md) |
 | Release and evaluation limits  | [Security Policy](../.github/SECURITY.md)                           |
 | Technical CI contracts         | [CI/CD Contracts](../ci/README.md)                                  |
 

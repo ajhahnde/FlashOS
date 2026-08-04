@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 # This crate is the inherited build system. Every file under `src/` originates
 # upstream, so the package license matches the root LICENSE file rather than the
-# Apache-2.0 license that covers FlashOS-original code such as FlashShell.
+# Apache-2.0 license that covers FlashOS-original code such as Flash.
 license = "MIT"
 repository = "https://github.com/ajhahnde/FlashOS"
 default-run = "repo"

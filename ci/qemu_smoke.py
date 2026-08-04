@@ -358,7 +358,7 @@ print("\nqemu smoke: ok")
 verified = [
     "FlashOS identity",
     "TUI login",
-    "FlashShell pipeline",
+    "Flash pipeline",
     "IHDA audio driver",
     "interactive editing",
     "exit status",

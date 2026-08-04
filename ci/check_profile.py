@@ -32,7 +32,7 @@ EXPECTED_PACKAGES = {
     "bootloader",
     "coreutils",
     "extrautils",
-    "flashshell",
+    "flash",
     "kernel",
     "libgcc",
     "libstdcxx",
@@ -76,15 +76,15 @@ release_profile = load(RELEASE_PROFILE_PATH)
 base = load(BASE_PATH)
 version = release_version()
 root_manifest = load(ROOT / "Cargo.toml")
-flashshell_manifest = load(ROOT / "components/flashshell/Cargo.toml")
+flash_manifest = load(ROOT / "components/flash/Cargo.toml")
 
 if root_manifest.get("package", {}).get("version") != version:
     fail("root Cargo package version drifted from versions.env")
-flashshell_version = (
-    flashshell_manifest.get("workspace", {}).get("package", {}).get("version")
+flash_version = (
+    flash_manifest.get("workspace", {}).get("package", {}).get("version")
 )
-if flashshell_version != version:
-    fail("FlashShell workspace version drifted from versions.env")
+if flash_version != version:
+    fail("Flash workspace version drifted from versions.env")
 
 if profile.get("include") != ["../flashos-base.toml"]:
     fail("the x86_64 profile must include only ../flashos-base.toml")

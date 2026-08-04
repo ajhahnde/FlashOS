@@ -25,7 +25,7 @@ _flashos_zsh_completion() {
     'changes:inspect Git state without writing it'
     'commit:create a manual or generated Git commit'
     'check:run repository checks'
-    'shell:run FlashShell checks'
+    'shell:run Flash checks'
     'podman:inspect or control the Podman machine'
     'clean:remove an explicit generated-data scope'
     'root:change to the repository root'

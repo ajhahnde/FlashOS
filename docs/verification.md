@@ -66,7 +66,7 @@ source checks
 → release evidence
 ```
 
-Not every change requires every layer. A documentation-only edit does not require an image build, while a kernel, profile, login, filesystem, driver, FlashShell target-integration, or image-assembly change normally requires downstream image and runtime evidence.
+Not every change requires every layer. A documentation-only edit does not require an image build, while a kernel, profile, login, filesystem, driver, Flash target-integration, or image-assembly change normally requires downstream image and runtime evidence.
 
 A later layer does not make earlier failures irrelevant. For example, an image that happens to boot does not justify ignoring a failed product-profile check.
 
@@ -85,9 +85,9 @@ cargo test --locked
 
 These commands check the host-side `flashos_build` package and its committed dependency resolution. The root package supports the build system; it is not the FlashOS kernel.
 
-### FlashShell workspace
+### Flash workspace
 
-From `components/flashshell/`:
+From `components/flash/`:
 
 ```bash
 cargo fmt --all --check
@@ -95,11 +95,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 ```
 
-These checks cover the FlashShell host workspace, including its syntax, runtime, platform abstractions, and command-line packages as exercised by their tests.
+These checks cover the Flash host workspace, including its syntax, runtime, platform abstractions, and command-line packages as exercised by their tests.
 
 Host tests cannot reach every target-specific path. In particular, the FlashOS image selects target-side terminal and process integrations that require separate target compilation and runtime qualification.
 
-Detailed FlashShell test organization belongs in the [FlashShell Development Guide](../components/flashshell/docs/development.md).
+Detailed Flash test organization belongs in the [Flash Development Guide](../components/flash/docs/development.md).
 
 ### CI Python
 
@@ -148,11 +148,11 @@ Run the public host-side gate collection with:
 flashos check ci
 ```
 
-This command combines helper syntax checks, the product-profile contract, root workspace checks, FlashShell host checks, CI Python linting, and whitespace validation.
+This command combines helper syntax checks, the product-profile contract, root workspace checks, Flash host checks, CI Python linting, and whitespace validation.
 
 It does not:
 
-- build FlashShell for the target ABI;
+- build Flash for the target ABI;
 - build a package or system image;
 - boot QEMU;
 - reproduce the hosted Docker image workflow;
@@ -160,11 +160,11 @@ It does not:
 
 ## Target compilation
 
-Changes that affect target-specific FlashShell code should also compile the `fsh` binary for the Redox target:
+Changes that affect target-specific Flash code should also compile the `fsh` binary for the Redox target:
 
 ```bash
-cd components/flashshell
-redoxer build -p flashshell-cli --bin fsh
+cd components/flash
+redoxer build -p flash-cli --bin fsh
 ```
 
 With the root helper loaded, the equivalent command is:
@@ -175,7 +175,7 @@ flashos check target
 
 A successful target build proves that the selected binary compiles through the configured target toolchain. It does not prove that:
 
-- the FlashShell recipe uses the tested source revision;
+- the Flash recipe uses the tested source revision;
 - the binary is installed in an image;
 - login starts the binary;
 - external commands and terminal editing work inside FlashOS.
@@ -271,7 +271,7 @@ A successful build supports the claim that an artifact was assembled. It does no
 - reaches the bootloader;
 - starts the kernel successfully;
 - reaches login;
-- starts FlashShell;
+- starts Flash;
 - satisfies filesystem or permission expectations;
 - behaves identically to a hosted clean-container build.
 
@@ -379,7 +379,7 @@ The contract verifies those specific interactions. It does not currently establi
 - long-duration stability;
 - package installation after boot;
 - performance characteristics;
-- general FlashShell language conformance;
+- general Flash language conformance;
 - physical hardware compatibility.
 
 The `ihdad` marker proves that the expected guest driver path began initialization under the emulated controller. It does not prove that sound was produced.
@@ -411,7 +411,7 @@ The primary CI workflow separates source checks, static product validation, imag
 The standard CI workflow runs independent jobs for:
 
 - root workspace formatting and tests;
-- FlashShell formatting, Clippy, and host tests;
+- Flash formatting, Clippy, and host tests;
 - CI Python linting;
 - the product-profile contract;
 - whitespace validation.
@@ -472,7 +472,7 @@ Its current jobs include:
 
 - pull-request dependency review that rejects newly introduced dependencies at or above the configured severity threshold;
 - Cargo advisory, license, ban, and source-policy checks for the root workspace;
-- equivalent Cargo policy checks for the FlashShell workspace.
+- equivalent Cargo policy checks for the Flash workspace.
 
 The workflow runs on the configured repository events and schedule. A passing dependency-policy workflow does not constitute a full security audit of FlashOS, its upstream operating-system components, or produced images.
 
@@ -564,7 +564,7 @@ source ./flashos.sh
 flashos check ci
 ```
 
-Add target compilation when target-specific FlashShell code changed:
+Add target compilation when target-specific Flash code changed:
 
 ```bash
 flashos check target
@@ -630,7 +630,7 @@ A failure identifies the boundary at which an expected condition was not met. St
 | -------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | Formatting                 | Tracked source differs from formatter output                       | The reported files and workspace toolchain                               |
 | Root tests                 | A host-side build-system assertion failed                          | Test output, recent root workspace changes, lockfile                     |
-| FlashShell Clippy or tests | A host-side FlashShell quality rule failed                         | Reported crate, target, fixture, or warning                              |
+| Flash Clippy or tests | A host-side Flash quality rule failed                         | Reported crate, target, fixture, or warning                              |
 | Target compilation         | The selected binary did not compile for the target                 | Target-only code, dependencies, ABI, `redoxer` environment               |
 | Python lint                | A CI script violates the configured lint rules                     | Reported file and diagnostic                                             |
 | Product contract           | A static repository invariant failed                               | Exact `profile contract:` message and owning configuration               |

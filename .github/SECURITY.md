@@ -34,7 +34,7 @@ Security fixes are normally delivered through the active source tree and a later
 
 Reports are in scope when they concern a security boundary owned or materially changed by FlashOS, including:
 
-- FlashShell under [`components/flashshell/`](../components/flashshell/), including parsing, evaluation, command expansion, process execution, pipelines, redirections, job control, and terminal handling.
+- Flash under [`components/flash/`](../components/flash/), including parsing, evaluation, command expansion, process execution, pipelines, redirections, job control, and terminal handling.
 - FlashOS-authored build support, image profiles, configuration, installation behavior, CI contracts, and release automation.
 - FlashOS-authored package recipes and patches where FlashOS changes the behavior or security properties of a shipped component.
 - Integration vulnerabilities caused by how FlashOS configures, combines, packages, or exposes inherited components.
@@ -190,7 +190,7 @@ When a report might reveal a vulnerability, privilege boundary failure, credenti
 - [Verification and Testing](../docs/verification.md) — Evidence levels and the limits of automated qualification.
 - [Hardware Compatibility](../docs/hardware.md) — Published physical-device evidence.
 - [Changelog](../CHANGELOG.md) — Public release history and security-relevant changes.
-- [FlashShell Architecture](../components/flashshell/docs/architecture.md) — FlashShell trust and platform boundaries.
+- [Flash Architecture](../components/flash/docs/architecture.md) — Flash trust and platform boundaries.
 
 ---
 

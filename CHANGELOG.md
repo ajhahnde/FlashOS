@@ -7,15 +7,16 @@ All notable changes to the current FlashOS source tree are recorded in this docu
 The `0.9.0` and older tags inherited with the Redox OS source history are upstream tags, not FlashOS releases. The former AArch64 FlashOS release history remains available in the archived `FlashOS-old` repository.
 
 ## [Unreleased]
-
+### Changed
+- Renamed FlashShell to Flash across the codebase.
 ### Added
 
 - Added an optional sourceable Bash and Zsh helper layer for common image build,
-  interactive QEMU, exact-artifact smoke, profile, FlashShell, Podman, and local
+  interactive QEMU, exact-artifact smoke, profile, Flash, Podman, and local
   quality commands. The wrappers keep the x86_64 FlashOS profile and artifact
   paths consistent without hiding the underlying tools or exposing Git and
   physical-device writes.
-- Added interactive job control to FlashShell. Ctrl-C now interrupts the running
+- Added interactive job control to Flash. Ctrl-C now interrupts the running
   command without ending the shell, while Ctrl-Z retains an exact external
   foreground command as an addressable job and returns the prompt. `jobs`
   exposes structured job state, `bg` and `fg` resume stopped work in the chosen
@@ -51,7 +52,7 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
-- FlashShell now observes jobs continued by an external process, reports their
+- Flash now observes jobs continued by an external process, reports their
   live running state, and removes the stale stopped notice at the next command
   boundary.
 - Pinned every input the image is built from: the container base image by
@@ -68,7 +69,7 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   now applies to `build.sh` and to the `changelog`, `find-recipe`, and `ventoy`
   helper scripts.
 - Declared the license and repository of the build-support crate and dropped
-  its inherited author field, matching the FlashShell workspace metadata.
+  its inherited author field, matching the Flash workspace metadata.
 - Corrected two build-support paths that pointed at directories the recipe
   tree no longer uses.
 
@@ -122,9 +123,9 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   scope.
 - Made graphical XDG home directories optional in the inherited installer and
   disabled their creation for the FlashOS image.
-- Added FlashShell to the active source tree and installed `fsh` as the login
+- Added Flash to the active source tree and installed `fsh` as the login
   shell for both development accounts.
-- Added the FlashShell target recipe and target-build verification.
+- Added the Flash target recipe and target-build verification.
 - Added FlashOS hostname, release metadata, console issue, QEMU title, network
   boot filename, and image build path.
 - Restored the English documentation suite with the original FlashOS
@@ -132,10 +133,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 - Added public hardware, trademark, attribution, and upstream reference
   documents.
 - Restored GitHub Actions as an x86_64-native CI/CD architecture with
-  independent build-system, FlashShell, and TUI product-contract gates.
+  independent build-system, Flash, and TUI product-contract gates.
 - Added a FlashOS-owned Docker clean-room build, immutable checksummed image
   promotion, and a separate QEMU consumer that verifies FlashOS identity,
-  TUI login, FlashShell pipelines, and the IHDA audio driver.
+  TUI login, Flash pipelines, and the IHDA audio driver.
 - Added a self-contained live image for removable USB media and qualified its
   exact promoted bytes through an emulated USB mass-storage boot.
 - Added scheduled dependency policy, Dependabot, tag-driven release
@@ -157,7 +158,7 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 - Made future kernel divergence explicit: FlashOS may stop consuming Redox
   kernel updates when its kernel requirements differ.
 - Extended the product contract to enforce release-version lockstep across
-  the root crate, FlashShell workspace, README, `os-release`, console issue,
+  the root crate, Flash workspace, README, `os-release`, console issue,
   and release artefact names.
 - Moved build-provenance attestation into release-candidate packaging so a
   non-publishing dry run exercises the same attestation used by tagged
@@ -170,18 +171,18 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Verified
 
-- FlashShell host tests and clippy checks.
-- FlashShell target compilation for `x86_64-unknown-redox`.
+- Flash host tests and clippy checks.
+- Flash target compilation for `x86_64-unknown-redox`.
 - Root Cargo metadata and locked dependency check.
 - FlashOS build-environment selection for `x86_64` and the `flashos` profile.
 - QEMU boot, login to `>> `, and an external-to-external pipeline on the
   final rebranded image.
 - Automated QEMU contract including the FlashOS bootloader, kernel identity,
-  login prompt, FlashShell pipeline, and retained IHDA audio driver.
+  login prompt, Flash pipeline, and retained IHDA audio driver.
 - Non-publishing release workflow: clean-room rebuild of both images, separate
   NVMe and USB QEMU qualification, compression, checksum verification,
   CycloneDX SBOM generation, and build-provenance attestation.
-- Physical live USB boot, display, keyboard, login, and FlashShell validation
+- Physical live USB boot, display, keyboard, login, and Flash validation
   on a Sony VAIO VPCEB4L1E.
 
 ---

@@ -39,7 +39,7 @@ FlashOS uses the following evidence rules:
    A source file, driver recipe, upstream report, or successful QEMU run does not qualify a physical device.
 
 2. **Each subsystem is reported separately.**
-   Reaching FlashShell does not prove networking, audio playback, internal storage, suspend, or shutdown.
+   Reaching Flash does not prove networking, audio playback, internal storage, suspend, or shutdown.
 
 3. **Unknown remains unknown.**
    A subsystem that was not tested is recorded as `Not tested`, not inferred as either working or broken.
@@ -65,12 +65,12 @@ The overall status summarizes the highest physical test stage supported by the r
 | **Boot failed**     | Firmware attempted to load the image, but the FlashOS bootloader, kernel, or console path did not reach the next expected stage.                                                                    |
 | **Boot observed**   | FlashOS bootloader or kernel output was observed, but a usable console session was not established.                                                                                                 |
 | **Console reached** | A visible text console and at least one usable keyboard input path reached the login interface.                                                                                                     |
-| **Interactive**     | Login succeeded, FlashShell started, and the prompt accepted an interactive command.                                                                                                                |
+| **Interactive**     | Login succeeded, Flash started, and the prompt accepted an interactive command.                                                                                                                |
 | **Validated**       | The interactive baseline, an external pipeline, a non-destructive home-directory write/read/remove cycle, and a recorded shutdown or reboot outcome all completed on the exact identified artifact. |
 
 `Validated` is a console baseline, not a statement that every hardware subsystem works. Audio, networking, internal storage, pointing devices, power management, and other functions retain separate results.
 
-A device may therefore be `Validated` while an optional subsystem is explicitly reported as unsupported. Conversely, a device that reaches FlashShell but lacks the remaining baseline evidence is classified conservatively as `Interactive`.
+A device may therefore be `Validated` while an optional subsystem is explicitly reported as unsupported. Conversely, a device that reaches Flash but lacks the remaining baseline evidence is classified conservatively as `Interactive`.
 
 ## Emulated reference baseline
 
@@ -83,7 +83,7 @@ The hosted runtime workflow separately exercises:
 | `harddrive.img`  | NVMe                |
 | `redox-live.iso` | USB mass storage    |
 
-The QEMU smoke contract checks observable boot, login, FlashShell, external-process, filesystem, permission, and selected driver-startup behavior. It attaches the tested image in snapshot mode so that guest writes do not change the supplied artifact.
+The QEMU smoke contract checks observable boot, login, Flash, external-process, filesystem, permission, and selected driver-startup behavior. It attaches the tested image in snapshot mode so that guest writes do not change the supplied artifact.
 
 These results establish the expected emulated baseline before physical testing. They do not qualify a physical motherboard, firmware implementation, USB controller, storage controller, display adapter, keyboard, or audio codec.
 
@@ -95,7 +95,7 @@ Only devices with recorded physical FlashOS evidence are listed in this section.
 
 | Device              | FlashOS artifact           | Boot medium      | Recorded evidence                                                    | Not recorded                                                                                                | Overall status  |
 | ------------------- | -------------------------- | ---------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------- |
-| Sony VAIO VPCEB4L1E | FlashOS `0.1.0` live image | USB mass storage | Physical boot, display output, keyboard input, login, and FlashShell | Firmware mode, image checksum, external pipeline, internal storage, networking, audio, shutdown, and reboot | **Interactive** |
+| Sony VAIO VPCEB4L1E | FlashOS `0.1.0` live image | USB mass storage | Physical boot, display output, keyboard input, login, and Flash | Firmware mode, image checksum, external pipeline, internal storage, networking, audio, shutdown, and reboot | **Interactive** |
 
 ### Sony VAIO VPCEB4L1E
 
@@ -106,7 +106,7 @@ The published FlashOS `0.1.0` record confirms that the live USB image:
 - accepted keyboard input;
 - reached the login interface;
 - completed login;
-- started FlashShell.
+- started Flash.
 
 The public record does not identify the firmware mode or artifact checksum and does not document the remaining validated-baseline checks. The result is therefore classified as `Interactive` rather than extending it to unrecorded subsystems.
 
@@ -291,7 +291,7 @@ firmware
 → kernel startup
 → driver and service initialization
 → console login
-→ FlashShell
+→ Flash
 ```
 
 When a failure occurs, preserve:
@@ -328,13 +328,13 @@ Record whether:
 - the username is accepted;
 - the expected password behavior occurs;
 - `Login successful!` appears;
-- FlashShell reaches its `>> ` prompt.
+- Flash reaches its `>> ` prompt.
 
 Do not publish passwords other than credentials already documented as part of the public evaluation image.
 
 ### 6. Check an external pipeline
 
-At the FlashShell prompt, run:
+At the Flash prompt, run:
 
 ```fsh
 printf 'hardware\ncheck\n' | head -n 1
@@ -346,7 +346,7 @@ Expected output:
 hardware
 ```
 
-This checks that FlashShell can start two external processes, connect their byte streams, receive the first process's output, and return control to the prompt.
+This checks that Flash can start two external processes, connect their byte streams, receive the first process's output, and return control to the prompt.
 
 ### 7. Check a non-destructive filesystem path
 
@@ -553,7 +553,7 @@ Do not open a public issue for a suspected security vulnerability. Use the priva
 - Built-in keyboard: Passed / Failed / Not tested
 - External keyboard: Passed / Failed / Not tested
 - Login: Passed / Failed / Not tested
-- FlashShell prompt: Passed / Failed / Not tested
+- Flash prompt: Passed / Failed / Not tested
 - External pipeline: Passed / Failed / Not tested
 - Home file write/read/remove: Passed / Failed / Not tested
 - Internal storage: Passed / Failed / Not tested
@@ -605,7 +605,7 @@ It does not establish FlashOS compatibility because:
 - FlashOS is TUI-only rather than an upstream desktop image;
 - the tested image and configuration are different;
 - a historical result may no longer apply;
-- upstream reports do not exercise FlashShell or FlashOS release contracts.
+- upstream reports do not exercise Flash or FlashOS release contracts.
 
 Do not copy upstream devices into the FlashOS result table until a physical FlashOS artifact has been tested and the evidence has been recorded.
 

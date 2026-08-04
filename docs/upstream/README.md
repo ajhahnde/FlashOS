@@ -138,7 +138,7 @@ The following table summarizes the present relationship without replacing the de
 | System services and utilities  | Selected inherited packages built through repository recipes                | [`config/flashos-base.toml`](../../config/flashos-base.toml), [`recipes/`](../../recipes/) |
 | Package and image construction | Inherited and adapted Cookbook, installer, RedoxFS, and Make infrastructure | [`Makefile`](../../Makefile), [`mk/`](../../mk/), [`src/`](../../src/)                     |
 | System profile and identity    | Maintained by FlashOS                                                       | [`config/`](../../config/)                                                                 |
-| Primary shell                  | FlashOS-owned FlashShell component                                          | [`components/flashshell/`](../../components/flashshell/)                                   |
+| Primary shell                  | FlashOS-owned Flash component                                          | [`components/flash/`](../../components/flash/)                                   |
 | Verification and releases      | Maintained by FlashOS                                                       | [`ci/`](../../ci/), [`.github/workflows/`](../../.github/workflows/)                       |
 
 This is an architectural summary, not a complete software bill of materials. Individual images can also include third-party packages that are neither developed by FlashOS nor part of the Redox OS project.
@@ -221,7 +221,7 @@ The primary repository references are:
 
 - [`NOTICE`](../../NOTICE) — project relationship and high-level attribution;
 - [`LICENSE`](../../LICENSE) — MIT license retained for the inherited root build-system code;
-- [`components/flashshell/LICENSE`](../../components/flashshell/LICENSE) — Apache License 2.0 for FlashShell;
+- [`components/flash/LICENSE`](../../components/flash/LICENSE) — Apache License 2.0 for Flash;
 - [`TRADEMARK.md`](../../TRADEMARK.md) — FlashOS identity and use of Redox references.
 
 Third-party packages and inherited components retain their own licenses and copyright notices. The root license must not be interpreted as relicensing every dependency, package, or separately licensed component in the repository.
@@ -241,4 +241,4 @@ For an exact release artifact, use its accompanying source and image inventories
 
 ---
 
-[← Previous: Roadmap](../roadmap.md) · [Documentation index](../README.md) · [Next: FlashShell Overview →](../../components/flashshell/README.md)
+[← Previous: Roadmap](../roadmap.md) · [Documentation index](../README.md) · [Next: Flash Overview →](../../components/flash/README.md)
