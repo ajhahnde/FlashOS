@@ -14,7 +14,7 @@ This roadmap describes the intended public development direction for FlashOS, fr
 - [Now: Complete and qualify Flash v1](#now-complete-and-qualify-flash-v1)
 - [Next: Qualify the next release](#next-qualify-the-next-release)
 - [Next: Expand the terminal environment](#next-expand-the-terminal-environment)
-- [Later: Reduce transitional dependencies](#later-reduce-transitional-dependencies)
+- [Later: Evolve inherited system dependencies](#later-evolve-inherited-system-dependencies)
 - [Later: Broaden hardware and platform evidence](#later-broaden-hardware-and-platform-evidence)
 - [Security and production direction](#security-and-production-direction)
 - [Architectural non-goals](#architectural-non-goals)
@@ -58,7 +58,7 @@ The roadmap begins from the following established product boundaries:
 - Physical hardware claims are limited to individually recorded evidence.
 - Release artifacts can be accompanied by checksums, separate source and image SBOMs, and build-provenance evidence.
 - The current kernel, ABI, libc, boot, package, installer, and build foundations still depend substantially on the Redox ecosystem.
-- The intended long-term borrowed boundary is the kernel, but replacement of other dependencies remains incremental rather than immediate.
+- The Redox kernel is intended to remain the primary upstream-owned foundation. Other core components may originate in external open-source projects, but the long-term direction is to bring the visible FlashOS user environment under direct FlashOS product ownership through original development, maintained forks, or substantial project-specific adaptation.
 
 These boundaries describe the starting point. They do not claim that FlashOS is complete or that every part of the documented Flash v1 contract is already implemented and qualified for every target.
 
@@ -81,7 +81,7 @@ qualify and publish an exact release candidate
                 ↓
 expand the FlashOS-owned terminal environment
                 ↓
-replace transitional system dependencies incrementally
+adapt, internalize, or replace inherited system components where justified
                 ↓
 broaden physical hardware and architecture evidence
 ```
@@ -219,7 +219,21 @@ A successful evaluation release does not imply production readiness, long-term s
 
 After Flash completion, the next major product workstream is the broader FlashOS-owned terminal environment.
 
-The objective is not to add a graphical desktop. It is to make the text interface feel like a coherent operating environment rather than a shell placed on top of an inherited collection of utilities.
+The objective is not to add a graphical desktop. It is to make the text interface feel like a coherent operating environment rather than an unrelated collection of tools placed around a shell.
+
+### Adoption and adaptation of upstream projects
+
+FlashOS does not require every user-facing component to originate as a from-scratch implementation. Existing open-source projects may be imported or forked when they provide a suitable technical foundation.
+
+Components adopted for the core FlashOS environment may be substantially modified in behavior, interface, architecture, visual design, keyboard interaction, configuration, diagnostics, and integration with Flash. The objective is not merely to bundle existing applications, but to shape them into a coherent environment with a recognizable FlashOS identity.
+
+In this roadmap, `FlashOS-owned` therefore describes direct responsibility for product direction, maintained modifications, integration contracts, and the resulting user experience. It does not require original authorship of every source line.
+
+Adoption alone does not make an upstream project FlashOS-owned. FlashOS ownership begins when the project assumes direct responsibility for the component's product direction, project-specific behavior, integration, and maintained modifications.
+
+Upstream origin, licensing, copyright, and attribution must remain documented throughout such adaptation. Changes should be contributed upstream where that relationship remains practical, but FlashOS may maintain a long-lived fork when its product direction requires substantial or incompatible changes.
+
+This direction applies primarily to userspace and user-facing components. The Redox kernel boundary is treated separately below.
 
 ### Shared terminal interface foundations
 
@@ -263,7 +277,7 @@ Priority should be given to:
 - operation through serial and framebuffer consoles;
 - predictable interaction with Flash pipelines and job control.
 
-Replacing a utility is justified by a concrete FlashOS requirement, not by branding alone.
+Replacing or substantially adapting a utility is justified by a concrete FlashOS requirement, not by branding or source ownership alone.
 
 ### Completion criteria
 
@@ -272,17 +286,20 @@ The terminal environment can be considered established when:
 - common workflows are possible without relying on undocumented host assumptions;
 - shared text-interface behavior is target-tested;
 - utilities compose predictably through Flash;
+- adopted components follow documented FlashOS interaction and integration contracts;
 - failure and recovery behavior is documented;
 - the environment remains usable over the supported console paths;
-- the package and dependency cost of each application is understood.
+- the package, patch, and dependency cost of each application is understood.
 
-## Later: Reduce transitional dependencies
+## Later: Evolve inherited system dependencies
 
 FlashOS currently depends on inherited Redox userspace, libraries, toolchains, package recipes, boot components, installer code, filesystem tools, and build orchestration.
 
-The long-term direction is to narrow that dependency boundary deliberately. This is not a single migration project or a requirement to rewrite working infrastructure immediately.
+The long-term direction is to bring these boundaries under deliberate FlashOS control where doing so benefits the product. Depending on the component, this may mean retaining it unchanged, contributing changes upstream, maintaining a project-specific patch set, importing or forking and substantially adapting it, removing it, or replacing it entirely. A clean-room rewrite is not required.
 
-### Incremental replacement order
+The objective is not independence for its own sake. Each transition should produce a measurable improvement in product control, maintainability, target support, security, diagnosability, reproducibility, interface stability, package size, or dependency cost.
+
+### Incremental transition areas
 
 Candidate areas include:
 
@@ -296,7 +313,7 @@ Candidate areas include:
 
 Each change should have an independently testable reason and exit criterion.
 
-A replacement should not be accepted solely because it changes an inherited name. It should provide a measurable improvement in at least one relevant area, such as:
+A transition should not be accepted solely because it changes an inherited name or increases the amount of FlashOS-authored code. It should provide a measurable improvement in at least one relevant area, such as:
 
 - product control;
 - maintainability;
@@ -326,23 +343,28 @@ They should be replaced only when the underlying ABI, tool, format, or artifact 
 
 ### Kernel boundary
 
-The Redox kernel remains the intended borrowed kernel foundation.
+The Redox kernel remains the intended upstream-owned kernel foundation.
+
+FlashOS intends to keep the kernel close to upstream and modify or extend it only when concrete product, hardware, or platform requirements make such changes necessary.
 
 FlashOS may maintain additional patches, vendor a revision, or diverge from upstream when a concrete FlashOS requirement cannot be met through the existing relationship. Continuous synchronization with every upstream kernel change is not an architectural requirement.
 
 An independent kernel rewrite is not part of the current roadmap. Kernel divergence should begin only from a specific product or hardware need and must preserve a usable system throughout the transition.
 
-### Completion criteria for a replaced dependency
+### Completion criteria for a transitioned dependency
 
-A transitional component should be considered replaced only when:
+An inherited component should be considered transitioned only when:
 
-- its responsibility and replacement boundary are documented;
-- active profiles no longer depend on the old path;
-- clean image construction succeeds without it;
-- relevant runtime contracts pass;
+- its responsibility and the new ownership or dependency boundary are documented;
+- active profiles use the intended path;
+- clean image construction succeeds with the new dependency state;
+- relevant build and runtime contracts pass;
+- maintained patches and upstream relationships are documented;
 - licenses and attribution remain correct;
 - rollback or migration behavior is understood;
-- public documentation no longer describes the removed component as active.
+- public documentation accurately describes the resulting component and dependency state.
+
+When a component is removed or fully replaced, active profiles must no longer depend on the old path.
 
 ## Later: Broaden hardware and platform evidence
 
@@ -437,7 +459,7 @@ Future security work should include:
 - a concise threat model;
 - a maintained record of accepted security debt;
 - review of Flash input, process, descriptor, history, and configuration boundaries;
-- review of artifact substitution and dependency replacement risks;
+- review of artifact substitution and dependency-transition risks;
 - regression tests for reproducible findings;
 - least-privilege release automation;
 - clear disclosure and corrected-release procedures.
@@ -476,6 +498,14 @@ The roadmap does not include:
 
 POSIX operating-system concepts may still inform process, descriptor, terminal, and job-control behavior where relevant.
 
+### Reimplementation for ownership alone
+
+FlashOS does not aim to replace working upstream or third-party components solely so that their implementations become FlashOS-authored.
+
+External open-source software may remain a permanent part of the system when it provides a suitable technical foundation and can be maintained responsibly. FlashOS ownership may instead be established through substantial adaptation, maintained project-specific changes, explicit integration contracts, and direct responsibility for the resulting product experience.
+
+Original implementation, adoption, maintained forking, and upstream collaboration are all valid development paths. The appropriate path depends on concrete product and technical requirements.
+
 ### Bulk replacement of the inherited system
 
 FlashOS does not plan to replace the entire Redox-derived stack in one rewrite.
@@ -493,7 +523,7 @@ Such a migration would combine too many independent risks:
 - drivers;
 - kernel.
 
-Each boundary should move only when the replacement can be built, tested, and maintained independently.
+Each boundary should move only when the transition can be built, tested, and maintained independently.
 
 ### Unqualified hardware breadth
 
@@ -526,7 +556,7 @@ This roadmap should be updated when:
 - a major initiative becomes complete;
 - the priority order changes;
 - a new architecture or reference-hardware target is deliberately selected;
-- a transitional dependency is formally replaced;
+- an inherited dependency boundary is materially changed;
 - a security or implementation finding changes the product direction;
 - a release establishes a materially different baseline.
 
@@ -534,16 +564,16 @@ It should not be updated for every internal task or intermediate implementation 
 
 The following files own the current facts behind this direction:
 
-| Concern                        | Primary source                                                      |
-| ------------------------------ | ------------------------------------------------------------------- |
-| Shipped and unreleased changes | [CHANGELOG.md](../CHANGELOG.md)                                     |
-| Current system boundaries      | [Architecture](architecture.md)                                     |
-| Development workflow           | [Development](development.md)                                       |
-| Verification model             | [Verification and Testing](verification.md)                         |
-| Physical hardware evidence     | [Hardware Compatibility](hardware.md)                               |
-| Flash behavior                 | [Flash Documentation](../components/flash/docs/README.md)           |
-| Release and evaluation limits  | [Security Policy](../.github/SECURITY.md)                           |
-| Technical CI contracts         | [CI/CD Contracts](../ci/README.md)                                  |
+| Concern                        | Primary source                                            |
+| ------------------------------ | --------------------------------------------------------- |
+| Shipped and unreleased changes | [CHANGELOG.md](../CHANGELOG.md)                           |
+| Current system boundaries      | [Architecture](architecture.md)                           |
+| Development workflow           | [Development](development.md)                             |
+| Verification model             | [Verification and Testing](verification.md)               |
+| Physical hardware evidence     | [Hardware Compatibility](hardware.md)                     |
+| Flash behavior                 | [Flash Documentation](../components/flash/docs/README.md) |
+| Release and evaluation limits  | [Security Policy](../.github/SECURITY.md)                 |
+| Technical CI contracts         | [CI/CD Contracts](../ci/README.md)                        |
 
 Detailed scheduling, experiments, rejected implementation approaches, and volatile task state remain outside the public roadmap.
 

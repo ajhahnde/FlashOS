@@ -89,6 +89,21 @@ A local patch does not convert the complete upstream component into a FlashOS-na
 
 Similarly, preserving an inherited technical identifier does not determine project identity. Names such as `x86_64-unknown-redox` describe active compatibility contracts and must remain until the corresponding interface is replaced, not merely renamed.
 
+### Component origin and product ownership
+
+A FlashOS-owned component does not necessarily originate entirely within the
+FlashOS project. Existing open-source projects may be imported or forked when
+they provide a suitable technical foundation.
+
+Once adopted as part of the FlashOS user environment, such components may be
+substantially modified in behavior, interface, architecture, and visual design.
+FlashOS then assumes responsibility for the resulting product experience and
+for maintaining its project-specific changes.
+
+The Redox kernel is the deliberate exception. FlashOS intends to keep the
+kernel close to upstream and modify or extend it only when concrete product,
+hardware, or platform requirements make such changes necessary.
+
 ## Current system layers
 
 ### Host build orchestration
@@ -360,26 +375,26 @@ It does not. Physical-machine support requires device-specific evidence maintain
 
 Use the following files when evaluating or changing an architectural contract:
 
-| Concern                        | Primary source                                                                          |
-| ------------------------------ | --------------------------------------------------------------------------------------- |
-| Public product scope           | [`README.md`](../README.md)                                                             |
-| Documentation responsibilities | [`docs/README.md`](README.md)                                                           |
-| Shared image foundation        | [`config/flashos-base.toml`](../config/flashos-base.toml)                               |
-| Development image profile      | [`config/x86_64/flashos.toml`](../config/x86_64/flashos.toml)                           |
-| Release image profile          | [`config/x86_64/flashos-release.toml`](../config/x86_64/flashos-release.toml)           |
-| Build-variable resolution      | [`mk/config.mk`](../mk/config.mk)                                                       |
-| Cross-toolchain and sysroot    | [`mk/prefix.mk`](../mk/prefix.mk)                                                       |
-| Package construction           | [`mk/repo.mk`](../mk/repo.mk) and package recipes under [`recipes/`](../recipes/)       |
-| Image assembly                 | [`mk/disk.mk`](../mk/disk.mk)                                                           |
-| QEMU device model              | [`mk/qemu.mk`](../mk/qemu.mk)                                                           |
-| Flash source architecture      | [`components/flash/`](../components/flash/)                                             |
-| Flash image package            | [`recipes/terminal/flash/recipe.toml`](../recipes/terminal/flash/recipe.toml)           |
-| Product-profile invariants     | [`ci/check_profile.py`](../ci/check_profile.py)                                         |
-| Runtime qualification          | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                                               |
-| Release version                | [`versions.env`](../versions.env)                                                       |
-| Hardware evidence              | [Hardware Compatibility](hardware.md)                                                   |
-| Future direction               | [Roadmap](roadmap.md)                                                                   |
-| Upstream reference material    | [Upstream References](upstream/README.md)                                               |
+| Concern                        | Primary source                                                                    |
+| ------------------------------ | --------------------------------------------------------------------------------- |
+| Public product scope           | [`README.md`](../README.md)                                                       |
+| Documentation responsibilities | [`docs/README.md`](README.md)                                                     |
+| Shared image foundation        | [`config/flashos-base.toml`](../config/flashos-base.toml)                         |
+| Development image profile      | [`config/x86_64/flashos.toml`](../config/x86_64/flashos.toml)                     |
+| Release image profile          | [`config/x86_64/flashos-release.toml`](../config/x86_64/flashos-release.toml)     |
+| Build-variable resolution      | [`mk/config.mk`](../mk/config.mk)                                                 |
+| Cross-toolchain and sysroot    | [`mk/prefix.mk`](../mk/prefix.mk)                                                 |
+| Package construction           | [`mk/repo.mk`](../mk/repo.mk) and package recipes under [`recipes/`](../recipes/) |
+| Image assembly                 | [`mk/disk.mk`](../mk/disk.mk)                                                     |
+| QEMU device model              | [`mk/qemu.mk`](../mk/qemu.mk)                                                     |
+| Flash source architecture      | [`components/flash/`](../components/flash/)                                       |
+| Flash image package            | [`recipes/terminal/flash/recipe.toml`](../recipes/terminal/flash/recipe.toml)     |
+| Product-profile invariants     | [`ci/check_profile.py`](../ci/check_profile.py)                                   |
+| Runtime qualification          | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                                         |
+| Release version                | [`versions.env`](../versions.env)                                                 |
+| Hardware evidence              | [Hardware Compatibility](hardware.md)                                             |
+| Future direction               | [Roadmap](roadmap.md)                                                             |
+| Upstream reference material    | [Upstream References](upstream/README.md)                                         |
 
 When these sources disagree, configuration, recipes, executable checks, and current code take precedence over descriptive text. The documentation should then be corrected without treating an outdated statement as an implemented system contract.
 
