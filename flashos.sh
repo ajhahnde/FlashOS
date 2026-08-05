@@ -38,6 +38,8 @@ unset _flashos_source_path
 FLASHOS_ARCH="${FLASHOS_ARCH:-x86_64}"
 FLASHOS_CONFIG_NAME="${FLASHOS_CONFIG_NAME:-flashos}"
 
+_FLASHOS_AI_DIR="${_FLASHOS_DIR}/tools/flashos"
+
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   _FLASHOS_RED="$(printf '\033[0;31m')"
   _FLASHOS_GREEN="$(printf '\033[0;32m')"
@@ -280,30 +282,6 @@ flash-check() {
   esac
 }
 
-flashshell-check() {
-  printf '%s\n' \
-    'warning: flashshell-check is deprecated; use flash-check' >&2
-  flash-check "$@"
-}
-
-_flashos_check_shell_helpers() {
-  local checked=0
-
-  if command -v bash >/dev/null 2>&1; then
-    _flashos_root command bash -n flashos.sh || return 1
-    checked=1
-  fi
-  if command -v zsh >/dev/null 2>&1; then
-    _flashos_root command zsh -n flashos.sh || return 1
-    _flashos_root command zsh -n flashos.zsh || return 1
-    checked=1
-  fi
-  if [ "$checked" -eq 0 ]; then
-    _flashos_error "neither bash nor zsh is available for syntax checks"
-    return 1
-  fi
-}
-
 _flashos_check_quick() {
   _flashos_check_shell_helpers &&
     _flashos_root command python3 ci/check_profile.py &&
@@ -311,7 +289,7 @@ _flashos_check_quick() {
 }
 
 _flashos_check_python() {
-  _flashos_root command ruff check flashos-commit.py flashos_ai.py ci/ "$@"
+  _flashos_root command ruff check tools/flashos/ ci/ "$@"
 }
 
 _flashos_check_root() {
@@ -714,7 +692,7 @@ flashos-changes() {
 }
 
 flashos-commit() {
-  local commit_script="${_FLASHOS_DIR}/flashos-commit.py"
+  local commit_script="${_FLASHOS_AI_DIR}/flashos-commit.py"
 
   if [ ! -f "$commit_script" ]; then
     _flashos_error "commit helper not found: $commit_script"

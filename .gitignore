@@ -27,5 +27,5 @@ target
 wget-log
 # Local QEMU smoke-test output
 /qemu-smoke.log
-# context for flashos*.* files
-contexts/
+# context for ai-powered commands 
+tools/flashos/contexts/
