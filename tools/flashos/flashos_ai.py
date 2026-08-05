@@ -185,14 +185,83 @@ def _http_error_message(exc: urllib.error.HTTPError, raw: bytes) -> str:
     return decoded or str(exc)
 
 
-def _retry_delay(attempt: int, headers: Any = None) -> float:
+def _duration_seconds(value: Any) -> float | None:
+    """Parse a Google-style duration such as ``26.5s``."""
+    if not isinstance(value, str):
+        return None
+
+    duration = value.strip()
+    if not duration.endswith("s"):
+        return None
+
+    try:
+        seconds = float(duration[:-1])
+    except ValueError:
+        return None
+
+    if seconds < 0:
+        return None
+    return seconds
+
+
+def _body_retry_delay(raw: bytes) -> float | None:
+    """Return retryDelay from a Gemini JSON error response when present."""
+    try:
+        details = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+    if not isinstance(details, dict):
+        return None
+
+    api_error = details.get("error")
+    if not isinstance(api_error, dict):
+        return None
+
+    error_details = api_error.get("details")
+    if isinstance(error_details, list):
+        for detail in error_details:
+            if not isinstance(detail, dict):
+                continue
+            detail_type = detail.get("@type")
+            if (
+                isinstance(detail_type, str)
+                and detail_type.endswith("google.rpc.RetryInfo")
+            ):
+                seconds = _duration_seconds(detail.get("retryDelay"))
+                if seconds is not None:
+                    return seconds
+
+    message = api_error.get("message")
+    if isinstance(message, str):
+        marker = "Please retry in "
+        marker_index = message.rfind(marker)
+        if marker_index >= 0:
+            duration = message[marker_index + len(marker) :].split(None, 1)[0]
+            seconds = _duration_seconds(duration.rstrip("."))
+            if seconds is not None:
+                return seconds
+
+    return None
+
+
+def _retry_delay(
+    attempt: int,
+    headers: Any = None,
+    raw: bytes = b"",
+) -> float:
     if headers is not None:
         retry_after = headers.get("Retry-After")
         if retry_after:
             try:
-                return min(max(float(retry_after), 0.0), 30.0)
+                return min(max(float(retry_after), 0.0), 60.0)
             except ValueError:
                 pass
+
+    body_delay = _body_retry_delay(raw)
+    if body_delay is not None:
+        return min(body_delay, 60.0)
+
     return min(float(2 ** (attempt - 1)), 8.0)
 
 
@@ -264,11 +333,13 @@ def call_gemini(
                 exc.code in RETRYABLE_HTTP_STATUSES
                 and attempt < config.attempts
             ):
+                delay = _retry_delay(attempt, exc.headers, raw)
                 if retry_notice is not None:
                     retry_notice(
-                        f"Gemini API returned HTTP {exc.code}; retrying"
+                        f"Gemini API returned HTTP {exc.code}; "
+                        f"retrying in {delay:.1f}s"
                     )
-                time.sleep(_retry_delay(attempt, exc.headers))
+                time.sleep(delay)
                 continue
             raise FlashOSAIError(f"Gemini API error: {message}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:

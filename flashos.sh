@@ -708,6 +708,23 @@ flashos-commit() {
   _flashos_root command "$commit_script" "$@"
 }
 
+flashos-ask() {
+  local ask_script="${_FLASHOS_AI_DIR}/flashos-ask.py"
+
+  if [ ! -f "$ask_script" ]; then
+    _flashos_error "ask helper not found: $ask_script"
+    return 1
+  fi
+
+  if [ ! -x "$ask_script" ]; then
+    _flashos_error "ask helper is not executable: $ask_script"
+    _flashos_error "run: chmod +x \"$ask_script\""
+    return 1
+  fi
+
+  _flashos_root command "$ask_script" "$@"
+}
+
 # -- Maintenance and end-to-end qualification ------------------------------
 
 flashos-clean() {
@@ -840,6 +857,7 @@ _flashos_usage() {
     "  logs [action]             inspect or follow QEMU smoke logs" \
     "  changes [action]          inspect Git state without writing it" \
     "  commit [arguments]        create a manual or generated Git commit" \
+    "  ask [options] QUESTION    ask a read-only repository question" \
     "  check [scope]             run repository checks" \
     "  shell [scope]             run Flash host/target checks" \
     "" \
@@ -873,6 +891,7 @@ flashos() {
     logs|log)         flashos-logs "$@" ;;
     changes|change)   flashos-changes "$@" ;;
     commit)           flashos-commit "$@" ;;
+    ask)              flashos-ask "$@" ;;
     check)            flashos-check "$@" ;;
     shell)            flash-check "$@" ;;
     podman)           flashos-podman "$@" ;;
@@ -899,8 +918,7 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
     previous="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-      choices="status doctor version versions profile env build run smoke qualify recipe artifacts logs changes commit check shell podman clean root list help"
-    else
+    choices="status doctor version versions profile env build run smoke qualify recipe artifacts logs changes commit ask check shell podman clean root list help"e
       case "$previous" in
         profile) choices="dev release" ;;
         versions) choices="show check" ;;
@@ -913,6 +931,7 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
         logs) choices="list disk live follow" ;;
         changes) choices="status diff stat staged recent" ;;
         commit)  choices="-a -g -p --add-all --generate --push help" ;;
+        ask)     choices="-n --help" ;;
         check)   choices="quick profile root shell target python docs ci all" ;;
         shell)   choices="fmt clippy test target all" ;;
         podman)  choices="status start stop info" ;;

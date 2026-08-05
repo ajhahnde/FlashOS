@@ -24,6 +24,7 @@ _flashos_zsh_completion() {
     'logs:inspect or follow QEMU smoke logs'
     'changes:inspect Git state without writing it'
     'commit:create a manual or generated Git commit'
+    'ask:ask a question about the repository'
     'check:run repository checks'
     'shell:run Flash checks'
     'podman:inspect or control the Podman machine'
@@ -56,6 +57,10 @@ _flashos_zsh_completion() {
           '--generate[generate the commit subject with Gemini]' \
           '--push[push after a successful commit]' \
           'help[show commit help]'
+        ;;
+      ask)    
+        _values 'ask' \
+          '-n[show the line number]' 
         ;;
       check)   _values 'scope' quick profile root shell target python docs ci all ;;
       shell)   _values 'scope' fmt clippy test target all ;;
