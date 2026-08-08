@@ -4,7 +4,7 @@
   "generation_contract": {
     "evidence": "Only staged_file_status and staged_diff describe the current commit.",
     "result": "One locally validated English subject in the repository house style.",
-    "house_style": "Conventional type with an optional lowercase scope, one imperative subject line, at most 72 characters, and no trailing period.",
+    "house_style": "One imperative Conventional Commit subject. The flash or tools scope is required when that named subproject owns the primary effect; root, CI, release, repository-wide, and mixed-area effects are unscoped. Maximum 72 characters and no trailing period.",
     "prohibited_inference": "Do not use repository context, filenames alone, unstaged assumptions, milestone knowledge, or model repair feedback as evidence of a change."
   },
   "context_policy": {
@@ -176,7 +176,7 @@
         "A recipe change affects package construction or integration.",
         "A package becomes part of FlashOS only when selected by the active profile directly or through a required dependency.",
         "recipes/core/kernel/** and recipes/core/bootloader/** remain upstream-component boundaries even when locally patched.",
-        "recipes/terminal/flash/** integrates a pinned Flash revision into images."
+        "recipes/terminal/flash/** integrates the filtered in-tree Flash workspace snapshot into images."
       ]
     },
     {
@@ -209,8 +209,8 @@
       "role": "The fsh executable, interactive front end, script entry point, startup, history, and line-editing integration."
     },
     {
-      "paths": ["ci/check_profile.py"],
-      "role": "Static product-profile and repository invariant checks.",
+      "paths": ["ci/check_profile.py", "ci/check_coverage.py"],
+      "role": "Static product-profile, repository-invariant, and Flash host-coverage completeness checks.",
       "semantic_hints": [
         "Passing this check proves only the encoded static contract; it does not compile packages, build images, or boot FlashOS."
       ]
@@ -227,8 +227,12 @@
       "role": "Local executable product, image, runtime, and CI contracts."
     },
     {
-      "paths": [".github/workflows/ci.yml", ".github/workflows/_image.yml"],
-      "role": "Hosted source-quality, product-contract, clean image-build, artifact-promotion, and QEMU qualification workflows."
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/_image.yml",
+        ".github/workflows/coverage.yml"
+      ],
+      "role": "Hosted source-quality, product-contract, informational host-coverage, clean image-build, artifact-promotion, and QEMU qualification workflows."
     },
     {
       "paths": [".github/workflows/security.yml"],
@@ -375,15 +379,17 @@
     "conventional_scopes_allowed": true,
     "scope_policy": {
       "format": "A scope is lowercase ASCII alphanumeric text with optional internal hyphens, enclosed in parentheses between the type and colon.",
-      "use": "Use a scope when one clear repository area owns the primary effect; omit it for repository-wide or naturally unscoped changes.",
+      "use": "Use a scope if and only if exactly one named subproject owns the primary effect. Flash and host-tool effects require their scope; pure CI, root build-system, release, repository-wide, and mixed-area effects must remain unscoped.",
       "known_scopes": {
         "flash": "Flash component source, tests, metadata, or component documentation under components/flash/.",
-        "tools": "Host developer commands under flashos.sh, flashos.zsh, or tools/flashos/.",
-        "ci": "A focused correction or feature in CI scripts or workflow behavior when the scope adds clarity. Pure workflow maintenance may use ci: without a scope."
+        "tools": "Host developer commands under flashos.sh, flashos.zsh, or tools/flashos/."
       },
       "rules": [
         "Use type(flash): for a primary Flash component effect; do not use the historical Flash: prefix.",
         "Use type(tools): for a primary host developer-tool effect.",
+        "Use unscoped ci: for a pure CI effect; never use ci(ci): or build(ci):.",
+        "Use an unscoped type for root build-system, release, repository-wide, or mixed-area effects.",
+        "Only flash and tools are valid scopes; do not invent a scope for another directory or subsystem.",
         "Do not add a scope merely because a touched path contains that word.",
         "Do not invent issue numbers, milestone names, branch names, or private planning identifiers as scopes."
       ]

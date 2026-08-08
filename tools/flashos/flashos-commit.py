@@ -60,9 +60,11 @@ Interpretation contract:
 - Distinguish implementation, integration, configuration, CLI wiring,
   documentation, tests, build tooling, CI, and release metadata.
 - Use the narrowest accurate prefix allowed by commit_subject_policy.
-- Use the optional scope policy consistently: primary Flash component work uses
-  type(flash): and primary host developer-tool work uses type(tools):. Do not
-  reproduce historical unprefixed or Flash: subjects.
+- Apply the scope policy deterministically. A primary effect owned by Flash or
+  the host developer tools requires type(flash): or type(tools): respectively.
+  Pure CI, root build-system, release, repository-wide, and mixed-area effects
+  remain unscoped. Never repeat a type as its own scope: use ci:, not ci(ci):.
+  Do not reproduce historical unprefixed or Flash: subjects.
 - Describe observable intent, not a list of filenames or low-level edit nouns.
 - Do not claim a build, test, fix, security property, compatibility result,
   release, or runtime behavior unless the staged data itself establishes it.
@@ -75,8 +77,9 @@ Output contract:
 - Output exactly one JSON object with exactly one key named subject and no
   Markdown, code fence, or surrounding commentary.
 - subject must contain exactly one non-empty English line.
-- Begin subject with one allowed component prefix or conventional type, optionally with
-  one lowercase scope permitted by commit_subject_policy, followed by one space.
+- Begin subject with one allowed component prefix or conventional type. Include
+  exactly one permitted lowercase scope only when commit_subject_policy requires
+  it for the primary effect, then follow the prefix with one space.
 - Obey the configured maximum character count and every subject-policy rule.
 - Use concise imperative wording after the prefix.
 - Do not place Markdown, quotes, backticks, a body, trailers, explanations,
@@ -108,6 +111,7 @@ class CommitPolicy:
     core_prefixes: tuple[str, ...]
     component_prefixes: tuple[str, ...]
     conventional_scopes_allowed: bool
+    known_scopes: tuple[str, ...]
     forbidden_subject_terms: tuple[str, ...]
     trailing_period_allowed: bool
     quotes_or_backticks_allowed: bool
@@ -166,6 +170,12 @@ def usage(script_dir: Path) -> str:
             "  -g sends staged file names and diff content to Gemini.",
             "  Review staged changes before generating a commit message.",
             "",
+            "subject policy:",
+            "  type(flash):  required for a primary Flash-owned effect",
+            "  type(tools):  required for a primary host-tool effect",
+            "  type:         required for root, CI, release, repository-wide,",
+            "                or mixed-area effects; never use ci(ci):",
+            "",
             "The default project context file is:",
             f"  {context_path}",
             "",
@@ -178,6 +188,8 @@ def usage(script_dir: Path) -> str:
             "",
             "examples:",
             '  flashos commit "feat(tools): add commit helper"',
+            '  flashos commit "ci: harden the coverage workflow"',
+            '  flashos commit "build(flash): update image integration"',
             '  flashos commit -a "chore(tools): maintain repository helpers"',
             "  flashos commit -g",
             "  flashos commit -a -g",
@@ -389,6 +401,27 @@ def validate_project_context(context: dict[str, Any]) -> CommitPolicy:
             "are allowed"
         )
 
+    known_scopes: tuple[str, ...] = ()
+    if conventional_scopes_allowed:
+        scope_policy = policy["scope_policy"]
+        raw_known_scopes = scope_policy.get("known_scopes")
+        if (
+            not isinstance(raw_known_scopes, dict)
+            or not raw_known_scopes
+            or not all(
+                isinstance(scope, str)
+                and re.fullmatch(r"[a-z0-9][a-z0-9-]*", scope)
+                and isinstance(description, str)
+                and description.strip()
+                for scope, description in raw_known_scopes.items()
+            )
+        ):
+            invalid_context(
+                "commit_subject_policy.scope_policy.known_scopes must be a "
+                "non-empty object of lowercase scopes and descriptions"
+            )
+        known_scopes = tuple(raw_known_scopes)
+
     forbidden_subject_terms = policy.get("forbidden_subject_terms")
     if (
         not isinstance(forbidden_subject_terms, list)
@@ -408,6 +441,7 @@ def validate_project_context(context: dict[str, Any]) -> CommitPolicy:
         core_prefixes=tuple(core_prefixes),
         component_prefixes=tuple(component_prefixes),
         conventional_scopes_allowed=conventional_scopes_allowed,
+        known_scopes=known_scopes,
         forbidden_subject_terms=tuple(forbidden_subject_terms),
         trailing_period_allowed=policy.get("trailing_period") is not False,
         quotes_or_backticks_allowed=(
@@ -558,10 +592,18 @@ def validate_commit_subject(message: str, policy: CommitPolicy) -> str:
         core_types = "|".join(
             re.escape(prefix.removesuffix(":")) for prefix in policy.core_prefixes
         )
-        prefix_allowed = re.match(
-            rf"^(?:{core_types})\([a-z0-9][a-z0-9-]*\): ",
+        scoped_prefix = re.match(
+            rf"^(?P<type>{core_types})\((?P<scope>[a-z0-9][a-z0-9-]*)\): ",
             subject,
-        ) is not None
+        )
+        if scoped_prefix is not None:
+            scope = scoped_prefix.group("scope")
+            commit_type = scoped_prefix.group("type")
+            if scope not in policy.known_scopes:
+                invalid_commit_subject(f"the scope {scope!r} is not allowed")
+            if scope == commit_type:
+                invalid_commit_subject("the scope redundantly repeats the type")
+            prefix_allowed = True
     if not prefix_allowed:
         invalid_commit_subject(
             "the subject does not use an allowed commit prefix"

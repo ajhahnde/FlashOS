@@ -121,10 +121,21 @@ sends staged filenames, the staged diff, and the public commit context. Inspect
 the relevant repository state before using either command.
 
 `flashos commit` accepts only the repository house style: one English
-Conventional Commit subject, an optional lowercase scope such as `tools` or
-`flash`, at most 72 characters, and no trailing period. Generated subjects are
-validated locally, require confirmation, and are abandoned if the staged index
-changes before commit creation. A requested push requires a second confirmation.
+Conventional Commit subject, at most 72 characters, and no trailing period.
+Scope selection is deterministic rather than decorative:
+
+- use `type(flash):` when Flash owns the primary effect;
+- use `type(tools):` when the host developer tools own the primary effect;
+- use an unscoped `type:` for pure CI, root build-system, release,
+  repository-wide, or mixed-area effects;
+- never repeat a type as a scope: use `ci:`, not `ci(ci):`.
+
+`flash` and `tools` are the only accepted scopes. Thus
+`build(flash): use the in-tree workspace source` and
+`ci: trust the mounted workspace in image builds` follow the same rule.
+Generated subjects are validated locally, require confirmation, and are
+abandoned if the staged index changes before commit creation. A requested push
+requires a second confirmation.
 
 The normal development profile is `flashos`. The `flashos-release` profile exists for release-image qualification and should not replace the development profile during routine interactive work.
 

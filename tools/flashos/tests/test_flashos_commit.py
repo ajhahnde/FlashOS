@@ -22,9 +22,11 @@ class CommitPolicyTests(unittest.TestCase):
     def test_context_defines_the_current_house_style(self) -> None:
         self.assertEqual(self.context["schema_version"], 2)
         self.assertTrue(self.policy.conventional_scopes_allowed)
+        self.assertEqual(self.policy.known_scopes, ("flash", "tools"))
         self.assertEqual(self.policy.component_prefixes, ())
         self.assertIn("type(flash):", commit.SYSTEM_INSTRUCTION)
         self.assertIn("type(tools):", commit.SYSTEM_INSTRUCTION)
+        self.assertIn("use ci:, not ci(ci):", commit.SYSTEM_INSTRUCTION)
 
     def test_accepts_scoped_and_unscoped_house_style(self) -> None:
         self.assertEqual(
@@ -37,6 +39,20 @@ class CommitPolicyTests(unittest.TestCase):
         self.assertEqual(
             commit.validate_commit_subject("docs: clarify setup", self.policy),
             "docs: clarify setup",
+        )
+        self.assertEqual(
+            commit.validate_commit_subject(
+                "ci: trust the mounted workspace in image builds",
+                self.policy,
+            ),
+            "ci: trust the mounted workspace in image builds",
+        )
+        self.assertEqual(
+            commit.validate_commit_subject(
+                "build(flash): use the in-tree workspace source",
+                self.policy,
+            ),
+            "build(flash): use the in-tree workspace source",
         )
 
     def test_structured_subject_response_is_exact(self) -> None:
@@ -59,6 +75,9 @@ class CommitPolicyTests(unittest.TestCase):
             "feat(tools): add repository question helper.",
             "feat(tools): add helper\nbody",
             "feat(tools): harden Gemini helpers",
+            "ci(ci): harden coverage",
+            "build(ci): update workflow tooling",
+            "feat(kernel): add scheduler support",
         )
         for subject in invalid:
             with self.subTest(subject=subject):
@@ -71,6 +90,8 @@ class CommitOptionTests(unittest.TestCase):
         help_text = commit.usage(TOOLS_DIR)
         self.assertIn('feat(tools): add commit helper', help_text)
         self.assertIn('chore(tools): maintain repository helpers', help_text)
+        self.assertIn('ci: harden the coverage workflow', help_text)
+        self.assertIn('build(flash): update image integration', help_text)
 
     def test_manual_and_generated_messages_are_exclusive(self) -> None:
         with self.assertRaisesRegex(commit.FlashOSError, "cannot be combined"):
