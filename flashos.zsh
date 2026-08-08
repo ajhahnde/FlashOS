@@ -59,8 +59,12 @@ _flashos_zsh_completion() {
           'help[show commit help]'
         ;;
       ask)    
-        _values 'ask' \
-          '-n[show the line number]' 
+        _values 'ask option' \
+          '-n[include the most relevant evidence line]' \
+          '--line-numbers[include the most relevant evidence line]' \
+          '-h[show ask help]' \
+          '--help[show ask help]' \
+          'help[show ask help]'
         ;;
       check)   _values 'scope' quick profile root shell target python docs ci all ;;
       shell)   _values 'scope' fmt clippy test target all ;;
@@ -73,4 +77,3 @@ _flashos_zsh_completion() {
 if (( $+functions[compdef] )); then
   compdef _flashos_zsh_completion flashos fos
 fi
-

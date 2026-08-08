@@ -85,12 +85,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The product contract and the QEMU harness are release-critical scripts
-      # and are held to the same standard as the Rust workspaces.
-      - name: Lint the CI Python
+      # Product contracts, the QEMU harness, and host developer tools are held
+      # to the same source-quality standard as the Rust workspaces.
+      - name: Check the FlashOS Python
         run: |
           pipx install ruff==0.16.0
-          ruff check ci/
+          ruff check ci/ tools/flashos/
+          python3 -m unittest discover -s tools/flashos/tests -p 'test_*.py'
 
       - name: Validate package, TUI, shell, identity, and audio policy
         run: python3 ci/check_profile.py

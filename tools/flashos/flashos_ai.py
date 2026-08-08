@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,7 @@ GEMINI_INTERACTIONS_URL = (
     "https://generativelanguage.googleapis.com/v1/interactions"
 )
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
+DEFAULT_MAX_RESPONSE_BYTES = 1_048_576
 
 RetryNotice = Callable[[str], None]
 
@@ -39,6 +42,8 @@ class GeminiConfig:
     attempts: int = 3
     timeout_seconds: float = 120.0
     max_output_tokens: int = 64
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
+    response_schema: dict[str, Any] | None = None
     seed: int | None = 42
     thinking_level: str | None = "low"
 
@@ -53,6 +58,14 @@ class GeminiConfig:
             raise FlashOSAIError(
                 "Gemini max_output_tokens must be a positive integer"
             )
+        if self.max_response_bytes < 1:
+            raise FlashOSAIError(
+                "Gemini max_response_bytes must be a positive integer"
+            )
+        if self.response_schema is not None and not isinstance(
+            self.response_schema, dict
+        ):
+            raise FlashOSAIError("Gemini response_schema must be an object")
 
 
 def load_json_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -253,16 +266,49 @@ def _retry_delay(
     if headers is not None:
         retry_after = headers.get("Retry-After")
         if retry_after:
-            try:
-                return min(max(float(retry_after), 0.0), 60.0)
-            except ValueError:
-                pass
+            parsed_delay = _retry_after_seconds(retry_after)
+            if parsed_delay is not None:
+                return min(parsed_delay, 60.0)
 
     body_delay = _body_retry_delay(raw)
     if body_delay is not None:
         return min(body_delay, 60.0)
 
     return min(float(2 ** (attempt - 1)), 8.0)
+
+
+def _retry_after_seconds(
+    value: Any,
+    *,
+    now: datetime | None = None,
+) -> float | None:
+    """Parse Retry-After seconds or an HTTP date."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    retry_after = value.strip()
+    try:
+        seconds = float(retry_after)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(retry_after)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        current = now or datetime.now(UTC)
+        seconds = (retry_at - current).total_seconds()
+    return max(seconds, 0.0)
+
+
+def _read_response_bytes(response: Any, maximum_bytes: int) -> bytes:
+    """Read one bounded HTTP response body."""
+    raw = response.read(maximum_bytes + 1)
+    if len(raw) > maximum_bytes:
+        raise FlashOSAIError(
+            f"Gemini response exceeds {maximum_bytes} bytes"
+        )
+    return raw
 
 
 def _request_payload(
@@ -285,6 +331,12 @@ def _request_payload(
         "input": prompt,
         "generation_config": generation_config,
     }
+    if config.response_schema is not None:
+        payload["response_format"] = {
+            "type": "text",
+            "mime_type": "application/json",
+            "schema": config.response_schema,
+        }
     return json.dumps(payload).encode("utf-8")
 
 
@@ -322,12 +374,18 @@ def call_gemini(
                 request,
                 timeout=config.timeout_seconds,
             ) as response:
-                data = json.load(response)
+                raw = _read_response_bytes(response, config.max_response_bytes)
+                data = json.loads(raw)
             if not isinstance(data, dict):
                 raise FlashOSAIError("Gemini returned an invalid response")
             return data
         except urllib.error.HTTPError as exc:
-            raw = exc.read()
+            raw = exc.read(config.max_response_bytes + 1)
+            if len(raw) > config.max_response_bytes:
+                raise FlashOSAIError(
+                    f"Gemini error response exceeds "
+                    f"{config.max_response_bytes} bytes"
+                ) from exc
             message = _http_error_message(exc, raw)
             if (
                 exc.code in RETRYABLE_HTTP_STATUSES

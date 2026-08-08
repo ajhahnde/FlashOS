@@ -10,6 +10,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added optional Gemini-backed host helpers for evidence-bounded repository
+  location questions and locally validated commit subjects. Their public
+  contexts define FlashOS terminology, evidence limits, privacy boundaries, and
+  the one-line Conventional Commit house style.
 - Added an optional sourceable Bash and Zsh helper layer for common image build,
   interactive QEMU, exact-artifact smoke, profile, Flash, Podman, and local
   quality commands. The wrappers keep the x86_64 FlashOS profile and artifact

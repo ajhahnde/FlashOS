@@ -101,12 +101,14 @@ Host tests cannot reach every target-specific path. In particular, the FlashOS i
 
 Detailed Flash test organization belongs in the [Flash Development Guide](../components/flash/docs/development.md).
 
-### CI Python
+### FlashOS Python
 
-The product-profile and QEMU scripts are release-relevant code. Lint them with:
+The product-profile scripts, QEMU harness, and host developer tools are
+FlashOS-owned Python. Lint and test them with:
 
 ```bash
-ruff check ci/
+ruff check ci/ tools/flashos/
+python3 -m unittest discover -s tools/flashos/tests -p 'test_*.py'
 ```
 
 The command requires Ruff to be available on the host. Hosted CI installs its configured version before running the check.

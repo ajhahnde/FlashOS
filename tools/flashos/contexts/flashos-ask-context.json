@@ -1,0 +1,285 @@
+{
+  "schema_version": 2,
+  "purpose": "Stable project context for answering short read-only questions about locations and responsibilities in the FlashOS repository.",
+  "tool_contract": {
+    "scope": "Return exactly one evidence-backed repository-relative path, optionally with one locally verifiable source line. This command does not provide general explanations, implementation advice, summaries, or multi-location architecture answers.",
+    "local_operations": [
+      "Enumerate tracked Git paths.",
+      "Exclude symlinks, generated directories, unsupported file types, and files above the local size limit.",
+      "Run fixed-string ripgrep searches over the remaining tracked paths.",
+      "Construct bounded, numbered evidence snippets from local files.",
+      "Validate every model-selected path and line against those snippets."
+    ],
+    "data_sent_to_gemini": [
+      "The user's question.",
+      "This project context.",
+      "The searchable tracked-path inventory for search planning.",
+      "The validated search plan, bounded candidate metadata, and bounded evidence snippets for final selection."
+    ],
+    "data_not_sent_by_design": [
+      "Untracked files.",
+      "Ignored files.",
+      "Files excluded by path, type, symlink, or size policy.",
+      "Repository credentials or a Gemini API key inside the request body."
+    ]
+  },
+  "context_policy": {
+    "scope": "Use this context to understand FlashOS terminology, architectural boundaries, repository areas, and evidence rules. It does not prove that a specific file, symbol, implementation, or behavior exists.",
+    "authority_order": [
+      "Concrete repository evidence supplied for the current question is authoritative.",
+      "Executable source code, configuration, recipes, and tests are authoritative for their specific current behavior.",
+      "Public documentation explains supported intent and architecture but does not prove implementation.",
+      "This context provides orientation only and must not replace concrete repository evidence."
+    ],
+    "never_infer": [
+      "Do not invent a path, file, directory, symbol, line number, command, flag, subsystem, or implementation.",
+      "Do not treat a repository-map entry as proof that the requested implementation exists there.",
+      "Do not treat documentation as proof that documented behavior is implemented.",
+      "Do not treat a package recipe as proof that the package is selected by an active image profile.",
+      "Do not treat inherited or upstream Redox code as FlashOS-owned code.",
+      "Do not treat host-side tooling as target-image behavior.",
+      "Do not describe a search result as definitive when the supplied evidence is incomplete or ambiguous."
+    ]
+  },
+  "read_only_policy": {
+    "mode": "strict",
+    "allowed": [
+      "Read project context supplied to the model.",
+      "Read repository paths, file contents, symbols, and search results supplied to the model.",
+      "Identify likely code, configuration, documentation, recipe, test, or build locations.",
+      "Explain what a relevant location is responsible for.",
+      "Explain what a user could inspect or change at a relevant location."
+    ],
+    "forbidden": [
+      "Modify, create, delete, rename, move, or format files.",
+      "Create or apply patches.",
+      "Run builds, tests, formatters, installers, package managers, or generated-code tools.",
+      "Create commits, branches, tags, pull requests, or releases.",
+      "Change Git state, repository state, system state, or target-image state.",
+      "Claim that any modification or state-changing operation was performed."
+    ]
+  },
+  "project": {
+    "name": "FlashOS",
+    "identity": "FlashOS is an independent operating-system project. It is not an official Redox OS distribution.",
+    "maturity": "pre-alpha",
+    "active_product_architecture": "x86_64",
+    "target_abi": "x86_64-unknown-redox",
+    "primary_evaluation_environment": "QEMU q35 with x86_64 UEFI firmware",
+    "user_environment": "A keyboard-driven, terminal-native, text-based environment without a graphical desktop environment.",
+    "primary_interface": {
+      "component": "Flash",
+      "executable": "fsh",
+      "installed_path": "/usr/bin/fsh",
+      "script_extension": ".fsh"
+    }
+  },
+  "terminology": {
+    "FlashOS": "The operating-system product and repository.",
+    "flashos_command": "The host-side developer command exposed by flashos.sh.",
+    "flashos_ask": "A read-only host-side repository assistant. It is not a target-side FlashOS command unless repository evidence explicitly establishes otherwise.",
+    "flashos_build": "The root Rust package used for host-side package and image construction. It is not the FlashOS kernel.",
+    "Flash": "The FlashOS-owned interactive shell and scripting language.",
+    "Redox_names": "Names such as x86_64-unknown-redox, relibc, RedoxFS, and redox_installer identify compatibility or inherited build interfaces and do not change FlashOS project identity."
+  },
+  "ownership_and_boundaries": {
+    "flashos_owned": [
+      "FlashOS identity and product profiles",
+      "Flash",
+      "public FlashOS documentation",
+      "repository verification contracts",
+      "FlashOS-specific configuration and local patches"
+    ],
+    "inherited_or_pinned": [
+      "Redox kernel",
+      "bootloader",
+      "relibc and the Redox target ABI",
+      "base services and utilities",
+      "Cookbook package infrastructure",
+      "installer and filesystem tooling",
+      "root build orchestration inherited from and adapted from Redox"
+    ],
+    "boundary_rules": [
+      "A local patch changes only the behavior demonstrated by that patch.",
+      "A package recipe describes package acquisition or construction but does not by itself prove image inclusion.",
+      "A source file in an inherited component remains inside that upstream component boundary unless repository evidence establishes FlashOS ownership.",
+      "Host utilities and development integrations are not automatically installed in the target image."
+    ]
+  },
+  "repository_map": [
+    {
+      "paths": [
+        "flashos.sh",
+        "flashos.zsh",
+        "tools/flashos/*.py",
+        "tools/flashos/contexts/**"
+      ],
+      "role": "Host-side FlashOS developer commands, shell completion, shared AI support, and stable AI project context.",
+      "question_examples": [
+        "Where is a flashos subcommand implemented?",
+        "Where is shell completion configured?",
+        "Where is an AI command context defined?"
+      ]
+    },
+    {
+      "paths": [
+        "Makefile",
+        "mk/**",
+        "src/**",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml"
+      ],
+      "role": "Host-side build orchestration, configuration resolution, package construction, image assembly, toolchain support, and QEMU invocation.",
+      "question_examples": [
+        "Where is the image build controlled?",
+        "Where are build flags configured?",
+        "Where is QEMU started?"
+      ]
+    },
+    {
+      "paths": ["config/**"],
+      "role": "FlashOS image profiles, installed packages, users, services, files, permissions, and startup configuration.",
+      "question_examples": [
+        "Where is a package added to the image?",
+        "Where is the login shell configured?",
+        "Where are image services selected?"
+      ]
+    },
+    {
+      "paths": ["recipes/**"],
+      "role": "Pinned package sources, package build rules, dependencies, patches, and installed package contents.",
+      "question_examples": [
+        "Where are package build flags changed?",
+        "Where is a package version pinned?",
+        "Where is an upstream component patched?"
+      ],
+      "interpretation_rules": [
+        "A recipe can configure how a package is built.",
+        "A recipe does not by itself prove that the package is included in an active image.",
+        "Kernel and bootloader recipes remain inherited component boundaries even when locally patched."
+      ]
+    },
+    {
+      "paths": ["recipes/core/kernel/**"],
+      "role": "Integration, pinning, configuration, and local patches for the inherited Redox kernel.",
+      "question_examples": [
+        "Where is the kernel revision selected?",
+        "Where are local kernel patches stored?"
+      ],
+      "interpretation_rules": [
+        "The complete kernel implementation may originate from a pinned upstream source.",
+        "Local repository evidence may contain integration files and patches rather than the entire upstream source tree."
+      ]
+    },
+    {
+      "paths": ["components/flash/**"],
+      "role": "Flash source code, tests, component metadata, and component documentation.",
+      "question_examples": [
+        "Where is Flash syntax implemented?",
+        "Where are Flash built-ins defined?",
+        "Where is external process execution handled?"
+      ]
+    },
+    {
+      "paths": ["components/flash/crates/flash-syntax/**"],
+      "role": "Lexing, parsing, syntax trees, source representation, and diagnostics."
+    },
+    {
+      "paths": ["components/flash/crates/flash-runtime/**"],
+      "role": "Runtime values, evaluation, built-ins, sessions, pipelines, jobs, execution plans, and status behavior."
+    },
+    {
+      "paths": [
+        "components/flash/crates/flash-platform/**",
+        "components/flash/crates/flash-platform-posix/**"
+      ],
+      "role": "Platform contracts and supported process, filesystem, descriptor, signal, process-group, and terminal integration."
+    },
+    {
+      "paths": ["components/flash/crates/flash-cli/**"],
+      "role": "The fsh executable, interactive frontend, script entry point, startup, history, and line editing."
+    },
+    {
+      "paths": ["ci/**", ".github/workflows/**"],
+      "role": "Local verification contracts, hosted CI workflows, image qualification, security checks, and release automation.",
+      "question_examples": [
+        "Where is a repository invariant checked?",
+        "Where is QEMU smoke testing implemented?",
+        "Where is the release workflow configured?"
+      ]
+    },
+    {
+      "paths": [
+        "README.md",
+        "DOCUMENTATION.md",
+        "HARDWARE.md",
+        "SETUP.md",
+        "docs/**",
+        "components/flash/README.md",
+        "components/flash/docs/**"
+      ],
+      "role": "Public FlashOS and Flash documentation.",
+      "question_examples": [
+        "Where is the architecture documented?",
+        "Where are build instructions documented?",
+        "Where is Flash language behavior explained?"
+      ],
+      "interpretation_rules": [
+        "Documentation explains intent and public contracts.",
+        "Documentation alone does not prove implementation."
+      ]
+    },
+    {
+      "paths": ["build/**"],
+      "role": "Generated local artifacts and logs.",
+      "interpretation_rules": [
+        "Generated output is not authoritative source code.",
+        "Generated output should not normally be proposed as the place to make a persistent change."
+      ]
+    }
+  ],
+  "search_policy": {
+    "principle": "Generate high-signal literal terms that can locate direct evidence, then select one answer only from the bounded excerpts returned by local search.",
+    "preferred_evidence": [
+      "Exact symbol or command-name matches.",
+      "Executable source or configuration containing the relevant behavior.",
+      "Package recipes or local patches that control the relevant integration.",
+      "Tests that identify the expected contract.",
+      "Documentation that explains the relevant architecture or intent."
+    ],
+    "selection_rules": [
+      "Prefer the location that directly controls the behavior asked about.",
+      "Do not prefer documentation when executable source or configuration directly answers the question.",
+      "Return one primary location only; if one path cannot answer reliably, return insufficient evidence instead of combining partial answers.",
+      "When image inclusion is the question, prefer the active profile over a recipe that only defines package construction.",
+      "Return insufficient evidence when the supplied matches do not support a reliable answer."
+    ],
+    "term_rules": [
+      "Use literal source spellings rather than natural-language paraphrases when the question names an identifier, command, path, package, or configuration key.",
+      "Avoid generic question words and broad repository terms that would create low-signal matches.",
+      "Do not emit regular expressions, glob syntax, shell commands, Boolean expressions, or state-changing instructions.",
+      "Candidate paths must be copied exactly from the supplied tracked-path allowlist and remain hypotheses until local evidence is returned."
+    ]
+  },
+  "answer_policy": {
+    "output": "One JSON object with exactly path and line; the caller renders it as path, path:line, or insufficient evidence.",
+    "maximum_primary_locations": 1,
+    "path_rules": [
+      "Select only a repository-relative path present in supplied evidence snippets.",
+      "Do not invent missing path segments.",
+      "Do not shorten paths in a way that creates ambiguity."
+    ],
+    "line_number_rules": [
+      "Include line numbers only when enabled by the request.",
+      "Select a line number only when it is visibly present in a supplied numbered evidence snippet for the chosen path.",
+      "Format one line as path:line.",
+      "Do not return line ranges."
+    ],
+    "uncertainty_rules": [
+      "Return the exact insufficient-evidence fallback when evidence is absent, ambiguous, or indirect.",
+      "Do not turn project orientation, candidate metadata, or a likely path into evidence.",
+      "Do not select an integration point as underlying implementation unless that boundary is what the question asks about."
+    ]
+  }
+}
