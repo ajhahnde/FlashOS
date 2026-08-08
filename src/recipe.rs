@@ -28,6 +28,11 @@ pub enum SourceRecipe {
         /// The path to the source
         path: String,
     },
+    /// Source maintained inside the current repository workspace
+    Workspace {
+        /// Repository-relative path copied from the current Git worktree
+        workspace: String,
+    },
     /// A git repository source
     Git {
         /// The URL for the git repository, such as https://gitlab.redox-os.org/redox-os/ion.git
@@ -695,6 +700,41 @@ mod tests {
                 }),
                 build: BuildRecipe::new(BuildKind::Cargo {
                     cargopath: None,
+                    cargoflags: Vec::new(),
+                    cargopackages: Vec::new(),
+                    cargoexamples: Vec::new(),
+                    clearlocked: false,
+                    cargopackagesprefixed: false,
+                }),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_cargo_recipe() {
+        use crate::recipe::{BuildKind, BuildRecipe, Recipe, SourceRecipe};
+
+        let recipe: Recipe = toml::from_str(
+            r#"
+            [source]
+            workspace = "components/flash"
+
+            [build]
+            template = "cargo"
+            cargopath = "crates/flash-cli"
+        "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            recipe,
+            Recipe {
+                source: Some(SourceRecipe::Workspace {
+                    workspace: "components/flash".to_string(),
+                }),
+                build: BuildRecipe::new(BuildKind::Cargo {
+                    cargopath: Some("crates/flash-cli".to_string()),
                     cargoflags: Vec::new(),
                     cargopackages: Vec::new(),
                     cargoexamples: Vec::new(),

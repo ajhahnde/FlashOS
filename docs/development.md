@@ -108,7 +108,7 @@ Two optional commands use the Gemini Interactions API:
 
 ```bash
 flashos ask "Where is external process execution handled?"
-flashos ask --line-numbers "Where is the Flash recipe pinned?"
+flashos ask --line-numbers "Where is the Flash image source selected?"
 flashos commit "docs: clarify the host workflow"
 flashos commit --generate
 ```
@@ -674,24 +674,30 @@ The image package is controlled by:
 recipes/terminal/flash/recipe.toml
 ```
 
-That recipe fetches the FlashOS repository at a pinned Git revision and builds:
+That recipe snapshots the in-tree Flash workspace and builds:
 
 ```text
-components/flash/crates/flash-cli
+crates/flash-cli
 ```
 
-Uncommitted edits in the current checkout are therefore not automatically consumed by a normal recipe build.
+The snapshot includes tracked files and non-ignored untracked files under
+`components/flash/`. It excludes ignored generated state such as `target/` and
+`fuzz/target/`. A clean CI or release checkout is bound to its exact Flash tree;
+a local recipe build can consume intentional uncommitted component edits for
+testing.
 
-When integrating a Flash revision into an image:
+When integrating a Flash change into an image:
 
 1. complete the component-level checks;
 2. confirm the target build where required;
-3. update the recipe input deliberately;
-4. keep the source revision immutable;
-5. rebuild the recipe and image;
-6. run target-side runtime verification.
+3. inspect the workspace snapshot inputs with `git status`;
+4. rebuild the recipe and image from the intended checkout;
+5. run target-side runtime verification;
+6. commit the component and integration changes together.
 
-Do not replace the pinned revision with a floating branch. A tagged or otherwise identified image must not silently build a different shell after the branch advances.
+Do not replace the workspace source with a floating remote branch. A tagged or
+otherwise identified image must build Flash from the same checkout that defines
+the image.
 
 ## Manage generated state
 
@@ -792,9 +798,12 @@ The check detects drift between the central value and the repository locations t
 
 Historical release information belongs in [CHANGELOG.md](../CHANGELOG.md), not in duplicated current-status sections throughout the documentation.
 
-### Git recipe revisions
+### Recipe source identity
 
-Shipped Git-based recipes must use immutable revisions.
+Shipped external Git-based recipes must use immutable revisions. The in-tree
+Flash recipe instead uses `workspace = "components/flash"`, whose clean source
+identity is derived from the component tree in the current FlashOS checkout.
+This avoids an impossible self-SHA while preserving exact release provenance.
 
 When updating a pinned component:
 

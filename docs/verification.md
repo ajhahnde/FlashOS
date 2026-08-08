@@ -177,7 +177,7 @@ flashos check target
 
 A successful target build proves that the selected binary compiles through the configured target toolchain. It does not prove that:
 
-- the Flash recipe uses the tested source revision;
+- the Flash recipe snapshots the tested in-tree workspace state;
 - the binary is installed in an image;
 - login starts the binary;
 - external commands and terminal editing work inside FlashOS.
@@ -460,7 +460,10 @@ These are failure diagnostics. They are not regular release assets.
 
 ### Rebuildability and reproducibility
 
-The repository uses lockfiles, pinned recipe revisions, pinned GitHub Actions, checksums, and a controlled hosted build environment to reduce uncontrolled drift and improve traceability.
+The repository uses lockfiles, pinned external recipe revisions, a
+checkout-bound in-tree Flash workspace snapshot, pinned GitHub Actions,
+checksums, and a controlled hosted build environment to reduce uncontrolled
+drift and improve traceability.
 
 The current workflow does not perform two independent builds and compare their output bytes. It therefore must not be described as proving bit-for-bit reproducible images.
 

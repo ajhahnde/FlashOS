@@ -86,6 +86,15 @@ pub fn generate_html_pkg(
 </table>"#
             )
         }
+        Some(SourceRecipe::Workspace { workspace }) => {
+            let short_identifier = get_short_commit(&package.source_identifier);
+            format!(
+                r#"<table>
+    <tr><th>Workspace:</th><td>{workspace}</td></tr>
+    <tr><th>Snapshot:</th><td>{short_identifier}</td></tr>
+</table>"#
+            )
+        }
         _ => String::from(r#"<p>No source specified.</p>"#),
     };
 

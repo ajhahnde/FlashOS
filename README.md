@@ -22,6 +22,7 @@
 
   <p>
     <a href="docs/README.md"><strong>Documentation</strong></a> ·
+    <a href="docs/source_of_truth.md"><strong>Source of Truth</strong></a> ·
     <a href="docs/getting-started.md"><strong>Getting Started</strong></a> ·
     <a href="components/flash/README.md"><strong>Flash</strong></a> ·
     <a href="ci/README.md"><strong>CI</strong></a> ·

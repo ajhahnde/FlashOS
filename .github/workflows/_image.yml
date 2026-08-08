@@ -105,8 +105,9 @@ jobs:
           # Bind the SBOM to the artifacts it describes and give it a component
           # list. Syft finds nothing in the staged payload on its own: these are
           # bare Redox ELF binaries with no package manifest for it to read. The
-          # authoritative inventory is the recipe set that produced them, and
-          # every shipped recipe now carries a pinned revision.
+          # authoritative inventory is the recipe set that produced them.
+          # External sources are pinned; in-tree Flash is bound to this exact
+          # checkout through its filtered workspace snapshot.
           python3 - <<'BIND'
           import hashlib, json, pathlib, re, tomllib
 

@@ -70,7 +70,10 @@ Consequently:
 
 Before relying on a time-sensitive upstream statement, compare the retained copy with the current upstream source.
 
-The retained files also do not identify the source revisions used to build FlashOS. Those revisions are recorded in package recipes and dependency lockfiles.
+The retained files also do not identify the source revisions used to build
+FlashOS. External revisions are recorded in package recipes and dependency
+lockfiles; the in-tree Flash package is bound to the current FlashOS checkout
+through its workspace recipe.
 
 ## How to interpret upstream material
 
@@ -100,7 +103,11 @@ To determine what enters a FlashOS image, inspect the active configuration and i
 
 ### The upstream default branch is not the shipped revision
 
-Git-based packages selected for FlashOS images use explicit source revisions. The current content of an upstream default branch may therefore differ from the code used by a particular FlashOS image.
+External Git-based packages selected for FlashOS images use explicit source
+revisions. The current content of an upstream default branch may therefore
+differ from the code used by a particular FlashOS image. Flash is maintained in
+this repository and is selected from the same exact checkout through its
+filtered workspace source.
 
 When investigating behavior, begin with the revision in the relevant `recipe.toml`, not the latest upstream commit.
 

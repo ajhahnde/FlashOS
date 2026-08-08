@@ -1,13 +1,12 @@
 [source]
-# Pinned so a tagged image ships the shell from a known commit. Fetching the
-# default branch let the image build a different fsh than the tag it carried.
-# This revision must be bumped as part of preparing a release.
-git = "https://github.com/ajhahnde/FlashOS"
-rev = "23c402003a09dea644ef84b4758bf739264255b4"
+# Flash is maintained in this repository. The workspace source snapshots only
+# tracked and non-ignored files from the current checkout, so an image builds
+# the Flash tree belonging to the same FlashOS revision without a self-SHA pin.
+workspace = "components/flash"
 
 [build]
 template = "cargo"
-cargopath = "components/flash/crates/flash-cli"
+cargopath = "crates/flash-cli"
 cargoflags = [
     "--bin fsh",
 ]

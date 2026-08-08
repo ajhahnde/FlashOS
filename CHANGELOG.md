@@ -53,12 +53,17 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   each named for what it covers, with the image document bound to the SHA-256
   digests of the artifacts it describes.
 - Added product-contract rules covering release credentials, parity between the
-  development and release profiles, and immutable revisions for every recipe
-  that reaches the image.
+  development and release profiles, immutable revisions for every external Git
+  recipe that reaches the image, and the in-tree Flash workspace source.
 - Added a lint gate for the release-critical Python in `ci/`.
 
 ### Changed
 
+- Changed the Flash image recipe to snapshot the current in-tree
+  `components/flash/` workspace instead of pinning the repository to its own
+  commit SHA. Clean builds remain bound to the exact outer FlashOS checkout,
+  while local component edits can be tested without a follow-up pin commit;
+  ignored build outputs are excluded from the snapshot.
 - Relicensed Flash from Apache-2.0 to MIT so the FlashOS-owned component and
   the inherited root build infrastructure use the same permissive license while
   retaining their separate copyright notices.

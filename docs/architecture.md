@@ -294,12 +294,18 @@ recipes/terminal/flash/recipe.toml
 
 That recipe:
 
-- fetches the FlashOS repository at a pinned commit;
-- selects `components/flash/crates/flash-cli`;
+- snapshots tracked and non-ignored files from `components/flash/` in the
+  current checkout;
+- selects `crates/flash-cli` inside that snapshot;
 - builds the binary named `fsh`;
 - installs the resulting package into the target image.
 
-The package input is therefore the revision pinned by the recipe, not automatically every uncommitted or newer change present in a developer's current working tree. Updating Flash in a produced image requires keeping the component source, recipe revision, version metadata, and verification expectations aligned.
+In a clean CI or release checkout, the package input is therefore the Flash
+tree belonging to that exact outer FlashOS revision. A local build also includes
+tracked modifications and non-ignored untracked files under `components/flash/`
+so component changes can be tested before commit. Ignored outputs such as Cargo
+`target/` directories are never copied into the recipe source. Updating Flash
+does not require a self-referential follow-up recipe SHA.
 
 Flash also distinguishes host and target integrations at compile time. macOS and Linux development builds use host-oriented configuration, history, and line-editing integrations, while the Redox target selects its target terminal editor path. A feature demonstrated in a host build must therefore not be documented as available inside FlashOS until the target path and image have been checked.
 
@@ -322,7 +328,8 @@ Architecture, build success, runtime qualification, and hardware support are sep
 - required framebuffer, terminal, and audio scheme access;
 - absence of Orbital and `/ui` profile paths;
 - version alignment;
-- immutable revisions for shipped Git recipes;
+- the exact in-tree Flash workspace source and immutable revisions for shipped
+  external Git recipes;
 - presence of required local branding patches.
 
 This check validates configuration and repository structure. It does not boot an image.

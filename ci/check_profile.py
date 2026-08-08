@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -62,19 +61,6 @@ def fail(message: str) -> None:
 def load(path: Path) -> dict:
     with path.open("rb") as source:
         return tomllib.load(source)
-
-
-def git_output(args: list[str], *, check: bool = True) -> str | None:
-    result = subprocess.run(
-        ["git", *args],
-        check=check,
-        text=True,
-        capture_output=True,
-        cwd=ROOT,
-    )
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
 
 
 def release_version() -> str:
@@ -206,6 +192,20 @@ readme = (ROOT / "README.md").read_text()
 if f"FlashOS {version}" not in readme or f"version-{version}-" not in readme:
     fail("README version drifted from versions.env")
 
+readme_header_links = (
+    '<a href="docs/README.md"><strong>Documentation</strong></a>',
+    '<a href="docs/source_of_truth.md"><strong>Source of Truth</strong></a>',
+    '<a href="docs/getting-started.md"><strong>Getting Started</strong></a>',
+)
+readme_header_positions = tuple(readme.find(link) for link in readme_header_links)
+if -1 in readme_header_positions or readme_header_positions != tuple(
+    sorted(readme_header_positions)
+):
+    fail(
+        "README header must route Documentation -> Source of Truth -> "
+        "Getting Started"
+    )
+
 source_of_truth_path = ROOT / "docs/source_of_truth.md"
 if not source_of_truth_path.is_file():
     fail("public source-of-truth register is missing")
@@ -279,9 +279,21 @@ for expected in (
     if expected not in image_workflow:
         fail(f"image workflow contract is missing: {expected}")
 
-# Every package that reaches the image is fetched from an upstream Git
-# repository. Without an explicit revision the same FlashOS tag would build
-# whatever that repository's default branch happened to be at the time.
+# Flash is maintained in this repository, so its source is the current
+# checkout's tracked/non-ignored component snapshot. This avoids a circular
+# self-SHA pin while keeping image source identity bound to the outer checkout.
+flash_recipe = load(ROOT / "recipes/terminal/flash/recipe.toml")
+if flash_recipe.get("source") != {"workspace": "components/flash"}:
+    fail("Flash recipe must use the in-tree components/flash workspace source")
+flash_build = flash_recipe.get("build", {})
+if flash_build.get("template") != "cargo" or flash_build.get("cargopath") != (
+    "crates/flash-cli"
+):
+    fail("Flash workspace recipe must build crates/flash-cli with Cargo")
+
+# Every external Git package that reaches the image retains an explicit
+# revision. Without one, the same FlashOS tag could build whatever the
+# repository's default branch happened to contain later.
 RECIPE_ROOTS = ("core", "libs", "terminal")
 for package in sorted(packages):
     recipe_paths = [
@@ -301,45 +313,6 @@ for package in sorted(packages):
             "shipped recipe is not pinned to an immutable revision: "
             f"{recipe_path.relative_to(ROOT)}"
         )
-
-    if package == "flash":
-        commit_arg = f"{revision}^{{commit}}"
-        if (
-            git_output(
-                ["rev-parse", "--verify", commit_arg],
-                check=False,
-            )
-            is None
-        ):
-            fail(f"pinned Flash commit {revision} is not available locally")
-
-        pinned_tree = git_output(
-            [
-                "rev-parse",
-                "--verify",
-                f"{revision}:components/flash",
-            ],
-            check=False,
-        )
-        if pinned_tree is None:
-            fail(f"components/flash is missing in pinned commit {revision}")
-
-        current_tree = git_output(
-            [
-                "rev-parse",
-                "--verify",
-                "HEAD:components/flash",
-            ],
-            check=False,
-        )
-        if current_tree is None:
-            fail("components/flash is missing in current HEAD")
-
-        if pinned_tree != current_tree:
-            fail(
-                f"Flash recipe tree ({pinned_tree}) does not match current "
-                f"tree ({current_tree}); update recipe.toml to match"
-            )
 
 qemu_smoke = (ROOT / "ci/qemu_smoke.py").read_text()
 for expected in ('choices=("nvme", "usb")', "snapshot=on"):

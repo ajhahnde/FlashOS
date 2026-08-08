@@ -18,6 +18,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File},
     io::Read,
+    os::unix::fs::{PermissionsExt, symlink},
     path::{Path, PathBuf},
     process::Command,
     rc::Rc,
@@ -63,6 +64,210 @@ impl FetchResult {
     }
 }
 
+#[derive(Debug)]
+struct WorkspaceFile {
+    source: PathBuf,
+    relative: PathBuf,
+}
+
+#[derive(Debug)]
+struct WorkspaceSnapshot {
+    files: Vec<WorkspaceFile>,
+    identifier: String,
+}
+
+fn workspace_git_output(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(root).args(args);
+    let output = command
+        .output()
+        .map_err(wrap_io_err!("Running Git for workspace source"))?;
+    if !output.status.success() {
+        bail_other_err!(
+            "Git workspace source command failed: git -C {:?} {}: {}",
+            root.display(),
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(output.stdout)
+}
+
+fn workspace_snapshot(root: &Path, workspace: &str) -> Result<WorkspaceSnapshot> {
+    let workspace_relative = Path::new(workspace);
+    if workspace_relative.as_os_str().is_empty()
+        || workspace_relative.is_absolute()
+        || workspace_relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        bail_other_err!(
+            "Workspace source path must be a non-empty normalized repository-relative path: {:?}",
+            workspace
+        );
+    }
+
+    let root = root.canonicalize().map_err(wrap_io_err!(
+        root,
+        "Canonicalizing workspace repository root"
+    ))?;
+    let workspace_root = root
+        .join(workspace_relative)
+        .canonicalize()
+        .map_err(wrap_io_err!(
+            root.join(workspace_relative),
+            "Canonicalizing workspace source"
+        ))?;
+    if !workspace_root.starts_with(&root) || !workspace_root.is_dir() {
+        bail_other_err!(
+            "Workspace source escapes the repository or is not a directory: {:?}",
+            workspace
+        );
+    }
+
+    let tree_spec = format!("HEAD:{workspace}");
+    let tree = workspace_git_output(&root, &["rev-parse", "--verify", &tree_spec])?;
+    let tree = String::from_utf8(tree).map_err(|error| {
+        Error::Other(format!("Workspace tree identifier is not UTF-8: {error}"))
+    })?;
+    let tree = tree.trim().to_string();
+
+    let listed = workspace_git_output(
+        &root,
+        &[
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            workspace,
+        ],
+    )?;
+    let mut files = Vec::new();
+    for raw_path in listed
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+    {
+        let path = std::str::from_utf8(raw_path).map_err(|error| {
+            Error::Other(format!("Workspace source path is not UTF-8: {error}"))
+        })?;
+        let repository_path = PathBuf::from(path);
+        let relative = repository_path
+            .strip_prefix(workspace_relative)
+            .map_err(|_| {
+                Error::Other(format!(
+                    "Git returned a path outside workspace source {workspace:?}: {path:?}"
+                ))
+            })?
+            .to_path_buf();
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        let source = root.join(&repository_path);
+        if source.symlink_metadata().is_ok() {
+            files.push(WorkspaceFile { source, relative });
+        }
+    }
+    files.sort_by(|left, right| left.relative.cmp(&right.relative));
+    files.dedup_by(|left, right| left.relative == right.relative);
+
+    let status = workspace_git_output(
+        &root,
+        &[
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--",
+            workspace,
+        ],
+    )?;
+    let identifier = if status.is_empty() {
+        tree
+    } else {
+        let mut hasher = blake3::Hasher::new();
+        for file in &files {
+            let relative = file.relative.to_string_lossy();
+            hasher.update(&(relative.len() as u64).to_le_bytes());
+            hasher.update(relative.as_bytes());
+
+            let metadata = file.source.symlink_metadata().map_err(wrap_io_err!(
+                &file.source,
+                "Reading workspace source metadata"
+            ))?;
+            if metadata.file_type().is_symlink() {
+                hasher.update(b"symlink");
+                let target = fs::read_link(&file.source).map_err(wrap_io_err!(
+                    &file.source,
+                    "Reading workspace source symlink"
+                ))?;
+                let target = target.to_string_lossy();
+                hasher.update(&(target.len() as u64).to_le_bytes());
+                hasher.update(target.as_bytes());
+            } else if metadata.is_file() {
+                hasher.update(b"file");
+                hasher.update(&(metadata.permissions().mode() & 0o111).to_le_bytes());
+                hasher.update(&metadata.len().to_le_bytes());
+                let mut source = File::open(&file.source).map_err(wrap_io_err!(
+                    &file.source,
+                    "Opening workspace source for hashing"
+                ))?;
+                hasher
+                    .update_reader(&mut source)
+                    .map_err(wrap_io_err!(&file.source, "Hashing workspace source"))?;
+            } else {
+                bail_other_err!(
+                    "Workspace source contains unsupported file type: {:?}",
+                    file.source.display()
+                );
+            }
+        }
+        format!("{tree}-dirty-{}", hasher.finalize().to_hex())
+    };
+
+    Ok(WorkspaceSnapshot { files, identifier })
+}
+
+fn materialize_workspace(snapshot: &WorkspaceSnapshot, destination: &Path) -> Result<()> {
+    let temporary = destination.with_added_extension("tmp");
+    create_dir_clean(&temporary)?;
+    for file in &snapshot.files {
+        let target = temporary.join(&file.relative);
+        let parent = target.parent().ok_or_else(wrap_other_err!(
+            "Workspace snapshot target has no parent: {:?}",
+            target.display()
+        ))?;
+        create_dir(parent)?;
+
+        let metadata = file.source.symlink_metadata().map_err(wrap_io_err!(
+            &file.source,
+            "Reading workspace source metadata"
+        ))?;
+        if metadata.file_type().is_symlink() {
+            let link_target = fs::read_link(&file.source).map_err(wrap_io_err!(
+                &file.source,
+                "Reading workspace source symlink"
+            ))?;
+            symlink(&link_target, &target).map_err(wrap_io_err!(
+                &file.source,
+                &target,
+                "Copying workspace source symlink"
+            ))?;
+        } else {
+            fs::copy(&file.source, &target).map_err(wrap_io_err!(
+                &file.source,
+                &target,
+                "Copying workspace source file"
+            ))?;
+        }
+    }
+
+    if destination.exists() {
+        remove_all(destination)?;
+    }
+    rename(&temporary, destination)
+}
+
 /// Fetch using "offline mode". It is equivalent of using "local" rule to all recipes.
 pub fn fetch_offline(recipe: &CookRecipe, logger: &PtyOut) -> Result<FetchResult> {
     let recipe_dir = &recipe.dir;
@@ -80,7 +285,9 @@ pub fn fetch_offline(recipe: &CookRecipe, logger: &PtyOut) -> Result<FetchResult
     }
 
     let result = match &recipe.recipe.source {
-        Some(SourceRecipe::Path { path: _ }) | None => fetch(recipe, true, logger)?,
+        Some(SourceRecipe::Path { path: _ })
+        | Some(SourceRecipe::Workspace { workspace: _ })
+        | None => fetch(recipe, true, logger)?,
         Some(SourceRecipe::SameAs { same_as }) => {
             let recipe = fetch_resolve_canon(&same_as, &recipe)?;
             // recursively fetch
@@ -196,6 +403,26 @@ pub fn fetch(recipe: &CookRecipe, check_source: bool, logger: &PtyOut) -> Result
                 "".to_string(),
                 cached,
             )
+        }
+        Some(SourceRecipe::Workspace { workspace }) => {
+            let root = std::env::current_dir()
+                .map_err(wrap_io_err!("Resolving workspace repository root"))?;
+            let snapshot = workspace_snapshot(&root, workspace)?;
+            let cached = source_dir.is_dir()
+                && cached_info.as_ref().is_some_and(|info| {
+                    info.source_identifier == snapshot.identifier
+                        && info.patch_identifier.is_empty()
+                });
+            if !cached {
+                log_to_pty!(
+                    logger,
+                    "[DEBUG]: workspace source {:?} changed to {}",
+                    workspace,
+                    snapshot.identifier
+                );
+                materialize_workspace(&snapshot, &source_dir)?;
+            }
+            FetchResult::new(source_dir, snapshot.identifier, "".to_string(), cached)
         }
         Some(SourceRecipe::Git {
             git,
@@ -863,4 +1090,141 @@ pub fn fetch_get_source_info(recipe: &CookRecipe) -> Result<SourceIdentifier> {
     let target_dir = recipe.target_dir();
     let source_toml_path = target_dir.join("source_info.toml");
     read_toml(&source_toml_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{materialize_workspace, workspace_snapshot};
+    use std::{
+        fs,
+        os::unix::fs::{PermissionsExt, symlink},
+        path::PathBuf,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TestRepository {
+        root: PathBuf,
+    }
+
+    impl TestRepository {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "flashos-workspace-source-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).unwrap();
+            let repository = Self { root };
+            repository.git(&["init", "--quiet"]);
+            repository.git(&["config", "user.email", "test@example.invalid"]);
+            repository.git(&["config", "user.name", "FlashOS Test"]);
+            repository
+        }
+
+        fn git(&self, args: &[&str]) -> String {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&self.root)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_string()
+        }
+
+        fn write(&self, relative: &str, contents: &str) {
+            let path = self.root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, contents).unwrap();
+        }
+    }
+
+    impl Drop for TestRepository {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    #[test]
+    fn workspace_snapshot_tracks_worktree_without_ignored_artifacts() {
+        let repository = TestRepository::new();
+        repository.write("component/.gitignore", "target/\n");
+        repository.write("component/Cargo.toml", "[package]\nname = \"demo\"\n");
+        repository.write("component/bin/run", "#!/bin/sh\nexit 0\n");
+        let executable = repository.root.join("component/bin/run");
+        let mut permissions = executable.metadata().unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions).unwrap();
+        symlink(
+            "Cargo.toml",
+            repository.root.join("component/manifest-link"),
+        )
+        .unwrap();
+        repository.git(&["add", "."]);
+        repository.git(&["commit", "--quiet", "-m", "initial"]);
+
+        repository.write("component/target/ignored", "large generated output");
+        let clean = workspace_snapshot(&repository.root, "component").unwrap();
+        let tree = repository.git(&["rev-parse", "HEAD:component"]);
+        assert_eq!(clean.identifier, tree);
+
+        let destination = repository.root.join("snapshot");
+        materialize_workspace(&clean, &destination).unwrap();
+        assert!(destination.join("Cargo.toml").is_file());
+        assert!(!destination.join("target").exists());
+        assert!(
+            destination
+                .join("manifest-link")
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_ne!(
+            destination
+                .join("bin/run")
+                .metadata()
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o111,
+            0
+        );
+
+        repository.write("component/Cargo.toml", "[package]\nname = \"changed\"\n");
+        repository.write("component/new.fsh", "print 'local change'\n");
+        fs::remove_file(repository.root.join("component/manifest-link")).unwrap();
+        let dirty = workspace_snapshot(&repository.root, "component").unwrap();
+        assert!(dirty.identifier.starts_with(&format!("{tree}-dirty-")));
+        assert_ne!(dirty.identifier, clean.identifier);
+
+        repository.write("component/target/ignored", "different generated output");
+        let dirty_after_ignored_change = workspace_snapshot(&repository.root, "component").unwrap();
+        assert_eq!(dirty_after_ignored_change.identifier, dirty.identifier);
+
+        materialize_workspace(&dirty, &destination).unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.join("Cargo.toml")).unwrap(),
+            "[package]\nname = \"changed\"\n"
+        );
+        assert!(destination.join("new.fsh").is_file());
+        assert!(!destination.join("manifest-link").exists());
+        assert!(!destination.join("target").exists());
+    }
+
+    #[test]
+    fn workspace_snapshot_rejects_paths_outside_repository() {
+        let repository = TestRepository::new();
+        assert!(workspace_snapshot(&repository.root, "../component").is_err());
+        assert!(workspace_snapshot(&repository.root, "/component").is_err());
+        assert!(workspace_snapshot(&repository.root, "").is_err());
+    }
 }

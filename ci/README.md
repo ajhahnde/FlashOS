@@ -694,7 +694,9 @@ The current automation uses several independent drift and integrity controls:
 - root and Flash Rust toolchains are pinned separately;
 - Cargo lockfiles record the selected Rust dependency resolution;
 - Cargo policies check advisories, licenses, bans, and sources;
-- shipped Git-based package recipes require full immutable revisions;
+- shipped external Git-based package recipes require full immutable revisions;
+- the in-tree Flash recipe snapshots only tracked and non-ignored files from
+  `components/flash/` and records a content-sensitive source identity;
 - third-party GitHub Actions require full commit SHAs;
 - the CI base image is selected by digest;
 - the Rust installer used in the CI image is checksum-verified;
@@ -887,7 +889,10 @@ Do not add a planned assertion to a table as if it already passes. A public runt
 
 When changing artifact names or SBOM scope, update the producer, consumer, checksum generation, release packaging, profile-contract source assertions, and documentation together.
 
-When changing a third-party Action, preserve a full commit pin. When changing a shipped Git recipe source, preserve an immutable revision.
+When changing a third-party Action, preserve a full commit pin. When changing
+an external Git recipe source, preserve an immutable revision. When changing an
+in-tree workspace recipe, preserve its repository-relative path, ignored-file
+exclusion, content-sensitive identity, and clean-checkout CI contract.
 
 ## Sources of truth
 
