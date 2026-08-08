@@ -10,6 +10,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added informational host line-coverage reporting for all five Flash crates.
+  A dedicated workflow generates one LCOV report with pinned Rust coverage
+  tooling, rejects empty reports or reports that omit a workspace member, and
+  authenticates the Codecov upload through GitHub OIDC. Coverage status checks
+  and pull-request comments remain disabled while a new Rust baseline is
+  established; the README badge explicitly represents Flash host coverage and
+  does not claim Redox, QEMU, or hardware-path coverage.
 - Added a public source-of-truth register that routes drift-prone product,
   platform, implementation, verification, release, hardware, licensing, and
   strategy claims to their authoritative sources, justification, and
@@ -59,6 +66,11 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Clarified and tightened the commit-subject scope rule. `flash` and `tools`
+  are now the only accepted scopes and are required when that named subproject
+  owns the primary effect; pure CI, root build-system, release,
+  repository-wide, and mixed-area subjects remain unscoped. The commit helper
+  rejects invented scopes and redundant forms such as `ci(ci):`.
 - Changed the Flash image recipe to snapshot the current in-tree
   `components/flash/` workspace instead of pinning the repository to its own
   commit SHA. Clean builds remain bound to the exact outer FlashOS checkout,
