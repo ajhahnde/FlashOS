@@ -273,6 +273,11 @@ for expected in (
     # package payload rather than from the repository working tree.
     "FlashOS-x86_64-image.cdx.json",
     "dist/payload",
+    # The container runs as root over a runner-owned bind mount. Git must
+    # trust exactly that mount for the in-tree Flash workspace snapshot.
+    "GIT_CONFIG_COUNT=1",
+    "GIT_CONFIG_KEY_0=safe.directory",
+    "GIT_CONFIG_VALUE_0=/workspace",
     "--disk-interface nvme",
     "--disk-interface usb",
 ):

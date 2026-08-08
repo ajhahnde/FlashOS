@@ -43,10 +43,17 @@ jobs:
           CONFIG_NAME: ${{ inputs.config-name }}
         run: |
           set -euo pipefail
+          # The hosted checkout belongs to the runner UID, while the build
+          # container runs as root. Trust only the fixed source mount so Git
+          # can snapshot the in-tree Flash workspace without weakening its
+          # ownership check for any other path.
           docker run --rm --privileged \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --workdir /workspace \
             --env CI=1 \
+            --env GIT_CONFIG_COUNT=1 \
+            --env GIT_CONFIG_KEY_0=safe.directory \
+            --env GIT_CONFIG_VALUE_0=/workspace \
             "flashos-ci:${GITHUB_SHA}" \
             make \
               ARCH=x86_64 \
