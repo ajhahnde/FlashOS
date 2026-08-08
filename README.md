@@ -146,7 +146,7 @@ No response, review, acceptance, or release timeline is guaranteed.
 
 ## License and attribution
 
-The inherited root build infrastructure is available under the [MIT License](LICENSE). Flash is provided under the [Apache License 2.0](components/flash/LICENSE). Third-party packages and inherited components retain their respective licenses.
+The inherited root build infrastructure and Flash are available under the MIT License, with their respective copyright notices in the root [LICENSE](LICENSE) and the [Flash license](components/flash/LICENSE). Third-party packages and inherited components retain their respective licenses.
 
 See the following files for attribution and project identity information:
 

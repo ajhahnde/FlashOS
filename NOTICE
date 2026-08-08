@@ -14,8 +14,8 @@ by the MIT License and copyright notice in LICENSE:
 Redox OS, its logo, and related marks belong to the Redox OS nonprofit. The
 upstream trademark policy is retained in docs/upstream/REDOX_TRADEMARK.md.
 
-Flash, located under components/flash, is licensed separately under
-the Apache License, Version 2.0. See components/flash/LICENSE.
+Flash, located under components/flash, is licensed under a separate MIT License
+and copyright notice. See components/flash/LICENSE.
 
 Technical identifiers such as x86_64-unknown-redox, redoxer, relibc, and
 upstream package names are currently retained for compatibility and

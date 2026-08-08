@@ -55,6 +55,9 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Relicensed Flash from Apache-2.0 to MIT so the FlashOS-owned component and
+  the inherited root build infrastructure use the same permissive license while
+  retaining their separate copyright notices.
 - Renamed FlashShell to Flash across the source tree while preserving the
   `fsh` executable, `/usr/bin/fsh`, `.fsh` scripts, and prompt protocol. Added
   concrete fallback strategies for configuration and history:

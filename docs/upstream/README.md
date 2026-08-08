@@ -221,7 +221,7 @@ The primary repository references are:
 
 - [`NOTICE`](../../NOTICE) — project relationship and high-level attribution;
 - [`LICENSE`](../../LICENSE) — MIT license retained for the inherited root build-system code;
-- [`components/flash/LICENSE`](../../components/flash/LICENSE) — Apache License 2.0 for Flash;
+- [`components/flash/LICENSE`](../../components/flash/LICENSE) — MIT license and copyright notice for Flash;
 - [`TRADEMARK.md`](../../TRADEMARK.md) — FlashOS identity and use of Redox references.
 
 Third-party packages and inherited components retain their own licenses and copyright notices. The root license must not be interpreted as relicensing every dependency, package, or separately licensed component in the repository.
