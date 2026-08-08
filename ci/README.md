@@ -922,4 +922,4 @@ When changing a third-party Action, preserve a full commit pin. When changing a 
 
 ---
 
-[← Previous: Flash Development](../components/flash/docs/development.md) · [Documentation index](../docs/README.md) · [Next: Changelog →](../CHANGELOG.md)
+[← Previous: Flash Development](../components/flash/docs/development.md) · [Documentation index](../docs/README.md) · [Source of Truth](../docs/source_of_truth.md) · [Next: Changelog →](../CHANGELOG.md)

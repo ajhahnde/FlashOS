@@ -241,4 +241,4 @@ For an exact release artifact, use its accompanying source and image inventories
 
 ---
 
-[← Previous: Roadmap](../roadmap.md) · [Documentation index](../README.md) · [Next: Flash Overview →](../../components/flash/README.md)
+[← Previous: Roadmap](../roadmap.md) · [Documentation index](../README.md) · [Source of Truth](../source_of_truth.md) · [Next: Flash Overview →](../../components/flash/README.md)

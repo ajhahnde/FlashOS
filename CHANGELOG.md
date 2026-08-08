@@ -10,6 +10,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added a public source-of-truth register that routes drift-prone product,
+  platform, implementation, verification, release, hardware, licensing, and
+  strategy claims to their authoritative sources, justification, and
+  event-driven review triggers.
 - Added optional Gemini-backed host helpers for evidence-bounded repository
   location questions and locally validated commit subjects. Their public
   contexts define FlashOS terminology, evidence limits, privacy boundaries, and
@@ -200,4 +204,4 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ---
 
-[← Previous: CI/CD Contracts](ci/README.md) · [FlashOS README](README.md) · [Next: Security Policy →](.github/SECURITY.md)
+[← Previous: CI/CD Contracts](ci/README.md) · [FlashOS README](README.md) · [Source of Truth](docs/source_of_truth.md) · [Next: Security Policy →](.github/SECURITY.md)

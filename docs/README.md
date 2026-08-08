@@ -8,6 +8,7 @@ This page is the central index for the public FlashOS documentation. It directs 
 
 | Goal                                      | Guide                                                  | Scope                                                                                                          |
 | ----------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Trace changing public claims to evidence  | [Source of Truth](source_of_truth.md)                  | Public facts, authoritative sources, justification, precedence, and event-driven review triggers               |
 | Build and boot FlashOS for the first time | [Getting Started](getting-started.md)                  | Host requirements, repository setup, image building, QEMU execution, and initial session checks                |
 | Understand how the system is structured   | [Architecture](architecture.md)                        | System layers, image configuration, build-to-boot flow, component ownership, and upstream boundaries           |
 | Work on the repository                    | [Development](development.md)                          | Development environment, repository layout, common workflows, build operations, and documentation rules        |
@@ -44,4 +45,4 @@ New documentation should link directly to the current guides listed above rather
 
 ---
 
-[← Back to FlashOS](../README.md) · [Next: Getting Started →](getting-started.md)
+[← Back to FlashOS](../README.md) · [Next: Source of Truth →](source_of_truth.md)

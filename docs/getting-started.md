@@ -517,4 +517,4 @@ After reaching a working Flash prompt:
 
 ---
 
-[← Previous: Documentation Index](README.md) · [Documentation index](README.md) · [Next: Architecture →](architecture.md)
+[← Previous: Source of Truth](source_of_truth.md) · [Documentation index](README.md) · [Next: Architecture →](architecture.md)
