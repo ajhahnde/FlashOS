@@ -291,6 +291,8 @@ _flashos_check_quick() {
 _flashos_check_python() {
   _flashos_root command ruff check tools/flashos/ ci/ "$@" &&
     _flashos_root command python3 -m unittest discover \
+      -s ci/tests -p 'test_*.py' &&
+    _flashos_root command python3 -m unittest discover \
       -s tools/flashos/tests -p 'test_*.py'
 }
 

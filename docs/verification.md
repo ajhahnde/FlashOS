@@ -14,6 +14,7 @@ This guide explains how FlashOS distinguishes source checks, target compilation,
 - [Image construction](#image-construction)
 - [QEMU runtime qualification](#qemu-runtime-qualification)
 - [Hosted CI and artifact promotion](#hosted-ci-and-artifact-promotion)
+- [Host coverage reporting](#host-coverage-reporting)
 - [Security checks](#security-checks)
 - [Release evidence](#release-evidence)
 - [Physical hardware qualification](#physical-hardware-qualification)
@@ -29,6 +30,7 @@ FlashOS treats every check as evidence for a bounded claim. Passing one layer do
 | Layer                | Primary evidence                                                  | Supported claim                                                               | Not established                                          |
 | -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
 | Source quality       | Formatting, linting, and host tests                               | The checked source satisfies its host-side quality rules                      | Target compilation or image behavior                     |
+| Host coverage        | Validated Flash LCOV report                                       | Host tests executed the reported Flash source lines                           | Redox, QEMU, kernel, or hardware-path coverage           |
 | Target compilation   | Redox-target build                                                | The selected component compiles for the current target ABI                    | Package installation or runtime behavior                 |
 | Product profile      | `ci/check_profile.py`                                             | Declared profiles and selected repository contracts satisfy static invariants | Successful package or image construction                 |
 | Package construction | Cookbook recipe build                                             | The selected recipe can produce its package output                            | Inclusion in a clean image                               |
@@ -108,6 +110,7 @@ FlashOS-owned Python. Lint and test them with:
 
 ```bash
 ruff check ci/ tools/flashos/
+python3 -m unittest discover -s ci/tests -p 'test_*.py'
 python3 -m unittest discover -s tools/flashos/tests -p 'test_*.py'
 ```
 
@@ -360,14 +363,14 @@ The generated smoke log is diagnostic evidence from the session. It is not a rep
 
 The QEMU smoke contract checks observable markers and interactive behavior across several general evidence classes. While [CI/CD Contracts](../ci/README.md) and [`ci/qemu_smoke.py`](../ci/qemu_smoke.py) remain the authoritative sources for exact serial markers, assertion sequences, parameters, and artifact paths, the qualification tests cover these interaction categories:
 
-| Category                             | Nature of tested interaction                                               |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| **Boot and kernel progress**         | Observable bootloader markers, serial boot submission, and kernel startup  |
-| **Service initialization**           | Driver spawn markers, such as guest audio driver (`ihdad`) initialization  |
-| **Authentication and basic access**  | Successful unprivileged console login and primary prompt display           |
-| **Interactive command editing**      | Target-side line editing, command history recall, and multiline input      |
+| Category                             | Nature of tested interaction                                                                                                           |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Boot and kernel progress**         | Observable bootloader markers, serial boot submission, and kernel startup                                                              |
+| **Service initialization**           | Driver spawn markers, such as guest audio driver (`ihdad`) initialization                                                              |
+| **Authentication and basic access**  | Successful unprivileged console login and primary prompt display                                                                       |
+| **Interactive command editing**      | Target-side line editing, command history recall, and multiline input                                                                  |
 | **Pipelines and flow control**       | External command piping and exit-status branching (e.g., a nonzero external status reaches the fallback branch of a conditional chain) |
-| **Filesystem and security patterns** | Unprivileged file manipulation in user space versus required rejection under `/etc`, and release-profile root login rejection |
+| **Filesystem and security patterns** | Unprivileged file manipulation in user space versus required rejection under `/etc`, and release-profile root login rejection          |
 
 For the complete line-by-line runtime contract and serial synchronization rules, consult [CI/CD Contracts](../ci/README.md#runtime-assertions).
 
@@ -468,6 +471,20 @@ drift and improve traceability.
 The current workflow does not perform two independent builds and compare their output bytes. It therefore must not be described as proving bit-for-bit reproducible images.
 
 A checksum proves the identity and integrity of a particular byte sequence. It does not prove how independently reproducible, correct, secure, or hardware-compatible that sequence is.
+
+## Host coverage reporting
+
+The independent Coverage workflow instruments the complete Flash host test
+suite, validates one LCOV report, and uploads it to Codecov. Its structural
+guard requires reported source from every Flash workspace crate and at least
+one executed first-party line. Codecov statuses, comments, and GitHub checks
+remain disabled while the new Rust baseline is established, and Coverage is
+not part of the standard CI `required` aggregate.
+
+Coverage is an observation about lines compiled and executed on the host. It
+does not measure target-selected Redox paths, image packaging, QEMU behavior,
+the kernel, or physical hardware. The public badge must therefore remain
+labelled as Flash host coverage rather than as a whole-system quality score.
 
 ## Security checks
 
@@ -631,21 +648,21 @@ Use local qualification to find failures before pushing a change. Use the hosted
 
 A failure identifies the boundary at which an expected condition was not met. Start with that boundary rather than assuming a root cause.
 
-| Failure point              | What is known                                                      | First investigation area                                                 |
-| -------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| Formatting                 | Tracked source differs from formatter output                       | The reported files and workspace toolchain                               |
-| Root tests                 | A host-side build-system assertion failed                          | Test output, recent root workspace changes, lockfile                     |
-| Flash Clippy or tests      | A host-side Flash quality rule failed                              | Reported crate, target, fixture, or warning                              |
-| Target compilation         | The selected binary did not compile for the target                 | Target-only code, dependencies, ABI, `redoxer` environment               |
-| Python lint                | A CI script violates the configured lint rules                     | Reported file and diagnostic                                             |
-| Product contract           | A static repository invariant failed                               | Exact `profile contract:` message and owning configuration               |
-| Recipe build               | A package could not be produced                                    | Recipe source, revision, patch, dependencies, toolchain                  |
-| Image build                | Installer or image assembly did not complete                       | Build log, package repository, filesystem tools, available storage       |
-| Checksum verification      | Downloaded or staged bytes differ from the recorded digest         | Artifact transfer, staging, file replacement, incomplete download        |
-| Boot marker timeout        | The expected serial marker did not appear                          | Earlier serial output, firmware, QEMU command, kernel or service startup |
-| Interactive assertion      | Boot progressed, but a tested interaction failed                   | The scoped smoke log near the failed marker                              |
-| Release root assertion     | The release image accepted or did not reject the tested root login | Release profile, installed account database, login implementation        |
-| Physical test              | The recorded device did not reach the expected state               | Device-specific firmware, controller, driver, and boot observations      |
+| Failure point          | What is known                                                      | First investigation area                                                 |
+| ---------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Formatting             | Tracked source differs from formatter output                       | The reported files and workspace toolchain                               |
+| Root tests             | A host-side build-system assertion failed                          | Test output, recent root workspace changes, lockfile                     |
+| Flash Clippy or tests  | A host-side Flash quality rule failed                              | Reported crate, target, fixture, or warning                              |
+| Target compilation     | The selected binary did not compile for the target                 | Target-only code, dependencies, ABI, `redoxer` environment               |
+| Python lint            | A CI script violates the configured lint rules                     | Reported file and diagnostic                                             |
+| Product contract       | A static repository invariant failed                               | Exact `profile contract:` message and owning configuration               |
+| Recipe build           | A package could not be produced                                    | Recipe source, revision, patch, dependencies, toolchain                  |
+| Image build            | Installer or image assembly did not complete                       | Build log, package repository, filesystem tools, available storage       |
+| Checksum verification  | Downloaded or staged bytes differ from the recorded digest         | Artifact transfer, staging, file replacement, incomplete download        |
+| Boot marker timeout    | The expected serial marker did not appear                          | Earlier serial output, firmware, QEMU command, kernel or service startup |
+| Interactive assertion  | Boot progressed, but a tested interaction failed                   | The scoped smoke log near the failed marker                              |
+| Release root assertion | The release image accepted or did not reject the tested root login | Release profile, installed account database, login implementation        |
+| Physical test          | The recorded device did not reach the expected state               | Device-specific firmware, controller, driver, and boot observations      |
 
 Common categories are diagnostic starting points, not automatic explanations. For example, an absent login prompt could result from an earlier kernel failure, a service configuration change, a serial-routing problem, or simply a timeout on a slow host.
 
@@ -681,6 +698,9 @@ Do not remove an assertion solely because a change fails it. First determine whe
 | QEMU runtime contract                    | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                             |
 | Public local helper behavior             | [`flashos.sh`](../flashos.sh)                                         |
 | Standard hosted CI orchestration         | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             |
+| Informational host coverage              | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) |
+| Coverage report completeness             | [`ci/check_coverage.py`](../ci/check_coverage.py)                     |
+| Codecov reporting policy                 | [`codecov.yml`](../codecov.yml)                                       |
 | Image production and runtime consumption | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)     |
 | Dependency-policy workflow               | [`.github/workflows/security.yml`](../.github/workflows/security.yml) |
 | Release packaging and publication        | [`.github/workflows/release.yml`](../.github/workflows/release.yml)   |

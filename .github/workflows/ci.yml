@@ -91,6 +91,7 @@ jobs:
         run: |
           pipx install ruff==0.16.0
           ruff check ci/ tools/flashos/
+          python3 -m unittest discover -s ci/tests -p 'test_*.py'
           python3 -m unittest discover -s tools/flashos/tests -p 'test_*.py'
 
       - name: Validate package, TUI, shell, identity, and audio policy

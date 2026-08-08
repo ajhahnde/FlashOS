@@ -1,0 +1,9 @@
+# Coverage is informational while the new Rust baseline is established.
+# The report covers host-executable Flash code, not Redox, QEMU, or hardware paths.
+coverage:
+  status:
+    project: off
+    patch: off
+
+comment: false
+github_checks: false

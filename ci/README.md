@@ -12,6 +12,7 @@ This document defines the executable CI/CD contracts implemented by the scripts 
 - [QEMU runtime contract](#qemu-runtime-contract)
 - [Hosted workflow architecture](#hosted-workflow-architecture)
 - [Standard CI workflow](#standard-ci-workflow)
+- [Coverage workflow](#coverage-workflow)
 - [Reusable image qualification](#reusable-image-qualification)
 - [Security workflow](#security-workflow)
 - [Release workflow](#release-workflow)
@@ -24,12 +25,13 @@ This document defines the executable CI/CD contracts implemented by the scripts 
 
 ## Responsibility and boundaries
 
-The CI implementation separates four responsibilities:
+The CI implementation separates five responsibilities:
 
 1. source and host-workspace quality;
 2. static repository and product-profile validation;
 3. image construction and runtime qualification;
-4. security review and release delivery.
+4. informational Flash host-coverage measurement;
+5. security review and release delivery.
 
 The executable scripts under `ci/` own product-specific assertions that must also be available outside GitHub Actions. Workflow files own hosted orchestration, permissions, artifact transfer, retention, and publication conditions.
 
@@ -49,9 +51,11 @@ FlashOS remains pre-alpha software even when all current automated contracts pas
 | Path                                                                  | Responsibility                                                                                |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | [`ci/check_profile.py`](check_profile.py)                             | Validate static FlashOS product, profile, release, pinning, and workflow invariants           |
+| [`ci/check_coverage.py`](check_coverage.py)                           | Reject empty Flash LCOV reports and reports that omit a workspace crate                       |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                   | Boot an existing x86_64 image and evaluate the current serial runtime contract                |
 | [`ci/container/Dockerfile`](container/Dockerfile)                     | Define the hosted x86_64 image-build tool environment                                         |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             | Run ordinary source, product, image, and runtime gates                                        |
+| [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) | Generate, validate, and upload informational Flash host coverage                              |
 | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)     | Build, checksum, promote, download, and boot disk and live images                             |
 | [`.github/workflows/security.yml`](../.github/workflows/security.yml) | Run dependency review and Cargo supply-chain policies                                         |
 | [`.github/workflows/release.yml`](../.github/workflows/release.yml)   | Rebuild and qualify release images, package a candidate, attest it, and optionally publish it |
@@ -140,6 +144,7 @@ The profile contract compares that version with selected public and installed id
 - `/usr/lib/os-release`;
 - `/etc/issue`;
 - the root README;
+- the title-cased README badge labels;
 - release artifact naming and tag-validation source.
 
 A mismatch fails before an image is built.
@@ -155,6 +160,10 @@ The script verifies the presence of selected release-critical workflow contracts
 - expected raw disk, live-image, image-SBOM, and checksum paths;
 - collection of staged package payloads;
 - NVMe and USB runtime qualification paths.
+
+It also binds the informational coverage workflow to its pinned generator,
+OIDC-authenticated single-report upload, report-completeness guard, and disabled
+Codecov status/comment policy.
 
 These checks confirm that the workflow source contains the required contract elements. They do not execute the workflow or parse its complete semantics.
 
@@ -256,7 +265,7 @@ The smoke script waits for ordered markers and performs scoped serial interactio
 | History                 | The preceding command can be recalled                                              |
 | Multiline input         | Continuation prompts join and evaluate a block                                     |
 | Cancellation            | `Ctrl-C` abandons the current input without executing it                           |
-| Exit status             | A failing external command activates the tested <code>&#124;&#124;</code> fallback          |
+| Exit status             | A failing external command activates the tested <code>&#124;&#124;</code> fallback |
 | User filesystem         | The unprivileged account can create, read, and remove a file in its home directory |
 | Foreground completion   | A failing foreground command returns control to the prompt                         |
 | Permission boundary     | The unprivileged account cannot create the tested file under `/etc`                |
@@ -331,6 +340,11 @@ ci.yml
 security.yml
 └── independent dependency-policy jobs
 
+coverage.yml
+└── pinned Flash host coverage
+    ├── complete LCOV report guard
+    └── OIDC-authenticated Codecov upload
+
 release.yml
 ├── _image.yml using flashos-release
 ├── package, checksum, SBOM, and attest
@@ -387,6 +401,39 @@ It runs after every ordinary gate, including when an earlier gate fails or is sk
 - Flash quality;
 - product contract;
 - image and runtime qualification.
+
+The separate Coverage workflow is intentionally absent from this aggregate.
+Its own failures remain visible without making a third-party reporting service
+a release or branch-protection dependency.
+
+## Coverage workflow
+
+The informational workflow is defined in
+[`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml). It runs
+on pushes to `main`, pull requests, and manual dispatch.
+
+The workflow uses Flash's pinned stable toolchain and a pinned
+`cargo-llvm-cov` release to execute the complete host workspace test suite and
+write one LCOV report. Test, benchmark, and example source files are excluded
+from the reported numerator and denominator; their test binaries still run and
+exercise product source.
+
+Before upload, [`ci/check_coverage.py`](check_coverage.py) rejects a missing or
+empty report, a report with no executed first-party lines, or a report that
+omits any of the five workspace crates. This is a structural completeness
+guard, not a minimum percentage threshold.
+
+The Codecov action and CLI version are pinned. Upload authentication uses
+GitHub OIDC with job-scoped `id-token: write`; no persistent Codecov token is
+stored in the workflow. [`codecov.yml`](../codecov.yml) disables project and
+patch statuses, pull-request comments, and GitHub checks while the Rust
+baseline is being established. The workflow may fail visibly, but it is not a
+member of the standard CI `required` aggregate.
+
+The resulting percentage covers host-executable Flash source only. It does not
+measure Redox-selected code, image integration, QEMU behavior, the borrowed
+kernel, or physical hardware paths. The README badge is therefore labelled and
+described as Flash host coverage.
 
 This provides one stable aggregate status that can be selected by repository branch-protection settings. Whether branch protection actually requires that status is a repository setting rather than a property of the workflow source.
 
@@ -732,7 +779,8 @@ This command runs:
 - whitespace validation;
 - root workspace formatting and tests;
 - Flash formatting, Clippy, and host tests;
-- Ruff over `ci/`.
+- Ruff over `ci/` and the offline Python unit suites for `ci/` and the host
+  developer tools.
 
 It does not build an image, boot QEMU, reproduce the hosted Docker handoff, generate SBOMs, run dependency review, or create attestations.
 
@@ -748,6 +796,28 @@ Lint the release-relevant Python scripts when Ruff is installed:
 
 ```bash
 ruff check ci/
+python3 -m unittest discover -s ci/tests -p 'test_*.py'
+```
+
+Validate an existing LCOV report directly:
+
+```bash
+python3 ci/check_coverage.py coverage/flash.lcov
+```
+
+Generate that report when `cargo-llvm-cov` 0.8.7 and the pinned Flash
+toolchain's `llvm-tools-preview` component are installed:
+
+```bash
+cd components/flash
+mkdir -p ../../coverage
+cargo llvm-cov \
+  --workspace \
+  --locked \
+  --lcov \
+  --output-path ../../coverage/flash.lcov \
+  --ignore-filename-regex '(^|/)(tests|benches|examples)/'
+python3 ../../ci/check_coverage.py ../../coverage/flash.lcov
 ```
 
 ### Development-profile smoke qualification
@@ -839,28 +909,31 @@ A successful target build remains distinct from image and runtime qualification.
 
 Start with the failing contract boundary rather than assuming a cause.
 
-| Failure point                   | What is known                                                         | First investigation area                                                    |
-| ------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Root formatting                 | Root source differs from formatter output                             | Reported file and pinned root toolchain                                     |
-| Root tests                      | A host-side build-system assertion failed                             | Test output, root workspace changes, lockfile                               |
-| Flash formatting or Clippy | Flash source or lint policy failed                               | Reported crate, target, warning, or formatter output                        |
+| Failure point              | What is known                                                         | First investigation area                                                    |
+| -------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Root formatting            | Root source differs from formatter output                             | Reported file and pinned root toolchain                                     |
+| Root tests                 | A host-side build-system assertion failed                             | Test output, root workspace changes, lockfile                               |
+| Flash formatting or Clippy | Flash source or lint policy failed                                    | Reported crate, target, warning, or formatter output                        |
 | Flash tests                | A host-side component test failed                                     | Test target, fixture, platform path, recent language or runtime change      |
-| Ruff                            | A CI Python source rule failed                                        | Reported `ci/` file and diagnostic                                          |
-| Product profile                 | A static repository invariant failed                                  | Exact `profile contract:` message and owning manifest or workflow           |
-| Container build                 | The hosted tool boundary could not be constructed                     | Base image, package installation, installer download, checksum              |
-| Image build                     | Package or image assembly did not complete                            | Container log, recipe source, target toolchain, storage                     |
-| Staged payload                  | No qualifying package stage was found                                 | Recipe outputs and target stage directories                                 |
-| Image SBOM                      | Inventory creation or metadata binding failed                         | Staged payload, recipe metadata, scanner output                             |
-| Checksum verification           | Bytes differ from the recorded digest                                 | Staging, transfer, replacement, incomplete artifact                         |
-| Boot-marker timeout             | An expected serial marker did not appear                              | Earlier serial log, firmware, QEMU configuration, kernel or service startup |
-| Interactive assertion           | Boot progressed but a tested interaction failed                       | Captured serial bytes near the scoped assertion                             |
-| Root-lock assertion             | The release image did not reject the tested root login                | Release profile, account database, login behavior                           |
-| Dependency review               | A pull request introduces a dependency above the configured threshold | Dependency diff and advisory                                                |
-| Cargo policy                    | A workspace violates advisory, license, ban, or source policy         | Applicable `deny.toml` and dependency graph                                 |
-| Release version                 | Tag and `versions.env` do not match                                   | Selected tag and central release version                                    |
-| Candidate packaging             | Qualified inputs could not be compressed or assembled                 | Downloaded image artifact and packaging log                                 |
-| Attestation                     | GitHub could not attest one or more candidate subjects                | Job permissions, OIDC context, subject paths                                |
-| Publication                     | Candidate verification or GitHub Release operation failed             | Tag context, environment, permissions, checksums, release state             |
+| Ruff                       | A CI Python source rule failed                                        | Reported `ci/` file and diagnostic                                          |
+| Coverage generation        | Instrumented Flash host tests or report export failed                 | Test output, pinned coverage tool, LLVM component                           |
+| Coverage completeness      | LCOV omitted expected first-party source                              | Report contents, workspace members, generator filters                       |
+| Codecov upload             | A validated report could not be authenticated or transferred          | OIDC permission, pinned action/CLI, Codecov availability                    |
+| Product profile            | A static repository invariant failed                                  | Exact `profile contract:` message and owning manifest or workflow           |
+| Container build            | The hosted tool boundary could not be constructed                     | Base image, package installation, installer download, checksum              |
+| Image build                | Package or image assembly did not complete                            | Container log, recipe source, target toolchain, storage                     |
+| Staged payload             | No qualifying package stage was found                                 | Recipe outputs and target stage directories                                 |
+| Image SBOM                 | Inventory creation or metadata binding failed                         | Staged payload, recipe metadata, scanner output                             |
+| Checksum verification      | Bytes differ from the recorded digest                                 | Staging, transfer, replacement, incomplete artifact                         |
+| Boot-marker timeout        | An expected serial marker did not appear                              | Earlier serial log, firmware, QEMU configuration, kernel or service startup |
+| Interactive assertion      | Boot progressed but a tested interaction failed                       | Captured serial bytes near the scoped assertion                             |
+| Root-lock assertion        | The release image did not reject the tested root login                | Release profile, account database, login behavior                           |
+| Dependency review          | A pull request introduces a dependency above the configured threshold | Dependency diff and advisory                                                |
+| Cargo policy               | A workspace violates advisory, license, ban, or source policy         | Applicable `deny.toml` and dependency graph                                 |
+| Release version            | Tag and `versions.env` do not match                                   | Selected tag and central release version                                    |
+| Candidate packaging        | Qualified inputs could not be compressed or assembled                 | Downloaded image artifact and packaging log                                 |
+| Attestation                | GitHub could not attest one or more candidate subjects                | Job permissions, OIDC context, subject paths                                |
+| Publication                | Candidate verification or GitHub Release operation failed             | Tag context, environment, permissions, checksums, release state             |
 
 A timeout reports that a marker was not observed within its budget. It does not identify whether the cause was a slow host, firmware problem, boot regression, serial-routing change, or an outdated expected marker.
 
@@ -877,7 +950,7 @@ When an intended system change requires a contract update:
 3. update `ci/check_profile.py` for affected static invariants;
 4. update `ci/qemu_smoke.py` for affected runtime behavior;
 5. preserve specific, actionable failure messages;
-6. update `_image.yml`, `ci.yml`, `security.yml`, or `release.yml` when orchestration, permissions, or artifact flow changes;
+6. update `_image.yml`, `ci.yml`, `coverage.yml`, `security.yml`, or `release.yml` when orchestration, permissions, or artifact flow changes;
 7. run Ruff and the static profile contract;
 8. rebuild and smoke-test both affected image forms;
 9. test development and release profiles when their shared contract changes;
@@ -905,11 +978,14 @@ exclusion, content-sensitive identity, and clean-checkout CI contract.
 | QEMU serial runtime contract          | [`qemu_smoke.py`](qemu_smoke.py)                                              |
 | Hosted build environment              | [`container/Dockerfile`](container/Dockerfile)                                |
 | Ordinary CI orchestration             | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                     |
+| Informational host coverage           | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml)         |
+| Coverage report completeness          | [`check_coverage.py`](check_coverage.py)                                      |
+| Codecov reporting policy              | [`codecov.yml`](../codecov.yml)                                               |
 | Image producer and runtime consumer   | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)             |
 | Dependency-policy orchestration       | [`.github/workflows/security.yml`](../.github/workflows/security.yml)         |
 | Release qualification and publication | [`.github/workflows/release.yml`](../.github/workflows/release.yml)           |
 | Root Cargo policy                     | [`deny.toml`](../deny.toml)                                                   |
-| Flash Cargo policy               | [`components/flash/deny.toml`](../components/flash/deny.toml)       |
+| Flash Cargo policy                    | [`components/flash/deny.toml`](../components/flash/deny.toml)                 |
 | Product version                       | [`versions.env`](../versions.env)                                             |
 | Development image profile             | [`config/x86_64/flashos.toml`](../config/x86_64/flashos.toml)                 |
 | Release image profile                 | [`config/x86_64/flashos-release.toml`](../config/x86_64/flashos-release.toml) |

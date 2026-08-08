@@ -15,9 +15,12 @@
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml">
       <img src="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml/badge.svg" alt="Security">
     </a>
-    <img src="https://img.shields.io/badge/version-0.1.0-f59e0b?style=square" alt="FlashOS 0.1.0">
-    <img src="https://img.shields.io/badge/status-pre--alpha-f59e0b?style=square" alt="Pre-alpha">
-    <img src="https://img.shields.io/badge/target-x86__64--unknown--redox-lightgrey?style=square" alt="x86_64-unknown-redox">
+    <a href="https://app.codecov.io/gh/ajhahnde/FlashOS">
+      <img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=square&label=Coverage" alt="Flash host coverage">
+    </a>
+    <img src="https://img.shields.io/badge/Version-0.1.0-f59e0b?style=square" alt="FlashOS 0.1.0">
+    <img src="https://img.shields.io/badge/Status-pre--alpha-f59e0b?style=square" alt="Pre-alpha">
+    <img src="https://img.shields.io/badge/Target-x86__64--unknown--redox-lightgrey?style=square" alt="x86_64-unknown-redox">
   </p>
 
   <p>

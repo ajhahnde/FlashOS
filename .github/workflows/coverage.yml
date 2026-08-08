@@ -1,0 +1,72 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flash:
+    name: flash-host-coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: components/flash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache Flash Cargo downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: flash-coverage-cargo-${{ runner.os }}-${{ hashFiles('components/flash/Cargo.lock') }}
+          restore-keys: flash-coverage-cargo-${{ runner.os }}-
+
+      - name: Activate the pinned Flash toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup component add llvm-tools-preview
+          rustc --version
+
+      - name: Install the pinned coverage generator
+        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        with:
+          tool: cargo-llvm-cov@0.8.7
+          fallback: none
+
+      - name: Generate Flash host coverage
+        run: |
+          mkdir -p ../../coverage
+          cargo llvm-cov \
+            --workspace \
+            --locked \
+            --lcov \
+            --output-path ../../coverage/flash.lcov \
+            --ignore-filename-regex '(^|/)(tests|benches|examples)/'
+
+      - name: Validate coverage completeness
+        run: python3 ../../ci/check_coverage.py ../../coverage/flash.lcov
+
+      - name: Upload the validated report
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          use_oidc: true
+          version: v11.3.1
+          files: coverage/flash.lcov
+          disable_search: true
+          fail_ci_if_error: true

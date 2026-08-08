@@ -27,3 +27,6 @@ target
 wget-log
 # Local QEMU smoke-test output
 /qemu-smoke.log
+# Generated host-coverage reports and raw child-process profiles
+/coverage/
+*.profraw

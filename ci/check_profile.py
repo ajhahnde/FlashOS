@@ -189,8 +189,20 @@ if issue_file is None or issue_file.get("data") != f"FlashOS {version}\n":
     fail("/etc/issue version drifted from versions.env")
 
 readme = (ROOT / "README.md").read_text()
-if f"FlashOS {version}" not in readme or f"version-{version}-" not in readme:
+if f"FlashOS {version}" not in readme or f"Version-{version}-" not in readme:
     fail("README version drifted from versions.env")
+
+for expected in (
+    "actions/workflows/ci.yml/badge.svg",
+    "actions/workflows/security.yml/badge.svg",
+    "https://img.shields.io/codecov/c/github/ajhahnde/FlashOS",
+    "label=Coverage",
+    f"Version-{version}-",
+    "Status-pre--alpha-",
+    "Target-x86__64--unknown--redox-",
+):
+    if expected not in readme:
+        fail(f"README badge contract is missing: {expected}")
 
 readme_header_links = (
     '<a href="docs/README.md"><strong>Documentation</strong></a>',
@@ -283,6 +295,41 @@ for expected in (
 ):
     if expected not in image_workflow:
         fail(f"image workflow contract is missing: {expected}")
+
+security_workflow = (ROOT / ".github/workflows/security.yml").read_text()
+if not security_workflow.startswith("name: Security\n"):
+    fail("security workflow name must preserve the Security badge label")
+
+coverage_workflow = (ROOT / ".github/workflows/coverage.yml").read_text()
+for expected in (
+    "name: Coverage",
+    "id-token: write",
+    "rustup component add llvm-tools-preview",
+    "tool: cargo-llvm-cov@0.8.7",
+    "fallback: none",
+    "python3 ../../ci/check_coverage.py ../../coverage/flash.lcov",
+    "use_oidc: true",
+    "version: v11.3.1",
+    "files: coverage/flash.lcov",
+    "disable_search: true",
+    "fail_ci_if_error: true",
+):
+    if expected not in coverage_workflow:
+        fail(f"coverage workflow contract is missing: {expected}")
+
+ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+if "python3 -m unittest discover -s ci/tests -p 'test_*.py'" not in ci_workflow:
+    fail("standard CI must run the coverage-contract unit tests")
+
+codecov_config = (ROOT / "codecov.yml").read_text()
+for expected in (
+    "project: off",
+    "patch: off",
+    "comment: false",
+    "github_checks: false",
+):
+    if expected not in codecov_config:
+        fail(f"informational Codecov policy is missing: {expected}")
 
 # Flash is maintained in this repository, so its source is the current
 # checkout's tracked/non-ignored component snapshot. This avoids a circular
