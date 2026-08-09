@@ -10,6 +10,18 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added ordered script arguments to Flash. `fsh [OPTIONS] SCRIPT [ARGUMENT]...`
+  preserves empty, Unicode, and option-like operands as immutable root-only
+  `$args: List[String]` data without splitting or reparsing. Non-UTF-8 script
+  arguments fail before source loading, and dependency modules receive no
+  ambient caller arguments.
+- Added resolved type annotations and named-function signatures to canonical
+  Flash programs. The closed built-in namespace includes exact scalar,
+  collection, callable, and `Any` contracts; known local and imported calls are
+  checked conservatively before execution, while declarations, assignments,
+  dynamic calls, closure parameters, and named-function results retain exact
+  runtime enforcement with recursive `List[T]` matching and cross-file
+  diagnostics.
 - Added host-free lexical-reference resolution to every loaded Flash module.
   Canonical module programs now expose deterministic source-spanned references
   to local bindings and complete import/declaration/export provenance for
