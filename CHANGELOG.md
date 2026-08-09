@@ -10,6 +10,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added Flash's first source-level module declaration and recursive analysis
+  loader. A top-level `import '<path>'` records an exact static dependency;
+  injected canonicalization and source-loading capabilities build one acyclic
+  graph and stable source registry, parse canonical aliases only once, and
+  preserve cross-file resolution, read, UTF-8, syntax, and cycle diagnostics
+  without executing source. Frontend execution and imported/exported-name
+  semantics remain separate work.
 - Added informational host line-coverage reporting for all five Flash crates.
   A dedicated workflow generates one LCOV report with pinned Rust coverage
   tooling, rejects empty reports or reports that omit a workspace member, and
