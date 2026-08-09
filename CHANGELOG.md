@@ -15,8 +15,11 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   injected canonicalization and source-loading capabilities build one acyclic
   graph and stable source registry, parse canonical aliases only once, and
   preserve cross-file resolution, read, UTF-8, syntax, and cycle diagnostics
-  without executing source. Frontend execution and imported/exported-name
-  semantics remain separate work.
+  without executing source. Non-interactive `fsh <script>` execution now uses
+  the real filesystem adapter, renders grouped source excerpts for cross-file
+  diagnostics, and executes only the root while treating analyzed load-only
+  imports as non-executing. Imported/exported-name semantics remain separate
+  work.
 - Added informational host line-coverage reporting for all five Flash crates.
   A dedicated workflow generates one LCOV report with pinned Rust coverage
   tooling, rejects empty reports or reports that omit a workspace member, and
