@@ -3,8 +3,8 @@ name = "flashos_build"
 version = "0.1.0"
 edition = "2024"
 # This crate is the inherited build system. Every file under `src/` originates
-# upstream, so the package license matches the root LICENSE file. Flash is also
-# MIT-licensed under its separate component license and copyright notice.
+# upstream and remains MIT-licensed; its retained copyright notice is in
+# LICENSES/REDOX-BUILD-SYSTEM-MIT.
 license = "MIT"
 repository = "https://github.com/ajhahnde/FlashOS"
 default-run = "repo"

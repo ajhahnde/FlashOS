@@ -6,16 +6,30 @@ implementation is derived from the Redox OS build system and ecosystem.
 FlashOS is not a Redox OS subproject or official distribution and is not
 affiliated with or endorsed by the Redox OS nonprofit.
 
-The inherited build-system code is derived from Redox OS and remains covered
-by the MIT License and copyright notice in LICENSE:
+Original FlashOS material is available under the MIT License and copyright
+notice in LICENSE unless a file or component states otherwise. That license
+does not relicense third-party packages or separately licensed inherited
+components.
+
+Flash, located under components/flash, carries a component-local copy of the
+same MIT License and Anton Hahn copyright notice so that the workspace remains
+self-contained when distributed separately. See components/flash/LICENSE.
+
+The inherited build-system code is derived from Redox OS and remains available
+under its MIT License and copyright notice in LICENSES/REDOX-BUILD-SYSTEM-MIT:
 
     Copyright (c) 2016 Redox OS Developers
+
+The Redox kernel incorporated into FlashOS remains available under its MIT
+License and copyright notice in LICENSES/REDOX-KERNEL-MIT:
+
+    Copyright (c) 2017 Jeremy Soller
 
 Redox OS, its logo, and related marks belong to the Redox OS nonprofit. The
 upstream trademark policy is retained in docs/upstream/REDOX_TRADEMARK.md.
 
-Flash, located under components/flash, is licensed under a separate MIT License
-and copyright notice. See components/flash/LICENSE.
+Other third-party packages and inherited components retain their respective
+licenses and copyright notices.
 
 Technical identifiers such as x86_64-unknown-redox, redoxer, relibc, and
 upstream package names are currently retained for compatibility and

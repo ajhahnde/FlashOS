@@ -149,7 +149,7 @@ No response, review, acceptance, or release timeline is guaranteed.
 
 ## License and attribution
 
-The inherited root build infrastructure and Flash are available under the MIT License, with their respective copyright notices in the root [LICENSE](LICENSE) and the [Flash license](components/flash/LICENSE). Third-party packages and inherited components retain their respective licenses.
+Original FlashOS material is available under the primary [FlashOS MIT License](LICENSE) unless a file or component states otherwise. Flash carries a [component-local copy of the same license](components/flash/LICENSE) so that its workspace remains self-contained, while the inherited Redox build infrastructure and kernel retain the notices under [`LICENSES/`](LICENSES/). Third-party packages and other inherited components retain their respective licenses.
 
 See the following files for attribution and project identity information:
 

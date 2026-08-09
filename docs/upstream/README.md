@@ -227,11 +227,13 @@ The files in this directory are only part of the repository's attribution struct
 The primary repository references are:
 
 - [`NOTICE`](../../NOTICE) — project relationship and high-level attribution;
-- [`LICENSE`](../../LICENSE) — MIT license retained for the inherited root build-system code;
-- [`components/flash/LICENSE`](../../components/flash/LICENSE) — MIT license and copyright notice for Flash;
+- [`LICENSE`](../../LICENSE) — primary MIT license for original FlashOS material;
+- [`components/flash/LICENSE`](../../components/flash/LICENSE) — component-local copy of the FlashOS MIT license and copyright notice for Flash;
+- [`LICENSES/REDOX-BUILD-SYSTEM-MIT`](../../LICENSES/REDOX-BUILD-SYSTEM-MIT) — retained MIT license and copyright notice for the inherited Redox build-system code;
+- [`LICENSES/REDOX-KERNEL-MIT`](../../LICENSES/REDOX-KERNEL-MIT) — retained MIT license and copyright notice for the incorporated Redox kernel;
 - [`TRADEMARK.md`](../../TRADEMARK.md) — FlashOS identity and use of Redox references.
 
-Third-party packages and inherited components retain their own licenses and copyright notices. The root license must not be interpreted as relicensing every dependency, package, or separately licensed component in the repository.
+Third-party packages and inherited components retain their own licenses and copyright notices. The primary FlashOS license must not be interpreted as relicensing every dependency, package, or separately licensed component in the repository.
 
 For an exact release artifact, use its accompanying source and image inventories together with the licenses and notices of the included components. This index is not a complete license report and does not modify any applicable license or trademark policy.
 
