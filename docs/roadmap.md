@@ -104,6 +104,9 @@ Planned work includes:
 - script arguments that preserve cardinality, order, and data semantics;
 - typed function signatures;
 - stable name, signature, and pipeline resolution across files;
+- an explicit public contract for module-initializer effects on working
+  directory, child environment, status, output, filesystem, processes, jobs,
+  and program exit;
 - clear separation between module scopes and ambient shell state.
 
 Module loading does not introduce wildcard mutation of unrelated scopes, does not depend on side effects from runtime execution, and does not reparse strings as source code.
@@ -129,6 +132,9 @@ Interactive sessions, non-interactive evaluation, and `.fsh` scripts share the s
 Work in this area includes:
 
 - preserving exact argument-vector semantics without host shell routing;
+- defining a stable built-in command namespace and compatibility policy while
+  retaining internal-before-external resolution and `^name` as the explicit
+  external-command escape;
 - preserving explicit structured-to-byte conversion boundaries;
 - removing the current one-internal-island executor restriction so a
   carrier-compatible pipeline can alternate between external byte segments and
@@ -159,6 +165,8 @@ Flash moves from the primary implementation initiative when:
 
 - maintainable multi-file programs can be resolved, loaded, statically checked, canonically formatted, and documented;
 - explicit module imports, exports, and script arguments behave according to the v1 contract;
+- built-in namespace evolution cannot silently redefine accepted v1 scripts,
+  and module-initializer effects have a complete documented public contract;
 - the claimed host and FlashOS capability matrices are explicit;
 - `fsh check` and the required language server operate against shared syntax and semantic APIs without execution;
 - no carrier-valid pipeline is rejected solely because it contains more than
