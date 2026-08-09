@@ -130,6 +130,9 @@ Work in this area includes:
 
 - preserving exact argument-vector semantics without host shell routing;
 - preserving explicit structured-to-byte conversion boundaries;
+- removing the current one-internal-island executor restriction so a
+  carrier-compatible pipeline can alternate between external byte segments and
+  internal typed segments any number of times;
 - aligning host and FlashOS behavior without hiding or emulating unsupported target capabilities;
 - keeping redirected, non-interactive, and terminal-attached sessions distinct where the operating system requires it;
 - validating configuration, history, cancellation, redirection, process lifetime, and terminal restoration on target systems;
@@ -158,11 +161,13 @@ Flash moves from the primary implementation initiative when:
 - explicit module imports, exports, and script arguments behave according to the v1 contract;
 - the claimed host and FlashOS capability matrices are explicit;
 - `fsh check` and the required language server operate against shared syntax and semantic APIs without execution;
+- no carrier-valid pipeline is rejected solely because it contains more than
+  one internal stage island;
 - host, target-build, QEMU, fuzzing, and security-relevant gates cover the supported surface;
 - no known critical command-injection, descriptor-lifetime, terminal-corruption, process-lifetime, or data-loss defect remains open;
 - public language, scripting, architecture, and toolchain documentation matches executable behavior.
 
-This is a product-completion boundary, not a promise that Flash will stop evolving after v1.
+This is the language and runtime completion boundary. Flash may continue to gain compatible capabilities, diagnostics, tooling, and optimizations after v1, but known foundational semantic or executor-topology gaps are not deferred past it. An incompatible language redesign would require an explicit future major-version decision.
 
 ## Next: Qualify the next release
 
