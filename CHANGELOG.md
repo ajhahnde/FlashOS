@@ -10,6 +10,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added Flash documentation comments and inspection-only language help.
+  Consecutive complete-line `##` blocks attach to immediately following named
+  functions and normalize into the same resolved metadata retained by module
+  analysis and runtime callables. `help [NAME]` snapshots documented built-ins
+  and visible named functions during planning, renders deterministic UTF-8 byte
+  output, preserves distinct built-in/function namespaces and lexical
+  shadowing, and never runs the inspected body or probes an executable.
 - Added ordered script arguments to Flash. `fsh [OPTIONS] SCRIPT [ARGUMENT]...`
   preserves empty, Unicode, and option-like operands as immutable root-only
   `$args: List[String]` data without splitting or reparsing. Non-UTF-8 script
