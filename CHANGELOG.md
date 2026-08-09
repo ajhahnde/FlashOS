@@ -10,6 +10,14 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added host-free lexical-reference resolution to every loaded Flash module.
+  Canonical module programs now expose deterministic source-spanned references
+  to local bindings and complete import/declaration/export provenance for
+  cross-file reads. Resolution mirrors source-ordered evaluator scopes,
+  callable capture, parameters, recursive functions, loops, match arms, and
+  shadowing before execution; unknown reads and same-scope duplicate bindings
+  now fail program construction with `MOD009` and `MOD010`. Load-only modules
+  are fully analyzed while remaining dormant at runtime.
 - Added Flash's first explicit module-name analysis. Top-level
   `export { name }` lists make local declarations or functions visible, while
   `import { name } from '<path>'` requests only named target exports and never
