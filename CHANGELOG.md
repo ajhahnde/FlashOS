@@ -10,6 +10,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added Flash's first explicit module-name analysis. Top-level
+  `export { name }` lists make local declarations or functions visible, while
+  `import { name } from '<path>'` requests only named target exports and never
+  creates wildcard ambient access. Canonical module programs now expose
+  deterministic export/import tables and diagnose unknown, private, duplicate,
+  and colliding names without evaluation. Imported runtime values and module
+  initialization remain later work.
 - Added Flash's first source-level module declaration and recursive analysis
   loader. A top-level `import '<path>'` records an exact static dependency;
   injected canonicalization and source-loading capabilities build one acyclic
