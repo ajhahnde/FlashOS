@@ -29,4 +29,4 @@ The upstream Redox OS trademark policy is retained for reference in
 
 ---
 
-[← Previous: Security Policy](.github/SECURITY.md) · [FlashOS README](README.md) · [Source of Truth](docs/source_of_truth.md) · [Next: Attribution Notice →](NOTICE)
+[← Previous: Security Policy](.github/SECURITY.md) · [FlashOS README](README.md) · [Next: Attribution Notice →](NOTICE)

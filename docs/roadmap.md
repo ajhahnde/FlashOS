@@ -43,9 +43,7 @@ This file intentionally does not contain:
 - an exhaustive feature backlog;
 - promises of support, review, or delivery.
 
-Implemented and released changes belong in [CHANGELOG.md](../CHANGELOG.md).
-[Source of Truth](source_of_truth.md) routes changing public claims to
-their authoritative configuration, evidence, policy, or documentation source.
+Implemented and released changes belong in [CHANGELOG.md](../CHANGELOG.md). Current architecture, verification, hardware, and security claims remain authoritative in their respective documents.
 
 ## Current foundation
 
@@ -66,7 +64,6 @@ These boundaries describe the starting point. They do not claim that FlashOS is 
 
 For the exact current state, consult:
 
-- [Source of Truth](source_of_truth.md)
 - [Architecture](architecture.md)
 - [Verification and Testing](verification.md)
 - [Hardware Compatibility](hardware.md)
@@ -569,7 +566,6 @@ The following files own the current facts behind this direction:
 
 | Concern                        | Primary source                                            |
 | ------------------------------ | --------------------------------------------------------- |
-| Public claim ownership         | [Source of Truth](source_of_truth.md)                     |
 | Shipped and unreleased changes | [CHANGELOG.md](../CHANGELOG.md)                           |
 | Current system boundaries      | [Architecture](architecture.md)                           |
 | Development workflow           | [Development](development.md)                             |
@@ -585,4 +581,4 @@ General proposals and reproducible implementation problems may be submitted thro
 
 ---
 
-[← Previous: Hardware Compatibility](hardware.md) · [Documentation index](README.md) · [Source of Truth](source_of_truth.md) · [Next: Upstream References →](upstream/README.md)
+[← Previous: Hardware Compatibility](hardware.md) · [Documentation index](README.md) · [Next: Upstream References →](upstream/README.md)

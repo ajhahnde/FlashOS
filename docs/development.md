@@ -952,4 +952,4 @@ A successful local check is evidence for the specific layer it exercises. It is 
 
 ---
 
-[← Previous: Architecture](architecture.md) · [Documentation index](README.md) · [Source of Truth](source_of_truth.md) · [Next: Verification →](verification.md)
+[← Previous: Architecture](architecture.md) · [Documentation index](README.md) · [Next: Verification →](verification.md)

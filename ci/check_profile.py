@@ -204,59 +204,6 @@ for expected in (
     if expected not in readme:
         fail(f"README badge contract is missing: {expected}")
 
-readme_header_links = (
-    '<a href="docs/README.md"><strong>Documentation</strong></a>',
-    '<a href="docs/source_of_truth.md"><strong>Source of Truth</strong></a>',
-    '<a href="docs/getting-started.md"><strong>Getting Started</strong></a>',
-)
-readme_header_positions = tuple(readme.find(link) for link in readme_header_links)
-if -1 in readme_header_positions or readme_header_positions != tuple(
-    sorted(readme_header_positions)
-):
-    fail(
-        "README header must route Documentation -> Source of Truth -> "
-        "Getting Started"
-    )
-
-source_of_truth_path = ROOT / "docs/source_of_truth.md"
-if not source_of_truth_path.is_file():
-    fail("public source-of-truth register is missing")
-
-source_of_truth = source_of_truth_path.read_text()
-for expected in (
-    "`versions.env`",
-    "`config/x86_64/flashos.toml`",
-    "`config/flashos-base.toml`",
-    "`components/flash/README.md`",
-    "`docs/hardware.md`",
-    "`docs/roadmap.md`",
-    "`ci/check_profile.py`",
-):
-    if expected not in source_of_truth:
-        fail(f"source-of-truth authority is missing: {expected}")
-
-public_navigation = {
-    "README.md": readme,
-    ".github/SECURITY.md": (ROOT / ".github/SECURITY.md").read_text(),
-    "CHANGELOG.md": (ROOT / "CHANGELOG.md").read_text(),
-    "TRADEMARK.md": (ROOT / "TRADEMARK.md").read_text(),
-    "ci/README.md": (ROOT / "ci/README.md").read_text(),
-    "components/flash/README.md": (
-        ROOT / "components/flash/README.md"
-    ).read_text(),
-    "docs/README.md": (ROOT / "docs/README.md").read_text(),
-    "docs/architecture.md": (ROOT / "docs/architecture.md").read_text(),
-    "docs/development.md": (ROOT / "docs/development.md").read_text(),
-    "docs/getting-started.md": (ROOT / "docs/getting-started.md").read_text(),
-    "docs/hardware.md": (ROOT / "docs/hardware.md").read_text(),
-    "docs/roadmap.md": (ROOT / "docs/roadmap.md").read_text(),
-    "docs/upstream/README.md": (ROOT / "docs/upstream/README.md").read_text(),
-    "docs/verification.md": (ROOT / "docs/verification.md").read_text(),
-}
-for path, content in public_navigation.items():
-    if "source_of_truth.md" not in content:
-        fail(f"{path} does not route readers to source_of_truth.md")
-
 release_workflow = (ROOT / ".github/workflows/release.yml").read_text()
 for expected in (
     'expected="v${FLASHOS_RELEASE_VERSION}"',

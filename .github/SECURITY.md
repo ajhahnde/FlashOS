@@ -194,4 +194,4 @@ When a report might reveal a vulnerability, privilege boundary failure, credenti
 
 ---
 
-[← Previous: Changelog](../CHANGELOG.md) · [Documentation index](../docs/README.md) · [Source of Truth](../docs/source_of_truth.md) · [Next: Trademark Policy →](../TRADEMARK.md)
+[← Previous: Changelog](../CHANGELOG.md) · [Documentation index](../docs/README.md) · [Next: Trademark Policy →](../TRADEMARK.md)

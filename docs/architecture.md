@@ -407,4 +407,4 @@ When these sources disagree, configuration, recipes, executable checks, and curr
 
 ---
 
-[← Previous: Getting Started](getting-started.md) · [Documentation index](README.md) · [Source of Truth](source_of_truth.md) · [Next: Development →](development.md)
+[← Previous: Getting Started](getting-started.md) · [Documentation index](README.md) · [Next: Development →](development.md)

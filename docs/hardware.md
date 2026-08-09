@@ -652,4 +652,4 @@ When descriptive text conflicts with the current configuration, executable contr
 
 ---
 
-[← Previous: Verification](verification.md) · [Documentation index](README.md) · [Source of Truth](source_of_truth.md) · [Next: Roadmap →](roadmap.md)
+[← Previous: Verification](verification.md) · [Documentation index](README.md) · [Next: Roadmap →](roadmap.md)

@@ -25,7 +25,6 @@
 
   <p>
     <a href="docs/README.md"><strong>Documentation</strong></a> ·
-    <a href="docs/source_of_truth.md"><strong>Source of Truth</strong></a> ·
     <a href="docs/getting-started.md"><strong>Getting Started</strong></a> ·
     <a href="components/flash/README.md"><strong>Flash</strong></a> ·
     <a href="ci/README.md"><strong>CI</strong></a> ·
@@ -35,10 +34,6 @@
 </div>
 
 > **Project status:** FlashOS is pre-alpha software. Interfaces, package boundaries, image formats, and supported workflows may change without compatibility guarantees. Documentation describes the source tree in which it is located; published releases may differ.
-
-The public [Source of Truth](docs/source_of_truth.md) register identifies
-the authoritative source, justification, and review trigger for claims that are
-most likely to drift.
 
 ## About FlashOS
 
@@ -86,7 +81,6 @@ The following tree shows the canonical navigation paths between the central publ
 
   - [`docs/README.md`](docs/README.md) — General FlashOS documentation index
 
-    - [`docs/source_of_truth.md`](docs/source_of_truth.md) — Public claims, authoritative sources, evidence, and review triggers
     - [`docs/getting-started.md`](docs/getting-started.md) — Build, boot, and first-use instructions
     - [`docs/architecture.md`](docs/architecture.md) — System layers, image configuration, and component boundaries
     - [`docs/development.md`](docs/development.md) — Repository development workflow

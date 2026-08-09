@@ -712,4 +712,4 @@ When descriptive documentation conflicts with an executable script or active wor
 
 ---
 
-[← Previous: Development](development.md) · [Documentation index](README.md) · [Source of Truth](source_of_truth.md) · [Next: Hardware Compatibility →](hardware.md)
+[← Previous: Development](development.md) · [Documentation index](README.md) · [Next: Hardware Compatibility →](hardware.md)
