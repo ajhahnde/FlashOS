@@ -37,11 +37,11 @@
 
 ## About FlashOS
 
-FlashOS is a small, independent operating-system project focused on a keyboard-driven terminal environment. It is not an official Redox OS distribution and is not affiliated with or endorsed by the Redox OS nonprofit.
+FlashOS is not an attempt to recreate an existing operating system. It is an independent effort to build a modern, terminal-native operating system with its own vision of how users, the shell, and the system should interact.
 
-The current system uses the Redox kernel and parts of the Redox ABI, toolchain, userspace, packaging, and image-building infrastructure. These dependencies are documented explicitly and do not imply that every upstream Redox capability is supported or qualified by FlashOS.
+FlashOS currently builds on the Redox kernel and parts of the Redox ABI, toolchain, userspace, packaging, and image-building infrastructure. These components serve as a technical foundation and may be adapted, replaced, or diverge from upstream as FlashOS evolves. FlashOS is not an official Redox OS distribution and is not affiliated with or endorsed by the Redox OS nonprofit.
 
-[Flash](components/flash/README.md) is the primary interactive and scripting interface. Flash scripts use the `.fsh` file extension.
+[Flash](https://github.com/ajhahnde/FlashOS/blob/main/components/flash/README.md) is the primary interactive and scripting interface of FlashOS. Flash scripts use the `.fsh` file extension.
 
 ## Current scope
 
