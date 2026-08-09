@@ -5,7 +5,7 @@
   </picture>
 
   <p>
-    <strong>An x86_64 operating system based on the Redox kernel, with a text-based user environment and Flash as its primary interface.</strong>
+    <strong>An operating system designed around a modern, typed, structured command environment.</strong>
   </p>
 
   <p>
@@ -32,8 +32,6 @@
     <a href=".github/SECURITY.md"><strong>Security</strong></a>
   </p>
 </div>
-
-> **Project status:** FlashOS is pre-alpha software. Interfaces, package boundaries, image formats, and supported workflows may change without compatibility guarantees. Documentation describes the source tree in which it is located; published releases may differ.
 
 ## About FlashOS
 
