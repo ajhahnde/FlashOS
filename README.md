@@ -5,7 +5,7 @@
   </picture>
 
   <p>
-    <strong>An operating system designed around a modern, typed, structured command environment.</strong>
+    <strong>A terminal-native operating system built around a typed, structured command environment.</strong>
   </p>
 
   <p>
