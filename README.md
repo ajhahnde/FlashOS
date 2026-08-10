@@ -33,23 +33,25 @@
   </p>
 </div>
 
-## About FlashOS
+## About
 
-FlashOS is not an attempt to recreate an existing operating system. It is an independent effort to build a modern, terminal-native operating system with its own vision of how users, the shell, and the system should interact.
+FlashOS is an independent x86_64 operating-system project built around a keyboard-driven, terminal-native user environment. It uses the Redox kernel and parts of the Redox ecosystem as its current low-level foundation while maintaining its own product profile, user experience, verification contracts, and development direction.
 
-FlashOS currently builds on the Redox kernel and parts of the Redox ABI, toolchain, userspace, packaging, and image-building infrastructure. These components serve as a technical foundation and may be adapted, replaced, or diverge from upstream as FlashOS evolves. FlashOS is not an official Redox OS distribution and is not affiliated with or endorsed by the Redox OS nonprofit.
+Flash (fsh) is the primary interactive and scripting interface of FlashOS. It is a non-POSIX command language built around structured runtime values, explicit process execution, composable pipelines, and a shared execution model for interactive commands and .fsh scripts.
 
-[Flash](https://github.com/ajhahnde/FlashOS/blob/main/components/flash/README.md) is the primary interactive and scripting interface of FlashOS. Flash scripts use the `.fsh` file extension.
+FlashOS is designed to grow into a cohesive terminal-native operating environment built around Flash. The long-term goal is a system where interactive commands, scripting, system management, and a dedicated TUI share the same structured interfaces and system model rather than existing as separate layers.
+
+FlashOS is not an official Redox OS distribution and is not affiliated with or endorsed by the Redox OS nonprofit.
 
 ## Current scope
 
-| Area                           | Current project scope                                        |
-| ------------------------------ | ------------------------------------------------------------ |
-| Architecture                   | x86_64                                                       |
-| Target ABI                     | `x86_64-unknown-redox`                                       |
-| User environment               | Text-based interface without a graphical desktop environment |
-| Primary interface              | Flash at `/usr/bin/fsh`                                      |
-| Primary evaluation environment | QEMU `q35` with UEFI firmware                                |
+| Area                           | Current project scope         |
+| ------------------------------ | ----------------------------- |
+| Architecture                   | x86_64                        |
+| Target ABI                     | `x86_64-unknown-redox`        |
+| User environment               | Text-based interface          |
+| Primary interface              | Flash at `/usr/bin/fsh`       |
+| Primary evaluation environment | QEMU `q35` with UEFI firmware |
 
 Device-specific test results and the limits of current hardware evidence are maintained in [Hardware Compatibility](docs/hardware.md).
 
