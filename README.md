@@ -37,7 +37,7 @@
 
 FlashOS is an independent x86_64 operating-system project built around a keyboard-driven, terminal-native user environment. It uses the Redox kernel and parts of the Redox ecosystem as its current low-level foundation while maintaining its own product profile, user experience, verification contracts, and development direction.
 
-Flash (fsh) is the primary interactive and scripting interface of FlashOS. It is a non-POSIX command language built around structured runtime values, explicit process execution, composable pipelines, and a shared execution model for interactive commands and .fsh scripts.
+[Flash](https://github.com/ajhahnde/FlashOS/blob/main/components/flash/README.md) is the primary interactive and scripting interface of FlashOS. It is a non-POSIX command language built around structured runtime values, explicit process execution, composable pipelines, and a shared execution model for interactive commands and `.fsh` scripts.
 
 FlashOS is designed to grow into a cohesive terminal-native operating environment built around Flash. The long-term goal is a system where interactive commands, scripting, system management, and a dedicated TUI share the same structured interfaces and system model rather than existing as separate layers.
 
