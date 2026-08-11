@@ -196,7 +196,7 @@ for expected in (
     "actions/workflows/ci.yml/badge.svg",
     "actions/workflows/security.yml/badge.svg",
     "https://img.shields.io/codecov/c/github/ajhahnde/FlashOS",
-    "label=Coverage",
+    "label=Flash%20host%20coverage",
     f"Version-{version}-",
     "Status-pre--alpha-",
     "Target-x86__64--unknown--redox-",
