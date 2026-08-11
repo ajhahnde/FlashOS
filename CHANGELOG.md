@@ -10,6 +10,18 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added the complete Flash module-initializer effect contract. Named
+  dependencies share logical cwd, child environment, status, output, process,
+  and job state in deterministic initialization order; successful completion
+  and whole-program initializer `exit` commit the final child environment,
+  while runtime or output failure does not. Output, filesystem, and process
+  effects remain immediate and non-transactional, and every exit route joins
+  program jobs with ordered background-failure precedence. Canonical module
+  programs now expose source-spanned direct and named-dependency-folded
+  host-free summaries for working-directory, environment, status, output,
+  filesystem, process, job, exit, and opaque external effects. Load-only
+  modules remain dormant in transitive summaries, known callables fold their
+  bodies, and valid effectful modules add no checker diagnostic.
 - Added non-executing `fsh check [--] SOURCE` analysis for one root and its
   recursively discovered canonical import closure. The checker accumulates
   deterministic module, name, signature, and `PIP001`-`PIP004` pipeline-carrier
