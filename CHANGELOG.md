@@ -10,6 +10,14 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added explicit `fsh format --check [--] PATH...` and
+  `fsh format --write [--] PATH...` launcher modes. Ordered checks report
+  anchored `FMT001` diagnostics without writes; write mode preflights the full
+  explicit-file batch and atomically replaces changed files through synchronized
+  same-directory temporaries while preserving permission bits. The frontend
+  rejects directories, final symlinks, duplicate canonical targets, invalid or
+  incomplete source, and stale preflight data without loading imports,
+  initializing a session, or executing source.
 - Added Flash documentation comments and inspection-only language help.
   Consecutive complete-line `##` blocks attach to immediately following named
   functions and normalize into the same resolved metadata retained by module
