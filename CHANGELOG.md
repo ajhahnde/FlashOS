@@ -10,6 +10,15 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added non-executing `fsh check [--] SOURCE` analysis for one root and its
+  recursively discovered canonical import closure. The checker accumulates
+  deterministic module, name, signature, and `PIP001`-`PIP004` pipeline-carrier
+  diagnostics through shared runtime analysis, accepts canonical symlink
+  aliases to regular UTF-8 source, and reports silent status-0 success,
+  stderr-only status-1 analysis failure, and status-2 invocation misuse. Static
+  carrier classification uses built-in contracts without expanding words,
+  probing executables, initializing modules, mutating session state, applying
+  redirections, or executing source.
 - Added explicit `fsh format --check [--] PATH...` and
   `fsh format --write [--] PATH...` launcher modes. Ordered checks report
   anchored `FMT001` diagnostics without writes; write mode preflights the full
