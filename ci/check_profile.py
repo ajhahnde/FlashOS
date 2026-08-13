@@ -305,10 +305,15 @@ flash_recipe = load(ROOT / "recipes/terminal/flash/recipe.toml")
 if flash_recipe.get("source") != {"workspace": "components/flash"}:
     fail("Flash recipe must use the in-tree components/flash workspace source")
 flash_build = flash_recipe.get("build", {})
-if flash_build.get("template") != "cargo" or flash_build.get("cargopath") != (
-    "crates/flash-cli"
+flash_script = flash_build.get("script", "")
+if flash_build.get("template") != "custom" or "DYNAMIC_INIT" not in flash_script:
+    fail("Flash workspace recipe must initialize the Cargo build template")
+for expected in (
+    'COOKBOOK_CARGO_PATH="crates/flash-cli" cookbook_cargo --bin fsh',
+    'COOKBOOK_CARGO_PATH="crates/flash-lsp" cookbook_cargo --bin flash-language-server',
 ):
-    fail("Flash workspace recipe must build crates/flash-cli with Cargo")
+    if expected not in flash_script:
+        fail(f"Flash workspace recipe is missing packaged binary build: {expected}")
 
 # Every external Git package that reaches the image retains an explicit
 # revision. Without one, the same FlashOS tag could build whatever the
