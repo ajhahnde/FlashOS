@@ -5,8 +5,9 @@
 workspace = "components/flash"
 
 [build]
-template = "cargo"
-cargopath = "crates/flash-cli"
-cargoflags = [
-    "--bin fsh",
-]
+template = "custom"
+script = """
+DYNAMIC_INIT
+COOKBOOK_CARGO_PATH="crates/flash-cli" cookbook_cargo --bin fsh
+COOKBOOK_CARGO_PATH="crates/flash-lsp" cookbook_cargo --bin flash-language-server
+"""
