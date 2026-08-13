@@ -107,6 +107,8 @@ The contract currently verifies that:
 - the combined base and architecture profiles select exactly the package set encoded by the script;
 - selected graphical desktop and window-system identifiers are absent from that package set;
 - both configured system accounts use `/usr/bin/fsh`;
+- the in-tree Flash recipe builds both `fsh` and `flash-language-server` from
+  their exact workspace crate paths;
 - the development and release profiles differ only in their account configuration where the script permits that difference;
 - the release profile locks the root account;
 - a locked release root account does not also carry a password;

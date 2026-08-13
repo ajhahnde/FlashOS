@@ -204,6 +204,8 @@ Its current checks include:
 - exclusion of selected graphical-stack identifiers;
 - disabled graphical XDG user-directory creation;
 - `/usr/bin/fsh` as the configured shell for `root` and `user`;
+- the in-tree Flash package recipe builds both `fsh` and
+  `flash-language-server` from the checkout-bound component workspace;
 - alignment of development and release profile structure;
 - a locked root account in the release profile;
 - rejection of well-known release-profile passwords;
