@@ -87,6 +87,10 @@ const REPO_HELP_STR: &str = r#"
         COOKBOOK_WRITE_FILETREE=false whether to write stage files tree
         COOKBOOK_MAKE_JOBS=          override build jobs count from nproc
         COOKBOOK_WEB=false           whether to generate package web files
+        COOKBOOK_WEB_OUT_DIR=web     package web output directory
+        COOKBOOK_WEB_REPO_URL=/repo  package repository URL
+        COOKBOOK_WEB_SOURCE_URL=https://github.com/ajhahnde/FlashOS
+                                    source repository used for build links
 "#;
 
 #[derive(Clone)]

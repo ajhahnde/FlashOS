@@ -1,5 +1,5 @@
 {
-  description = "The Nix-flake for Redox development on NixOS";
+  description = "The Nix flake for FlashOS development on NixOS";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -56,7 +56,7 @@
           {
             formatter = pkgs.nixfmt-rfc-style;
 
-            # TODO: Create Redox OS Image as package
+            # TODO: Create a FlashOS image package
             # TODO: No cross-compile for now, as there is no pkgsCross.aarch64-unknown-redox and so on
             # TODO: Get rid of make env step: package custom libtool and setup rust toolchain properly
             devShells = {
@@ -122,7 +122,7 @@
                   shellHook = ''
                     # Install required configuration
                     ${podmanSetupScript}
-                    echo "Redox podman build environment loaded"
+                    echo "FlashOS Podman build environment loaded"
                   '';
                 };
 

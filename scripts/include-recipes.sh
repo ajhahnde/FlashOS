@@ -11,7 +11,7 @@ if [ -z "$*" ]
 then
     echo "Find matching recipes, and format for inclusion in config"
     echo "Usage: $0 \"pattern\""
-    echo "Must be run from 'redox' directory"
+    echo "Must be run from the FlashOS repository root"
     echo "e.g. $0 \"TODO.*error\""
     exit 1
 fi

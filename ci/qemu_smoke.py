@@ -18,6 +18,15 @@ DEFAULT_OVMF_PATHS = (
     "/opt/homebrew/opt/qemu/share/qemu/edk2-x86_64-code.fd",
 )
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def release_version() -> str:
+    for line in (REPOSITORY_ROOT / "versions.env").read_text().splitlines():
+        if line.startswith("FLASHOS_RELEASE_VERSION="):
+            return line.split("=", 1)[1]
+    raise SystemExit("qemu smoke: FLASHOS_RELEASE_VERSION is missing")
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -49,6 +58,7 @@ def resolve_ovmf(explicit: Path | None) -> Path:
 
 
 args = parse_args()
+version = release_version()
 image = args.image.resolve()
 if not image.is_file():
     raise SystemExit(f"qemu smoke: image not found: {image}")
@@ -196,7 +206,21 @@ try:
     collect_until(b"FlashOS starting")
     collect_until(b"Starting framebuffer debug")
     collect_until(b'pcid-spawner: spawn "/usr/lib/drivers/ihdad"')
-    collect_until(b"username:")
+    banner_start = len(captured)
+    collect_until(b"username:", banner_start)
+    banner = bytes(captured[banner_start:])
+    expected_banner = f"FlashOS {version}".encode()
+    if expected_banner not in banner:
+        raise RuntimeError(f"login banner does not contain {expected_banner!r}")
+    for forbidden_banner in (
+        b"Redox OS distribution",
+        b"Welcome to Redox OS",
+        b"redox login:",
+    ):
+        if forbidden_banner in banner:
+            raise RuntimeError(
+                f"login banner contains inherited identity {forbidden_banner!r}"
+            )
     login_start = len(captured)
     send(b"user\r")
     collect_until(b"password:", login_start)

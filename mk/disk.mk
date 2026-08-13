@@ -1,4 +1,4 @@
-# Configuration file with the commands configuration of the Redox image
+# Commands for constructing FlashOS disk and live images
 
 $(BUILD)/harddrive.img: $(FSTOOLS) $(REPO_TAG)
 ifeq ($(FSTOOLS_IN_PODMAN),1)

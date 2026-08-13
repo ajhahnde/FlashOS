@@ -88,6 +88,7 @@ data = """
 path = "/etc/os-release"
 data = "../usr/lib/os-release"
 symlink = true
+postinstall = true
 
 # Transitional package source while the inherited userspace is replaced.
 [[files]]

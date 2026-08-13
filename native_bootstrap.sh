@@ -18,7 +18,7 @@ banner()
 
 ############################################################################
 # This function takes care of installing a dependency via package manager of
-# choice for building Redox on BSDs (macOS, FreeBSD, etc.).
+# choice for building FlashOS on BSDs (macOS, FreeBSD, etc.).
 # @params:    $1 package manager
 #             $2 package name
 #             $3 binary name (optional)
@@ -84,7 +84,7 @@ osx()
 
 ############################################################################
 # This function takes care of installing all dependencies using MacPorts for
-# building Redox on macOS
+# building FlashOS on macOS
 # @params:    $1 the emulator to install, "qemu"
 ############################################################################
 osx_macports()
@@ -149,7 +149,7 @@ osx_macports()
 
 ############################################################################
 # This function takes care of installing all dependencies using Homebrew for
-# building Redox on macOS
+# building FlashOS on macOS
 # @params:    $1 the emulator to install, "qemu"
 ############################################################################
 osx_homebrew()
@@ -211,7 +211,7 @@ osx_homebrew()
 
 #######################################################################
 # This function takes care of installing all dependencies using pkg for
-# building Redox on FreeBSD
+# building FlashOS on FreeBSD
 # @params:    $1 the emulator to install, "qemu"
 #######################################################################
 freebsd()
@@ -275,7 +275,7 @@ freebsd()
 }
 
 ###############################################################################
-# This function takes care of installing all dependencies for building Redox on
+# This function takes care of installing all dependencies for building FlashOS on
 # Arch Linux
 # @params:	$1 the emulator to install, "qemu"
 # 		$2 install non-interactively, boolean
@@ -348,7 +348,7 @@ archLinux()
 }
 
 ###############################################################################
-# This function takes care of installing all dependencies for building Redox on
+# This function takes care of installing all dependencies for building FlashOS on
 # Debian-based Linux
 # @params:	$1 the emulator to install, "qemu"
 # 		$2 install non-interactively, boolean
@@ -464,7 +464,7 @@ ubuntu()
 }
 
 ###############################################################################
-# This function takes care of installing all dependencies for building Redox on
+# This function takes care of installing all dependencies for building FlashOS on
 # Fedora Linux
 # @params:	$1 the emulator to install, "qemu"
 # 		$2 install non-interactively, boolean
@@ -558,7 +558,7 @@ fedora()
 }
 
 ###############################################################################
-# This function takes care of installing all dependencies for building Redox on
+# This function takes care of installing all dependencies for building FlashOS on
 # *SUSE Linux
 ###############################################################################
 suse()
@@ -675,7 +675,7 @@ suse()
 }
 
 ###############################################################################
-# This function takes care of installing all dependencies for building Redox on
+# This function takes care of installing all dependencies for building FlashOS on
 # Gentoo Linux
 # @params:	$1 the emulator to install, "qemu"
 ###############################################################################
@@ -719,7 +719,7 @@ gentoo()
 }
 
 ###############################################################################
-# This function takes care of installing all dependencies for building Redox on
+# This function takes care of installing all dependencies for building FlashOS on
 # Solus
 # @params:	$1 the emulator to install, "qemu"
 ###############################################################################
@@ -778,8 +778,8 @@ is_os_redox()
 }
 
 ###############################################################################
-# This function takes care of installing all dependencies for building Redox on
-# Redox OS itself (bootstrapping Redox on Redox)
+# This function installs the dependencies for building FlashOS on Redox OS
+# itself (bootstrapping FlashOS on Redox)
 # @params:    $1 the emulator to install, "qemu"
 ###############################################################################
 redox()
@@ -843,7 +843,7 @@ redox()
     done
     
     echo ""
-    echo "Note: Building Redox on Redox itself is experimental."
+    echo "Note: Building FlashOS on Redox OS itself is experimental."
     echo "Some dependencies may not be available yet in the Redox package repository."
     echo "For the best build experience, consider using podman_bootstrap.sh on another system."
 }
@@ -854,14 +854,14 @@ redox()
 usage()
 {
     echo "------------------------"
-    echo "|Redox bootstrap script|"
+    echo "|FlashOS bootstrap script|"
     echo "------------------------"
     echo "Usage: ./native_bootstrap.sh"
     echo "OPTIONS:"
     echo
     echo "   -h,--help      Show this prompt"
     echo "   -u [branch]    Update git repo and update rust"
-    echo "                  If blank defaults to master"
+    echo "                  If blank defaults to main"
     echo "   -e [emulator]  Install specific emulator, qemu"
     echo "   -p [package    Choose an Ubuntu package manager, apt-fast or"
     echo "       manager]   aptitude"
@@ -1028,7 +1028,7 @@ banner
 if [ "Darwin" == "$(uname -s)" ]; then
     echo "Detected macOS!"
 
-    echo "WARNING: Building Redox OS on MacOS is not recommended, please use podman_bootstrap.sh instead."
+    echo "WARNING: Building FlashOS on macOS natively is not recommended; use podman_bootstrap.sh instead."
     echo "WARNING: Our toolchain is not designed to work on MacOS and it relies on FUSE which requires kernel extensions."
     echo "WARNING: If you want to continue anyway, please wait for 3 seconds or cancel this script now!"
     sleep 3
@@ -1083,4 +1083,4 @@ if [ "$dependenciesonly" = false ]; then
     boot
 fi
 
-echo "Redox bootstrap complete!"
+echo "FlashOS bootstrap complete!"

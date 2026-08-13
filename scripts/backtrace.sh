@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# This script allow the user to copy a Rust backtrace from Redox
+# This script allows the user to decode a Rust backtrace from FlashOS
 # and retrieve the symbols
 
 usage()
@@ -10,7 +10,7 @@ usage()
     echo "Print the backtrace contained in the backtracefile."
     echo "Symbols are taken from the executable for the given recipe."
     echo "If no backtracefile is given, decode the given addresses instead."
-    echo "This command must be run in the 'redox' directory."
+    echo "This command must be run from the FlashOS repository root."
     echo
     echo "-X for x86_64, -6 for i686, -A for aarch64 (x86_64 is the default)."
     echo "To read from stdin, use '-b -'"
@@ -75,4 +75,3 @@ then
 else
     sed '/^\s*$/d; s/^.*0x\([0-9a-f]*\).*$/\1/g' "$INFILE" | addr2line --demangle=rust --inlines --pretty-print --functions --exe="$EXECUTABLE"
 fi
-

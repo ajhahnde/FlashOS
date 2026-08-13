@@ -2,9 +2,11 @@
 
 set -e
 
-git fetch origin master
+base_ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || printf '%s\n' origin/main)"
+base_branch="${base_ref#origin/}"
+git fetch origin "${base_branch}"
 packages=""
-for toml in $(git diff --name-only origin/master... | grep '/recipe.toml$' | sort | uniq)
+for toml in $(git diff --name-only "${base_ref}"... | grep '/recipe.toml$' | sort | uniq)
 do
     package="$(basename "$(dirname "${toml}")")"
     if [ -n "${packages}" ]
@@ -19,5 +21,4 @@ then
 else
     echo "No recipe.toml changes found"
 fi
-
 

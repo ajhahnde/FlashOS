@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# This script show the changelog of all Redox components
+# This script shows the changelog of all FlashOS image components
 
 set -e
 
@@ -9,7 +9,7 @@ LAST_RELEASE_TIMESTAMP="$(git log --format="%ct" -1 "${LAST_RELEASE_TAG}")"
 echo "Last release: ${LAST_RELEASE_TAG} at ${LAST_RELEASE_TIMESTAMP}"
 
 REPOS=(
-    redox=.
+    flashos=.
     cookbook=cookbook
     rust=rust
 )

@@ -34,6 +34,7 @@ shell = "/usr/bin/fsh"
 [[files]]
 path = "/etc/hostname"
 data = "flashos"
+postinstall = true
 
 [[files]]
 path = "/usr/lib/os-release"
@@ -49,10 +50,17 @@ HOME_URL="https://github.com/ajhahnde/FlashOS"
 DOCUMENTATION_URL="https://github.com/ajhahnde/FlashOS#readme"
 SUPPORT_URL="https://github.com/ajhahnde/FlashOS/issues"
 """
+postinstall = true
 
 [[files]]
 path = "/etc/issue"
 data = "FlashOS 0.1.0\n"
+postinstall = true
+
+[[files]]
+path = "/etc/motd"
+data = "Login successful!\n"
+postinstall = true
 
 [[files]]
 path = "/usr/lib/init.d/30_console"

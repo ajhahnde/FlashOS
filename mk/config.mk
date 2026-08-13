@@ -5,7 +5,7 @@
 HOST_ARCH?=$(shell uname -m)
 
 # Configuration
-## Architecture to build Redox for (aarch64, i586, or x86_64). Defaults to a host one
+## Architecture to build FlashOS for (aarch64, i586, or x86_64). Defaults to a host one
 ARCH?=$(HOST_ARCH)
 ## Sub-device type for aarch64 if needed
 BOARD?=

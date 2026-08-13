@@ -282,6 +282,12 @@ flash-check() {
   esac
 }
 
+flashshell-check() {
+  printf '%s\n' \
+    'warning: flashshell-check is deprecated; use flash-check' >&2
+  flash-check "$@"
+}
+
 _flashos_check_quick() {
   _flashos_check_shell_helpers &&
     _flashos_root command python3 ci/check_profile.py &&

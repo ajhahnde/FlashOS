@@ -21,7 +21,7 @@ pub struct CliWebConfig {
     out_dir: PathBuf,
     /// absolute url to repo (not the web) instead of "/repo"
     repo_url: String,
-    /// this repository build url
+    /// repository URL used for build-script and commit links
     this_repo: String,
 }
 
@@ -43,8 +43,8 @@ impl CliWebConfig {
                     .ok()
                     .unwrap_or("web".to_string()),
             ),
-            // TODO: Hardcoded URL, maybe get this remote-url next time
-            this_repo: "https://gitlab.redox-os.org/redox-os/redox".to_string(),
+            this_repo: env::var("COOKBOOK_WEB_SOURCE_URL")
+                .unwrap_or_else(|_| "https://github.com/ajhahnde/FlashOS".to_string()),
         })
     }
 }

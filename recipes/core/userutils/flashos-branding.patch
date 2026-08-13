@@ -1,26 +1,15 @@
 diff --git a/res/issue b/res/issue
-index 6a963d8..812be49 100644
+index 6a963d8..8b90a61 100644
 --- a/res/issue
 +++ b/res/issue
-@@ -1,6 +1,5 @@
+@@ -1,6 +1 @@
 -########## Redox OS ##########
 -# Login with the following:  #
 -# `user`                     #
 -# `root`:`password`          #
 -##############################
 - 
-+
-+FlashOS - by github.com/ajhahnde
-+
-+    > An unofficial Redox OS distribution
-+
-diff --git a/res/motd b/res/motd
-index 5cd097a..91475e8 100644
---- a/res/motd
-+++ b/res/motd
-@@ -1 +1 @@
--Welcome to Redox OS!
-+Login successful!
++FlashOS
 diff --git a/src/bin/login.rs b/src/bin/login.rs
 index 83ad72d..9f281a9 100644
 --- a/src/bin/login.rs
