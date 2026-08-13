@@ -47,7 +47,7 @@ jobs:
           # container runs as root. Trust only the fixed source mount so Git
           # can snapshot the in-tree Flash workspace without weakening its
           # ownership check for any other path.
-          docker run --rm --privileged \
+          docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --workdir /workspace \
             --env CI=1 \

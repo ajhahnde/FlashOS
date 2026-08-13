@@ -3,7 +3,23 @@ name: Security
 on:
   push:
     branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "components/flash/**/Cargo.toml"
+      - "components/flash/Cargo.lock"
+      - "components/flash/deny.toml"
+      - ".github/workflows/security.yml"
   pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "components/flash/**/Cargo.toml"
+      - "components/flash/Cargo.lock"
+      - "components/flash/deny.toml"
+      - ".github/workflows/security.yml"
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -28,10 +44,10 @@ jobs:
         with:
           fail-on-severity: high
 
-  root-policy:
-    name: root-cargo-policy
+  cargo-policy:
+    name: cargo-policy
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Advisories, licenses, bans, and sources
@@ -39,12 +55,6 @@ jobs:
         with:
           command: check advisories bans licenses sources
 
-  flash-policy:
-    name: flash-cargo-policy
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Flash advisories, licenses, bans, and sources
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:

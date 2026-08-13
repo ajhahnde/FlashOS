@@ -8,6 +8,17 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ## [Unreleased]
 
+### Changed
+
+- Streamlined hosted CI without weakening the artifact path: repository and
+  product checks now share one job, documentation-only changes skip the costly
+  clean image/QEMU gate behind the stable aggregate result, informational
+  coverage runs only for relevant changes on `main`, and dependency policy is
+  path-scoped plus weekly. The image container no longer receives unnecessary
+  privileged host access, routine dependency updates are grouped, source SBOMs
+  are generated before binary artifacts enter the workspace, and published
+  release assets can no longer be overwritten by a rerun.
+
 ### Added
 
 - Added the complete Flash module-initializer effect contract. Named
@@ -179,6 +190,20 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   its inherited author field, matching the Flash workspace metadata.
 - Corrected two build-support paths that pointed at directories the recipe
   tree no longer uses.
+
+### Fixed
+
+- Corrected the final login banner so FlashOS no longer presents itself as an
+  unofficial Redox OS distribution. Product identity files are now installed
+  after packages, and the static and QEMU contracts reject inherited product
+  branding in the resulting image.
+- Corrected the package-repository web generator to link build scripts and
+  commits to FlashOS by default, with an explicit source-URL override for
+  alternate deployments.
+- Replaced inherited Redox product wording in the Nix and bootstrap developer
+  interfaces, updated maintenance scripts to refer to the FlashOS repository
+  root and `main` branch, and restored the documented deprecated
+  `flashshell-check` compatibility alias.
 
 ### Removed
 

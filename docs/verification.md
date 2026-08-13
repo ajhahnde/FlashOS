@@ -211,12 +211,15 @@ Its current checks include:
 - exclusion of Orbital scheme access;
 - absence of the legacy `/ui` configuration path;
 - version alignment between `versions.env`, Cargo metadata, system identity, the root README, and release workflow contracts;
+- post-package installation of the final FlashOS hostname, release metadata,
+  console issue, and `/etc/os-release` link;
 - presence of the expected image artifacts and image-oriented SBOM contract in the hosted workflow;
 - NVMe and USB runtime paths;
 - QEMU snapshot use;
 - immutable Git revisions for shipped Git-based recipes;
 - full commit pins for external GitHub Actions;
-- presence of the required local branding patch files.
+- presence of the required local branding patch files and rejection of added
+  inherited product-identity strings in those patches.
 
 The script combines parsed TOML checks with selected repository-text assertions. It does not:
 
@@ -367,7 +370,7 @@ The QEMU smoke contract checks observable markers and interactive behavior acros
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **Boot and kernel progress**         | Observable bootloader markers, serial boot submission, and kernel startup                                                              |
 | **Service initialization**           | Driver spawn markers, such as guest audio driver (`ihdad`) initialization                                                              |
-| **Authentication and basic access**  | Successful unprivileged console login and primary prompt display                                                                       |
+| **Authentication and basic access**  | Exact versioned FlashOS login banner, absence of inherited Redox product identity, successful unprivileged console login, and primary prompt display |
 | **Interactive command editing**      | Target-side line editing, command history recall, and multiline input                                                                  |
 | **Pipelines and flow control**       | External command piping and exit-status branching (e.g., a nonzero external status reaches the fallback branch of a conditional chain) |
 | **Filesystem and security patterns** | Unprivileged file manipulation in user space versus required rejection under `/etc`, and release-profile root login rejection          |
@@ -413,15 +416,16 @@ The primary CI workflow separates source checks, static product validation, imag
 
 ### Host-quality jobs
 
-The standard CI workflow runs independent jobs for:
+The standard CI workflow runs two independent jobs for:
 
-- root workspace formatting and tests;
+- root workspace formatting and tests together with CI Python linting, Python
+  tests, the product-profile contract, and whitespace validation;
 - Flash formatting, Clippy, and host tests;
-- CI Python linting;
-- the product-profile contract;
-- whitespace validation.
 
-The image workflow begins only after these required jobs succeed.
+The image workflow begins only after these required jobs succeed. Manual runs
+and any change that can affect produced images receive full image and runtime
+qualification. Changes limited to documentation and licenses retain the stable
+aggregate CI result but skip the expensive image gate.
 
 ### Clean-container image producer
 
@@ -479,7 +483,9 @@ suite, validates one LCOV report, and uploads it to Codecov. Its structural
 guard requires reported source from every Flash workspace crate and at least
 one executed first-party line. Codecov statuses, comments, and GitHub checks
 remain disabled while the new Rust baseline is established, and Coverage is
-not part of the standard CI `required` aggregate.
+not part of the standard CI `required` aggregate. It runs when relevant changes
+reach `main` or when manually dispatched; pull requests use the normal Flash
+test gate without duplicating the suite under instrumentation.
 
 Coverage is an observation about lines compiled and executed on the host. It
 does not measure target-selected Redox paths, image packaging, QEMU behavior,
@@ -496,7 +502,12 @@ Its current jobs include:
 - Cargo advisory, license, ban, and source-policy checks for the root workspace;
 - equivalent Cargo policy checks for the Flash workspace.
 
-The workflow runs on the configured repository events and schedule. A passing dependency-policy workflow does not constitute a full security audit of FlashOS, its upstream operating-system components, or produced images.
+The event-driven runs are limited to dependency manifests, lockfiles, policy,
+and workflow changes. A weekly schedule still detects newly published
+advisories without requiring unrelated source and documentation changes to
+repeat identical policy work. A passing dependency-policy workflow does not
+constitute a full security audit of FlashOS, its upstream operating-system
+components, or produced images.
 
 Security vulnerabilities must be handled through the process in the [Security Policy](../.github/SECURITY.md), not through public verification logs alone.
 
@@ -523,7 +534,8 @@ After image qualification, the packaging job:
 - downloads the qualified disk, live image, image SBOM, and image checksums;
 - verifies the incoming checksums;
 - compresses the disk and live image;
-- generates a source-oriented CycloneDX SBOM for the repository;
+- generates a source-oriented CycloneDX SBOM before promoted binaries enter
+  the workspace;
 - promotes the image-oriented SBOM produced with the images;
 - creates and verifies release-candidate SHA-256 checksums;
 - creates a build-provenance attestation for the compressed images, both SBOMs, and checksum file;
@@ -533,14 +545,17 @@ The two SBOMs have different scopes:
 
 | SBOM        | Intended scope                                                                               |
 | ----------- | -------------------------------------------------------------------------------------------- |
-| Source SBOM | The repository and source dependency view scanned during release packaging                   |
+| Source SBOM | The repository and source dependency view scanned before promoted binaries are downloaded    |
 | Image SBOM  | Staged target package payloads and recipe metadata associated with the built image artifacts |
 
 Neither document should be interpreted outside its stated scope. An SBOM is an inventory artifact, not proof that every component is vulnerability-free.
 
 ### Publication boundary
 
-Release publication occurs only under the workflow's tag and publication conditions. Before creating or updating the GitHub Release, the publication job downloads the packaged candidate and verifies its checksums again.
+Release publication occurs only under the workflow's tag and publication
+conditions. Before creating the GitHub Release, the publication job downloads
+the packaged candidate and verifies its checksums again. An existing release
+is rejected; a workflow rerun cannot overwrite already-published assets.
 
 The published assets consist of:
 

@@ -15,11 +15,58 @@ concurrency:
 
 jobs:
   quality:
-    name: build-system-quality
+    name: repository-quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      qualify_image: ${{ steps.scope.outputs.qualify_image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Keep one stable CI workflow for every change, but do not spend roughly
+      # ten runner-minutes rebuilding and booting images for documentation-only
+      # updates. Unknown file types deliberately take the safe path and qualify.
+      - name: Decide whether runtime qualification is needed
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          qualify=true
+          if [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
+            if [ "${EVENT_NAME}" = "pull_request" ]; then
+              base="${BASE_SHA}"
+            elif [ -n "${BEFORE_SHA}" ] &&
+                 [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ] &&
+                 git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+              base="${BEFORE_SHA}"
+            else
+              base=""
+            fi
+
+            if [ -n "${base}" ]; then
+              qualify=false
+              mapfile -t changed < <(git diff --name-only "${base}" "${HEAD_SHA}")
+              for path in "${changed[@]}"; do
+                case "${path}" in
+                  *.md|docs/*|LICENSE|LICENSES/*|.github/ISSUE_TEMPLATE/*)
+                    ;;
+                  *)
+                    qualify=true
+                    break
+                    ;;
+                esac
+              done
+            fi
+          fi
+          echo "qualify_image=${qualify}" >> "${GITHUB_OUTPUT}"
+          echo "base_sha=${base:-}" >> "${GITHUB_OUTPUT}"
+          echo "Image and QEMU qualification required: ${qualify}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Cache Cargo downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -41,6 +88,29 @@ jobs:
 
       - name: Build-system tests
         run: cargo test --locked
+
+      # Product contracts, the QEMU harness, and host developer tools are held
+      # to the same source-quality standard as the Rust workspaces.
+      - name: Check the FlashOS Python
+        run: |
+          pipx install ruff==0.16.0
+          ruff check ci/ tools/flashos/
+          python3 -m unittest discover -s ci/tests -p 'test_*.py'
+          python3 -m unittest discover -s tools/flashos/tests -p 'test_*.py'
+
+      - name: Validate package, TUI, shell, identity, and audio policy
+        run: python3 ci/check_profile.py
+
+      - name: Reject whitespace errors
+        env:
+          BASE_SHA: ${{ steps.scope.outputs.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "${BASE_SHA}" ]; then
+            git diff --check "${BASE_SHA}" "${HEAD_SHA}"
+          else
+            git show --check --format= "${HEAD_SHA}"
+          fi
 
   flash:
     name: flash-quality
@@ -76,33 +146,10 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
-  product-contract:
-    name: tui-product-contract
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      # Product contracts, the QEMU harness, and host developer tools are held
-      # to the same source-quality standard as the Rust workspaces.
-      - name: Check the FlashOS Python
-        run: |
-          pipx install ruff==0.16.0
-          ruff check ci/ tools/flashos/
-          python3 -m unittest discover -s ci/tests -p 'test_*.py'
-          python3 -m unittest discover -s tools/flashos/tests -p 'test_*.py'
-
-      - name: Validate package, TUI, shell, identity, and audio policy
-        run: python3 ci/check_profile.py
-
-      - name: Reject whitespace errors
-        run: git diff --check HEAD
-
   image:
     name: image-and-runtime
-    needs: [quality, flash, product-contract]
+    if: needs.quality.outputs.qualify_image == 'true'
+    needs: [quality, flash]
     uses: ./.github/workflows/_image.yml
     with:
       artifact-name: flashos-x86_64-ci-${{ github.sha }}
@@ -113,7 +160,7 @@ jobs:
   required:
     name: required
     if: always()
-    needs: [quality, flash, product-contract, image]
+    needs: [quality, flash, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -121,7 +168,6 @@ jobs:
         env:
           ROOT_RESULT: ${{ needs.quality.result }}
           SHELL_RESULT: ${{ needs.flash.result }}
-          CONTRACT_RESULT: ${{ needs.product-contract.result }}
           IMAGE_RESULT: ${{ needs.image.result }}
         run: |
           set -euo pipefail
@@ -130,20 +176,23 @@ jobs:
             echo
             echo "| gate | result |"
             echo "|:--|:--|"
-            echo "| build system | ${ROOT_RESULT} |"
+            echo "| repository + product contract | ${ROOT_RESULT} |"
             echo "| Flash | ${SHELL_RESULT} |"
-            echo "| TUI product contract | ${CONTRACT_RESULT} |"
             echo "| Docker image + QEMU runtime | ${IMAGE_RESULT} |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
           for result in \
             "${ROOT_RESULT}" \
-            "${SHELL_RESULT}" \
-            "${CONTRACT_RESULT}" \
-            "${IMAGE_RESULT}"
+            "${SHELL_RESULT}"
           do
             if [ "${result}" != "success" ]; then
               echo "::error::one or more required CI gates failed"
               exit 1
             fi
           done
+
+          if [ "${IMAGE_RESULT}" != "success" ] &&
+             [ "${IMAGE_RESULT}" != "skipped" ]; then
+            echo "::error::image qualification did not succeed or skip by policy"
+            exit 1
+          fi

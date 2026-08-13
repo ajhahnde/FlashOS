@@ -3,7 +3,12 @@ name: Coverage
 on:
   push:
     branches: [main]
-  pull_request:
+    paths:
+      - "components/flash/**"
+      - "ci/check_coverage.py"
+      - "ci/tests/test_check_coverage.py"
+      - "codecov.yml"
+      - ".github/workflows/coverage.yml"
   workflow_dispatch:
 
 permissions:
@@ -34,8 +39,8 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: flash-coverage-cargo-${{ runner.os }}-${{ hashFiles('components/flash/Cargo.lock') }}
-          restore-keys: flash-coverage-cargo-${{ runner.os }}-
+          key: flash-cargo-${{ runner.os }}-${{ hashFiles('components/flash/Cargo.lock') }}
+          restore-keys: flash-cargo-${{ runner.os }}-
 
       - name: Activate the pinned Flash toolchain
         run: |

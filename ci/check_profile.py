@@ -188,6 +188,19 @@ issue_file = next(
 if issue_file is None or issue_file.get("data") != f"FlashOS {version}\n":
     fail("/etc/issue version drifted from versions.env")
 
+identity_files = {
+    item.get("path"): item for item in base.get("files", []) + profile.get("files", [])
+}
+for identity_path in (
+    "/etc/hostname",
+    "/etc/issue",
+    "/etc/motd",
+    "/etc/os-release",
+    "/usr/lib/os-release",
+):
+    if identity_files.get(identity_path, {}).get("postinstall") is not True:
+        fail(f"{identity_path} must be installed after packages")
+
 readme = (ROOT / "README.md").read_text()
 if f"FlashOS {version}" not in readme or f"Version-{version}-" not in readme:
     fail("README version drifted from versions.env")
@@ -267,6 +280,13 @@ for expected in (
 ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text()
 if "python3 -m unittest discover -s ci/tests -p 'test_*.py'" not in ci_workflow:
     fail("standard CI must run the coverage-contract unit tests")
+if "qualify_image" not in ci_workflow or '"skipped"' not in ci_workflow:
+    fail("standard CI must retain its documented conditional image gate")
+
+if "--clobber" in release_workflow:
+    fail("release publication must not overwrite existing release assets")
+if "published assets are immutable" not in release_workflow:
+    fail("release publication must reject an existing release")
 
 codecov_config = (ROOT / "codecov.yml").read_text()
 for expected in (
@@ -314,7 +334,12 @@ for package in sorted(packages):
         )
 
 qemu_smoke = (ROOT / "ci/qemu_smoke.py").read_text()
-for expected in ('choices=("nvme", "usb")', "snapshot=on"):
+for expected in (
+    'choices=("nvme", "usb")',
+    "snapshot=on",
+    'expected_banner = f"FlashOS {version}".encode()',
+    'b"Redox OS distribution"',
+):
     if expected not in qemu_smoke:
         fail(f"QEMU immutability/bus contract is missing: {expected}")
 
@@ -349,6 +374,27 @@ missing_patches = [
 ]
 if missing_patches:
     fail(f"branding patches are missing: {missing_patches}")
+
+for path in required_branding_patches:
+    for line_number, line in enumerate(path.read_text().splitlines(), start=1):
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        for forbidden in (
+            "Redox OS distribution",
+            "Welcome to Redox OS",
+            "redox login:",
+        ):
+            if forbidden in line:
+                fail(
+                    "branding patch adds inherited product identity: "
+                    f"{path.relative_to(ROOT)}:{line_number}: {forbidden}"
+                )
+
+web_source = (ROOT / "src/web.rs").read_text()
+if "https://github.com/ajhahnde/FlashOS" not in web_source:
+    fail("package web source links must default to the FlashOS repository")
+if 'this_repo: "https://gitlab.redox-os.org/redox-os/redox"' in web_source:
+    fail("package web source links still point to the inherited Redox repository")
 
 print("profile contract: ok")
 print(f"release: {version}")

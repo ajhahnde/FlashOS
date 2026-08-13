@@ -92,6 +92,7 @@ The script reads or inspects repository state including:
 - release and image workflow source;
 - the QEMU smoke script;
 - the root README;
+- the package-web source-link configuration;
 - required branding patches;
 - every workflow file under `.github/workflows/`.
 
@@ -149,6 +150,10 @@ The profile contract compares that version with selected public and installed id
 
 A mismatch fails before an image is built.
 
+The hostname, issue, login message, release metadata, and `/etc/os-release`
+link must also be marked for post-package installation so inherited package
+payloads cannot silently replace the final product identity.
+
 ### Release and image-workflow invariants
 
 The script verifies the presence of selected release-critical workflow contracts, including:
@@ -177,7 +182,9 @@ The contract also verifies:
 
 - QEMU snapshot attachment of tested image files;
 - the supported NVMe and USB smoke interfaces;
-- presence of required local branding patches.
+- presence of required local branding patches;
+- absence of inherited Redox product-identity additions in branding patches;
+- FlashOS as the default source repository for generated package-web links.
 
 ### Limits of the static contract
 
@@ -326,10 +333,11 @@ The active workflow relationship is:
 
 ```text
 ci.yml
-├── build-system-quality
+├── repository-quality
+│   ├── root workspace quality
+│   └── Python and product contracts
 ├── flash-quality
-├── tui-product-contract
-└── _image.yml
+├── _image.yml when the change can affect produced images
     ├── docker-clean-room-build
     │   └── promoted checksummed image artifact
     └── qemu-artifact-consumer
@@ -338,7 +346,8 @@ ci.yml
         CI / required
 
 security.yml
-└── independent dependency-policy jobs
+├── pull-request dependency review
+└── combined root and Flash Cargo policy
 
 coverage.yml
 └── pinned Flash host coverage
@@ -371,11 +380,10 @@ The workflow's default token permission is read-only repository content.
 
 The independent prerequisite jobs are:
 
-| Job                    | Contract                                                                                  |
-| ---------------------- | ----------------------------------------------------------------------------------------- |
-| `build-system-quality` | Root workspace formatting and locked host tests                                           |
-| `flash-quality`        | Flash formatting, Clippy with warnings denied, and locked workspace tests                 |
-| `tui-product-contract` | Ruff checks for `ci/`, the static product-profile contract, and Git whitespace validation |
+| Job                 | Contract                                                                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `repository-quality` | Root formatting and locked tests, Ruff, Python tests, the static product-profile contract, and whitespace validation      |
+| `flash-quality`      | Flash formatting, Clippy with warnings denied, and locked workspace tests                                                  |
 
 The root and Flash workspaces use their own pinned toolchain files and separate Cargo caches.
 
@@ -383,7 +391,12 @@ The standard CI workflow does not run the Flash Redox target-build command as a 
 
 ### Image prerequisite
 
-The `image-and-runtime` job invokes `_image.yml` only after all host-quality and product-contract jobs succeed.
+The `image-and-runtime` job invokes `_image.yml` only after both host-quality
+jobs succeed. Manual runs and changes to source, configuration, recipes,
+tooling, workflows, or unknown paths always qualify the images. Changes limited
+to documentation and licenses skip this roughly ten-minute gate. The
+classification is conservative: a path that is not explicitly
+documentation-only triggers the build.
 
 For ordinary CI it uses:
 
@@ -395,12 +408,17 @@ For ordinary CI it uses:
 
 The final job is named `required`.
 
-It runs after every ordinary gate, including when an earlier gate fails or is skipped. It writes a summary table and exits nonzero unless all of these results are `success`:
+It runs after every ordinary gate, including when an earlier gate fails or is
+skipped. It writes a summary table and requires both source-quality results to
+be `success`. Image qualification must be `success`, except that the documented
+documentation-only policy may produce `skipped`:
 
-- root build-system quality;
+- repository and product-contract quality;
 - Flash quality;
-- product contract;
-- image and runtime qualification.
+- image and runtime qualification when the change is in scope.
+
+This provides one stable aggregate status that can be selected by repository
+rules even when an expensive job is intentionally skipped.
 
 The separate Coverage workflow is intentionally absent from this aggregate.
 Its own failures remain visible without making a third-party reporting service
@@ -410,7 +428,10 @@ a release or branch-protection dependency.
 
 The informational workflow is defined in
 [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml). It runs
-on pushes to `main`, pull requests, and manual dispatch.
+after relevant Flash, coverage-contract, Codecov-policy, or workflow changes
+reach `main`, and on manual dispatch. Pull requests already run the uninstrumented
+Flash suite in standard CI; avoiding a second instrumented run keeps the
+informational service out of the required review path.
 
 The workflow uses Flash's pinned stable toolchain and a pinned
 `cargo-llvm-cov` release to execute the complete host workspace test suite and
@@ -434,8 +455,6 @@ The resulting percentage covers host-executable Flash source only. It does not
 measure Redox-selected code, image integration, QEMU behavior, the borrowed
 kernel, or physical hardware paths. The README badge is therefore labelled and
 described as Flash host coverage.
-
-This provides one stable aggregate status that can be selected by repository branch-protection settings. Whether branch protection actually requires that status is a repository setting rather than a property of the workflow source.
 
 ## Reusable image qualification
 
@@ -549,8 +568,8 @@ The supply-chain workflow is defined in [`.github/workflows/security.yml`](../.g
 
 It runs on:
 
-- pushes to `main`;
-- pull requests;
+- dependency-policy changes pushed to `main`;
+- pull requests that change dependency manifests, lockfiles, policy, or this workflow;
 - its configured weekly schedule;
 - manual dispatch.
 
@@ -564,7 +583,7 @@ This job evaluates dependency changes visible to GitHub's dependency graph. It i
 
 ### Cargo policies
 
-Separate jobs run Cargo policy checks for:
+A single job and checkout run Cargo policy checks for:
 
 - the root workspace;
 - the nested Flash workspace.
@@ -665,7 +684,7 @@ The two release SBOMs have deliberately different scopes:
 
 | Document    | Scope                                                                                   |
 | ----------- | --------------------------------------------------------------------------------------- |
-| Source SBOM | Repository and source-dependency view scanned during release packaging                  |
+| Source SBOM | Repository and source-dependency view scanned before promoted binaries are downloaded   |
 | Image SBOM  | Staged target package payloads and recipe metadata associated with the qualified images |
 
 Neither should be presented as a complete inventory outside its stated boundary.
@@ -683,7 +702,8 @@ Before publishing, it:
 
 1. downloads the packaged candidate;
 2. verifies `SHA256SUMS` again;
-3. creates the tagged GitHub Release or replaces the named assets on an existing release.
+3. rejects an already-existing release so published assets remain immutable;
+4. creates the tagged GitHub Release and uploads the candidate.
 
 Normal published assets are the two compressed images, two SBOMs, and checksum file. QEMU serial logs are not part of the standard published set.
 
