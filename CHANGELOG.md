@@ -21,6 +21,14 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added `/usr/bin/flash-language-server`, a separate stdio-only Language Server
+  Protocol executable with full-text versioned overlays for absolute `file:`
+  URIs. It publishes deterministic shared module diagnostics and provides
+  completion, hover, signature help, definition, references, and canonical
+  whole-document formatting with cancellation and stale-generation barriers.
+  The adapter shares Flash syntax and semantic analysis but has no CLI,
+  platform, terminal, session, configuration, history, executable-probe, or
+  execution capability; effectful open source is analyzed without being run.
 - Added the complete Flash module-initializer effect contract. Named
   dependencies share logical cwd, child environment, status, output, process,
   and job state in deterministic initialization order; successful completion

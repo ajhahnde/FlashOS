@@ -164,7 +164,11 @@ These programs remain separate processes. Flash coordinates command execution bu
 
 ### Flash
 
-Flash is the primary FlashOS-owned user-facing component. Its executable is named `fsh`, and the active system profiles assign `/usr/bin/fsh` as the login shell for both configured accounts.
+Flash is the primary FlashOS-owned user-facing component. The package installs
+the `fsh` shell and the separate `flash-language-server` protocol executable.
+The active system profiles assign `/usr/bin/fsh` as the login shell for both
+configured accounts; the language server is an editor-launched, non-executing
+stdio service rather than a login interface.
 
 Flash is a userspace process. It does not replace the kernel, system initialization, authentication service, filesystem, package manager, or external command implementations.
 
