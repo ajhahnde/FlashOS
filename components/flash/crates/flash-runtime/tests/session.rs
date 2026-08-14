@@ -30,7 +30,7 @@ use flash_platform::{
 use flash_platform_posix::PosixPlatform;
 use flash_runtime::builtin::standard_registry;
 use flash_runtime::command::{CommandLifecycle, CommandNamespaceEntry, CommandRegistry};
-use flash_runtime::eval::FakeClock;
+use flash_runtime::eval::{Clock, FakeClock, Instant};
 use flash_runtime::job::{JobMemberState, JobPlacement, JobState, ProcessId};
 use flash_runtime::plan::SessionOptions;
 use flash_runtime::resolve::ExecutableProbe;
@@ -73,6 +73,17 @@ fn session() -> Session {
 
 fn terminal_platform() -> FakePlatform {
     FakePlatform::with_terminal(Capabilities::full(), true, TerminalSize::new(80, 24))
+}
+
+#[derive(Debug, Default)]
+struct TickingClock {
+    now: AtomicU64,
+}
+
+impl Clock for TickingClock {
+    fn now(&self) -> Instant {
+        Instant::from_nanos(self.now.fetch_add(10, Ordering::SeqCst))
+    }
 }
 
 #[derive(Debug)]
@@ -4828,6 +4839,133 @@ fn mixed_pipeline_statuses_aggregate_in_source_order() {
         status.stages().iter().map(Status::code).collect::<Vec<_>>(),
         vec![Some(1), Some(0), Some(0), Some(0)]
     );
+}
+
+#[test]
+fn mixed_pipeline_status_slots_preserve_selection_signals_and_durations() {
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flash-status-fixture"));
+    let temp = TempDir::new("session-mixed-status-slots");
+    let source = format!(
+        "^{0} exit 7 | decode bytes | encode bytes | \
+         ^{0} signal | decode bytes | encode bytes | ^{0} exit 0",
+        fixture.display()
+    );
+    let probe = Probe::new([fixture]);
+
+    for (pipefail, expected_code, expect_signal) in [(false, Some(0), false), (true, None, true)] {
+        let mut session = Session::new(
+            temp.path(),
+            environment(),
+            SessionOptions::default().with_pipefail(pipefail),
+        );
+        session
+            .submit(
+                "<interactive>",
+                &source,
+                &probe,
+                &PosixPlatform,
+                &TickingClock::default(),
+                &mut Vec::new(),
+            )
+            .expect("the complete mixed status vector should aggregate");
+
+        let status = session.current_status().expect("status should commit");
+        assert_eq!(status.code(), expected_code);
+        assert_eq!(status.signal().is_some(), expect_signal);
+        assert_eq!(status.stages().len(), 7);
+        assert_eq!(
+            status.stages().iter().map(Status::code).collect::<Vec<_>>(),
+            vec![Some(7), Some(0), Some(0), None, Some(0), Some(0), Some(0)]
+        );
+        assert!(status.stages()[3].signal().is_some());
+        assert!(status.duration() > Duration::ZERO);
+        for index in [0, 3, 6] {
+            assert!(status.stages()[index].duration() > Duration::ZERO);
+        }
+        for index in [1, 2, 4, 5] {
+            assert_eq!(status.stages()[index].duration(), Duration::ZERO);
+        }
+    }
+}
+
+#[test]
+fn deferred_check_forwards_successful_external_bytes() {
+    let temp = TempDir::new("session-deferred-check-success");
+    let probe = Probe::new(["/bin/echo"]);
+    let mut session = Session::new(temp.path(), environment(), SessionOptions::default());
+    let mut sink = Vec::new();
+
+    session
+        .submit(
+            "<interactive>",
+            "^/bin/echo -n xxxxxxxxxxxxxxxxx | check | decode bytes | encode bytes",
+            &probe,
+            &PosixPlatform,
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect("a successful deferred check should forward without capture");
+
+    assert_eq!(sink, vec![b'x'; 17]);
+    assert_eq!(
+        session
+            .current_status()
+            .expect("aggregate status should commit")
+            .stages()
+            .iter()
+            .map(Status::code)
+            .collect::<Vec<_>>(),
+        vec![Some(0), Some(0), Some(0), Some(0)]
+    );
+}
+
+#[test]
+fn deferred_check_failure_aborts_the_chain_and_preserves_session_status() {
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_flash-status-fixture"));
+    let temp = TempDir::new("session-deferred-check");
+    let probe = Probe::new([fixture.clone()]);
+    let mut session = Session::new(temp.path(), environment(), SessionOptions::default());
+    let mut sink = Vec::new();
+    session
+        .submit(
+            "<interactive>",
+            format!("^{} exit 23", fixture.display()),
+            &probe,
+            &PosixPlatform,
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect("the baseline status should complete normally");
+
+    for (connector, label) in [("&&", "and"), ("||", "or")] {
+        let marker = temp.path().join(format!("unreached-{label}.txt"));
+        let error = session
+            .submit(
+                "<interactive>",
+                format!(
+                    "^{0} exit 7 | check | decode bytes | encode bytes {2} \
+                     ^{0} late 0 {1} 0",
+                    fixture.display(),
+                    marker.display(),
+                    connector
+                ),
+                &probe,
+                &PosixPlatform,
+                &FakeClock::new(),
+                &mut sink,
+            )
+            .expect_err("an unsuccessful deferred check should remain a runtime error");
+
+        assert!(
+            error
+                .render()
+                .contains("checked command was unsuccessful: exit 7"),
+            "{}",
+            error.render()
+        );
+        assert!(!marker.exists(), "a runtime error must abort the chain");
+        assert_eq!(session.current_status().and_then(Status::code), Some(23));
+    }
 }
 
 #[test]

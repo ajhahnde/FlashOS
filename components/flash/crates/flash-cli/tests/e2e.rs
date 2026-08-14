@@ -712,6 +712,33 @@ fn a_closed_mixed_pipeline_reader_stops_the_internal_bridge() {
 }
 
 #[test]
+fn a_deferred_check_failure_survives_downstream_early_exit() {
+    let temp = TempDir::new("deferred-check-early-exit");
+    let marker = temp.path().join("unreached.txt");
+    let script = temp.script(
+        "deferred-check-early-exit.fsh",
+        &format!(
+            "^{0} source 1048576 7 | check | ^{1} exit 0 && \
+             ^{1} late 0 {2} 0\n",
+            stream_fixture(),
+            status_fixture(),
+            marker.display()
+        ),
+    );
+
+    let output = run_script(&script, temp.path(), fixture_directory());
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert!(!marker.exists(), "the runtime error must abort the chain");
+    let stderr = String::from_utf8(output.stderr).expect("diagnostics should be UTF-8");
+    assert!(
+        stderr.contains("checked command was unsuccessful"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn a_missing_command_is_a_script_error() {
     let temp = TempDir::new("missing-command");
     let script = temp.script("missing.fsh", "^definitely-not-a-flash-command\n");

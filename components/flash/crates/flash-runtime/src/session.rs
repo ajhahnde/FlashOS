@@ -44,7 +44,9 @@ use crate::eval::{
     Clock, Completion, EvalLimits, ExpandedWord, RuntimeError, RuntimeErrorKind,
     evaluate_in_environment_owned_with_binding_types, expand_word,
 };
-use crate::execute::{MixedSegment, execute_foreground_status, start_mixed_pipeline};
+use crate::execute::{
+    MixedSegment, aggregate_statuses, execute_foreground_status, start_mixed_pipeline,
+};
 use crate::internal::{
     DEFAULT_MATERIALIZATION_LIMIT, InternalPayload, InternalPipelineOutcome, StageOutcome,
     execute_internal_pipeline, execute_internal_suffix, execute_stage,
@@ -1691,16 +1693,21 @@ fn run_mixed_pipeline(
         .expect("mixed preparation state must not be poisoned")
         .pending_state
         .clone();
-    let mut indexed_statuses = Vec::with_capacity(plan.stages().len());
+    let mut status_slots = StageStatusSlots::new(plan.stages().len());
+    let mut deferred_checks = Vec::new();
     let mut requested_exit = None;
     for result in segment_results.into_iter().flatten() {
         match result {
             MixedSegmentResult::Completed {
                 statuses,
+                deferred_checks: segment_checks,
                 closure_environment: updated,
                 ..
             } => {
-                indexed_statuses.extend(statuses);
+                for (index, status) in statuses {
+                    status_slots.complete(index, status);
+                }
+                deferred_checks.extend(segment_checks);
                 pending_state
                     .environment_mut()
                     .apply_delta(&closure_environment, &updated);
@@ -1725,25 +1732,90 @@ fn run_mixed_pipeline(
     }
 
     let (external_statuses, pipeline_duration) = mixed.wait(plan, platform, clock)?;
-    indexed_statuses.extend(external_statuses);
-    indexed_statuses.sort_by_key(|(index, _)| *index);
-    let statuses: Vec<Status> = indexed_statuses
-        .into_iter()
-        .map(|(_, status)| status)
-        .collect();
-    let selected = if plan.pipefail() {
-        statuses
-            .iter()
-            .rposition(|status| !status.is_ok())
-            .unwrap_or(statuses.len() - 1)
-    } else {
-        statuses.len() - 1
-    };
-    let status = Status::aggregate(statuses, selected, pipeline_duration)
-        .expect("a mixed pipeline has source-ordered leaf statuses");
+    for (index, status) in external_statuses {
+        status_slots.complete(index, status);
+    }
+    deferred_checks.sort_by_key(|check| check.check_stage);
+    for check in deferred_checks {
+        let upstream = status_slots.completed(check.upstream_stage);
+        if !upstream.is_ok() {
+            return Err(Interrupt::Runtime(RuntimeError::new(
+                RuntimeErrorKind::UnsuccessfulStatus {
+                    status: Box::new(upstream.clone()),
+                },
+                plan.stages()[check.check_stage].span(),
+            )));
+        }
+    }
+    let status = aggregate_statuses(
+        status_slots.into_statuses(),
+        plan.pipefail(),
+        pipeline_duration,
+    );
     pending_state.set_current_status(Some(status.clone()));
     *state = pending_state;
     Ok(ChainStep::Status(status))
+}
+
+enum StageStatusSlot {
+    Pending,
+    Completed(Status),
+}
+
+struct StageStatusSlots {
+    slots: Vec<StageStatusSlot>,
+}
+
+impl StageStatusSlots {
+    fn new(stage_count: usize) -> Self {
+        Self {
+            slots: std::iter::repeat_with(|| StageStatusSlot::Pending)
+                .take(stage_count)
+                .collect(),
+        }
+    }
+
+    fn complete(&mut self, index: usize, status: Status) {
+        let slot = self
+            .slots
+            .get_mut(index)
+            .expect("a mixed status index belongs to the source plan");
+        assert!(
+            matches!(slot, StageStatusSlot::Pending),
+            "a mixed source stage completes exactly once"
+        );
+        *slot = StageStatusSlot::Completed(status);
+    }
+
+    fn completed(&self, index: usize) -> &Status {
+        match self
+            .slots
+            .get(index)
+            .expect("a deferred check names a source stage")
+        {
+            StageStatusSlot::Completed(status) => status,
+            StageStatusSlot::Pending => {
+                panic!("a deferred check runs only after its upstream status completes")
+            }
+        }
+    }
+
+    fn into_statuses(self) -> Vec<Status> {
+        self.slots
+            .into_iter()
+            .map(|slot| match slot {
+                StageStatusSlot::Completed(status) => status,
+                StageStatusSlot::Pending => {
+                    panic!("a mixed pipeline aggregates only complete status slots")
+                }
+            })
+            .collect()
+    }
+}
+
+struct DeferredCheck {
+    check_stage: usize,
+    upstream_stage: usize,
 }
 
 struct MixedPreparation {
@@ -1788,6 +1860,7 @@ enum MixedSegmentResult {
     Completed {
         ordinal: usize,
         statuses: Vec<(usize, Status)>,
+        deferred_checks: Vec<DeferredCheck>,
         closure_environment: Environment,
     },
     Exit {
@@ -1838,6 +1911,7 @@ fn run_mixed_segment(
     let closure_context =
         OwnedClosureContext::new(source.clone(), closure_environment, EvalLimits::default());
     let mut statuses = Vec::with_capacity(stages.len());
+    let mut deferred_checks = Vec::new();
 
     let mut prepared = preparation
         .state
@@ -1858,7 +1932,23 @@ fn run_mixed_segment(
         let PlannedResolution::Internal { canonical_name, .. } = stage.resolution() else {
             unreachable!("mixed topology contains only internal segment stages");
         };
-        let upstream = statuses.last().map(|(_, status)| status);
+        let deferred_check = canonical_name == "check"
+            && index == first_stage
+            && index > 0
+            && matches!(
+                plan.stages()[index - 1].resolution(),
+                PlannedResolution::External { .. }
+            );
+        // The ordinary check path still validates its carrier and arity and
+        // creates its zero-valued leaf. This provisional status is never used
+        // as evidence: the coordinator retains the exact external dependency
+        // below and must validate it after the child has been waited.
+        let provisional_upstream = deferred_check.then(|| {
+            Status::exit(0, Duration::ZERO).expect("a deferred check placeholder is valid")
+        });
+        let upstream = provisional_upstream
+            .as_ref()
+            .or_else(|| statuses.last().map(|(_, status)| status));
         match execute_stage(
             canonical_name,
             stage,
@@ -1877,6 +1967,12 @@ fn run_mixed_segment(
             }) => {
                 payload = output_payload;
                 statuses.push((index, status));
+                if deferred_check {
+                    deferred_checks.push(DeferredCheck {
+                        check_stage: index,
+                        upstream_stage: index - 1,
+                    });
+                }
             }
             Ok(StageOutcome::Exit(code)) => {
                 prepared.stopped = true;
@@ -1922,6 +2018,7 @@ fn run_mixed_segment(
     Ok(MixedSegmentResult::Completed {
         ordinal,
         statuses,
+        deferred_checks,
         closure_environment: closure_context.environment_snapshot(),
     })
 }
