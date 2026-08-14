@@ -630,6 +630,50 @@ fn generated_64_mib_mixed_pipeline_streams_without_capture_or_deadlock() {
 }
 
 #[test]
+fn external_internal_alternation_round_trips_text() {
+    let temp = TempDir::new("alternating-text-stream");
+    let input = b"one\ntwo\nthree\n";
+    fs::write(temp.path().join("input.txt"), input).expect("text fixture should be written");
+    let script = temp.script(
+        "alternating-text.fsh",
+        &format!(
+            "^{0} relay 0 < input.txt | decode utf8 | encode utf8 | \
+             ^{0} relay 0 | decode utf8 | encode utf8 | \
+             ^{0} relay 0 > output.txt\n",
+            stream_fixture()
+        ),
+    );
+
+    let output = run_script(&script, temp.path(), fixture_directory());
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    assert_eq!(fs::read(temp.path().join("output.txt")).unwrap(), input);
+}
+
+#[test]
+fn generated_64_mib_three_island_pipeline_streams_with_bounded_consumption() {
+    let temp = TempDir::new("large-three-island-stream");
+    let script = temp.script(
+        "large-three-island.fsh",
+        &format!(
+            "^{0} source 67108864 0 | decode bytes | encode bytes | \
+             ^{0} relay 0 | decode bytes | encode bytes | \
+             ^{0} relay 0 | decode bytes | encode bytes | \
+             ^{0} sink 67108864 0\n",
+            stream_fixture()
+        ),
+    );
+
+    let output = run_script(&script, temp.path(), fixture_directory());
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn a_closed_pipeline_reader_preserves_the_last_stage_status() {
     let temp = TempDir::new("broken-pipe");
     let script = temp.script(

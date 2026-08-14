@@ -1001,16 +1001,15 @@ pub(crate) fn start_mixed_pipeline(
     internal: Range<usize>,
 ) -> Result<MixedPipeline, RuntimeError> {
     preflight(plan)?;
-    if internal.is_empty()
-        || internal.end > plan.stages().len()
-        || plan.stages()[internal.clone()]
-            .iter()
-            .any(|stage| !matches!(stage.resolution(), PlannedResolution::Internal { .. }))
-        || plan.stages()[..internal.start]
-            .iter()
-            .chain(&plan.stages()[internal.end..])
-            .any(|stage| !matches!(stage.resolution(), PlannedResolution::External { .. }))
-    {
+    let topology_matches = plan.mixed_topology().is_some_and(|topology| {
+        let [segment] = topology.internal_segments() else {
+            return false;
+        };
+        segment.ordinal() == 0
+            && segment.stages() == internal
+            && topology.external_indices().len() + internal.len() == plan.stages().len()
+    });
+    if !topology_matches {
         return Err(RuntimeError::new(
             RuntimeErrorKind::Unsupported {
                 feature: "a mixed pipeline with more than one internal stage island",

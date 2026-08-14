@@ -15,6 +15,7 @@
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
+use std::ops::Range;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,7 +54,79 @@ pub struct ExecutionPlan {
     span: Span,
 }
 
+/// The maximal internal segments and external stages in one mixed plan.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct MixedTopology {
+    internal_segments: Vec<InternalSegment>,
+    external_indices: Vec<usize>,
+}
+
+impl MixedTopology {
+    pub(crate) fn internal_segments(&self) -> &[InternalSegment] {
+        &self.internal_segments
+    }
+
+    pub(crate) fn external_indices(&self) -> &[usize] {
+        &self.external_indices
+    }
+}
+
+/// One maximal source-ordered range of internal stages in a mixed plan.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct InternalSegment {
+    ordinal: usize,
+    stages: Range<usize>,
+}
+
+impl InternalSegment {
+    pub(crate) const fn ordinal(&self) -> usize {
+        self.ordinal
+    }
+
+    pub(crate) fn stages(&self) -> Range<usize> {
+        self.stages.clone()
+    }
+}
+
 impl ExecutionPlan {
+    /// Partition a mixed plan into maximal internal segments and external stages.
+    ///
+    /// All-internal and all-external plans retain their dedicated executors and
+    /// therefore do not have a mixed topology.
+    pub(crate) fn mixed_topology(&self) -> Option<MixedTopology> {
+        let mut internal_segments = Vec::new();
+        let mut external_indices = Vec::new();
+        let mut open_segment = None;
+
+        for (index, stage) in self.stages.iter().enumerate() {
+            match stage.resolution() {
+                PlannedResolution::Internal { .. } => {
+                    open_segment.get_or_insert(index);
+                }
+                PlannedResolution::External { .. } => {
+                    if let Some(start) = open_segment.take() {
+                        internal_segments.push(InternalSegment {
+                            ordinal: internal_segments.len(),
+                            stages: start..index,
+                        });
+                    }
+                    external_indices.push(index);
+                }
+            }
+        }
+        if let Some(start) = open_segment {
+            internal_segments.push(InternalSegment {
+                ordinal: internal_segments.len(),
+                stages: start..self.stages.len(),
+            });
+        }
+
+        (!internal_segments.is_empty() && !external_indices.is_empty()).then_some(MixedTopology {
+            internal_segments,
+            external_indices,
+        })
+    }
+
     /// Build a one-stage external plan whose argument vector is already known.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn single_external(
@@ -1176,4 +1249,94 @@ fn check_descriptor_ownership(stage: &PlannedStage) -> Result<(), RuntimeError> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flash_syntax::SourceId;
+
+    fn topology_plan(kinds: &str) -> ExecutionPlan {
+        let source = SourceFile::new(SourceId::new(1), "topology.fsh", kinds);
+        let stages = kinds
+            .char_indices()
+            .map(|(index, kind)| PlannedStage {
+                resolution: match kind {
+                    'I' => PlannedResolution::Internal {
+                        source_name: format!("internal-{index}"),
+                        canonical_name: format!("internal-{index}"),
+                    },
+                    'E' => PlannedResolution::External {
+                        path: PathBuf::from(format!("/bin/external-{index}")),
+                    },
+                    other => panic!("unexpected topology stage {other:?}"),
+                },
+                input_carriers: BTreeSet::from([Carrier::ByteStream]),
+                output_carrier: Carrier::ByteStream,
+                argv: Vec::new(),
+                arguments: Vec::new(),
+                redirections: Vec::new(),
+                help: None,
+                span: source
+                    .span(index..index + 1)
+                    .expect("a topology stage has a valid span"),
+            })
+            .collect::<Vec<_>>();
+        let edges = (0..stages.len().saturating_sub(1))
+            .map(|index| PipelineEdge {
+                kind: PipeOperator::Stdout,
+                operator_span: source
+                    .span(index..index + 1)
+                    .expect("a topology edge has a valid span"),
+            })
+            .collect();
+        ExecutionPlan {
+            cwd: PathBuf::from("/work"),
+            environment: Environment::new(),
+            stages,
+            edges,
+            pipefail: false,
+            capture_limit: SessionOptions::DEFAULT_CAPTURE_LIMIT,
+            process_group_policy: ProcessGroupPolicy::Isolate,
+            span: source
+                .span(0..kinds.len())
+                .expect("a topology plan has a valid span"),
+        }
+    }
+
+    #[test]
+    fn mixed_topology_partitions_maximal_internal_segments() {
+        let cases = [
+            ("I", None),
+            ("III", None),
+            ("E", None),
+            ("EEE", None),
+            ("IEI", Some((vec![0..1, 2..3], vec![1]))),
+            ("IEIE", Some((vec![0..1, 2..3], vec![1, 3]))),
+            ("EIEI", Some((vec![1..2, 3..4], vec![0, 2]))),
+            ("EIE", Some((std::iter::once(1..2).collect(), vec![0, 2]))),
+            ("IEEI", Some((vec![0..1, 3..4], vec![1, 2]))),
+            ("IIEEIIEII", Some((vec![0..2, 4..6, 7..9], vec![2, 3, 6]))),
+            (
+                "EIIEEIIEIIE",
+                Some((vec![1..3, 5..7, 8..10], vec![0, 3, 4, 7, 10])),
+            ),
+        ];
+
+        for (kinds, expected) in cases {
+            let actual = topology_plan(kinds).mixed_topology().map(|topology| {
+                let segments = topology
+                    .internal_segments()
+                    .iter()
+                    .enumerate()
+                    .map(|(ordinal, segment)| {
+                        assert_eq!(segment.ordinal(), ordinal, "topology {kinds}");
+                        segment.stages()
+                    })
+                    .collect::<Vec<_>>();
+                (segments, topology.external_indices().to_vec())
+            });
+            assert_eq!(actual, expected, "topology {kinds}");
+        }
+    }
 }

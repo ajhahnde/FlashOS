@@ -168,6 +168,29 @@ fn a_byte_passthrough_internal_connects_to_an_external_stage() {
 }
 
 #[test]
+fn carrier_valid_multi_island_shapes_pass_complete_preflight() {
+    let mut registry = empty();
+    registry.register(CommandSignature::new(
+        "bytes",
+        [Carrier::Empty, Carrier::ByteStream],
+        Carrier::ByteStream,
+    ));
+    let probe = FakeProbe::with(&["/bin/cat"]);
+
+    for source in [
+        "bytes | ^cat | bytes",
+        "bytes | ^cat | bytes | ^cat",
+        "^cat | bytes | ^cat | bytes",
+        "^cat | bytes | ^cat | bytes | ^cat",
+        "bytes | ^cat | bytes | ^cat | bytes",
+        "bytes | ^cat | ^cat | bytes",
+    ] {
+        check(source, &registry, &probe)
+            .unwrap_or_else(|error| panic!("preflight rejected {source:?}: {error:?}"));
+    }
+}
+
+#[test]
 fn a_merged_stdout_stderr_edge_requires_a_byte_producer() {
     let mut registry = empty();
     registry.register(CommandSignature::new(

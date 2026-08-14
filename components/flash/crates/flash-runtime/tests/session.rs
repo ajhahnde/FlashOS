@@ -4693,6 +4693,39 @@ fn mixed_process_boundaries_stream_in_both_directions() {
 }
 
 #[test]
+fn a_carrier_valid_multi_island_plan_reaches_the_executor_boundary() {
+    let temp = TempDir::new("session-multi-island-boundary");
+    fs::write(temp.path().join("input.bin"), b"arbitrary topology")
+        .expect("binary fixture should be written");
+
+    let mut session = Session::new(temp.path(), environment(), SessionOptions::default());
+    let probe = Probe::new(["/bin/cat"]);
+    let mut sink = Vec::new();
+    let error = session
+        .submit(
+            "<interactive>",
+            "^/bin/cat < input.bin | decode bytes | encode bytes | \
+             ^/bin/cat | decode bytes | encode bytes | \
+             ^/bin/cat > output.bin",
+            &probe,
+            &PosixPlatform,
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect_err("the one-island executor must expose its remaining topology limit");
+
+    assert!(
+        error
+            .render()
+            .contains("a mixed pipeline with more than one internal stage island"),
+        "the valid plan reaches the executor rather than failing preflight: {error:?}"
+    );
+    assert!(sink.is_empty());
+    assert!(!temp.path().join("output.bin").exists());
+    assert!(session.current_status().is_none());
+}
+
+#[test]
 fn an_early_external_exit_stops_the_internal_byte_producer() {
     let temp = TempDir::new("session-mixed-early-exit");
     fs::write(temp.path().join("large.bin"), vec![b'x'; 2 * 1024 * 1024])
