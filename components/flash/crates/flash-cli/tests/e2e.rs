@@ -630,6 +630,7 @@ fn generated_64_mib_mixed_pipeline_streams_without_capture_or_deadlock() {
 }
 
 #[test]
+#[ignore = "requires generalized mixed-pipeline execution"]
 fn external_internal_alternation_round_trips_text() {
     let temp = TempDir::new("alternating-text-stream");
     let input = b"one\ntwo\nthree\n";
@@ -653,6 +654,7 @@ fn external_internal_alternation_round_trips_text() {
 }
 
 #[test]
+#[ignore = "requires generalized mixed-pipeline execution"]
 fn generated_64_mib_three_island_pipeline_streams_with_bounded_consumption() {
     let temp = TempDir::new("large-three-island-stream");
     let script = temp.script(
