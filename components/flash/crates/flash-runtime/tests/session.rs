@@ -4693,7 +4693,7 @@ fn mixed_process_boundaries_stream_in_both_directions() {
 }
 
 #[test]
-fn a_carrier_valid_multi_island_plan_reaches_the_executor_boundary() {
+fn a_carrier_valid_multi_island_plan_executes_in_source_order() {
     let temp = TempDir::new("session-multi-island-boundary");
     fs::write(temp.path().join("input.bin"), b"arbitrary topology")
         .expect("binary fixture should be written");
@@ -4701,7 +4701,7 @@ fn a_carrier_valid_multi_island_plan_reaches_the_executor_boundary() {
     let mut session = Session::new(temp.path(), environment(), SessionOptions::default());
     let probe = Probe::new(["/bin/cat"]);
     let mut sink = Vec::new();
-    let error = session
+    session
         .submit(
             "<interactive>",
             "^/bin/cat < input.bin | decode bytes | encode bytes | \
@@ -4712,17 +4712,65 @@ fn a_carrier_valid_multi_island_plan_reaches_the_executor_boundary() {
             &FakeClock::new(),
             &mut sink,
         )
-        .expect_err("the one-island executor must expose its remaining topology limit");
+        .expect("every carrier-valid internal segment should execute");
 
-    assert!(
-        error
-            .render()
-            .contains("a mixed pipeline with more than one internal stage island"),
-        "the valid plan reaches the executor rather than failing preflight: {error:?}"
+    assert!(sink.is_empty());
+    assert_eq!(
+        fs::read(temp.path().join("output.bin")).unwrap(),
+        b"arbitrary topology"
+    );
+    assert_eq!(
+        session
+            .current_status()
+            .expect("the aggregate status should commit")
+            .stages()
+            .len(),
+        7
+    );
+}
+
+#[test]
+fn mixed_segment_preparation_is_source_ordered_while_eager_drains_overlap() {
+    let temp = TempDir::new("session-mixed-preparation");
+    let nested = temp.path().join("nested");
+    fs::create_dir(&nested).expect("nested working directory should be created");
+    fs::write(temp.path().join("input.bin"), b"prepare in order")
+        .expect("binary fixture should be written");
+
+    let mut session = Session::new(temp.path(), environment(), SessionOptions::default());
+    let probe = Probe::new(["/bin/cat"]);
+    let mut sink = Vec::new();
+    session
+        .submit(
+            "<interactive>",
+            "open input.bin | ^/bin/cat | save first.bin | cd nested | pwd | to text | \
+             ^/bin/cat | save pwd.bin | pwd | to text | ^/bin/cat > final.txt",
+            &probe,
+            &PosixPlatform,
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect("eager segment preparation should not block later drains");
+
+    let expected = format!(
+        "{}\n",
+        fs::canonicalize(&nested)
+            .expect("nested working directory should canonicalize")
+            .display()
     );
     assert!(sink.is_empty());
-    assert!(!temp.path().join("output.bin").exists());
-    assert!(session.current_status().is_none());
+    assert_eq!(
+        fs::read(temp.path().join("first.bin")).unwrap(),
+        b"prepare in order"
+    );
+    assert_eq!(
+        fs::read(temp.path().join("pwd.bin")).unwrap(),
+        expected.as_bytes()
+    );
+    assert_eq!(
+        fs::read(temp.path().join("final.txt")).unwrap(),
+        expected.as_bytes()
+    );
 }
 
 #[test]

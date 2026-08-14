@@ -7,7 +7,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
-use std::ops::Range;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
@@ -23,8 +22,8 @@ use crate::command::CommandRegistry;
 use crate::eval::{AUTOMATIC_RESUME_LIMIT, Clock, Instant, RuntimeError, RuntimeErrorKind};
 use crate::job::ProcessId;
 use crate::plan::{
-    ExecutionPlan, PlannedRedirection, PlannedResolution, ProcessGroupPolicy, RedirectionAction,
-    SessionOptions, plan_pipeline_with_options, preflight,
+    ExecutionPlan, InternalSegment, PlannedRedirection, PlannedResolution, ProcessGroupPolicy,
+    RedirectionAction, SessionOptions, plan_pipeline_with_options, preflight,
 };
 use crate::resolve::ExecutableProbe;
 use crate::{Duration, Environment, ScopeStack, Signal, Status};
@@ -880,10 +879,30 @@ fn start_preflighted_pipeline(
     })
 }
 
-/// Running external stages surrounding one contiguous internal stage island.
-///
-/// The boundary endpoints remain parent-owned so the internal executor can pull
-/// an external prefix lazily and push into an external suffix without capture.
+/// Parent-owned resources for one maximal internal segment in a mixed pipeline.
+pub(crate) struct MixedSegment {
+    segment: InternalSegment,
+    input: Option<Box<dyn DescriptorEndpoint>>,
+    output: Option<Box<dyn DescriptorEndpoint>>,
+}
+
+impl MixedSegment {
+    pub(crate) const fn segment(&self) -> &InternalSegment {
+        &self.segment
+    }
+
+    /// Take the reader from an external predecessor, when one exists.
+    pub(crate) fn take_input(&mut self) -> Option<Box<dyn DescriptorEndpoint>> {
+        self.input.take()
+    }
+
+    /// Take the writer to an external successor, when one exists.
+    pub(crate) fn take_output(&mut self) -> Option<Box<dyn DescriptorEndpoint>> {
+        self.output.take()
+    }
+}
+
+/// Running external stages and parent-owned internal-segment endpoints.
 pub(crate) struct MixedPipeline {
     children: Vec<IndexedStartedChild>,
     /// Terminal ownership held for the external members. The shell process runs
@@ -895,20 +914,14 @@ pub(crate) struct MixedPipeline {
     /// The group the external members share, when the platform established one.
     /// Retained so a member that reports a stop can be resumed as one job.
     group: Option<ProcessGroupId>,
-    input: Option<Box<dyn DescriptorEndpoint>>,
-    output: Option<Box<dyn DescriptorEndpoint>>,
+    segments: Vec<MixedSegment>,
     started_at: Instant,
 }
 
 impl MixedPipeline {
-    /// Take the external-prefix reader, when the internal island has one.
-    pub(crate) fn take_input(&mut self) -> Option<Box<dyn DescriptorEndpoint>> {
-        self.input.take()
-    }
-
-    /// Take the external-suffix writer, when the internal island has one.
-    pub(crate) fn take_output(&mut self) -> Option<Box<dyn DescriptorEndpoint>> {
-        self.output.take()
+    /// Take every source-ordered internal segment resource.
+    pub(crate) fn take_segments(&mut self) -> Vec<MixedSegment> {
+        std::mem::take(&mut self.segments)
     }
 
     /// Wait every external stage and return source-indexed language statuses.
@@ -972,7 +985,7 @@ impl MixedPipeline {
             }
         }
         // The terminal returns only after the last external member has been
-        // waited, so a job that outlives the internal island still owns it.
+        // waited, so a job that outlives the internal segments still owns it.
         let released = release_foreground(foreground, plan);
         match first_error {
             Some(error) => Err(error),
@@ -989,38 +1002,36 @@ impl MixedPipeline {
     }
 }
 
-/// Start all external stages around one contiguous internal island.
+/// Start all external stages around every maximal internal segment.
 ///
 /// External-to-external edges retain ordinary kernel pipes. Exactly the two
-/// edges touching the island keep one endpoint in the parent for lazy pulls or
-/// checked partial writes.
+/// edges touching each segment keep one endpoint in the parent for lazy pulls
+/// or checked partial writes.
 pub(crate) fn start_mixed_pipeline(
     plan: &ExecutionPlan,
     platform: &dyn Platform,
     clock: &dyn Clock,
-    internal: Range<usize>,
 ) -> Result<MixedPipeline, RuntimeError> {
     preflight(plan)?;
-    let topology_matches = plan.mixed_topology().is_some_and(|topology| {
-        let [segment] = topology.internal_segments() else {
-            return false;
-        };
-        segment.ordinal() == 0
-            && segment.stages() == internal
-            && topology.external_indices().len() + internal.len() == plan.stages().len()
-    });
-    if !topology_matches {
-        return Err(RuntimeError::new(
+    let topology = plan.mixed_topology().ok_or_else(|| {
+        RuntimeError::new(
             RuntimeErrorKind::Unsupported {
-                feature: "a mixed pipeline with more than one internal stage island",
+                feature: "a non-mixed plan in the mixed pipeline executor",
             },
             plan.span(),
-        ));
-    }
+        )
+    })?;
 
     let mut pipes = Vec::with_capacity(plan.edges().len());
     for (index, edge) in plan.edges().iter().enumerate() {
-        if internal.contains(&index) && internal.contains(&(index + 1)) {
+        let both_internal = matches!(
+            plan.stages()[index].resolution(),
+            PlannedResolution::Internal { .. }
+        ) && matches!(
+            plan.stages()[index + 1].resolution(),
+            PlannedResolution::Internal { .. }
+        );
+        if both_internal {
             pipes.push((None, None));
             continue;
         }
@@ -1031,24 +1042,37 @@ pub(crate) fn start_mixed_pipeline(
         pipes.push((Some(reader), Some(writer)));
     }
 
-    let input = internal
-        .start
-        .checked_sub(1)
-        .and_then(|edge| pipes[edge].0.take());
-    let output = (internal.end < plan.stages().len())
-        .then(|| pipes[internal.end - 1].1.take())
-        .flatten();
+    let segments = topology
+        .internal_segments()
+        .iter()
+        .cloned()
+        .map(|segment| {
+            let stages = segment.stages();
+            let input = stages
+                .start
+                .checked_sub(1)
+                .and_then(|edge| pipes[edge].0.take());
+            let output = (stages.end < plan.stages().len())
+                .then(|| pipes[stages.end - 1].1.take())
+                .flatten();
+            MixedSegment {
+                segment,
+                input,
+                output,
+            }
+        })
+        .collect::<Vec<_>>();
     let environment: Vec<(OsString, OsString)> = plan
         .environment()
         .iter()
         .map(|(name, value)| (OsString::from(name), value.to_os_string()))
         .collect();
-    let mut children = Vec::with_capacity(plan.stages().len() - internal.len());
+    let mut children = Vec::with_capacity(topology.external_indices().len());
     let started_at = clock.now();
     let mut group = PipelineGroup::new(platform, plan.process_group_policy());
 
     for (index, stage) in plan.stages().iter().enumerate() {
-        if internal.contains(&index) {
+        if matches!(stage.resolution(), PlannedResolution::Internal { .. }) {
             continue;
         }
         let input_endpoint = index.checked_sub(1).and_then(|edge| pipes[edge].0.take());
@@ -1121,8 +1145,7 @@ pub(crate) fn start_mixed_pipeline(
         children,
         foreground,
         group: established,
-        input,
-        output,
+        segments,
         started_at,
     })
 }
