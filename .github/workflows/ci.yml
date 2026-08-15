@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
   schedule:
     - cron: "0 4 * * 0"
   workflow_dispatch:
@@ -41,7 +43,19 @@ jobs:
         run: |
           set -euo pipefail
           qualify=true
-          if [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
+          if [ "${EVENT_NAME}" = "push" ]; then
+            # Protected main already received exact-head candidate evidence.
+            # Re-run the fast source gates on the squash commit so the branch
+            # has an honest visible status without rebuilding OS artifacts.
+            qualify=false
+            if [ -n "${BEFORE_SHA}" ] &&
+               [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ] &&
+               git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+              base="${BEFORE_SHA}"
+            else
+              base=""
+            fi
+          elif [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
             if [ "${EVENT_NAME}" = "pull_request" ]; then
               base="${BASE_SHA}"
             elif [ -n "${BEFORE_SHA}" ] &&

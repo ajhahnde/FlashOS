@@ -513,8 +513,10 @@ silently losing runtime evidence.
 
 Protected `main` requires the exact pull-request head to pass the stable CI and
 Security aggregates before merge. The resulting squash commit has a different
-commit identity, but it does not repeat or restate the already-enforced
-candidate checks; weekly clean-room CI detects later hosted-environment drift.
+commit identity, so the ordinary workflow reruns the repository and Flash
+source gates to provide a visible status on that commit. It does not repeat the
+image build or QEMU boots; weekly clean-room CI detects later
+hosted-environment drift.
 
 ### Clean-container image producer
 
