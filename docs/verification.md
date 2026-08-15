@@ -565,9 +565,10 @@ suite, validates one LCOV report, and uploads it to Codecov. Its structural
 guard requires reported source from every Flash workspace crate and at least
 one executed first-party line. Codecov statuses, comments, and GitHub checks
 remain disabled while the new Rust baseline is established, and Coverage is
-not part of the standard CI `required` aggregate. It runs when relevant changes
-reach `main` or when manually dispatched; pull requests use the normal Flash
-test gate without duplicating the suite under instrumentation.
+not part of the standard CI `required` aggregate. It runs for relevant
+non-draft pull-request candidates and when manually dispatched; draft work
+waits until the ready-for-review transition before spending the additional
+instrumented test run.
 
 Coverage is an observation about lines compiled and executed on the host. It
 does not measure target-selected Redox paths, image packaging, QEMU behavior,

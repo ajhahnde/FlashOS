@@ -257,13 +257,13 @@ Do not weaken an executable check merely to make an unrelated implementation cha
 Use a progressive workflow so that inexpensive failures are found before a full image build.
 
 1. **Start from the intended integration revision.**
-   Create a focused working branch and verify that unrelated local changes are not present.
+   Create a focused working branch and verify that unrelated local changes are not present. Define the branch around one coherent review and rollback outcome, not around one commit, work session, implementation step, or checklist item.
 
 2. **Inspect the owning configuration or code.**
    Check adjacent tests, recipes, profile entries, patches, and documentation before editing.
 
 3. **Make the smallest coherent change.**
-   Keep product configuration, implementation, tests, and documentation synchronized.
+   Keep product configuration, implementation, tests, and documentation synchronized. Multiple dependent checkpoints may stay on the same branch until the complete outcome is ready to merge.
 
 4. **Run the narrowest relevant host checks.**
    Format and test the workspace or script that was modified.
@@ -279,6 +279,12 @@ Use a progressive workflow so that inexpensive failures are found before a full 
 
 8. **Review the final diff.**
    Remove generated files, accidental formatting changes, debugging output, and local configuration.
+
+Draft pull requests run the source-quality gates while development continues.
+The full clean image and QEMU path runs when the candidate is marked ready,
+and reruns after later candidate updates. Protected `main` receives that exact
+qualified tree and does not repeat ordinary qualification after merge; weekly
+clean-room CI separately detects hosted-environment drift.
 
 The helper interface provides a concise view of the working tree:
 

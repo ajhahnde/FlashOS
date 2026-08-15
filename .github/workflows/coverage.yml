@@ -1,8 +1,8 @@
 name: Coverage
 
 on:
-  push:
-    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "components/flash/**"
       - "ci/check_coverage.py"
@@ -21,6 +21,9 @@ concurrency:
 jobs:
   flash:
     name: flash-host-coverage
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

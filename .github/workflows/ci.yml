@@ -1,9 +1,10 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: "0 4 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -25,9 +26,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Keep one stable CI workflow for every change, but do not spend roughly
-      # ten runner-minutes rebuilding and booting images for documentation-only
-      # updates. Unknown file types deliberately take the safe path and qualify.
+      # Keep one stable CI workflow for every candidate, but do not spend
+      # roughly ten runner-minutes rebuilding and booting images for
+      # documentation-only updates. Unknown file types deliberately take the
+      # safe path and qualify.
       - name: Decide whether runtime qualification is needed
         id: scope
         env:
@@ -160,7 +162,10 @@ jobs:
 
   image:
     name: image-and-runtime
-    if: needs.quality.outputs.qualify_image == 'true'
+    if: >-
+      needs.quality.outputs.qualify_image == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.draft == false)
     needs: [quality, flash]
     uses: ./.github/workflows/_image.yml
     with:
@@ -178,6 +183,9 @@ jobs:
     steps:
       - name: Summarize and enforce every gate
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_DRAFT: ${{ github.event.pull_request.draft || false }}
+          QUALIFY_IMAGE: ${{ needs.quality.outputs.qualify_image }}
           ROOT_RESULT: ${{ needs.quality.result }}
           SHELL_RESULT: ${{ needs.flash.result }}
           IMAGE_RESULT: ${{ needs.image.result }}
@@ -203,8 +211,23 @@ jobs:
             fi
           done
 
-          if [ "${IMAGE_RESULT}" != "success" ] &&
-             [ "${IMAGE_RESULT}" != "skipped" ]; then
-            echo "::error::image qualification did not succeed or skip by policy"
+          if [ "${IMAGE_RESULT}" = "success" ]; then
+            exit 0
+          fi
+
+          if [ "${IMAGE_RESULT}" != "skipped" ]; then
+            echo "::error::image qualification did not succeed"
             exit 1
           fi
+
+          if [ "${QUALIFY_IMAGE}" != "true" ]; then
+            exit 0
+          fi
+
+          if [ "${EVENT_NAME}" = "pull_request" ] &&
+             [ "${PR_DRAFT}" = "true" ]; then
+            exit 0
+          fi
+
+          echo "::error::required image qualification was unexpectedly skipped"
+          exit 1

@@ -270,10 +270,14 @@ for expected in (
         fail(f"security workflow aggregate contract is missing: {expected}")
 if "pull_request:\n    paths:" in security_workflow:
     fail("security-required must report for every pull request")
+if "  push:\n    branches: [main]" in security_workflow:
+    fail("security workflow must not repeat dependency policy after PR merge")
 
 coverage_workflow = (ROOT / ".github/workflows/coverage.yml").read_text()
 for expected in (
     "name: Coverage",
+    "types: [opened, synchronize, reopened, ready_for_review]",
+    "github.event.pull_request.draft == false",
     "id-token: write",
     "rustup component add llvm-tools-preview",
     "tool: cargo-llvm-cov@0.8.7",
@@ -287,6 +291,8 @@ for expected in (
 ):
     if expected not in coverage_workflow:
         fail(f"coverage workflow contract is missing: {expected}")
+if "  push:\n    branches: [main]" in coverage_workflow:
+    fail("coverage must qualify the PR candidate instead of merged main")
 
 ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text()
 if "python3 -m unittest discover -s ci/tests -p 'test_*.py'" not in ci_workflow:
@@ -295,6 +301,18 @@ if "python3 ci/check_flashos_platform.py" not in ci_workflow:
     fail("standard CI must validate the FlashOS platform source baseline")
 if "qualify_image" not in ci_workflow or '"skipped"' not in ci_workflow:
     fail("standard CI must retain its documented conditional image gate")
+for expected in (
+    "types: [opened, synchronize, reopened, ready_for_review]",
+    'cron: "0 4 * * 0"',
+    "github.event.pull_request.draft == false",
+    "PR_DRAFT:",
+    "QUALIFY_IMAGE:",
+    "required image qualification was unexpectedly skipped",
+):
+    if expected not in ci_workflow:
+        fail(f"standard CI candidate-qualification contract is missing: {expected}")
+if "  push:\n    branches: [main]" in ci_workflow:
+    fail("standard CI must not repeat exact-tree qualification after PR merge")
 
 if "--clobber" in release_workflow:
     fail("release publication must not overwrite existing release assets")
