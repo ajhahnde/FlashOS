@@ -104,6 +104,9 @@ jobs:
       - name: Validate the FlashOS platform source baseline
         run: python3 ci/check_flashos_platform.py
 
+      - name: Validate the FlashOS capability evidence inventory
+        run: python3 ci/check_flashos_capabilities.py
+
       - name: Reject whitespace errors
         env:
           BASE_SHA: ${{ steps.scope.outputs.base_sha }}

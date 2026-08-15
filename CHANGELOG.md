@@ -25,6 +25,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added a checked FlashOS x86_64 capability-evidence inventory for Flash. It
+  compares all 14 current portable capability groups with the selected Redox
+  executable and adapter source paths and with the behavior already observed by
+  the QEMU smoke contract. Source declarations, runtime observations, and
+  evidence gaps remain distinct, and support classification is explicitly
+  deferred instead of being inferred from the Unix target family, adapter
+  methods, or successful builds.
 - Added a machine-readable FlashOS x86_64 platform baseline for Flash. It
   records the configured Rust and `relibc` inputs separately from observed
   compiler, binary-package, dynamic-linker, and ELF identity, with source checks

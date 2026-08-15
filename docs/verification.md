@@ -218,6 +218,22 @@ signals, terminals, directories, or other platform capabilities behave
 correctly. Those claims require their own adapter tests and target runtime
 evidence.
 
+The capability comparison is recorded separately in
+[`components/flash/platforms/flashos-x86_64-capability-evidence.toml`](../components/flash/platforms/flashos-x86_64-capability-evidence.toml).
+Validate its relationship to the live Flash contract and checked source/runtime
+markers with:
+
+```bash
+python3 ci/check_flashos_capabilities.py
+```
+
+That pass proves that every current capability has an explicit requirement and
+an internally consistent source/runtime evidence record. It does not prove the
+recorded source operations work on FlashOS, promote an indirect QEMU
+observation into full qualification, or classify an evidence gap as an
+unsupported target feature. Those conclusions require later operation mapping,
+classification, and targeted runtime tests.
+
 ## Product-profile verification
 
 Run the static FlashOS product contract from the repository root:
