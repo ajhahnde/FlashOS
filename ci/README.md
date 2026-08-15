@@ -348,8 +348,10 @@ ci.yml
         CI / required
 
 security.yml
-├── pull-request dependency review
-└── combined root and Flash Cargo policy
+├── dependency-scope
+├── pull-request dependency review when in scope
+├── combined root and Flash Cargo policy when in scope
+└── Security / security-required
 
 coverage.yml
 └── pinned Flash host coverage
@@ -571,11 +573,19 @@ The supply-chain workflow is defined in [`.github/workflows/security.yml`](../.g
 It runs on:
 
 - dependency-policy changes pushed to `main`;
-- pull requests that change dependency manifests, lockfiles, policy, or this workflow;
+- every pull request, with dependency work selected by changed-path scope;
 - its configured weekly schedule;
 - manual dispatch.
 
 Runs for the same workflow and pull request or Git reference share a cancel-in-progress concurrency group.
+
+The `security-required` job is a stable aggregate suitable for repository
+rules. It succeeds for unrelated pull requests only after the scope job proves
+that dependency manifests, lockfiles, policy, Dependabot configuration, and
+the security workflow are unchanged. For an in-scope pull request it requires
+both dependency review and the combined Cargo policy job to succeed. Scheduled,
+manual, and applicable `main` runs require Cargo policy while dependency review
+remains pull-request-only.
 
 ### Dependency review
 

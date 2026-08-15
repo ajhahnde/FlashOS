@@ -496,7 +496,8 @@ labelled as Flash host coverage rather than as a whole-system quality score.
 
 ## Security checks
 
-The security workflow is separate from the ordinary build and runtime pipeline.
+The security workflow is separate from the ordinary build and runtime pipeline,
+but its stable `security-required` aggregate is part of merge qualification.
 
 Its current jobs include:
 
@@ -504,12 +505,14 @@ Its current jobs include:
 - Cargo advisory, license, ban, and source-policy checks for the root workspace;
 - equivalent Cargo policy checks for the Flash workspace.
 
-The event-driven runs are limited to dependency manifests, lockfiles, policy,
-and workflow changes. A weekly schedule still detects newly published
-advisories without requiring unrelated source and documentation changes to
-repeat identical policy work. A passing dependency-policy workflow does not
-constitute a full security audit of FlashOS, its upstream operating-system
-components, or produced images.
+Every pull request reports the aggregate so repository rules can require it.
+Dependency review and Cargo policy execute only when the changed paths include
+dependency manifests, lockfiles, policy, Dependabot configuration, or the
+workflow itself; the aggregate verifies a controlled skip otherwise. A weekly
+schedule still detects newly published advisories without requiring unrelated
+source and documentation changes to repeat identical policy work. A passing
+dependency-policy workflow does not constitute a full security audit of
+FlashOS, its upstream operating-system components, or produced images.
 
 Security vulnerabilities must be handled through the process in the [Security Policy](../.github/SECURITY.md), not through public verification logs alone.
 

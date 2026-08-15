@@ -10,6 +10,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Made dependency policy merge-blocking through a stable security aggregate:
+  every pull request now reports the gate, while dependency review and Cargo
+  policy run only for relevant manifests, lockfiles, policy, Dependabot, or
+  workflow changes and controlled skips remain inexpensive.
 - Streamlined hosted CI without weakening the artifact path: repository and
   product checks now share one job, documentation-only changes skip the costly
   clean image/QEMU gate behind the stable aggregate result, informational
