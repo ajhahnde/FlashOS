@@ -25,6 +25,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added a checked FlashOS x86_64 platform classification for Flash. All 41
+  required operations and all 14 capability groups now have explicit native,
+  shimmed, deliberately unsupported, or separately authorized kernel-work
+  verdicts. The current result is 38 native operations plus a three-operation
+  FlashOS standard-directory policy shim, with no deliberately unsupported or
+  kernel-work verdicts; target-runtime qualification remains pending.
 - Added a checked per-operation FlashOS x86_64 platform map for Flash. Every
   portable capability requirement now resolves to its current Flash-internal,
   Rust standard-library, direct `relibc`, or unrouted boundary. The map

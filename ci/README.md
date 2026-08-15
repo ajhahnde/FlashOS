@@ -12,6 +12,7 @@ This document defines the executable CI/CD contracts implemented by the scripts 
 - [FlashOS platform baseline contract](#flashos-platform-baseline-contract)
 - [FlashOS capability evidence contract](#flashos-capability-evidence-contract)
 - [FlashOS operation-map contract](#flashos-operation-map-contract)
+- [FlashOS capability-classification contract](#flashos-capability-classification-contract)
 - [QEMU runtime contract](#qemu-runtime-contract)
 - [Hosted workflow architecture](#hosted-workflow-architecture)
 - [Standard CI workflow](#standard-ci-workflow)
@@ -57,6 +58,7 @@ FlashOS remains pre-alpha software even when all current automated contracts pas
 | [`ci/check_flashos_platform.py`](check_flashos_platform.py)           | Validate the tracked FlashOS toolchain/ABI record and built target artifacts                  |
 | [`ci/check_flashos_capabilities.py`](check_flashos_capabilities.py)   | Validate the Flash capability requirement and source/runtime evidence inventory               |
 | [`ci/check_flashos_operation_map.py`](check_flashos_operation_map.py) | Validate the per-operation map to current Rust, relibc, and Redox userland seams               |
+| [`ci/check_flashos_capability_classification.py`](check_flashos_capability_classification.py) | Validate complete operation and capability route verdicts without advancing target qualification |
 | [`ci/check_coverage.py`](check_coverage.py)                           | Reject empty Flash LCOV reports and reports that omit a workspace crate                       |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                   | Boot an existing x86_64 image and evaluate the current serial runtime contract                |
 | [`ci/container/Dockerfile`](container/Dockerfile)                     | Define the hosted x86_64 image-build tool environment                                         |
@@ -285,6 +287,27 @@ routes stop at their public APIs rather than inventing downstream libc calls.
 The `relibc` routes use the configured source revision while retaining the
 different effective binary-package revision from the platform baseline. A pass
 establishes mapping consistency, not target support or runtime behavior.
+
+## FlashOS capability-classification contract
+
+Run the architectural classification contract from the repository root:
+
+```bash
+python3 ci/check_flashos_capability_classification.py
+```
+
+The checker validates
+[`components/flash/platforms/flashos-x86_64-capability-classification.toml`](../components/flash/platforms/flashos-x86_64-capability-classification.toml)
+against the baseline, evidence inventory, operation map, and ordinary CI
+wiring. It requires every mapped operation and live capability exactly once and
+in order, validates each native or shimmed basis, and derives a capability's
+verdict from the strongest operation verdict.
+
+The current decision classifies 38 operations as native and the three
+standard-directory operations as a FlashOS policy shim. It identifies no
+deliberately unsupported operation and no kernel-work requirement. Every
+capability retains `target_qualification = "pending"`: classification chooses
+an implementation route but does not prove target behavior.
 
 ## QEMU runtime contract
 
@@ -906,6 +929,7 @@ python3 ci/check_profile.py
 python3 ci/check_flashos_platform.py
 python3 ci/check_flashos_capabilities.py
 python3 ci/check_flashos_operation_map.py
+python3 ci/check_flashos_capability_classification.py
 ```
 
 Lint the release-relevant Python scripts when Ruff is installed:

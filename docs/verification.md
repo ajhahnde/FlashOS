@@ -251,6 +251,22 @@ revision visible, and records currently internal or unrouted operations
 explicitly. A pass does not classify support, prove that a mapped symbol
 behaves correctly, or replace target execution evidence.
 
+The architectural route decision is recorded separately in
+[`components/flash/platforms/flashos-x86_64-capability-classification.toml`](../components/flash/platforms/flashos-x86_64-capability-classification.toml).
+Validate it with:
+
+```bash
+python3 ci/check_flashos_capability_classification.py
+```
+
+That checker requires exact ordered operation and capability coverage,
+validates native routes against the operation map, rejects a native verdict for
+an unrouted operation, and derives every capability verdict from its strongest
+operation verdict. The current decision records 38 native operations and a
+three-operation FlashOS standard-directory policy shim, with no deliberately
+unsupported or kernel-work result. Target qualification remains pending and
+requires later runtime evidence.
+
 ## Product-profile verification
 
 Run the static FlashOS product contract from the repository root:

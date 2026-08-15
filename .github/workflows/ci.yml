@@ -110,6 +110,9 @@ jobs:
       - name: Validate the FlashOS platform operation map
         run: python3 ci/check_flashos_operation_map.py
 
+      - name: Validate the FlashOS platform capability classification
+        run: python3 ci/check_flashos_capability_classification.py
+
       - name: Reject whitespace errors
         env:
           BASE_SHA: ${{ steps.scope.outputs.base_sha }}
