@@ -25,6 +25,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added arbitrary alternating mixed-pipeline execution. Maximal internal
+  segments stream concurrently across external byte stages without whole-stream
+  capture or cross-thread structured carriers, while source-ordered
+  preparation, status leaves, `pipefail`, deferred `check`, transactional
+  session state, closure-delta merging, explicit exit, local descriptor
+  override, child cleanup, and interactive/script/background parity remain
+  deterministic.
 - Added `/usr/bin/flash-language-server`, a separate stdio-only Language Server
   Protocol executable with full-text versioned overlays for absolute `file:`
   URIs. It publishes deterministic shared module diagnostics and provides
