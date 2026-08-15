@@ -11,14 +11,14 @@
 //! against isolated temporary directories.
 
 use std::any::Any;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Barrier, Mutex, mpsc};
 
 use flash_platform::{
     Capabilities, Capability, ChildProcess, DescriptorEndpoint, DescriptorReadError, FakePlatform,
@@ -86,16 +86,88 @@ impl Clock for TickingClock {
     }
 }
 
+#[derive(Debug, Default)]
+struct FailingOutput;
+
+impl io::Write for FailingOutput {
+    fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+        Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "the injected session output failed",
+        ))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
-struct BackgroundEndpoint;
+struct BackgroundEndpoint {
+    active: Arc<AtomicUsize>,
+    read_failure: Option<usize>,
+    write_failure: Option<usize>,
+    write_failure_barrier: Option<Arc<Barrier>>,
+    read_data: Option<Vec<u8>>,
+}
+
+impl BackgroundEndpoint {
+    fn new(
+        active: Arc<AtomicUsize>,
+        read_failure: Option<usize>,
+        write_failure: Option<usize>,
+        write_failure_barrier: Option<Arc<Barrier>>,
+        read_data: Option<Vec<u8>>,
+    ) -> Self {
+        active.fetch_add(1, Ordering::SeqCst);
+        Self {
+            active,
+            read_failure,
+            write_failure,
+            write_failure_barrier,
+            read_data,
+        }
+    }
+}
+
+impl Drop for BackgroundEndpoint {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 impl DescriptorEndpoint for BackgroundEndpoint {
     fn as_any(&self) -> &dyn Any {
         self
     }
 
-    fn read(&mut self, _buffer: &mut [u8]) -> Result<usize, DescriptorReadError> {
-        Ok(0)
+    fn read(&mut self, buffer: &mut [u8]) -> Result<usize, DescriptorReadError> {
+        if let Some(index) = self.read_failure {
+            Err(DescriptorReadError::Operation {
+                kind: io::ErrorKind::Other,
+                message: format!("the injected mixed-pipeline read failed at pipe {index}"),
+            })
+        } else if let Some(data) = self.read_data.take() {
+            let amount = data.len().min(buffer.len());
+            buffer[..amount].copy_from_slice(&data[..amount]);
+            Ok(amount)
+        } else {
+            Ok(0)
+        }
+    }
+
+    fn write(&mut self, buffer: &[u8]) -> Result<usize, flash_platform::DescriptorWriteError> {
+        if let Some(index) = self.write_failure {
+            if let Some(barrier) = &self.write_failure_barrier {
+                barrier.wait();
+            }
+            Err(flash_platform::DescriptorWriteError::Operation {
+                kind: io::ErrorKind::Other,
+                message: format!("the injected mixed-pipeline write failed at pipe {index}"),
+            })
+        } else {
+            Ok(buffer.len())
+        }
     }
 }
 
@@ -194,6 +266,14 @@ struct ControlledBackgroundPlatform {
     foreground_restore_refusal: Mutex<Option<String>>,
     /// When set, every group signal is refused with this message.
     signal_refusal: Mutex<Option<String>>,
+    pipe_calls: AtomicUsize,
+    pipe_read_failure: Mutex<Option<usize>>,
+    pipe_write_failures: Mutex<Vec<usize>>,
+    pipe_write_failure_barrier: Mutex<Option<Arc<Barrier>>>,
+    pipe_read_data: Mutex<BTreeMap<usize, Vec<u8>>>,
+    spawn_calls: AtomicUsize,
+    spawn_failure: Mutex<Option<usize>>,
+    active_endpoints: Arc<AtomicUsize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -288,6 +368,55 @@ impl ControlledBackgroundPlatform {
             .lock()
             .expect("foreground operation lock")
             .clone()
+    }
+
+    fn fail_pipe_read(&self, pipe_index: usize) {
+        *self.pipe_read_failure.lock().expect("pipe failure lock") = Some(pipe_index);
+    }
+
+    fn fail_pipe_write(&self, pipe_index: usize) {
+        self.pipe_write_failures
+            .lock()
+            .expect("pipe failure lock")
+            .push(pipe_index);
+    }
+
+    fn feed_pipe_read(&self, pipe_index: usize, data: impl Into<Vec<u8>>) {
+        self.pipe_read_data
+            .lock()
+            .expect("pipe data lock")
+            .insert(pipe_index, data.into());
+    }
+
+    fn synchronize_pipe_write_failures(&self, count: usize) {
+        *self
+            .pipe_write_failure_barrier
+            .lock()
+            .expect("pipe failure barrier lock") = Some(Arc::new(Barrier::new(count)));
+    }
+
+    fn fail_spawn(&self, spawn_index: usize) {
+        *self.spawn_failure.lock().expect("spawn failure lock") = Some(spawn_index);
+    }
+
+    fn active_endpoints(&self) -> usize {
+        self.active_endpoints.load(Ordering::SeqCst)
+    }
+
+    fn endpoint(
+        &self,
+        read_failure: Option<usize>,
+        write_failure: Option<usize>,
+        write_failure_barrier: Option<Arc<Barrier>>,
+        read_data: Option<Vec<u8>>,
+    ) -> BackgroundEndpoint {
+        BackgroundEndpoint::new(
+            Arc::clone(&self.active_endpoints),
+            read_failure,
+            write_failure,
+            write_failure_barrier,
+            read_data,
+        )
     }
 
     /// Complete one stopped child after the shell successfully continues it.
@@ -402,6 +531,14 @@ impl ControlledBackgroundPlatform {
                 foreground_refusal: Mutex::new(None),
                 foreground_restore_refusal: Mutex::new(None),
                 signal_refusal: Mutex::new(None),
+                pipe_calls: AtomicUsize::new(0),
+                pipe_read_failure: Mutex::new(None),
+                pipe_write_failures: Mutex::new(Vec::new()),
+                pipe_write_failure_barrier: Mutex::new(None),
+                pipe_read_data: Mutex::new(BTreeMap::new()),
+                spawn_calls: AtomicUsize::new(0),
+                spawn_failure: Mutex::new(None),
+                active_endpoints: Arc::new(AtomicUsize::new(0)),
             },
             controls,
         )
@@ -434,9 +571,32 @@ impl Platform for ControlledBackgroundPlatform {
     }
 
     fn pipe(&self) -> Result<PipeEndpoints, PipeError> {
+        let index = self.pipe_calls.fetch_add(1, Ordering::SeqCst);
+        let read_failure = self
+            .pipe_read_failure
+            .lock()
+            .expect("pipe failure lock")
+            .filter(|candidate| *candidate == index);
+        let write_failure = self
+            .pipe_write_failures
+            .lock()
+            .expect("pipe failure lock")
+            .contains(&index)
+            .then_some(index);
+        let read_data = self
+            .pipe_read_data
+            .lock()
+            .expect("pipe data lock")
+            .remove(&index);
+        let write_failure_barrier = write_failure.and_then(|_| {
+            self.pipe_write_failure_barrier
+                .lock()
+                .expect("pipe failure barrier lock")
+                .clone()
+        });
         Ok(PipeEndpoints::new(
-            Box::new(BackgroundEndpoint),
-            Box::new(BackgroundEndpoint),
+            Box::new(self.endpoint(read_failure, None, None, read_data)),
+            Box::new(self.endpoint(None, write_failure, write_failure_barrier, None)),
         ))
     }
 
@@ -444,14 +604,14 @@ impl Platform for ControlledBackgroundPlatform {
         &self,
         _request: FileOpenRequest<'_>,
     ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError> {
-        Ok(Box::new(BackgroundEndpoint))
+        Ok(Box::new(self.endpoint(None, None, None, None)))
     }
 
     fn inherit_descriptor(
         &self,
         _descriptor: u32,
     ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError> {
-        Ok(Box::new(BackgroundEndpoint))
+        Ok(Box::new(self.endpoint(None, None, None, None)))
     }
 
     fn read_descriptor(
@@ -510,6 +670,18 @@ impl Platform for ControlledBackgroundPlatform {
     }
 
     fn spawn(&self, request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError> {
+        let index = self.spawn_calls.fetch_add(1, Ordering::SeqCst);
+        if self
+            .spawn_failure
+            .lock()
+            .expect("spawn failure lock")
+            .is_some_and(|candidate| candidate == index)
+        {
+            return Err(SpawnError::Operation {
+                kind: io::ErrorKind::Other,
+                message: "the injected mixed-pipeline spawn failed".to_owned(),
+            });
+        }
         let child = self
             .children
             .lock()
@@ -4299,6 +4471,321 @@ fn a_mixed_foreground_wait_cleans_up_after_the_seventeenth_stop() {
         "the bounded wait terminates and performs one final cleanup wait"
     );
     assert_eq!(sink, b"0\n");
+}
+
+#[test]
+fn a_mixed_foreground_handoff_failure_terminates_and_reaps_every_child() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    session.enable_interactive_job_control(clock.clone());
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[657]]);
+    platform.refuse_foreground("the test terminal refused ownership");
+    let probe = Probe::new(["/bin/tool"]);
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("let failure cleanup reap the mixed child");
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            "^tool | decode bytes | length",
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("a real terminal handoff refusal is fatal");
+
+    assert!(
+        error
+            .render()
+            .contains("terminal handover to the job failed"),
+        "{}",
+        error.render()
+    );
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1],
+        "the started child receives one final cleanup wait"
+    );
+    assert_eq!(platform.foreground_attempts(), 1);
+    assert_eq!(platform.foreground_releases(), 0);
+    assert!(session.current_status().is_none());
+    assert!(sink.is_empty());
+}
+
+#[test]
+fn a_mixed_wait_failure_terminates_and_reaps_the_failed_child() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    session.enable_interactive_job_control(clock.clone());
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[658]]);
+    let probe = Probe::new(["/bin/tool"]);
+    controls[0]
+        .steps
+        .send(Err(WaitError::new(
+            io::ErrorKind::Other,
+            "the injected transition wait failed",
+        )))
+        .expect("inject the source-ordered wait failure");
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("let failure cleanup reap the mixed child");
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            "^tool | decode bytes | length",
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("a failed external wait is fatal");
+
+    assert!(
+        error
+            .render()
+            .contains("the injected transition wait failed"),
+        "{}",
+        error.render()
+    );
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1, 2],
+        "the failed transition wait is followed by one final cleanup wait"
+    );
+    assert_eq!(platform.foreground_releases(), 1);
+    assert!(session.current_status().is_none());
+    assert_eq!(sink, b"0\n");
+}
+
+#[test]
+fn a_mixed_pipe_read_failure_cancels_children_and_releases_endpoints() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    session.enable_interactive_job_control(clock.clone());
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[659]]);
+    platform.fail_pipe_read(0);
+    let probe = Probe::new(["/bin/tool"]);
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("let cancellation reap the mixed child");
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            "^tool | decode bytes | length",
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("the injected segment read must fail");
+
+    assert!(
+        error
+            .render()
+            .contains("the injected mixed-pipeline read failed"),
+        "{}",
+        error.render()
+    );
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1]
+    );
+    assert_eq!(platform.active_endpoints(), 0);
+    assert_eq!(platform.foreground_releases(), 1);
+    assert!(session.current_status().is_none());
+    assert!(sink.is_empty());
+}
+
+#[test]
+fn a_mixed_pipe_write_failure_cancels_children_and_releases_endpoints() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    session.enable_interactive_job_control(clock.clone());
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[660]]);
+    platform.fail_pipe_write(0);
+    let probe = Probe::new(["/bin/tool"]);
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("let cancellation reap the mixed child");
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            "which pwd | get kind | encode utf8 | ^tool",
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("the injected segment write must fail");
+
+    assert!(
+        error
+            .render()
+            .contains("the injected mixed-pipeline write failed"),
+        "{}",
+        error.render()
+    );
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1]
+    );
+    assert_eq!(platform.active_endpoints(), 0);
+    assert_eq!(platform.foreground_releases(), 1);
+    assert!(session.current_status().is_none());
+    assert!(sink.is_empty());
+}
+
+#[test]
+fn simultaneous_mixed_failures_select_the_earliest_source_stage() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    session.enable_interactive_job_control(clock.clone());
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[665, 666]]);
+    platform.fail_pipe_write(0);
+    platform.fail_pipe_write(2);
+    platform.feed_pipe_read(1, b"later segment bytes".to_vec());
+    platform.synchronize_pipe_write_failures(2);
+    let probe = Probe::new(["/bin/tool", "/bin/other"]);
+    for control in &controls {
+        control
+            .steps
+            .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+            .expect("let deterministic cancellation reap every mixed child");
+    }
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            "which pwd | get kind | encode utf8 | ^tool | \
+             decode bytes | encode bytes | ^other",
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("both segment drains have injected genuine failures");
+
+    assert!(
+        error
+            .render()
+            .contains("the injected mixed-pipeline write failed at pipe 0"),
+        "the earliest source failure must win:\n{}",
+        error.render()
+    );
+    for control in &controls {
+        assert_eq!(control.terminate_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(control.wait_entries.try_iter().collect::<Vec<_>>(), vec![1]);
+    }
+    assert_eq!(platform.active_endpoints(), 0);
+    assert_eq!(platform.foreground_releases(), 1);
+    assert!(session.current_status().is_none());
+    assert!(sink.is_empty());
+}
+
+#[test]
+fn a_mixed_output_failure_cancels_children_before_returning() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    session.enable_interactive_job_control(clock.clone());
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[661, 662]]);
+    let probe = Probe::new(["/bin/tool", "/bin/other"]);
+    for control in &controls {
+        control
+            .steps
+            .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+            .expect("let output-failure cancellation reap every mixed child");
+    }
+    let mut sink = FailingOutput;
+
+    let error = session
+        .submit(
+            "<interactive>",
+            "^tool | decode bytes | encode bytes | ^other | decode bytes | length",
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("the injected output failure is fatal");
+
+    let flash_runtime::session::SubmitError::Output(error) = error else {
+        panic!("the injected sink failure must retain its output-error channel");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("the injected session output failed")
+    );
+    for control in &controls {
+        assert_eq!(control.terminate_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(control.wait_entries.try_iter().collect::<Vec<_>>(), vec![1]);
+    }
+    assert_eq!(platform.active_endpoints(), 0);
+    assert_eq!(platform.foreground_releases(), 1);
+    assert!(session.current_status().is_none());
+}
+
+#[test]
+fn a_mixed_spawn_failure_cleans_every_earlier_child_and_endpoint() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    session.enable_interactive_job_control(clock.clone());
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[663, 664]]);
+    platform.fail_spawn(1);
+    let probe = Probe::new(["/bin/tool", "/bin/other"]);
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("let spawn-failure cleanup reap the earlier child");
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            "^tool | decode bytes | encode bytes | ^other",
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("the injected later spawn failure is fatal");
+
+    assert!(
+        error
+            .render()
+            .contains("the injected mixed-pipeline spawn failed"),
+        "{}",
+        error.render()
+    );
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1]
+    );
+    assert_eq!(controls[1].terminate_calls.load(Ordering::SeqCst), 0);
+    assert!(controls[1].wait_entries.try_iter().next().is_none());
+    assert_eq!(platform.active_endpoints(), 0);
+    assert_eq!(platform.foreground_attempts(), 0);
+    assert!(session.current_status().is_none());
+    assert!(sink.is_empty());
 }
 
 #[test]

@@ -41,11 +41,12 @@ use crate::builtin::{SessionState, standard_registry};
 use crate::closure::OwnedClosureContext;
 use crate::command::CommandRegistry;
 use crate::eval::{
-    Clock, Completion, EvalLimits, ExpandedWord, RuntimeError, RuntimeErrorKind,
-    evaluate_in_environment_owned_with_binding_types, expand_word,
+    CancellationToken, Clock, Completion, EvalLimits, ExpandedWord, ResourceBudget, RuntimeError,
+    RuntimeErrorKind, evaluate_in_environment_owned_with_binding_types, expand_word,
 };
 use crate::execute::{
-    MixedSegment, aggregate_statuses, execute_foreground_status, start_mixed_pipeline,
+    MixedPipelineControl, MixedSegment, aggregate_statuses, execute_foreground_status,
+    start_mixed_pipeline,
 };
 use crate::internal::{
     DEFAULT_MATERIALIZATION_LIMIT, InternalPayload, InternalPipelineOutcome, StageOutcome,
@@ -1618,6 +1619,7 @@ fn run_mixed_pipeline(
     let closure_environment = state.environment().clone();
     let preparation = Arc::new(MixedPreparation::new(state.clone()));
     let mut mixed = start_mixed_pipeline(plan, platform, clock)?;
+    let control = mixed.control();
     let mut segments = mixed.take_segments();
     let final_segment = (last_internal + 1 == plan.stages().len()).then(|| {
         segments
@@ -1630,8 +1632,9 @@ fn run_mixed_pipeline(
         for segment in segments {
             let preparation = Arc::clone(&preparation);
             let closure_environment = closure_environment.clone();
+            let control = control.clone();
             workers.push(scope.spawn(move || {
-                run_mixed_segment(
+                let result = run_mixed_segment(
                     segment,
                     plan,
                     registry,
@@ -1640,14 +1643,19 @@ fn run_mixed_pipeline(
                     platform,
                     preparation,
                     closure_environment,
+                    control.clone(),
                     None,
                     None,
-                )
+                );
+                if result.as_ref().is_err_and(|failure| !failure.triggered) {
+                    control.cancel_and_reap();
+                }
+                result
             }));
         }
 
         let final_result = final_segment.map(|segment| {
-            run_mixed_segment(
+            let result = run_mixed_segment(
                 segment,
                 plan,
                 registry,
@@ -1656,9 +1664,14 @@ fn run_mixed_pipeline(
                 platform,
                 Arc::clone(&preparation),
                 closure_environment.clone(),
+                control.clone(),
                 presentation.as_ref(),
                 Some(output),
-            )
+            );
+            if result.as_ref().is_err_and(|failure| !failure.triggered) {
+                control.cancel_and_reap();
+            }
+            result
         });
 
         let mut results = workers
@@ -1677,14 +1690,18 @@ fn run_mixed_pipeline(
 
     segment_results.sort_by_key(|result| match result {
         Ok(result) => result.ordinal(),
-        Err(failure) => failure.ordinal,
+        Err(failure) => failure.stage_index,
     });
-    if let Some(failure_index) = segment_results.iter().position(Result::is_err) {
+    let failure_index = segment_results
+        .iter()
+        .position(|result| matches!(result, Err(failure) if !failure.triggered))
+        .or_else(|| segment_results.iter().position(Result::is_err));
+    if let Some(failure_index) = failure_index {
         let Err(failure) = segment_results.remove(failure_index) else {
             unreachable!("the selected mixed segment result is a failure");
         };
         mixed.terminate();
-        return Err(failure.interrupt);
+        return Err(*failure.interrupt);
     }
 
     let mut pending_state = preparation
@@ -1843,15 +1860,45 @@ struct MixedPreparationState {
 }
 
 struct MixedSegmentFailure {
-    ordinal: usize,
-    interrupt: Interrupt,
+    stage_index: usize,
+    triggered: bool,
+    interrupt: Box<Interrupt>,
 }
 
 impl MixedSegmentFailure {
-    fn runtime(ordinal: usize, error: RuntimeError) -> Self {
+    fn runtime(
+        stage_index: usize,
+        error: RuntimeError,
+        cancellation_was_active: bool,
+        control: &MixedPipelineControl,
+    ) -> Self {
+        let triggered = cancellation_was_active
+            || (control.is_cancelled()
+                && matches!(error.kind(), RuntimeErrorKind::StreamCancelled { .. }));
         Self {
-            ordinal,
-            interrupt: Interrupt::Runtime(error),
+            stage_index,
+            triggered,
+            interrupt: Box::new(Interrupt::Runtime(error)),
+        }
+    }
+
+    fn interrupt(
+        stage_index: usize,
+        interrupt: Interrupt,
+        cancellation_was_active: bool,
+        control: &MixedPipelineControl,
+    ) -> Self {
+        let triggered = cancellation_was_active
+            || (control.is_cancelled()
+                && matches!(
+                    &interrupt,
+                    Interrupt::Runtime(error)
+                        if matches!(error.kind(), RuntimeErrorKind::StreamCancelled { .. })
+                ));
+        Self {
+            stage_index,
+            triggered,
+            interrupt: Box::new(interrupt),
         }
     }
 }
@@ -1893,6 +1940,7 @@ fn run_mixed_segment(
     platform: &dyn Platform,
     preparation: Arc<MixedPreparation>,
     closure_environment: Environment,
+    control: MixedPipelineControl,
     presentation: Option<&TerminalPresentation>,
     output: Option<&mut dyn Write>,
 ) -> Result<MixedSegmentResult, MixedSegmentFailure> {
@@ -1908,8 +1956,15 @@ fn run_mixed_segment(
         .map_or(InternalPayload::Empty, |reader| {
             InternalPayload::ByteStream(pipe_byte_stream(reader, plan.stages()[first_stage].span()))
         });
-    let closure_context =
-        OwnedClosureContext::new(source.clone(), closure_environment, EvalLimits::default());
+    let cancellation_control = control.clone();
+    let closure_context = OwnedClosureContext::new(
+        source.clone(),
+        closure_environment,
+        EvalLimits::new(
+            CancellationToken::from_fn(move || cancellation_control.is_cancelled()),
+            ResourceBudget::unlimited(),
+        ),
+    );
     let mut statuses = Vec::with_capacity(stages.len());
     let mut deferred_checks = Vec::new();
 
@@ -1928,6 +1983,12 @@ fn run_mixed_segment(
     }
 
     for index in stages {
+        let cancellation_was_active = control.is_cancelled();
+        if cancellation_was_active {
+            prepared.stopped = true;
+            preparation.ready.notify_all();
+            return Ok(MixedSegmentResult::Skipped { ordinal });
+        }
         let stage = &plan.stages()[index];
         let PlannedResolution::Internal { canonical_name, .. } = stage.resolution() else {
             unreachable!("mixed topology contains only internal segment stages");
@@ -1987,7 +2048,12 @@ fn run_mixed_segment(
             Err(error) => {
                 prepared.stopped = true;
                 preparation.ready.notify_all();
-                return Err(MixedSegmentFailure::runtime(ordinal, error));
+                return Err(MixedSegmentFailure::runtime(
+                    index,
+                    error,
+                    cancellation_was_active,
+                    &control,
+                ));
             }
         }
     }
@@ -1995,6 +2061,10 @@ fn run_mixed_segment(
     preparation.ready.notify_all();
     drop(prepared);
 
+    if control.is_cancelled() {
+        return Ok(MixedSegmentResult::Skipped { ordinal });
+    }
+    let cancellation_was_active = false;
     let drained = if let Some(writer) = resource.take_output() {
         drain_payload_to_pipe(payload, writer, plan.stages()[last_stage].span())
     } else {
@@ -2012,7 +2082,12 @@ fn run_mixed_segment(
             .expect("mixed preparation state must not be poisoned");
         prepared.stopped = true;
         preparation.ready.notify_all();
-        return Err(MixedSegmentFailure { ordinal, interrupt });
+        return Err(MixedSegmentFailure::interrupt(
+            last_stage,
+            interrupt,
+            cancellation_was_active,
+            &control,
+        ));
     }
 
     Ok(MixedSegmentResult::Completed {

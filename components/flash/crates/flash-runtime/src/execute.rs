@@ -8,7 +8,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use flash_platform::{
@@ -904,7 +905,7 @@ impl MixedSegment {
 
 /// Running external stages and parent-owned internal-segment endpoints.
 pub(crate) struct MixedPipeline {
-    children: Vec<IndexedStartedChild>,
+    control: MixedPipelineControl,
     /// Terminal ownership held for the external members. The shell process runs
     /// the internal island in its own group while the job owns the terminal; the
     /// island reads pipes rather than the keyboard, so it needs no ownership of
@@ -919,6 +920,11 @@ pub(crate) struct MixedPipeline {
 }
 
 impl MixedPipeline {
+    /// Clone the one controller shared by every internal segment worker.
+    pub(crate) fn control(&self) -> MixedPipelineControl {
+        self.control.clone()
+    }
+
     /// Take every source-ordered internal segment resource.
     pub(crate) fn take_segments(&mut self) -> Vec<MixedSegment> {
         std::mem::take(&mut self.segments)
@@ -931,11 +937,13 @@ impl MixedPipeline {
         platform: &dyn Platform,
         clock: &dyn Clock,
     ) -> Result<(Vec<(usize, Status)>, Duration), RuntimeError> {
-        let mut statuses = Vec::with_capacity(self.children.len());
+        let mut children = self.control.take_children();
+        let mut statuses = Vec::with_capacity(children.len());
         let mut first_error = None;
         let foreground = self.foreground;
         let group = self.group;
-        for mut started in self.children {
+        for child_index in 0..children.len() {
+            let started = &mut children[child_index];
             let stage = &plan.stages()[started.index];
             let mut automatic_resumes = 0;
             let waited = loop {
@@ -950,15 +958,6 @@ impl MixedPipeline {
                             &mut automatic_resumes,
                             stage.span(),
                         ) {
-                            // Unlike the source-ordered wait, nothing here is
-                            // blocked on this member's descriptors: the
-                            // internal island finished before the wait began.
-                            // Reaping still matters, because a stop nothing can
-                            // lift would leave the member alive and stopped
-                            // after the shell moves on, holding whatever it
-                            // inherited.
-                            let _ = started.child.child.terminate();
-                            let _ = started.child.child.wait();
                             break Err(error);
                         }
                     }
@@ -980,8 +979,10 @@ impl MixedPipeline {
                 }
                 Err(error) if first_error.is_none() => {
                     first_error = Some(error);
+                    terminate_indexed_and_reap(&mut children[child_index..]);
+                    break;
                 }
-                Err(_) => {}
+                Err(_) => unreachable!("the first mixed wait failure stops ordinary waiting"),
             }
         }
         // The terminal returns only after the last external member has been
@@ -997,8 +998,52 @@ impl MixedPipeline {
     }
 
     /// Stop and reap every spawned external stage after an internal failure.
-    pub(crate) fn terminate(mut self) {
-        terminate_indexed_and_reap(&mut self.children);
+    pub(crate) fn terminate(self) {
+        self.control.cancel_and_reap();
+    }
+}
+
+/// One idempotent cancellation owner shared by the mixed coordinator and all
+/// scoped segment workers.
+#[derive(Clone)]
+pub(crate) struct MixedPipelineControl {
+    cancelled: Arc<AtomicBool>,
+    children: Arc<Mutex<Vec<IndexedStartedChild>>>,
+}
+
+impl MixedPipelineControl {
+    fn new(children: Vec<IndexedStartedChild>) -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            children: Arc::new(Mutex::new(children)),
+        }
+    }
+
+    /// Whether a genuine failure has begun peer cancellation.
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    /// Trip cancellation once, terminate every live child, and perform the
+    /// final waits before the originating worker returns.
+    pub(crate) fn cancel_and_reap(&self) {
+        if self.cancelled.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let mut children = self
+            .children
+            .lock()
+            .expect("mixed child controller must not be poisoned");
+        terminate_indexed_and_reap(&mut children);
+        children.clear();
+    }
+
+    fn take_children(&self) -> Vec<IndexedStartedChild> {
+        let mut children = self
+            .children
+            .lock()
+            .expect("mixed child controller must not be poisoned");
+        std::mem::take(&mut *children)
     }
 }
 
@@ -1140,9 +1185,15 @@ pub(crate) fn start_mixed_pipeline(
 
     drop(pipes);
     let established = group.established();
-    let foreground = take_foreground(plan, platform, established)?;
+    let foreground = match take_foreground(plan, platform, established) {
+        Ok(foreground) => foreground,
+        Err(error) => {
+            terminate_indexed_and_reap(&mut children);
+            return Err(error);
+        }
+    };
     Ok(MixedPipeline {
-        children,
+        control: MixedPipelineControl::new(children),
         foreground,
         group: established,
         segments,
