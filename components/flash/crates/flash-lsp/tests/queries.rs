@@ -105,6 +105,7 @@ fn semantic_completion_hover_and_signature_help_use_shared_program_data() {
         "import { greet } from './library.fsh'\n",
         "let message = greet('world')\n",
         "let copied = $greet\n",
+        "let whole = int(3.9)\n",
         "pwd\n",
         "kill --kill 1\n",
     );
@@ -158,6 +159,51 @@ fn semantic_completion_hover_and_signature_help_use_shared_program_data() {
         "greet(name: String) -> String"
     );
     assert_eq!(signature["activeParameter"], 0);
+
+    let intrinsic_call = root.find("int(3.9)").unwrap() + 1;
+    let intrinsic_completion = request(
+        &workspace,
+        PositionEncoding::Utf16,
+        &control,
+        "textDocument/completion",
+        positional(&root_uri, root, intrinsic_call + 1, PositionEncoding::Utf16),
+    )
+    .unwrap();
+    assert!(
+        intrinsic_completion
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|candidate| candidate["label"] == "int")
+    );
+    let intrinsic_hover = request(
+        &workspace,
+        PositionEncoding::Utf16,
+        &control,
+        "textDocument/hover",
+        positional(&root_uri, root, intrinsic_call, PositionEncoding::Utf16),
+    )
+    .unwrap();
+    let intrinsic_hover = intrinsic_hover["contents"]["value"].as_str().unwrap();
+    assert!(
+        intrinsic_hover.contains("int(value: Int | Float) -> Int"),
+        "{intrinsic_hover}"
+    );
+
+    let intrinsic_argument = root.find("3.9").unwrap() + 1;
+    let intrinsic_signature = request(
+        &workspace,
+        PositionEncoding::Utf16,
+        &control,
+        "textDocument/signatureHelp",
+        positional(&root_uri, root, intrinsic_argument, PositionEncoding::Utf16),
+    )
+    .unwrap();
+    assert_eq!(
+        intrinsic_signature["signatures"][0]["label"],
+        "int(value: Int | Float) -> Int"
+    );
+    assert_eq!(intrinsic_signature["activeParameter"], 0);
 
     let command = root.find("pwd\n").unwrap() + 1;
     let command_hover = request(

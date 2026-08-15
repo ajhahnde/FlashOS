@@ -25,6 +25,7 @@ use flash_syntax::{
     UnaryOperator, VariableReference, WhileStatement, Word, WordPart, WordPartKind,
 };
 
+use crate::intrinsic::ExpressionIntrinsic;
 use crate::module::{RuntimeBindingTypes, ValueType};
 use crate::operation::{self, OperationError};
 use crate::{BindingMutability, Callable, Environment, Record, ScopeError, ScopeStack, Value};
@@ -229,6 +230,9 @@ pub enum RuntimeErrorKind {
     FloatLiteralOverflow,
     /// A record literal repeating a key.
     DuplicateRecordKey { key: String },
+    /// A double-quoted value interpolation produced native units that cannot
+    /// be represented by the UTF-8 `String` value family.
+    StringInterpolationNotUtf8,
     /// An ordinary word interpolation produced a value that cannot become an
     /// argument. `actual` names the offending value family.
     WordValueNotWordEligible { actual: &'static str },
@@ -489,6 +493,9 @@ impl fmt::Display for RuntimeErrorKind {
             Self::FloatLiteralOverflow => formatter.write_str("float literal is not finite"),
             Self::DuplicateRecordKey { key } => {
                 write!(formatter, "duplicate record key {key:?}")
+            }
+            Self::StringInterpolationNotUtf8 => {
+                formatter.write_str("double-quoted value interpolation is not valid UTF-8")
             }
             Self::WordValueNotWordEligible { actual } => write!(
                 formatter,
@@ -1758,7 +1765,7 @@ impl Evaluator<'_> {
         match pattern {
             Pattern::Wildcard(_) => Ok(true),
             Pattern::Literal(literal) => {
-                let expected = self.literal(literal)?;
+                let expected = self.literal(literal, scope)?;
                 Ok(&expected == subject)
             }
             Pattern::Binding(identifier) => {
@@ -1958,7 +1965,7 @@ impl Evaluator<'_> {
         let span = expression.span();
         self.charge(span)?;
         match expression.kind() {
-            ExpressionKind::Literal(literal) => self.literal(literal),
+            ExpressionKind::Literal(literal) => self.literal(literal, scope),
             ExpressionKind::Variable(variable) => {
                 let name = self.text(variable.name.span());
                 scope.get(name).cloned().ok_or_else(|| {
@@ -1979,7 +1986,7 @@ impl Evaluator<'_> {
             ExpressionKind::Record(entries) => {
                 let mut pairs = Vec::with_capacity(entries.len());
                 for entry in entries {
-                    let key = self.record_key(&entry.key)?;
+                    let key = self.record_key(&entry.key, scope)?;
                     let value = self.expression(&entry.value, scope)?;
                     pairs.push((key, value));
                 }
@@ -2078,7 +2085,7 @@ impl Evaluator<'_> {
         }
     }
 
-    fn literal(&self, literal: &Literal) -> Eval<Value> {
+    fn literal(&mut self, literal: &Literal, scope: &mut ScopeStack) -> Eval<Value> {
         let span = literal.span();
         match literal.kind() {
             LiteralKind::Null => Ok(Value::Null),
@@ -2091,7 +2098,7 @@ impl Evaluator<'_> {
                 let inner = &raw[1..raw.len() - 1];
                 Ok(Value::string(inner))
             }
-            LiteralKind::DoubleQuoted(_) => Err(self.unsupported("double-quoted string", span)),
+            LiteralKind::DoubleQuoted(parts) => self.double_quoted_value(parts, scope, span),
         }
     }
 
@@ -2120,17 +2127,37 @@ impl Evaluator<'_> {
             .ok_or_else(|| self.error(RuntimeErrorKind::FloatLiteralOverflow, span))
     }
 
-    fn record_key(&self, key: &RecordKey) -> Eval<String> {
+    fn record_key(&mut self, key: &RecordKey, scope: &mut ScopeStack) -> Eval<String> {
         match key {
             RecordKey::Identifier(identifier) => Ok(self.text(identifier.span()).to_owned()),
             RecordKey::SingleQuoted(span) => {
                 let raw = self.text(*span);
                 Ok(raw[1..raw.len() - 1].to_owned())
             }
-            RecordKey::DoubleQuoted(part) => {
-                Err(self.unsupported("double-quoted key", part.span()))
-            }
+            RecordKey::DoubleQuoted(part) => self
+                .double_quoted_value(std::slice::from_ref(part), scope, part.span())
+                .map(|value| match value {
+                    Value::String(key) => key.to_string(),
+                    _ => unreachable!("double-quoted values always produce strings"),
+                }),
         }
+    }
+
+    fn double_quoted_value(
+        &mut self,
+        parts: &[WordPart],
+        scope: &mut ScopeStack,
+        span: Span,
+    ) -> Eval<Value> {
+        let mut value = OsString::new();
+        let mut provenance = Vec::new();
+        for part in parts {
+            self.expand_part(part, scope, &mut value, &mut provenance)?;
+        }
+        value
+            .into_string()
+            .map(Value::string)
+            .map_err(|_| self.error(RuntimeErrorKind::StringInterpolationNotUtf8, span))
     }
 
     /// Expands one ordinary word into a single native argument.
@@ -2398,6 +2425,27 @@ impl Evaluator<'_> {
     fn call(&mut self, call: &CallExpression, scope: &mut ScopeStack, span: Span) -> Eval<Value> {
         // Cancellation is polled before entering any call.
         self.check_cancel(span)?;
+
+        if let ExpressionKind::Symbol(identifier) = call.callee.kind() {
+            let name = self.text(identifier.span());
+            if let Some(intrinsic) = ExpressionIntrinsic::lookup(name)
+                && scope.get(name).is_none()
+            {
+                if call.arguments.len() != intrinsic.arity() {
+                    return Err(self.error(
+                        RuntimeErrorKind::ArityMismatch {
+                            expected: intrinsic.arity(),
+                            actual: call.arguments.len(),
+                        },
+                        span,
+                    ));
+                }
+                let argument = self.expression(&call.arguments[0], scope)?;
+                return intrinsic
+                    .invoke(&argument)
+                    .map_err(|error| self.operation(error, span));
+            }
+        }
 
         let callee = self.callee_value(&call.callee, scope)?;
         let Value::Callable(callable) = callee else {

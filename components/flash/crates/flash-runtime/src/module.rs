@@ -34,6 +34,7 @@ use crate::command::{
     Carrier, CommandClassification, CommandLifecycle, CommandOutput, CommandRegistry,
 };
 use crate::documentation::Documentation;
+use crate::intrinsic::ExpressionIntrinsic;
 
 /// Host-free cooperative cancellation for static source analysis.
 #[derive(Clone)]
@@ -2096,6 +2097,16 @@ impl<'a> SignatureValidator<'a> {
             .names
             .reference(self.entry.module(), call.callee.span())
         else {
+            if let ExpressionKind::Symbol(identifier) = call.callee.kind()
+                && let Some(intrinsic) = ExpressionIntrinsic::lookup(self.text(identifier.span()))
+            {
+                return Ok(Some(self.validate_intrinsic_call(
+                    intrinsic,
+                    call_span,
+                    call,
+                    &argument_types,
+                )));
+            }
             return Ok(None);
         };
         let (target_module, declaration_span) = match reference.target() {
@@ -2159,6 +2170,51 @@ impl<'a> SignatureValidator<'a> {
         } else {
             signature.result().clone()
         }))
+    }
+
+    fn validate_intrinsic_call(
+        &self,
+        intrinsic: ExpressionIntrinsic,
+        call_span: Span,
+        call: &flash_syntax::CallExpression,
+        argument_types: &[Option<ValueType>],
+    ) -> ValueType {
+        if call.arguments.len() != intrinsic.arity() {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::IntrinsicCallArity {
+                    module: self.entry.module().clone(),
+                    name: intrinsic.name(),
+                    call_span,
+                    expected: intrinsic.arity(),
+                    actual: call.arguments.len(),
+                });
+            return ValueType::Any;
+        }
+        let Some(actual) = argument_types[0].as_ref() else {
+            return intrinsic.result_type();
+        };
+        if !intrinsic.accepts_type(actual) {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::IntrinsicArgumentMismatch {
+                    module: self.entry.module().clone(),
+                    name: intrinsic.name(),
+                    argument_span: call.arguments[0].span(),
+                    expected: intrinsic.parameter_type_label(),
+                    actual: actual.clone(),
+                });
+            ValueType::Any
+        } else {
+            intrinsic.result_type()
+        }
+    }
+
+    fn text(&self, span: Span) -> &str {
+        self.entry
+            .source()
+            .slice(span)
+            .expect("parsed syntax spans belong to their module source")
     }
 
     fn literal(
@@ -2519,7 +2575,12 @@ impl<'a> ReferenceResolver<'a> {
             }
             ExpressionKind::Call(call) => {
                 if let ExpressionKind::Symbol(identifier) = call.callee.kind() {
-                    self.variable(identifier.span(), call.callee.span())?;
+                    let name = self.text(identifier.span());
+                    if ExpressionIntrinsic::lookup(name).is_none()
+                        || self.visible_target(name).is_some()
+                    {
+                        self.variable(identifier.span(), call.callee.span())?;
+                    }
                 } else {
                     self.expression(&call.callee)?;
                 }
@@ -2617,13 +2678,7 @@ impl<'a> ReferenceResolver<'a> {
         reference_span: Span,
     ) -> Result<(), Box<ModuleNameError>> {
         let name = self.text(name_span).to_owned();
-        let Some(target) = self
-            .scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.bindings.get(&name))
-            .cloned()
-        else {
+        let Some(target) = self.visible_target(&name) else {
             self.errors.push(ModuleNameError::UnknownReference {
                 module: self.entry.module().clone(),
                 name,
@@ -2640,6 +2695,14 @@ impl<'a> ReferenceResolver<'a> {
             target,
         });
         Ok(())
+    }
+
+    fn visible_target(&self, name: &str) -> Option<Option<ModuleReferenceTarget>> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.bindings.get(name))
+            .cloned()
     }
 
     fn ensure_available(&mut self, declaration_span: Span) -> bool {
@@ -3282,6 +3345,16 @@ impl<'a> StaticEffectAnalyzer<'a> {
             return;
         }
         let Some(reference) = self.names.reference(&self.module, callee.span()) else {
+            if let ExpressionKind::Symbol(identifier) = callee.kind()
+                && self
+                    .source
+                    .slice(identifier.span())
+                    .ok()
+                    .and_then(ExpressionIntrinsic::lookup)
+                    .is_some()
+            {
+                return;
+            }
             self.expression(callee);
             self.summary.push(ModuleEffect::OpaqueExternal, call_span);
             return;
@@ -4750,6 +4823,13 @@ pub enum ModuleTypeError {
         actual: usize,
         declaration_span: Span,
     },
+    IntrinsicCallArity {
+        module: ModuleId,
+        name: &'static str,
+        call_span: Span,
+        expected: usize,
+        actual: usize,
+    },
     ArgumentMismatch {
         module: ModuleId,
         name: String,
@@ -4758,6 +4838,13 @@ pub enum ModuleTypeError {
         expected: ValueType,
         actual: ValueType,
         parameter_span: Span,
+    },
+    IntrinsicArgumentMismatch {
+        module: ModuleId,
+        name: &'static str,
+        argument_span: Span,
+        expected: &'static str,
+        actual: ValueType,
     },
     ResultMismatch {
         module: ModuleId,
@@ -4776,7 +4863,9 @@ impl ModuleTypeError {
             Self::UnknownType { module, .. }
             | Self::InvalidTypeArity { module, .. }
             | Self::CallArity { module, .. }
+            | Self::IntrinsicCallArity { module, .. }
             | Self::ArgumentMismatch { module, .. }
+            | Self::IntrinsicArgumentMismatch { module, .. }
             | Self::ResultMismatch { module, .. } => module,
         }
     }
@@ -4784,8 +4873,11 @@ impl ModuleTypeError {
     const fn primary_span(&self) -> Span {
         match self {
             Self::UnknownType { span, .. } | Self::InvalidTypeArity { span, .. } => *span,
-            Self::CallArity { call_span, .. } => *call_span,
-            Self::ArgumentMismatch { argument_span, .. } => *argument_span,
+            Self::CallArity { call_span, .. } | Self::IntrinsicCallArity { call_span, .. } => {
+                *call_span
+            }
+            Self::ArgumentMismatch { argument_span, .. }
+            | Self::IntrinsicArgumentMismatch { argument_span, .. } => *argument_span,
             Self::ResultMismatch { result_span, .. } => *result_span,
         }
     }
@@ -4818,6 +4910,15 @@ impl ModuleTypeError {
                     format!("expected {expected} arguments, found {actual}"),
                 )
                 .with_secondary(*declaration_span, "function declared here"),
+            Self::IntrinsicCallArity {
+                call_span,
+                expected,
+                actual,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG003", self.to_string()).with_primary(
+                *call_span,
+                format!("expected {expected} arguments, found {actual}"),
+            ),
             Self::ArgumentMismatch {
                 argument_span,
                 parameter_span,
@@ -4830,6 +4931,15 @@ impl ModuleTypeError {
                     format!("this argument is `{actual}`, expected `{expected}`"),
                 )
                 .with_secondary(*parameter_span, "parameter type declared here"),
+            Self::IntrinsicArgumentMismatch {
+                argument_span,
+                expected,
+                actual,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG004", self.to_string()).with_primary(
+                *argument_span,
+                format!("this argument is `{actual}`, expected `{expected}`"),
+            ),
             Self::ResultMismatch {
                 result_span,
                 annotation_span,
@@ -4876,6 +4986,17 @@ impl fmt::Display for ModuleTypeError {
                 "module `{}` calls `{name}` with {actual} arguments; expected {expected}",
                 module.path().display()
             ),
+            Self::IntrinsicCallArity {
+                module,
+                name,
+                expected,
+                actual,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` calls intrinsic `{name}` with {actual} arguments; expected {expected}",
+                module.path().display()
+            ),
             Self::ArgumentMismatch {
                 module,
                 name,
@@ -4886,6 +5007,17 @@ impl fmt::Display for ModuleTypeError {
             } => write!(
                 formatter,
                 "module `{}` passes `{actual}` to `{name}` parameter `{parameter}`; expected `{expected}`",
+                module.path().display()
+            ),
+            Self::IntrinsicArgumentMismatch {
+                module,
+                name,
+                expected,
+                actual,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` passes `{actual}` to intrinsic `{name}`; expected `{expected}`",
                 module.path().display()
             ),
             Self::ResultMismatch {
