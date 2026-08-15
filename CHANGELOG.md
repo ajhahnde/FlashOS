@@ -20,7 +20,9 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   policy is path-scoped plus weekly. Draft pull requests now remain on the fast
   source path; ready candidates run clean image/QEMU and informational Coverage
   before merge, protected `main` no longer repeats the same qualification, and
-  weekly clean-room CI retains hosted-environment drift detection. The image
+  an API-only merged-tree provenance check gives each resulting `main` commit a
+  visible status tied to its exact-head required evidence. Weekly clean-room CI
+  retains hosted-environment drift detection. The image
   container no longer receives unnecessary privileged host access, routine
   dependency updates are grouped, source SBOMs are generated before binary
   artifacts enter the workspace, and published release assets can no longer be

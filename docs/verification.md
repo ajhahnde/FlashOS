@@ -509,6 +509,15 @@ and any change that can affect produced images receive full image and runtime
 qualification. Changes limited to documentation and licenses retain the stable
 aggregate CI result but skip the expensive image gate.
 
+After a protected squash merge, the new `main` commit has a different commit
+identity from the qualified pull-request head. The lightweight Main
+qualification workflow gives that commit a visible status by proving through
+GitHub's API that its tree equals the associated merged pull-request tree and
+that the exact head passed `required` and `security-required`. When image
+qualification applied, it also verifies successful QEMU provenance before the
+final aggregate. This status reuses evidence; it does not check out, rebuild,
+or reboot the merged tree.
+
 ### Clean-container image producer
 
 The reusable image workflow:
@@ -799,6 +808,7 @@ Do not remove an assertion solely because a change fails it. First determine whe
 | QEMU runtime contract                    | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                             |
 | Public local helper behavior             | [`flashos.sh`](../flashos.sh)                                         |
 | Standard hosted CI orchestration         | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             |
+| Merged-tree qualification status         | [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml) |
 | Informational host coverage              | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) |
 | Coverage report completeness             | [`ci/check_coverage.py`](../ci/check_coverage.py)                     |
 | Codecov reporting policy                 | [`codecov.yml`](../codecov.yml)                                       |

@@ -284,7 +284,10 @@ Draft pull requests run the source-quality gates while development continues.
 The full clean image and QEMU path runs when the candidate is marked ready,
 and reruns after later candidate updates. Protected `main` receives that exact
 qualified tree and does not repeat ordinary qualification after merge; weekly
-clean-room CI separately detects hosted-environment drift.
+clean-room CI separately detects hosted-environment drift. A lightweight
+API-only status on the resulting `main` commit verifies its merged pull-request
+association, tree identity, and exact-head required-check provenance without
+checking out or rebuilding the source.
 
 The helper interface provides a concise view of the working tree:
 
