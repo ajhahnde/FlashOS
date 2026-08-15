@@ -644,7 +644,9 @@ Flash is maintained in:
 components/flash/
 ```
 
-Its workspace currently separates syntax, runtime, platform contracts, POSIX-oriented host integration, and the `fsh` executable.
+Its workspace currently separates syntax, runtime, portable platform contracts,
+shared Unix-like operations, FlashOS-specific adaptation, the `fsh` client, and
+the language-server executable.
 
 Run the standard host checks with:
 

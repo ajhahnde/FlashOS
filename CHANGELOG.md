@@ -25,6 +25,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added a dedicated FlashOS platform adapter for Flash. The adapter keeps the
+  classified Rust and `relibc` routes behind the portable platform contract and
+  adds native-path-preserving home, configuration, cache, and state selection
+  with deterministic FlashOS fallbacks. It is compiled by the Redox-target
+  `fsh` build but remains unselected with no advertised capabilities until the
+  later target-runtime qualification and bring-up work.
 - Added a checked FlashOS x86_64 platform classification for Flash. All 41
   required operations and all 14 capability groups now have explicit native,
   shimmed, deliberately unsupported, or separately authorized kernel-work
