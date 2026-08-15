@@ -307,7 +307,10 @@ The current decision classifies 38 operations as native and the three
 standard-directory operations as a FlashOS policy shim. It identifies no
 deliberately unsupported operation and no kernel-work requirement. Every
 capability retains `target_qualification = "pending"`: classification chooses
-an implementation route but does not prove target behavior.
+an implementation route but does not prove target behavior. The dedicated
+`flash-platform-flashos` crate implements those routes and policy while keeping
+its capability set empty and remaining unselected until later target bring-up
+and qualification.
 
 ## QEMU runtime contract
 

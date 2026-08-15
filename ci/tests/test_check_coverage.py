@@ -35,7 +35,7 @@ class CoverageContractTests(unittest.TestCase):
     def test_accepts_one_executed_source_from_every_workspace_member(self) -> None:
         output = self.validate(self.member_roots())
         self.assertIn("coverage contract: ok", output)
-        self.assertIn("workspace members: 6", output)
+        self.assertIn("workspace members: 7", output)
 
     def test_rejects_a_report_that_omits_a_workspace_member(self) -> None:
         with self.assertRaisesRegex(SystemExit, "omitted Flash workspace members"):

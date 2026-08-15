@@ -142,7 +142,8 @@ Work in this area includes:
 - aligning host and FlashOS behavior without hiding or emulating unsupported target capabilities;
 - keeping redirected, non-interactive, and terminal-attached sessions distinct where the operating system requires it;
 - validating configuration, history, cancellation, redirection, process lifetime, and terminal restoration on target systems;
-- mapping Flash capabilities to the actual FlashOS target ABI through the reserved FlashOS platform adapter role.
+- mapping Flash capabilities to the actual FlashOS target ABI through the
+  dedicated, qualification-gated FlashOS platform adapter.
 
 Host behavior on Linux or macOS must not be presented as FlashOS behavior until the target build and image verification path have been exercised.
 
