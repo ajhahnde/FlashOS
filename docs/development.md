@@ -287,9 +287,10 @@ runs for ready changes that can affect produced artifacts or their runtime
 qualification, and reruns after later candidate updates. Explicitly isolated
 documentation, policy, reporting, and host-tool changes retain the stable
 source aggregate without rebuilding the operating-system images. Protected
-`main` relies on the exact-head checks enforced before merge and does not
-repeat ordinary qualification afterward; weekly clean-room CI separately
-detects hosted-environment drift.
+`main` relies on the exact-head checks enforced before merge, then reruns only
+the fast repository and Flash source gates on the squash commit so its CI
+status remains visible. It does not rebuild or reboot the images after merge;
+weekly clean-room CI separately detects hosted-environment drift.
 
 The helper interface provides a concise view of the working tree:
 

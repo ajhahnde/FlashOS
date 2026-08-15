@@ -303,7 +303,10 @@ if "qualify_image" not in ci_workflow or '"skipped"' not in ci_workflow:
     fail("standard CI must retain its documented conditional image gate")
 for expected in (
     "types: [opened, synchronize, reopened, ready_for_review]",
+    "push:\n    branches: [main]",
     'cron: "0 4 * * 0"',
+    'if [ "${EVENT_NAME}" = "push" ]; then',
+    "Protected main already received exact-head candidate evidence.",
     "github.event.pull_request.draft == false",
     ".github/workflows/coverage.yml",
     ".github/workflows/security.yml",
@@ -315,9 +318,6 @@ for expected in (
 ):
     if expected not in ci_workflow:
         fail(f"standard CI candidate-qualification contract is missing: {expected}")
-if "  push:\n    branches: [main]" in ci_workflow:
-    fail("standard CI must not repeat exact-tree qualification after PR merge")
-
 if (ROOT / ".github/workflows/main-qualification.yml").exists():
     fail(
         "protected merges must rely on pre-merge qualification without a "

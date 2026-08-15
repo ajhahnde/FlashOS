@@ -21,9 +21,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   plus weekly. Draft pull requests are optional fast-feedback containers for
   incomplete work; complete candidates may enter ready review directly and run
   applicable clean image/QEMU and informational Coverage evidence once.
-  Protected `main` relies on the exact-head evidence enforced before merge
-  instead of adding a custom status afterward, while weekly clean-room CI
-  retains hosted-environment drift detection. The image
+  Protected `main` relies on the exact-head evidence enforced before merge,
+  then reruns only the fast source gates on the squash commit for an honest
+  visible status; it neither rebuilds images nor adds custom provenance logic.
+  Weekly clean-room CI retains hosted-environment drift detection. The image
   container no longer receives unnecessary privileged host access, routine
   dependency updates are grouped, source SBOMs are generated before binary
   artifacts enter the workspace, and published release assets can no longer be

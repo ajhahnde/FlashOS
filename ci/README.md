@@ -486,15 +486,17 @@ The ordinary workflow is defined in [`.github/workflows/ci.yml`](../.github/work
 It runs on:
 
 - pull-request creation, updates, reopening, and ready-for-review transitions;
+- protected `main` updates for visible source-only validation;
 - a weekly default-branch schedule;
 - manual dispatch.
 
 Protected `main` accepts only an up-to-date pull request whose stable required
 checks are green. Ordinary CI therefore qualifies that candidate before merge
-and does not rebuild the same source tree after merge. The weekly run preserves
-independent detection of hosted-runner, toolchain, and upstream build drift.
-The squash commit does not restate pull-request checks on its new identity;
-the protected merge is the boundary that enforces the exact-head evidence.
+and does not rebuild OS artifacts after merge. On the resulting squash commit,
+the same workflow reruns only repository and Flash source quality plus the
+stable `required` aggregate. This gives `main` a visible, truthful CI status
+without custom provenance logic. The weekly run preserves independent
+detection of hosted-runner, toolchain, and upstream build drift.
 
 Runs for the same workflow and pull request or Git reference share a concurrency group. A newer run cancels an older in-progress run in that group.
 
@@ -521,7 +523,9 @@ roughly ten-minute image path, but a complete locally green change may open as
 ready and avoid a duplicate draft run. Marking incomplete work ready triggers
 the applicable candidate workflow, and every later update to a non-draft pull
 request requalifies its new head. Manual and weekly runs always qualify the
-images.
+images. Protected-main updates always skip image/runtime work because their
+exact tree was already qualified before merge; their purpose is source-status
+visibility, not a second candidate build.
 
 For a non-draft pull request, source, configuration, recipes, build tooling,
 image/runtime workflows, QEMU contracts, and unknown paths qualify the images.
@@ -721,8 +725,9 @@ that dependency manifests, lockfiles, policy, Dependabot configuration, and
 the security workflow are unchanged. For an in-scope pull request it requires
 both dependency review and the combined Cargo policy job to succeed. Scheduled
 and manual runs require Cargo policy while dependency review remains
-pull-request-only. Protected `main` is not checked again after the exact PR
-candidate has passed.
+pull-request-only. Security is not checked again after the exact PR candidate
+has passed; the separate source-only `CI` run provides the visible status on
+the resulting protected-main commit.
 
 ### Dependency review
 
