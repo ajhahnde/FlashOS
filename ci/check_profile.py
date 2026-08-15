@@ -259,6 +259,16 @@ for expected in (
 security_workflow = (ROOT / ".github/workflows/security.yml").read_text()
 if not security_workflow.startswith("name: Security\n"):
     fail("security workflow name must preserve the Security badge label")
+for expected in (
+    "qualify_security",
+    "name: security-required",
+    "DEPENDENCY_RESULT",
+    "CARGO_RESULT",
+):
+    if expected not in security_workflow:
+        fail(f"security workflow aggregate contract is missing: {expected}")
+if "pull_request:\n    paths:" in security_workflow:
+    fail("security-required must report for every pull request")
 
 coverage_workflow = (ROOT / ".github/workflows/coverage.yml").read_text()
 for expected in (
