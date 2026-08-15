@@ -23,8 +23,9 @@ use crate::command::CommandRegistry;
 use crate::eval::{AUTOMATIC_RESUME_LIMIT, Clock, Instant, RuntimeError, RuntimeErrorKind};
 use crate::job::ProcessId;
 use crate::plan::{
-    ExecutionPlan, InternalSegment, PlannedRedirection, PlannedResolution, ProcessGroupPolicy,
-    RedirectionAction, SessionOptions, plan_pipeline_with_options, preflight,
+    ExecutionPlan, InternalSegment, InternalStdoutRoute, PlannedRedirection, PlannedResolution,
+    ProcessGroupPolicy, RedirectionAction, SessionOptions, internal_stdout_route,
+    plan_pipeline_with_options, preflight,
 };
 use crate::resolve::ExecutableProbe;
 use crate::{Duration, Environment, ScopeStack, Signal, Status};
@@ -897,7 +898,8 @@ impl MixedSegment {
         self.input.take()
     }
 
-    /// Take the writer to an external successor, when one exists.
+    /// Take the resolved byte output endpoint, when the segment does not use
+    /// the final inherited session sink.
     pub(crate) fn take_output(&mut self) -> Option<Box<dyn DescriptorEndpoint>> {
         self.output.take()
     }
@@ -1087,26 +1089,52 @@ pub(crate) fn start_mixed_pipeline(
         pipes.push((Some(reader), Some(writer)));
     }
 
-    let segments = topology
-        .internal_segments()
-        .iter()
-        .cloned()
-        .map(|segment| {
-            let stages = segment.stages();
-            let input = stages
-                .start
-                .checked_sub(1)
-                .and_then(|edge| pipes[edge].0.take());
-            let output = (stages.end < plan.stages().len())
-                .then(|| pipes[stages.end - 1].1.take())
-                .flatten();
-            MixedSegment {
-                segment,
-                input,
-                output,
+    let mut segments = Vec::with_capacity(topology.internal_segments().len());
+    for segment in topology.internal_segments().iter().cloned() {
+        let stages = segment.stages();
+        let input = stages
+            .start
+            .checked_sub(1)
+            .and_then(|edge| pipes[edge].0.take());
+        let last_stage = stages
+            .end
+            .checked_sub(1)
+            .expect("an internal segment is nonempty");
+        let pipeline_writer = (stages.end < plan.stages().len())
+            .then(|| pipes[last_stage].1.take())
+            .flatten();
+        let merge_pipeline_output = pipeline_writer.is_some()
+            && plan.edges()[last_stage].kind() == PipeOperator::StdoutAndStderr;
+        let output = match internal_stdout_route(&plan.stages()[last_stage], merge_pipeline_output)
+        {
+            InternalStdoutRoute::Default => pipeline_writer,
+            InternalStdoutRoute::File { target, mode } => {
+                drop(pipeline_writer);
+                let mode = match mode {
+                    OutputMode::Truncate => FileOpenMode::WriteTruncate,
+                    OutputMode::Append => FileOpenMode::WriteAppend,
+                };
+                let endpoint = platform
+                    .open_file(FileOpenRequest::new(
+                        Path::new(target.value()),
+                        plan.cwd(),
+                        mode,
+                    ))
+                    .map_err(|error| {
+                        RuntimeError::new(RuntimeErrorKind::RedirectionSetup(error), target.span())
+                    })?;
+                Some(endpoint)
             }
-        })
-        .collect::<Vec<_>>();
+            InternalStdoutRoute::Unsupported => {
+                unreachable!("mixed preflight rejects unsupported internal stdout routes")
+            }
+        };
+        segments.push(MixedSegment {
+            segment,
+            input,
+            output,
+        });
+    }
     let environment: Vec<(OsString, OsString)> = plan
         .environment()
         .iter()

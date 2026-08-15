@@ -78,6 +78,99 @@ pub(crate) struct InternalSegment {
     stages: Range<usize>,
 }
 
+/// The final standard-output destination of an internal segment tail.
+///
+/// Pipeline assignment is applied before the stage's source-ordered local
+/// redirections. The mixed executor uses this result to decide whether the
+/// tail still drains into its external successor or into a local file.
+pub(crate) enum InternalStdoutRoute<'a> {
+    /// The initially assigned pipeline or session output remains selected.
+    Default,
+    /// A local byte-file redirection replaced the initially assigned output.
+    File {
+        target: &'a ExpandedWord,
+        mode: OutputMode,
+    },
+    /// The resolved binding is not a writable byte destination the internal
+    /// executor supports.
+    Unsupported,
+}
+
+#[derive(Clone, Copy)]
+enum InternalDescriptorRoute<'a> {
+    DefaultOutput,
+    Inherited,
+    InputFile,
+    OutputFile {
+        target: &'a ExpandedWord,
+        mode: OutputMode,
+    },
+}
+
+/// Resolve an internal segment tail's stdout after pipeline assignment and
+/// local redirections have applied from left to right.
+pub(crate) fn internal_stdout_route(
+    stage: &PlannedStage,
+    merge_pipeline_output: bool,
+) -> InternalStdoutRoute<'_> {
+    let mut bindings = std::collections::BTreeMap::from([
+        (0, InternalDescriptorRoute::Inherited),
+        (1, InternalDescriptorRoute::DefaultOutput),
+        (
+            2,
+            if merge_pipeline_output {
+                InternalDescriptorRoute::DefaultOutput
+            } else {
+                InternalDescriptorRoute::Inherited
+            },
+        ),
+    ]);
+
+    for redirection in stage.redirections() {
+        match redirection.action() {
+            RedirectionAction::Input { descriptor, .. } => {
+                bindings.insert(*descriptor, InternalDescriptorRoute::InputFile);
+            }
+            RedirectionAction::Output {
+                descriptor,
+                target,
+                mode,
+                ..
+            } => {
+                bindings.insert(
+                    *descriptor,
+                    InternalDescriptorRoute::OutputFile {
+                        target,
+                        mode: *mode,
+                    },
+                );
+            }
+            RedirectionAction::Duplicate {
+                descriptor, source, ..
+            } => {
+                let Some(route) = bindings.get(source).copied() else {
+                    return InternalStdoutRoute::Unsupported;
+                };
+                bindings.insert(*descriptor, route);
+            }
+            RedirectionAction::Close { descriptor, .. } => {
+                bindings.remove(descriptor);
+            }
+        }
+    }
+
+    match bindings.get(&1) {
+        Some(InternalDescriptorRoute::DefaultOutput) => InternalStdoutRoute::Default,
+        Some(InternalDescriptorRoute::OutputFile { target, mode }) => InternalStdoutRoute::File {
+            target,
+            mode: *mode,
+        },
+        Some(InternalDescriptorRoute::Inherited | InternalDescriptorRoute::InputFile) | None => {
+            InternalStdoutRoute::Unsupported
+        }
+    }
+}
+
 impl InternalSegment {
     pub(crate) const fn ordinal(&self) -> usize {
         self.ordinal
@@ -1102,8 +1195,9 @@ fn descriptor_value(number: IoNumber, source: &SourceFile) -> Result<u32, Runtim
 /// Preflight rejects the statically detectable faults: a NUL byte in any argv
 /// argument or redirection target (no external argv or platform path can carry
 /// it), a descriptor duplication whose source is not open in the stage's
-/// descriptor map, a pipeline head whose command cannot begin a pipeline (it
-/// does not accept an empty input), and an incompatible pipeline edge (a
+/// descriptor map, an unsupported resolved stdout route at an internal segment
+/// tail, a pipeline head whose command cannot begin a pipeline (it does not
+/// accept an empty input), and an incompatible pipeline edge (a
 /// producer carrier the consumer does not accept, or a merged stdout+stderr edge
 /// whose producer is not a byte stream). A carrier mismatch carries an
 /// actionable diagnostic naming both commands, the accepted carrier set, and the
@@ -1111,11 +1205,43 @@ fn descriptor_value(number: IoNumber, source: &SourceFile) -> Result<u32, Runtim
 /// capability validation occurs at execution time so this pass remains
 /// platform-independent.
 pub fn preflight(plan: &ExecutionPlan) -> Result<(), RuntimeError> {
-    for stage in plan.stages() {
+    for (index, stage) in plan.stages().iter().enumerate() {
         check_nul(stage)?;
         check_descriptor_ownership(stage)?;
+        check_internal_stdout_route(plan, index, stage)?;
     }
     check_carriers(plan)?;
+    Ok(())
+}
+
+fn check_internal_stdout_route(
+    plan: &ExecutionPlan,
+    index: usize,
+    stage: &PlannedStage,
+) -> Result<(), RuntimeError> {
+    if !matches!(stage.resolution(), PlannedResolution::Internal { .. })
+        || plan
+            .stages()
+            .get(index + 1)
+            .is_some_and(|next| matches!(next.resolution(), PlannedResolution::Internal { .. }))
+    {
+        return Ok(());
+    }
+    let merge_pipeline_output = plan
+        .edges()
+        .get(index)
+        .is_some_and(|edge| edge.kind() == PipeOperator::StdoutAndStderr);
+    if matches!(
+        internal_stdout_route(stage, merge_pipeline_output),
+        InternalStdoutRoute::Unsupported
+    ) {
+        return Err(RuntimeError::new(
+            RuntimeErrorKind::Unsupported {
+                feature: "this resolved stdout route on an internal byte stream",
+            },
+            stage.span(),
+        ));
+    }
     Ok(())
 }
 

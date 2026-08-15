@@ -55,8 +55,8 @@ use crate::internal::{
 use crate::job::JobPlacement;
 use crate::module::RuntimeBindingTypes;
 use crate::plan::{
-    ExecutionPlan, PlannedResolution, PlannedStage, RedirectionAction, SessionOptions,
-    plan_pipeline_with_options_and_binding_types, preflight,
+    ExecutionPlan, InternalStdoutRoute, PlannedResolution, PlannedStage, SessionOptions,
+    internal_stdout_route, plan_pipeline_with_options_and_binding_types, preflight,
 };
 use crate::presentation::{
     OutputDestination, TerminalPresentation, render_table, select_terminal_presentation,
@@ -2122,10 +2122,12 @@ fn run_mixed_segment(
     let drained = if let Some(writer) = resource.take_output() {
         drain_payload_to_pipe(payload, writer, plan.stages()[last_stage].span())
     } else {
-        render_payload(
+        render_payload_with_redirection(
             payload,
             presentation,
-            plan.stages()[last_stage].span(),
+            &plan.stages()[last_stage],
+            plan.cwd(),
+            platform,
             output.expect("a final internal segment owns the session output"),
         )
     };
@@ -2200,13 +2202,17 @@ fn drain_payload_to_pipe(
     mut writer: Box<dyn DescriptorEndpoint>,
     span: flash_syntax::Span,
 ) -> Result<(), Interrupt> {
-    let InternalPayload::ByteStream(mut bytes) = payload else {
-        return Err(Interrupt::Runtime(RuntimeError::new(
-            RuntimeErrorKind::Unsupported {
-                feature: "an implicit structured-to-external conversion",
-            },
-            span,
-        )));
+    let mut bytes = match payload {
+        InternalPayload::Empty => return Ok(()),
+        InternalPayload::ByteStream(bytes) => bytes,
+        InternalPayload::Value(_) | InternalPayload::ValueStream(_) => {
+            return Err(Interrupt::Runtime(RuntimeError::new(
+                RuntimeErrorKind::Unsupported {
+                    feature: "an implicit structured-to-external conversion",
+                },
+                span,
+            )));
+        }
     };
     loop {
         match bytes.pull() {
@@ -2271,15 +2277,10 @@ fn output_destination(
     stage: &PlannedStage,
     platform: &dyn Platform,
 ) -> Result<OutputDestination, RuntimeError> {
-    if stage.redirections().iter().any(|redirection| {
-        let descriptor = match redirection.action() {
-            RedirectionAction::Input { descriptor, .. }
-            | RedirectionAction::Output { descriptor, .. }
-            | RedirectionAction::Duplicate { descriptor, .. }
-            | RedirectionAction::Close { descriptor, .. } => descriptor,
-        };
-        *descriptor == 1
-    }) {
+    if !matches!(
+        internal_stdout_route(stage, false),
+        InternalStdoutRoute::Default
+    ) {
         return Ok(OutputDestination::Redirected);
     }
     if !platform.is_output_terminal() {
@@ -2380,71 +2381,41 @@ fn render_payload_with_redirection(
     platform: &dyn Platform,
     sink: &mut dyn Write,
 ) -> Result<(), Interrupt> {
-    enum StdoutRoute<'stage> {
-        Sink,
-        File {
-            target: &'stage ExpandedWord,
-            mode: FileOpenMode,
-        },
-        Unsupported,
-    }
-
-    let mut route = StdoutRoute::Sink;
-    for redirection in stage.redirections() {
-        match redirection.action() {
-            RedirectionAction::Output {
-                descriptor,
-                mode,
-                target,
-                ..
-            } if *descriptor == 1 => {
-                route = StdoutRoute::File {
-                    target,
-                    mode: match mode {
-                        OutputMode::Truncate => FileOpenMode::WriteTruncate,
-                        OutputMode::Append => FileOpenMode::WriteAppend,
-                    },
-                };
-            }
-            RedirectionAction::Input { descriptor, .. }
-            | RedirectionAction::Duplicate { descriptor, .. }
-            | RedirectionAction::Close { descriptor, .. }
-                if *descriptor == 1 =>
-            {
-                route = StdoutRoute::Unsupported;
-            }
-            _ => {}
+    match internal_stdout_route(stage, false) {
+        InternalStdoutRoute::Default => render_payload(payload, presentation, stage.span(), sink),
+        InternalStdoutRoute::File { target, mode } => {
+            drain_payload_to_redirected_file(payload, target, mode, stage, cwd, platform)
         }
-    }
-
-    match route {
-        StdoutRoute::Sink => render_payload(payload, presentation, stage.span(), sink),
-        StdoutRoute::File { target, mode } => {
-            let endpoint = platform
-                .open_file(FileOpenRequest::new(Path::new(target.value()), cwd, mode))
-                .map_err(|error| {
-                    Interrupt::Runtime(RuntimeError::new(
-                        RuntimeErrorKind::RedirectionSetup(error),
-                        target.span(),
-                    ))
-                })?;
-            match payload {
-                InternalPayload::Empty => Ok(()),
-                bytes @ InternalPayload::ByteStream(_) => {
-                    drain_payload_to_pipe(bytes, endpoint, stage.span())
-                }
-                InternalPayload::Value(_) | InternalPayload::ValueStream(_) => {
-                    unreachable!("structured output redirection is rejected before execution")
-                }
-            }
-        }
-        StdoutRoute::Unsupported => Err(Interrupt::Runtime(RuntimeError::new(
+        InternalStdoutRoute::Unsupported => Err(Interrupt::Runtime(RuntimeError::new(
             RuntimeErrorKind::Unsupported {
-                feature: "this stdout redirection on an internal byte stream",
+                feature: "this resolved stdout route on an internal byte stream",
             },
             stage.span(),
         ))),
     }
+}
+
+fn drain_payload_to_redirected_file(
+    payload: InternalPayload,
+    target: &ExpandedWord,
+    mode: OutputMode,
+    stage: &PlannedStage,
+    cwd: &Path,
+    platform: &dyn Platform,
+) -> Result<(), Interrupt> {
+    let mode = match mode {
+        OutputMode::Truncate => FileOpenMode::WriteTruncate,
+        OutputMode::Append => FileOpenMode::WriteAppend,
+    };
+    let endpoint = platform
+        .open_file(FileOpenRequest::new(Path::new(target.value()), cwd, mode))
+        .map_err(|error| {
+            Interrupt::Runtime(RuntimeError::new(
+                RuntimeErrorKind::RedirectionSetup(error),
+                target.span(),
+            ))
+        })?;
+    drain_payload_to_pipe(payload, endpoint, stage.span())
 }
 
 /// Present one consecutive run of records as a single width-aware table.

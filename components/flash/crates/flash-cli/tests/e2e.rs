@@ -303,6 +303,32 @@ fn a_script_runs_and_joins_a_background_conditional_chain() {
 }
 
 #[test]
+fn a_background_supervisor_executes_a_multi_island_pipeline() {
+    let temp = TempDir::new("background-multi-island");
+    let marker = temp.path().join("reached.txt");
+    let script = temp.script(
+        "background-multi-island.fsh",
+        &format!(
+            "^{0} exit 0 | decode bytes | encode bytes | \
+             ^{0} exit 0 | decode bytes | encode bytes | ^{0} exit 0 && \
+             ^{0} late 0 {1} 0 &\n^{0} exit 0\n",
+            status_fixture(),
+            marker.display(),
+        ),
+    );
+
+    let output = run_script(&script, temp.path(), fixture_directory());
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    assert!(
+        marker.exists(),
+        "the background child shell should complete every mixed segment"
+    );
+}
+
+#[test]
 fn static_imports_are_loaded_from_the_filesystem_without_execution() {
     let temp = TempDir::new("static-import");
     let marker = temp.path().join("import-ran.txt");

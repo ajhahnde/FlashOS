@@ -34,6 +34,7 @@ use flash_runtime::eval::{Clock, FakeClock, Instant};
 use flash_runtime::job::{JobMemberState, JobPlacement, JobState, ProcessId};
 use flash_runtime::plan::SessionOptions;
 use flash_runtime::resolve::ExecutableProbe;
+use flash_runtime::script::execute_script;
 use flash_runtime::session::{
     BackgroundFailureReason, JobNoticeKind, LiveJobState, Session, SubmitOutcome,
 };
@@ -2505,6 +2506,31 @@ fn help_uses_the_ordinary_redirection_byte_path() {
     let redirected = fs::read_to_string(temp.path().join("help.txt")).unwrap();
     assert!(redirected.starts_with("builtin pwd\n  invocation: pwd\n"));
     assert!(redirected.ends_with('\n'));
+}
+
+#[test]
+fn a_mixed_internal_tail_file_override_closes_the_unused_pipeline() {
+    let temp = TempDir::new("mixed-internal-tail-redirection");
+    let mut session = Session::new(temp.path(), environment(), SessionOptions::default());
+    let probe = Probe::new(["/bin/cat"]);
+    let mut sink = Vec::new();
+
+    session
+        .submit(
+            "redirect.fsh",
+            "help pwd 3>help.txt 1>&3 | ^/bin/cat > downstream.txt",
+            &probe,
+            &PosixPlatform,
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect("the external successor should observe EOF on the unused pipe");
+
+    assert!(sink.is_empty());
+    let redirected = fs::read_to_string(temp.path().join("help.txt")).unwrap();
+    assert!(redirected.starts_with("builtin pwd\n  invocation: pwd\n"));
+    assert!(redirected.ends_with('\n'));
+    assert_eq!(fs::read(temp.path().join("downstream.txt")).unwrap(), b"");
 }
 
 /// Complete every scripted child so no observer outlives the test blocked on a
@@ -5260,6 +5286,51 @@ fn a_carrier_valid_multi_island_plan_executes_in_source_order() {
             .len(),
         7
     );
+}
+
+#[test]
+fn multi_island_interactive_and_script_execution_are_identical() {
+    let temp = TempDir::new("multi-island-frontend-parity");
+    fs::write(temp.path().join("input.bin"), b"frontend parity")
+        .expect("binary fixture should be written");
+    let source = "^/bin/cat < input.bin | decode bytes | encode bytes | \
+                  ^/bin/cat | decode bytes | encode bytes";
+    let probe = Probe::new(["/bin/cat"]);
+
+    let mut interactive = Session::new(temp.path(), environment(), SessionOptions::default());
+    let mut interactive_output = Vec::new();
+    interactive
+        .submit(
+            "<interactive>",
+            source,
+            &probe,
+            &PosixPlatform,
+            &FakeClock::new(),
+            &mut interactive_output,
+        )
+        .expect("the interactive frontend should execute every segment");
+
+    let mut script_environment = environment();
+    let mut script_output = Vec::new();
+    let script = execute_script(
+        "parity.fsh",
+        source,
+        temp.path(),
+        &mut script_environment,
+        &standard_registry(),
+        &probe,
+        &SessionOptions::default(),
+        &PosixPlatform,
+        Arc::new(FakeClock::new()),
+        &mut script_output,
+    )
+    .expect("the script frontend should execute the same segments");
+
+    assert_eq!(interactive_output, b"frontend parity");
+    assert_eq!(script_output, interactive_output);
+    let interactive_status = interactive.current_status().expect("status should commit");
+    let script_status = script.status().expect("script status should commit");
+    assert_eq!(script_status, interactive_status);
 }
 
 #[test]
