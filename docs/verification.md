@@ -231,8 +231,25 @@ That pass proves that every current capability has an explicit requirement and
 an internally consistent source/runtime evidence record. It does not prove the
 recorded source operations work on FlashOS, promote an indirect QEMU
 observation into full qualification, or classify an evidence gap as an
-unsupported target feature. Those conclusions require later operation mapping,
+unsupported target feature. Those conclusions require operation mapping,
 classification, and targeted runtime tests.
+
+The per-operation map is recorded separately in
+[`components/flash/platforms/flashos-x86_64-operation-map.toml`](../components/flash/platforms/flashos-x86_64-operation-map.toml).
+Validate it with:
+
+```bash
+python3 ci/check_flashos_operation_map.py
+```
+
+That checker requires exact ordered coverage of every capability requirement
+and validates each reference to the evidence inventory and mapped ABI seam. It
+preserves the unknown Rust source commit by stopping standard-library routes at
+their public APIs, maps direct adapter calls to the configured `relibc` source
+revision and Redox userland paths, keeps the distinct staged binary-package
+revision visible, and records currently internal or unrouted operations
+explicitly. A pass does not classify support, prove that a mapped symbol
+behaves correctly, or replace target execution evidence.
 
 ## Product-profile verification
 

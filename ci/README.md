@@ -10,6 +10,8 @@ This document defines the executable CI/CD contracts implemented by the scripts 
 - [Contract map](#contract-map)
 - [Static product-profile contract](#static-product-profile-contract)
 - [FlashOS platform baseline contract](#flashos-platform-baseline-contract)
+- [FlashOS capability evidence contract](#flashos-capability-evidence-contract)
+- [FlashOS operation-map contract](#flashos-operation-map-contract)
 - [QEMU runtime contract](#qemu-runtime-contract)
 - [Hosted workflow architecture](#hosted-workflow-architecture)
 - [Standard CI workflow](#standard-ci-workflow)
@@ -54,6 +56,7 @@ FlashOS remains pre-alpha software even when all current automated contracts pas
 | [`ci/check_profile.py`](check_profile.py)                             | Validate static FlashOS product, profile, release, pinning, and workflow invariants           |
 | [`ci/check_flashos_platform.py`](check_flashos_platform.py)           | Validate the tracked FlashOS toolchain/ABI record and built target artifacts                  |
 | [`ci/check_flashos_capabilities.py`](check_flashos_capabilities.py)   | Validate the Flash capability requirement and source/runtime evidence inventory               |
+| [`ci/check_flashos_operation_map.py`](check_flashos_operation_map.py) | Validate the per-operation map to current Rust, relibc, and Redox userland seams               |
 | [`ci/check_coverage.py`](check_coverage.py)                           | Reject empty Flash LCOV reports and reports that omit a workspace crate                       |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                   | Boot an existing x86_64 image and evaluate the current serial runtime contract                |
 | [`ci/container/Dockerfile`](container/Dockerfile)                     | Define the hosted x86_64 image-build tool environment                                         |
@@ -258,7 +261,30 @@ observations. An adapter method, a `Capabilities::full()` declaration, a Unix
 target family, or a successful build is source evidence only. An empty runtime
 evidence list means the current target contract has not observed that behavior;
 it does not mean that the target lacks the underlying operation. Classification
-and complete per-operation mapping remain separate work.
+and target behavior remain separate work.
+
+## FlashOS operation-map contract
+
+Run the per-operation mapping contract from the repository root:
+
+```bash
+python3 ci/check_flashos_operation_map.py
+```
+
+The checker validates
+[`components/flash/platforms/flashos-x86_64-operation-map.toml`](../components/flash/platforms/flashos-x86_64-operation-map.toml)
+against the target baseline, capability-evidence inventory, live `Capability`
+enum, configured Rust and `relibc` sources, and ordinary CI wiring. It requires
+every capability requirement exactly once and in declaration order, resolves
+all source-evidence and ABI-seam references, and keeps classification deferred.
+
+The map records four boundary shapes: Flash-internal operations, public Rust
+standard-library APIs, direct `relibc` ABI calls, and currently unrouted
+operations. The Rust target source commit remains unknown, so standard-library
+routes stop at their public APIs rather than inventing downstream libc calls.
+The `relibc` routes use the configured source revision while retaining the
+different effective binary-package revision from the platform baseline. A pass
+establishes mapping consistency, not target support or runtime behavior.
 
 ## QEMU runtime contract
 
@@ -879,6 +905,7 @@ Run the product contract directly:
 python3 ci/check_profile.py
 python3 ci/check_flashos_platform.py
 python3 ci/check_flashos_capabilities.py
+python3 ci/check_flashos_operation_map.py
 ```
 
 Lint the release-relevant Python scripts when Ruff is installed:

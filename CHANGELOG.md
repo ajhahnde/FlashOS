@@ -25,6 +25,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added a checked per-operation FlashOS x86_64 platform map for Flash. Every
+  portable capability requirement now resolves to its current Flash-internal,
+  Rust standard-library, direct `relibc`, or unrouted boundary. The map
+  preserves the unknown target compiler source commit and the distinct
+  configured `relibc` source and staged binary-package revisions, and it keeps
+  support classification and runtime qualification explicitly deferred.
 - Added a checked FlashOS x86_64 capability-evidence inventory for Flash. It
   compares all 14 current portable capability groups with the selected Redox
   executable and adapter source paths and with the behavior already observed by
