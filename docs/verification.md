@@ -10,6 +10,7 @@ This guide explains how FlashOS distinguishes source checks, target compilation,
 - [Evidence layers](#evidence-layers)
 - [Host and source checks](#host-and-source-checks)
 - [Target compilation](#target-compilation)
+- [Platform baseline verification](#platform-baseline-verification)
 - [Product-profile verification](#product-profile-verification)
 - [Image construction](#image-construction)
 - [QEMU runtime qualification](#qemu-runtime-qualification)
@@ -32,6 +33,7 @@ FlashOS treats every check as evidence for a bounded claim. Passing one layer do
 | Source quality       | Formatting, linting, and host tests                               | The checked source satisfies its host-side quality rules                      | Target compilation or image behavior                     |
 | Host coverage        | Validated Flash LCOV report                                       | Host tests executed the reported Flash source lines                           | Redox, QEMU, kernel, or hardware-path coverage           |
 | Target compilation   | Redox-target build                                                | The selected component compiles for the current target ABI                    | Package installation or runtime behavior                 |
+| Platform baseline    | Source and built-artifact baseline checks                         | The selected target, compiler, libc, dynamic linker, and ELF identity agree   | Capability availability or target runtime behavior       |
 | Product profile      | `ci/check_profile.py`                                             | Declared profiles and selected repository contracts satisfy static invariants | Successful package or image construction                 |
 | Package construction | Cookbook recipe build                                             | The selected recipe can produce its package output                            | Inclusion in a clean image                               |
 | Image construction   | Completed disk or live artifact                                   | The selected profile can be assembled into an image                           | Successful boot or interactive behavior                  |
@@ -186,6 +188,35 @@ A successful target build proves that the selected binary compiles through the c
 - external commands and terminal editing work inside FlashOS.
 
 Those claims require recipe, image, and runtime evidence.
+
+## Platform baseline verification
+
+The tracked FlashOS platform baseline records the target identity used by
+Flash without claiming that every abstract platform capability is implemented.
+Run the source half from the repository root:
+
+```bash
+python3 ci/check_flashos_platform.py
+```
+
+This compares the baseline with the active image profile, root build
+toolchain, Rust source selector, `relibc` source recipe, and CI wiring. After a
+clean image build has populated target artifacts, run:
+
+```bash
+python3 ci/check_flashos_platform.py --artifacts
+```
+
+Artifact validation reads Cargo's recorded compiler queries, staged package
+metadata, and the ELF headers of `fsh` and `libc.so`. It verifies the effective
+compiler release, Rust target configuration, binary `relibc` revision, ELF
+machine/class/endianness, dynamic linker, and required shared libraries.
+
+A pass establishes that the source and built artifacts agree with the recorded
+platform identity. It does not prove that argv, descriptors, processes,
+signals, terminals, directories, or other platform capabilities behave
+correctly. Those claims require their own adapter tests and target runtime
+evidence.
 
 ## Product-profile verification
 

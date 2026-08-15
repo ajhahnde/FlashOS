@@ -101,6 +101,9 @@ jobs:
       - name: Validate package, TUI, shell, identity, and audio policy
         run: python3 ci/check_profile.py
 
+      - name: Validate the FlashOS platform source baseline
+        run: python3 ci/check_flashos_platform.py
+
       - name: Reject whitespace errors
         env:
           BASE_SHA: ${{ steps.scope.outputs.base_sha }}

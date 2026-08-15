@@ -9,6 +9,7 @@ This document defines the executable CI/CD contracts implemented by the scripts 
 - [Responsibility and boundaries](#responsibility-and-boundaries)
 - [Contract map](#contract-map)
 - [Static product-profile contract](#static-product-profile-contract)
+- [FlashOS platform baseline contract](#flashos-platform-baseline-contract)
 - [QEMU runtime contract](#qemu-runtime-contract)
 - [Hosted workflow architecture](#hosted-workflow-architecture)
 - [Standard CI workflow](#standard-ci-workflow)
@@ -51,6 +52,7 @@ FlashOS remains pre-alpha software even when all current automated contracts pas
 | Path                                                                  | Responsibility                                                                                |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | [`ci/check_profile.py`](check_profile.py)                             | Validate static FlashOS product, profile, release, pinning, and workflow invariants           |
+| [`ci/check_flashos_platform.py`](check_flashos_platform.py)           | Validate the tracked FlashOS toolchain/ABI record and built target artifacts                  |
 | [`ci/check_coverage.py`](check_coverage.py)                           | Reject empty Flash LCOV reports and reports that omit a workspace crate                       |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                   | Boot an existing x86_64 image and evaluate the current serial runtime contract                |
 | [`ci/container/Dockerfile`](container/Dockerfile)                     | Define the hosted x86_64 image-build tool environment                                         |
@@ -204,6 +206,35 @@ A passing profile check does not:
 - qualify hardware.
 
 It means only that the checked repository satisfies the static invariants encoded by the current script.
+
+## FlashOS platform baseline contract
+
+Run the source contract from the repository root:
+
+```bash
+python3 ci/check_flashos_platform.py
+```
+
+The checker validates the machine-readable Flash target record against the
+active x86_64 image profile, root build toolchain, Rust compiler recipe,
+`relibc` recipe, and hosted workflow wiring. The standard source-quality job
+runs this mode before an image exists.
+
+After a clean image build has produced target package stages, run:
+
+```bash
+python3 ci/check_flashos_platform.py --artifacts
+```
+
+Artifact mode additionally validates the Cargo-recorded target compiler and
+target configuration, the binary `relibc` package revision, and the ELF
+identity of the staged `fsh` and C runtime. The reusable image workflow runs
+this mode before collecting payloads or promoting image artifacts.
+
+The baseline records configured source selections separately from observed
+binary-package identity. A pass establishes compiler, target, libc, loader, and
+ELF agreement; it does not establish platform-capability support or runtime
+behavior.
 
 ## QEMU runtime contract
 
