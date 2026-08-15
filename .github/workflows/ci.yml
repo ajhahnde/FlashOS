@@ -26,10 +26,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Keep one stable CI workflow for every candidate, but do not spend
-      # roughly ten runner-minutes rebuilding and booting images for
-      # documentation-only updates. Unknown file types deliberately take the
-      # safe path and qualify.
+      # Keep one stable CI workflow for every candidate, but reserve the
+      # roughly ten-minute clean image and boot path for changes that can
+      # affect produced artifacts or their runtime qualification. Explicitly
+      # isolated policy, reporting, and host-tool paths skip it. Unknown paths
+      # deliberately take the safe path and qualify.
       - name: Decide whether runtime qualification is needed
         id: scope
         env:
@@ -56,7 +57,12 @@ jobs:
               mapfile -t changed < <(git diff --name-only "${base}" "${HEAD_SHA}")
               for path in "${changed[@]}"; do
                 case "${path}" in
-                  *.md|docs/*|LICENSE|LICENSES/*|.github/ISSUE_TEMPLATE/*)
+                  *.md|docs/*|LICENSE|LICENSES/*|.github/ISSUE_TEMPLATE/*|\
+                  .github/dependabot.yml|.github/workflows/coverage.yml|\
+                  .github/workflows/security.yml|codecov.yml|deny.toml|\
+                  components/flash/deny.toml|flashos.sh|flashos.zsh|\
+                  tools/flashos/*|ci/check_coverage.py|\
+                  ci/tests/test_check_coverage.py)
                     ;;
                   *)
                     qualify=true

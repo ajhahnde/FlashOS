@@ -280,14 +280,16 @@ Use a progressive workflow so that inexpensive failures are found before a full 
 8. **Review the final diff.**
    Remove generated files, accidental formatting changes, debugging output, and local configuration.
 
-Draft pull requests run the source-quality gates while development continues.
-The full clean image and QEMU path runs when the candidate is marked ready,
-and reruns after later candidate updates. Protected `main` receives that exact
-qualified tree and does not repeat ordinary qualification after merge; weekly
-clean-room CI separately detects hosted-environment drift. A lightweight
-API-only status on the resulting `main` commit verifies its merged pull-request
-association, tree identity, and exact-head required-check provenance without
-checking out or rebuilding the source.
+Use a draft pull request when incomplete work benefits from hosted source
+feedback. A complete, locally green change may open directly for review and
+run its applicable candidate gates once. The full clean image and QEMU path
+runs for ready changes that can affect produced artifacts or their runtime
+qualification, and reruns after later candidate updates. Explicitly isolated
+documentation, policy, reporting, and host-tool changes retain the stable
+source aggregate without rebuilding the operating-system images. Protected
+`main` relies on the exact-head checks enforced before merge and does not
+repeat ordinary qualification afterward; weekly clean-room CI separately
+detects hosted-environment drift.
 
 The helper interface provides a concise view of the working tree:
 

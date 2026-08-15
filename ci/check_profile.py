@@ -305,6 +305,10 @@ for expected in (
     "types: [opened, synchronize, reopened, ready_for_review]",
     'cron: "0 4 * * 0"',
     "github.event.pull_request.draft == false",
+    ".github/workflows/coverage.yml",
+    ".github/workflows/security.yml",
+    "tools/flashos/*",
+    "ci/check_coverage.py",
     "PR_DRAFT:",
     "QUALIFY_IMAGE:",
     "required image qualification was unexpectedly skipped",
@@ -314,39 +318,11 @@ for expected in (
 if "  push:\n    branches: [main]" in ci_workflow:
     fail("standard CI must not repeat exact-tree qualification after PR merge")
 
-main_qualification_workflow = (
-    ROOT / ".github/workflows/main-qualification.yml"
-).read_text()
-for expected in (
-    "name: Main qualification",
-    "push:\n    branches: [main]",
-    "checks: read",
-    "contents: read",
-    "pull-requests: read",
-    "name: qualified-merge",
-    "listPullRequestsAssociatedWithCommit",
-    "mergeTree === headTree",
-    'requireSuccess("required")',
-    'requireSuccess("security-required")',
-    '"image-and-runtime / qemu-artifact-consumer"',
-    "the newest required aggregate predates runtime qualification",
-    'run.app?.slug === "github-actions"',
-):
-    if expected not in main_qualification_workflow:
-        fail(f"main qualification provenance contract is missing: {expected}")
-for forbidden in (
-    "actions/checkout@",
-    "cargo ",
-    "docker ",
-    "qemu-system",
-    "workflow_dispatch:",
-    "pull_request:",
-    "schedule:",
-):
-    if forbidden in main_qualification_workflow:
-        fail(f"main qualification must remain API-only: {forbidden}")
-if "run.check_suite?.app?.slug" in main_qualification_workflow:
-    fail("main qualification must read the Checks API producer from run.app.slug")
+if (ROOT / ".github/workflows/main-qualification.yml").exists():
+    fail(
+        "protected merges must rely on pre-merge qualification without a "
+        "post-merge status workflow"
+    )
 
 if "--clobber" in release_workflow:
     fail("release publication must not overwrite existing release assets")
