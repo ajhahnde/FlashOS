@@ -16,12 +16,15 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   workflow changes and controlled skips remain inexpensive.
 - Streamlined hosted CI without weakening the artifact path: repository and
   product checks now share one job, documentation-only changes skip the costly
-  clean image/QEMU gate behind the stable aggregate result, informational
-  coverage runs only for relevant changes on `main`, and dependency policy is
-  path-scoped plus weekly. The image container no longer receives unnecessary
-  privileged host access, routine dependency updates are grouped, source SBOMs
-  are generated before binary artifacts enter the workspace, and published
-  release assets can no longer be overwritten by a rerun.
+  clean image/QEMU gate behind the stable aggregate result, and dependency
+  policy is path-scoped plus weekly. Draft pull requests now remain on the fast
+  source path; ready candidates run clean image/QEMU and informational Coverage
+  before merge, protected `main` no longer repeats the same qualification, and
+  weekly clean-room CI retains hosted-environment drift detection. The image
+  container no longer receives unnecessary privileged host access, routine
+  dependency updates are grouped, source SBOMs are generated before binary
+  artifacts enter the workspace, and published release assets can no longer be
+  overwritten by a rerun.
 
 ### Added
 

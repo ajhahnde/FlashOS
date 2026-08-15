@@ -479,9 +479,14 @@ The ordinary workflow is defined in [`.github/workflows/ci.yml`](../.github/work
 
 It runs on:
 
-- pushes to `main`;
-- pull requests;
+- pull-request creation, updates, reopening, and ready-for-review transitions;
+- a weekly default-branch schedule;
 - manual dispatch.
+
+Protected `main` accepts only an up-to-date pull request whose stable required
+checks are green. Ordinary CI therefore qualifies that candidate before merge
+and does not rebuild the same source tree after merge. The weekly run preserves
+independent detection of hosted-runner, toolchain, and upstream build drift.
 
 Runs for the same workflow and pull request or Git reference share a concurrency group. A newer run cancels an older in-progress run in that group.
 
@@ -503,11 +508,15 @@ The standard CI workflow does not run the Flash Redox target-build command as a 
 ### Image prerequisite
 
 The `image-and-runtime` job invokes `_image.yml` only after both host-quality
-jobs succeed. Manual runs and changes to source, configuration, recipes,
-tooling, workflows, or unknown paths always qualify the images. Changes limited
-to documentation and licenses skip this roughly ten-minute gate. The
-classification is conservative: a path that is not explicitly
-documentation-only triggers the build.
+jobs succeed. Draft pull requests run those source gates without starting the
+roughly ten-minute image path. Marking the pull request ready triggers the full
+candidate workflow, and every later update to a non-draft pull request
+requalifies its new head. Manual and weekly runs always qualify the images.
+
+For a non-draft pull request, changes to source, configuration, recipes,
+tooling, workflows, or unknown paths qualify the images. Changes limited to
+documentation and licenses skip the gate. The classification is conservative:
+a path that is not explicitly documentation-only triggers the build.
 
 For ordinary CI it uses:
 
@@ -521,15 +530,18 @@ The final job is named `required`.
 
 It runs after every ordinary gate, including when an earlier gate fails or is
 skipped. It writes a summary table and requires both source-quality results to
-be `success`. Image qualification must be `success`, except that the documented
-documentation-only policy may produce `skipped`:
+be `success`. Image qualification must be `success`, except that a draft pull
+request or the documented documentation-only policy may produce `skipped`:
 
 - repository and product-contract quality;
 - Flash quality;
 - image and runtime qualification when the change is in scope.
 
-This provides one stable aggregate status that can be selected by repository
-rules even when an expensive job is intentionally skipped.
+The aggregate checks the event, draft state, and path classification before it
+accepts a skip. A missing image result on a non-draft in-scope candidate,
+weekly run, or manual run fails rather than silently weakening qualification.
+This provides one stable status for repository rules while draft development
+remains inexpensive.
 
 The separate Coverage workflow is intentionally absent from this aggregate.
 Its own failures remain visible without making a third-party reporting service
@@ -539,10 +551,16 @@ a release or branch-protection dependency.
 
 The informational workflow is defined in
 [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml). It runs
-after relevant Flash, coverage-contract, Codecov-policy, or workflow changes
-reach `main`, and on manual dispatch. Pull requests already run the uninstrumented
-Flash suite in standard CI; avoiding a second instrumented run keeps the
-informational service out of the required review path.
+for relevant Flash, coverage-contract, Codecov-policy, or workflow changes on
+non-draft pull requests, and on manual dispatch. A draft reports a controlled
+skip; its ready-for-review transition runs Coverage against the final candidate
+before merge. Later updates to a non-draft pull request rerun it for the new
+head.
+
+Coverage remains outside the stable `required` aggregate so the third-party
+reporting service is not a branch-protection dependency. Its first-party test
+execution and completeness result are nevertheless applicable candidate
+evidence and must be inspected before merge.
 
 The workflow uses Flash's pinned stable toolchain and a pinned
 `cargo-llvm-cov` release to execute the complete host workspace test suite and
@@ -679,7 +697,6 @@ The supply-chain workflow is defined in [`.github/workflows/security.yml`](../.g
 
 It runs on:
 
-- dependency-policy changes pushed to `main`;
 - every pull request, with dependency work selected by changed-path scope;
 - its configured weekly schedule;
 - manual dispatch.
@@ -690,9 +707,10 @@ The `security-required` job is a stable aggregate suitable for repository
 rules. It succeeds for unrelated pull requests only after the scope job proves
 that dependency manifests, lockfiles, policy, Dependabot configuration, and
 the security workflow are unchanged. For an in-scope pull request it requires
-both dependency review and the combined Cargo policy job to succeed. Scheduled,
-manual, and applicable `main` runs require Cargo policy while dependency review
-remains pull-request-only.
+both dependency review and the combined Cargo policy job to succeed. Scheduled
+and manual runs require Cargo policy while dependency review remains
+pull-request-only. Protected `main` is not checked again after the exact PR
+candidate has passed.
 
 ### Dependency review
 
