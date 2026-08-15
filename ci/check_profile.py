@@ -330,6 +330,7 @@ for expected in (
     'requireSuccess("security-required")',
     '"image-and-runtime / qemu-artifact-consumer"',
     "the newest required aggregate predates runtime qualification",
+    'run.app?.slug === "github-actions"',
 ):
     if expected not in main_qualification_workflow:
         fail(f"main qualification provenance contract is missing: {expected}")
@@ -344,6 +345,8 @@ for forbidden in (
 ):
     if forbidden in main_qualification_workflow:
         fail(f"main qualification must remain API-only: {forbidden}")
+if "run.check_suite?.app?.slug" in main_qualification_workflow:
+    fail("main qualification must read the Checks API producer from run.app.slug")
 
 if "--clobber" in release_workflow:
     fail("release publication must not overwrite existing release assets")

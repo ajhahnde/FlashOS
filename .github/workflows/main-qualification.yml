@@ -94,7 +94,7 @@ jobs:
               run.status === "completed" &&
               run.completed_at !== null &&
               Date.parse(run.completed_at) <= mergedAt &&
-              run.check_suite?.app?.slug === "github-actions"
+              run.app?.slug === "github-actions"
             );
 
             function newestRun(name) {
