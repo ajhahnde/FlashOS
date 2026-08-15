@@ -314,6 +314,37 @@ for expected in (
 if "  push:\n    branches: [main]" in ci_workflow:
     fail("standard CI must not repeat exact-tree qualification after PR merge")
 
+main_qualification_workflow = (
+    ROOT / ".github/workflows/main-qualification.yml"
+).read_text()
+for expected in (
+    "name: Main qualification",
+    "push:\n    branches: [main]",
+    "checks: read",
+    "contents: read",
+    "pull-requests: read",
+    "name: qualified-merge",
+    "listPullRequestsAssociatedWithCommit",
+    "mergeTree === headTree",
+    'requireSuccess("required")',
+    'requireSuccess("security-required")',
+    '"image-and-runtime / qemu-artifact-consumer"',
+    "the newest required aggregate predates runtime qualification",
+):
+    if expected not in main_qualification_workflow:
+        fail(f"main qualification provenance contract is missing: {expected}")
+for forbidden in (
+    "actions/checkout@",
+    "cargo ",
+    "docker ",
+    "qemu-system",
+    "workflow_dispatch:",
+    "pull_request:",
+    "schedule:",
+):
+    if forbidden in main_qualification_workflow:
+        fail(f"main qualification must remain API-only: {forbidden}")
+
 if "--clobber" in release_workflow:
     fail("release publication must not overwrite existing release assets")
 if "published assets are immutable" not in release_workflow:

@@ -1,0 +1,190 @@
+name: Main qualification
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  checks: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: main-qualification-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  provenance:
+    name: qualified-merge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify pre-merge qualification provenance
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const mergeSha = context.sha;
+            const defaultBranch = context.payload.repository.default_branch;
+
+            const associatedPulls = await github.paginate(
+              github.rest.repos.listPullRequestsAssociatedWithCommit,
+              {
+                owner,
+                repo,
+                commit_sha: mergeSha,
+                per_page: 100,
+              },
+            );
+
+            const mergedPulls = associatedPulls.filter((pull) =>
+              pull.merged_at !== null &&
+              pull.base.ref === defaultBranch &&
+              pull.base.repo.full_name === `${owner}/${repo}`
+            );
+
+            const treeMatches = [];
+            for (const pull of mergedPulls) {
+              const [mergeCommit, headCommit] = await Promise.all([
+                github.rest.repos.getCommit({
+                  owner,
+                  repo,
+                  ref: mergeSha,
+                }),
+                github.rest.repos.getCommit({
+                  owner,
+                  repo,
+                  ref: pull.head.sha,
+                }),
+              ]);
+
+              const mergeTree = mergeCommit.data.commit.tree.sha;
+              const headTree = headCommit.data.commit.tree.sha;
+              if (mergeTree === headTree) {
+                treeMatches.push({ pull, mergeTree });
+              }
+            }
+
+            if (treeMatches.length !== 1) {
+              core.setFailed(
+                `expected exactly one merged pull request with tree identity for ${mergeSha}; found ${treeMatches.length}`,
+              );
+              return;
+            }
+
+            const { pull, mergeTree } = treeMatches[0];
+            if (pull.draft) {
+              core.setFailed(`associated pull request #${pull.number} is still a draft`);
+              return;
+            }
+
+            const mergedAt = Date.parse(pull.merged_at);
+            const checkRuns = await github.paginate(
+              github.rest.checks.listForRef,
+              {
+                owner,
+                repo,
+                ref: pull.head.sha,
+                filter: "all",
+                per_page: 100,
+              },
+            );
+
+            const eligibleRuns = checkRuns.filter((run) =>
+              run.status === "completed" &&
+              run.completed_at !== null &&
+              Date.parse(run.completed_at) <= mergedAt &&
+              run.check_suite?.app?.slug === "github-actions"
+            );
+
+            function newestRun(name) {
+              return eligibleRuns
+                .filter((run) => run.name === name)
+                .sort((left, right) =>
+                  Date.parse(right.completed_at) - Date.parse(left.completed_at)
+                )[0];
+            }
+
+            function requireSuccess(name) {
+              const run = newestRun(name);
+              if (!run) {
+                throw new Error(
+                  `missing completed ${name} check on pull request head ${pull.head.sha}`,
+                );
+              }
+              if (run.conclusion !== "success") {
+                throw new Error(
+                  `newest ${name} check concluded ${run.conclusion}, not success`,
+                );
+              }
+              return run;
+            }
+
+            let required;
+            let securityRequired;
+            try {
+              required = requireSuccess("required");
+              securityRequired = requireSuccess("security-required");
+            } catch (error) {
+              core.setFailed(error.message);
+              return;
+            }
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner,
+                repo,
+                pull_number: pull.number,
+                per_page: 100,
+              },
+            );
+            const documentationOnly = files.length > 0 && files.every(({ filename }) =>
+              filename.endsWith(".md") ||
+              filename.startsWith("docs/") ||
+              filename === "LICENSE" ||
+              filename.startsWith("LICENSES/") ||
+              filename.startsWith(".github/ISSUE_TEMPLATE/")
+            );
+
+            let runtime = null;
+            if (!documentationOnly) {
+              try {
+                runtime = requireSuccess(
+                  "image-and-runtime / qemu-artifact-consumer",
+                );
+              } catch (error) {
+                core.setFailed(error.message);
+                return;
+              }
+
+              if (Date.parse(required.completed_at) < Date.parse(runtime.completed_at)) {
+                core.setFailed(
+                  "the newest required aggregate predates runtime qualification",
+                );
+                return;
+              }
+            }
+
+            await core.summary
+              .addHeading("Qualified merge provenance")
+              .addTable([
+                [
+                  { data: "evidence", header: true },
+                  { data: "result", header: true },
+                ],
+                ["pull request", `#${pull.number}`],
+                ["merge tree", mergeTree],
+                ["pull-request head", pull.head.sha],
+                ["CI / required", required.conclusion],
+                ["Security / security-required", securityRequired.conclusion],
+                [
+                  "image and QEMU",
+                  runtime === null ? "not required (documentation-only)" : runtime.conclusion,
+                ],
+              ])
+              .write();
+
+            core.info(
+              `main ${mergeSha} has the qualified tree from pull request #${pull.number}`,
+            );

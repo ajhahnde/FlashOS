@@ -16,6 +16,7 @@ This document defines the executable CI/CD contracts implemented by the scripts 
 - [QEMU runtime contract](#qemu-runtime-contract)
 - [Hosted workflow architecture](#hosted-workflow-architecture)
 - [Standard CI workflow](#standard-ci-workflow)
+- [Main qualification status](#main-qualification-status)
 - [Coverage workflow](#coverage-workflow)
 - [Reusable image qualification](#reusable-image-qualification)
 - [Security workflow](#security-workflow)
@@ -29,13 +30,14 @@ This document defines the executable CI/CD contracts implemented by the scripts 
 
 ## Responsibility and boundaries
 
-The CI implementation separates five responsibilities:
+The CI implementation separates six responsibilities:
 
 1. source and host-workspace quality;
 2. static repository and product-profile validation;
 3. image construction and runtime qualification;
 4. informational Flash host-coverage measurement;
-5. security review and release delivery.
+5. merged-tree qualification provenance; and
+6. security review and release delivery.
 
 The executable scripts under `ci/` own product-specific assertions that must also be available outside GitHub Actions. Workflow files own hosted orchestration, permissions, artifact transfer, retention, and publication conditions.
 
@@ -63,6 +65,7 @@ FlashOS remains pre-alpha software even when all current automated contracts pas
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                   | Boot an existing x86_64 image and evaluate the current serial runtime contract                |
 | [`ci/container/Dockerfile`](container/Dockerfile)                     | Define the hosted x86_64 image-build tool environment                                         |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             | Run ordinary source, product, image, and runtime gates                                        |
+| [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml) | Report and verify pre-merge qualification on the merged `main` tree                           |
 | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) | Generate, validate, and upload informational Flash host coverage                              |
 | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)     | Build, checksum, promote, download, and boot disk and live images                             |
 | [`.github/workflows/security.yml`](../.github/workflows/security.yml) | Run dependency review and Cargo supply-chain policies                                         |
@@ -179,6 +182,12 @@ The script verifies the presence of selected release-critical workflow contracts
 It also binds the informational coverage workflow to its pinned generator,
 OIDC-authenticated single-report upload, report-completeness guard, and disabled
 Codecov status/comment policy.
+
+The merged-tree status contract requires a read-only main-push workflow that
+uses GitHub's commit, pull-request, and checks APIs to verify tree identity and
+pre-merge required evidence. It rejects checkout, Cargo, Docker, QEMU, manual,
+pull-request, and scheduled execution in that workflow so the status cannot
+silently become a second qualification path.
 
 These checks confirm that the workflow source contains the required contract elements. They do not execute the workflow or parse its complete semantics.
 
@@ -465,6 +474,12 @@ coverage.yml
     ├── complete LCOV report guard
     └── OIDC-authenticated Codecov upload
 
+main-qualification.yml on a protected main update
+└── Main qualification / qualified-merge
+    ├── merged pull-request association and tree identity
+    ├── exact-head required and security-required provenance
+    └── successful QEMU provenance when image qualification applied
+
 release.yml
 ├── _image.yml using flashos-release
 ├── package, checksum, SBOM, and attest
@@ -487,6 +502,8 @@ Protected `main` accepts only an up-to-date pull request whose stable required
 checks are green. Ordinary CI therefore qualifies that candidate before merge
 and does not rebuild the same source tree after merge. The weekly run preserves
 independent detection of hosted-runner, toolchain, and upstream build drift.
+The separate main-qualification status connects the resulting merge commit to
+that evidence without repeating it.
 
 Runs for the same workflow and pull request or Git reference share a concurrency group. A newer run cancels an older in-progress run in that group.
 
@@ -546,6 +563,29 @@ remains inexpensive.
 The separate Coverage workflow is intentionally absent from this aggregate.
 Its own failures remain visible without making a third-party reporting service
 a release or branch-protection dependency.
+
+## Main qualification status
+
+The lightweight status workflow is defined in
+[`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml).
+It runs only when protected `main` advances and reports the
+`Main qualification / qualified-merge` check on the new commit.
+
+GitHub assigns a new commit identity to a squash merge, so pull-request checks
+do not appear directly on that merge commit. The workflow uses GitHub's API to
+prove that the new `main` tree has exactly one associated merged pull request
+with the same tree. It then verifies that the pull-request head had successful
+GitHub Actions `required` and `security-required` checks before the merge. For
+a change outside the documented documentation-only scope, it also requires a
+successful QEMU artifact-consumer check and requires the final `required`
+aggregate to follow that runtime result.
+
+The workflow has read-only `contents`, `pull-requests`, and `checks`
+permissions. It does not check out source, run Cargo, build a container or
+image, boot QEMU, generate Coverage, or repeat dependency policy. Its green
+result is qualification provenance for an already-tested tree, not a second
+qualification run. Missing or ambiguous pull-request association, tree drift,
+or absent/failed required evidence makes the status fail closed.
 
 ## Coverage workflow
 
@@ -1139,6 +1179,7 @@ exclusion, content-sensitive identity, and clean-checkout CI contract.
 | QEMU serial runtime contract          | [`qemu_smoke.py`](qemu_smoke.py)                                              |
 | Hosted build environment              | [`container/Dockerfile`](container/Dockerfile)                                |
 | Ordinary CI orchestration             | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                     |
+| Merged-tree qualification status      | [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml) |
 | Informational host coverage           | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml)         |
 | Coverage report completeness          | [`check_coverage.py`](check_coverage.py)                                      |
 | Codecov reporting policy              | [`codecov.yml`](../codecov.yml)                                               |
