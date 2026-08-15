@@ -66,6 +66,9 @@ jobs:
               "build/x86_64/${CONFIG_NAME}/harddrive.img" \
               "build/x86_64/${CONFIG_NAME}/redox-live.iso"
 
+      - name: Validate the FlashOS platform build baseline
+        run: python3 ci/check_flashos_platform.py --artifacts
+
       # Every package installed into the image is staged under its recipe as
       # target/<triple>/stage before it is packed. Scanning those trees
       # describes what the image actually contains, which a scan of the

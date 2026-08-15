@@ -25,6 +25,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added a machine-readable FlashOS x86_64 platform baseline for Flash. It
+  records the configured Rust and `relibc` inputs separately from observed
+  compiler, binary-package, dynamic-linker, and ELF identity, with source checks
+  in ordinary CI and artifact checks in the clean-room image path. The baseline
+  establishes the adapter target without claiming capability support or runtime
+  qualification.
 - Added arbitrary alternating mixed-pipeline execution. Maximal internal
   segments stream concurrently across external byte stages without whole-stream
   capture or cross-thread structured carriers, while source-ordered
