@@ -506,17 +506,15 @@ The standard CI workflow runs two independent jobs for:
 
 The image workflow begins only after these required jobs succeed. Manual runs
 and any change that can affect produced images receive full image and runtime
-qualification. Changes limited to documentation and licenses retain the stable
-aggregate CI result but skip the expensive image gate.
+qualification. Changes limited to documentation, licenses, or explicitly
+isolated policy, reporting, and host-tool paths retain the stable aggregate CI
+result but skip the expensive image gate. Unknown paths qualify rather than
+silently losing runtime evidence.
 
-After a protected squash merge, the new `main` commit has a different commit
-identity from the qualified pull-request head. The lightweight Main
-qualification workflow gives that commit a visible status by proving through
-GitHub's API that its tree equals the associated merged pull-request tree and
-that the exact head passed `required` and `security-required`. When image
-qualification applied, it also verifies successful QEMU provenance before the
-final aggregate. This status reuses evidence; it does not check out, rebuild,
-or reboot the merged tree.
+Protected `main` requires the exact pull-request head to pass the stable CI and
+Security aggregates before merge. The resulting squash commit has a different
+commit identity, but it does not repeat or restate the already-enforced
+candidate checks; weekly clean-room CI detects later hosted-environment drift.
 
 ### Clean-container image producer
 
@@ -808,7 +806,6 @@ Do not remove an assertion solely because a change fails it. First determine whe
 | QEMU runtime contract                    | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                             |
 | Public local helper behavior             | [`flashos.sh`](../flashos.sh)                                         |
 | Standard hosted CI orchestration         | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             |
-| Merged-tree qualification status         | [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml) |
 | Informational host coverage              | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) |
 | Coverage report completeness             | [`ci/check_coverage.py`](../ci/check_coverage.py)                     |
 | Codecov reporting policy                 | [`codecov.yml`](../codecov.yml)                                       |

@@ -15,13 +15,14 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   policy run only for relevant manifests, lockfiles, policy, Dependabot, or
   workflow changes and controlled skips remain inexpensive.
 - Streamlined hosted CI without weakening the artifact path: repository and
-  product checks now share one job, documentation-only changes skip the costly
-  clean image/QEMU gate behind the stable aggregate result, and dependency
-  policy is path-scoped plus weekly. Draft pull requests now remain on the fast
-  source path; ready candidates run clean image/QEMU and informational Coverage
-  before merge, protected `main` no longer repeats the same qualification, and
-  an API-only merged-tree provenance check gives each resulting `main` commit a
-  visible status tied to its exact-head required evidence. Weekly clean-room CI
+  product checks now share one job, documentation and explicitly isolated
+  policy, reporting, and host-tool changes skip the costly clean image/QEMU
+  gate behind the stable aggregate result, and dependency policy is path-scoped
+  plus weekly. Draft pull requests are optional fast-feedback containers for
+  incomplete work; complete candidates may enter ready review directly and run
+  applicable clean image/QEMU and informational Coverage evidence once.
+  Protected `main` relies on the exact-head evidence enforced before merge
+  instead of adding a custom status afterward, while weekly clean-room CI
   retains hosted-environment drift detection. The image
   container no longer receives unnecessary privileged host access, routine
   dependency updates are grouped, source SBOMs are generated before binary
