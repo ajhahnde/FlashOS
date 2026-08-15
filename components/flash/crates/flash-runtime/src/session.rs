@@ -1692,10 +1692,27 @@ fn run_mixed_pipeline(
         Ok(result) => result.ordinal(),
         Err(failure) => failure.stage_index,
     });
+    let requested_exit_stage = segment_results.iter().find_map(|result| match result {
+        Ok(MixedSegmentResult::Exit { stage_index, .. }) => Some(*stage_index),
+        _ => None,
+    });
     let failure_index = segment_results
         .iter()
-        .position(|result| matches!(result, Err(failure) if !failure.triggered))
-        .or_else(|| segment_results.iter().position(Result::is_err));
+        .position(|result| {
+            matches!(
+                result,
+                Err(failure)
+                    if !failure.triggered
+                        && requested_exit_stage
+                            .is_none_or(|exit_stage| failure.stage_index < exit_stage)
+            )
+        })
+        .or_else(|| {
+            requested_exit_stage
+                .is_none()
+                .then(|| segment_results.iter().position(Result::is_err))
+                .flatten()
+        });
     if let Some(failure_index) = failure_index {
         let Err(failure) = segment_results.remove(failure_index) else {
             unreachable!("the selected mixed segment result is a failure");
@@ -1738,6 +1755,14 @@ fn run_mixed_pipeline(
                     .environment_mut()
                     .apply_delta(&closure_environment, &updated);
                 requested_exit = Some(code);
+            }
+            MixedSegmentResult::StoppedByExit {
+                closure_environment: updated,
+                ..
+            } => {
+                pending_state
+                    .environment_mut()
+                    .apply_delta(&closure_environment, &updated);
             }
             MixedSegmentResult::Skipped { .. } => {}
         }
@@ -1846,6 +1871,7 @@ impl MixedPreparation {
             state: Mutex::new(MixedPreparationState {
                 next_segment: 0,
                 stopped: false,
+                requested_exit: None,
                 pending_state,
             }),
             ready: Condvar::new(),
@@ -1856,7 +1882,13 @@ impl MixedPreparation {
 struct MixedPreparationState {
     next_segment: usize,
     stopped: bool,
+    requested_exit: Option<MixedExit>,
     pending_state: SessionState,
+}
+
+#[derive(Clone, Copy)]
+struct MixedExit {
+    ordinal: usize,
 }
 
 struct MixedSegmentFailure {
@@ -1912,7 +1944,12 @@ enum MixedSegmentResult {
     },
     Exit {
         ordinal: usize,
+        stage_index: usize,
         code: u8,
+        closure_environment: Environment,
+    },
+    StoppedByExit {
+        ordinal: usize,
         closure_environment: Environment,
     },
     Skipped {
@@ -1925,6 +1962,7 @@ impl MixedSegmentResult {
         match self {
             Self::Completed { ordinal, .. }
             | Self::Exit { ordinal, .. }
+            | Self::StoppedByExit { ordinal, .. }
             | Self::Skipped { ordinal } => *ordinal,
         }
     }
@@ -2037,13 +2075,18 @@ fn run_mixed_segment(
             }
             Ok(StageOutcome::Exit(code)) => {
                 prepared.stopped = true;
+                prepared.requested_exit = Some(MixedExit { ordinal });
                 preparation.ready.notify_all();
-                drop(prepared);
-                return Ok(MixedSegmentResult::Exit {
+                let result = MixedSegmentResult::Exit {
                     ordinal,
+                    stage_index: index,
                     code,
                     closure_environment: closure_context.environment_snapshot(),
-                });
+                };
+                drop(prepared);
+                drop(resource);
+                control.cancel_and_reap();
+                return Ok(result);
             }
             Err(error) => {
                 prepared.stopped = true;
@@ -2062,6 +2105,17 @@ fn run_mixed_segment(
     drop(prepared);
 
     if control.is_cancelled() {
+        let requested_exit = preparation
+            .state
+            .lock()
+            .expect("mixed preparation state must not be poisoned")
+            .requested_exit;
+        if requested_exit.is_some_and(|exit| ordinal < exit.ordinal) {
+            return Ok(MixedSegmentResult::StoppedByExit {
+                ordinal,
+                closure_environment: closure_context.environment_snapshot(),
+            });
+        }
         return Ok(MixedSegmentResult::Skipped { ordinal });
     }
     let cancellation_was_active = false;
@@ -2082,6 +2136,20 @@ fn run_mixed_segment(
             .expect("mixed preparation state must not be poisoned");
         prepared.stopped = true;
         preparation.ready.notify_all();
+        if prepared
+            .requested_exit
+            .is_some_and(|exit| ordinal < exit.ordinal)
+            && matches!(
+                &interrupt,
+                Interrupt::Runtime(error)
+                    if matches!(error.kind(), RuntimeErrorKind::StreamCancelled { .. })
+            )
+        {
+            return Ok(MixedSegmentResult::StoppedByExit {
+                ordinal,
+                closure_environment: closure_context.environment_snapshot(),
+            });
+        }
         return Err(MixedSegmentFailure::interrupt(
             last_stage,
             interrupt,

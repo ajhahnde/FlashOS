@@ -997,7 +997,7 @@ impl MixedPipeline {
         }
     }
 
-    /// Stop and reap every spawned external stage after an internal failure.
+    /// Stop and reap every spawned external stage after an unsuccessful path.
     pub(crate) fn terminate(self) {
         self.control.cancel_and_reap();
     }
@@ -1019,13 +1019,13 @@ impl MixedPipelineControl {
         }
     }
 
-    /// Whether a genuine failure has begun peer cancellation.
+    /// Whether a failure or explicit exit has begun peer cancellation.
     pub(crate) fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
 
     /// Trip cancellation once, terminate every live child, and perform the
-    /// final waits before the originating worker returns.
+    /// final waits before the originating failure or exit path returns.
     pub(crate) fn cancel_and_reap(&self) {
         if self.cancelled.swap(true, Ordering::AcqRel) {
             return;

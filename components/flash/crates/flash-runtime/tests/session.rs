@@ -22,10 +22,10 @@ use std::sync::{Arc, Barrier, Mutex, mpsc};
 
 use flash_platform::{
     Capabilities, Capability, ChildProcess, DescriptorEndpoint, DescriptorReadError, FakePlatform,
-    FileActionError, FileOpenRequest, ForegroundTerminalGuard, JobSignal, PipeEndpoints, PipeError,
-    Platform, PlatformError, ProcessGroup, ProcessGroupId, ProcessStatus, ProcessTransition,
-    RecordingPlatform, SignalError, SpawnError, SpawnRequest, TerminalSize, TerminateError,
-    WaitError,
+    FileActionError, FileIoEndpoint, FileOpenRequest, ForegroundTerminalGuard, JobSignal,
+    PipeEndpoints, PipeError, Platform, PlatformError, ProcessGroup, ProcessGroupId, ProcessStatus,
+    ProcessTransition, RecordingPlatform, SignalError, SpawnError, SpawnRequest, TerminalSize,
+    TerminateError, WaitError, WorkingDirectoryError, WorkingDirectoryRequest,
 };
 use flash_platform_posix::PosixPlatform;
 use flash_runtime::builtin::standard_registry;
@@ -168,6 +168,22 @@ impl DescriptorEndpoint for BackgroundEndpoint {
         } else {
             Ok(buffer.len())
         }
+    }
+}
+
+impl FileIoEndpoint for BackgroundEndpoint {
+    fn read(&mut self, buffer: &mut [u8]) -> Result<usize, FileActionError> {
+        if let Some(data) = self.read_data.take() {
+            let amount = data.len().min(buffer.len());
+            buffer[..amount].copy_from_slice(&data[..amount]);
+            Ok(amount)
+        } else {
+            Ok(0)
+        }
+    }
+
+    fn write(&mut self, buffer: &[u8]) -> Result<usize, FileActionError> {
+        Ok(buffer.len())
     }
 }
 
@@ -570,6 +586,18 @@ impl Platform for ControlledBackgroundPlatform {
         self.require(Capability::HangupDisposition)
     }
 
+    fn resolve_working_directory(
+        &self,
+        request: WorkingDirectoryRequest<'_>,
+    ) -> Result<PathBuf, WorkingDirectoryError> {
+        self.require(Capability::WorkingDirectory)?;
+        Ok(if request.path().is_absolute() {
+            request.path().to_owned()
+        } else {
+            request.cwd().join(request.path())
+        })
+    }
+
     fn pipe(&self) -> Result<PipeEndpoints, PipeError> {
         let index = self.pipe_calls.fetch_add(1, Ordering::SeqCst);
         let read_failure = self
@@ -604,6 +632,13 @@ impl Platform for ControlledBackgroundPlatform {
         &self,
         _request: FileOpenRequest<'_>,
     ) -> Result<Box<dyn DescriptorEndpoint>, FileActionError> {
+        Ok(Box::new(self.endpoint(None, None, None, None)))
+    }
+
+    fn open_file_io(
+        &self,
+        _request: FileOpenRequest<'_>,
+    ) -> Result<Box<dyn FileIoEndpoint>, FileActionError> {
         Ok(Box::new(self.endpoint(None, None, None, None)))
     }
 
@@ -5269,6 +5304,371 @@ fn mixed_segment_preparation_is_source_ordered_while_eager_drains_overlap() {
         fs::read(temp.path().join("final.txt")).unwrap(),
         expected.as_bytes()
     );
+}
+
+#[test]
+fn successful_mixed_transactions_commit_state_and_source_ordered_closure_deltas() {
+    let temp = TempDir::new("session-mixed-transaction-success");
+    let nested = temp.path().join("nested");
+    fs::create_dir(&nested).expect("the committed working directory should be created");
+    fs::write(temp.path().join("input.txt"), b"transaction\n")
+        .expect("the transaction fixture should be written");
+
+    let mut session = Session::new(temp.path(), environment(), SessionOptions::default());
+    let probe = Probe::new(["/bin/cat"]);
+    let mut sink = Vec::new();
+    session
+        .submit(
+            "<interactive>",
+            format!(
+                "def early(row) {{\n\
+                     export WINNER = 'early'\n\
+                     export LOCAL = 'visible'\n\
+                     return $row\n\
+                 }}\n\
+                 def observe(row) {{\n\
+                     export WITHIN_SEGMENT = 'visible'\n\
+                     return $row\n\
+                 }}\n\
+                 def late(row) {{\n\
+                     export WINNER = 'late'\n\
+                     return $row\n\
+                 }}\n\
+                 ^/bin/cat < input.txt | save observed.txt | cd {} | pwd | to text | \
+                 ^/bin/cat | from text | each {{|row| early($row)}} | \
+                 each {{|row| observe($row)}} | to text | ^/bin/cat | from text | \
+                 each {{|row| late($row)}} | to text",
+                nested.display(),
+            ),
+            &probe,
+            &PosixPlatform,
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect("the complete mixed transaction should commit once");
+
+    let canonical_nested = fs::canonicalize(&nested).expect("the nested directory should exist");
+    assert_eq!(session.cwd(), canonical_nested);
+    assert_eq!(
+        session.environment().get("PWD"),
+        Some(canonical_nested.as_os_str())
+    );
+    assert_eq!(
+        session.environment().get("WINNER"),
+        Some(OsStr::new("late")),
+        "a later segment delta must win deterministically"
+    );
+    assert_eq!(
+        session.environment().get("LOCAL"),
+        Some(OsStr::new("visible")),
+        "the first lazy closure stage must retain its delta"
+    );
+    assert_eq!(
+        session.environment().get("WITHIN_SEGMENT"),
+        Some(OsStr::new("visible")),
+        "every lazy closure stage contributes to the shared segment delta"
+    );
+    assert_eq!(session.current_status().and_then(Status::code), Some(0));
+    assert_eq!(
+        fs::read(temp.path().join("observed.txt")).unwrap(),
+        b"transaction\n"
+    );
+    assert_eq!(sink, format!("{}\n", canonical_nested.display()).as_bytes());
+}
+
+fn stateful_mixed_source(tail: &str) -> String {
+    format!(
+        "def mark(row) {{\n\
+             export LEAK = 'no'\n\
+             return $row\n\
+         }}\n\
+         cd /next | which pwd | each {{|row| mark($row)}} | get kind | \
+         encode utf8 | {tail}"
+    )
+}
+
+fn session_with_baseline_status() -> Session {
+    let mut session = session();
+    assert_eq!(
+        submit(&mut session, "pwd", &Probe::default()),
+        SubmitOutcome::Continued
+    );
+    session
+}
+
+fn assert_mixed_state_rolled_back(session: &Session) {
+    assert_eq!(session.cwd(), Path::new("/work"));
+    assert_eq!(session.environment().get("LEAK"), None);
+    assert_eq!(session.environment().get("PWD"), None);
+    assert_eq!(session.current_status().and_then(Status::code), Some(0));
+}
+
+#[test]
+fn mixed_runtime_failure_rolls_back_all_pending_state() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session_with_baseline_status();
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[683]]);
+    platform.feed_pipe_read(1, vec![0xff]);
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("let runtime-failure cancellation reap the child");
+    let probe = Probe::new(["/bin/tool"]);
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            stateful_mixed_source("^tool | decode utf8"),
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("a later lazy decode failure should roll back the transaction");
+
+    assert!(error.render().contains("malformed input at byte offset 0"));
+    assert_mixed_state_rolled_back(&session);
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1]
+    );
+    assert_eq!(platform.active_endpoints(), 0);
+    assert!(sink.is_empty());
+}
+
+#[test]
+fn deferred_check_failure_rolls_back_state_but_keeps_observed_output() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session_with_baseline_status();
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[684]]);
+    platform.feed_pipe_read(1, b"bytes".to_vec());
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(7))))
+        .expect("complete the checked external stage unsuccessfully");
+    let probe = Probe::new(["/bin/tool"]);
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            stateful_mixed_source("^tool | check | decode bytes | length"),
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("a deferred check failure should reject pending state");
+
+    assert!(
+        error
+            .render()
+            .contains("checked command was unsuccessful: exit 7")
+    );
+    assert_mixed_state_rolled_back(&session);
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1]
+    );
+    assert!(
+        !sink.is_empty(),
+        "already-rendered output is not transactional"
+    );
+}
+
+#[test]
+fn mixed_output_failure_rolls_back_all_pending_state() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session_with_baseline_status();
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[685]]);
+    platform.feed_pipe_read(1, b"output".to_vec());
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("let output-failure cancellation reap the child");
+    let probe = Probe::new(["/bin/tool"]);
+    let mut sink = FailingOutput;
+
+    let error = session
+        .submit(
+            "<interactive>",
+            stateful_mixed_source("^tool | decode bytes | length"),
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("a final presentation failure should reject pending state");
+
+    let flash_runtime::session::SubmitError::Output(error) = error else {
+        panic!("the injected sink failure must retain its output-error channel");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("the injected session output failed")
+    );
+    assert_mixed_state_rolled_back(&session);
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1]
+    );
+    assert_eq!(platform.active_endpoints(), 0);
+}
+
+#[test]
+fn mixed_wait_failure_rolls_back_all_pending_state() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session_with_baseline_status();
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[686]]);
+    controls[0]
+        .steps
+        .send(Err(WaitError::new(
+            io::ErrorKind::Other,
+            "the injected transaction wait failed",
+        )))
+        .expect("inject the transaction wait failure");
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("let wait-failure cleanup reap the child");
+    let probe = Probe::new(["/bin/tool"]);
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            stateful_mixed_source("^tool"),
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect_err("a child wait failure should reject pending state");
+
+    assert!(
+        error
+            .render()
+            .contains("the injected transaction wait failed")
+    );
+    assert_mixed_state_rolled_back(&session);
+    assert_eq!(controls[0].terminate_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        controls[0].wait_entries.try_iter().collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(platform.active_endpoints(), 0);
+    assert!(sink.is_empty());
+}
+
+#[test]
+fn a_middle_island_exit_cancels_blocked_peers_and_commits_prior_state() {
+    let (completion, finished) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let temp = TempDir::new("session-mixed-middle-exit");
+        let prior = temp.path().join("prior");
+        let later = temp.path().join("later");
+        fs::create_dir(&prior).expect("the source-prior directory should be created");
+        fs::create_dir(&later).expect("the source-later directory should be created");
+        fs::write(temp.path().join("large.txt"), b"line\n".repeat(512 * 1024))
+            .expect("the source-prior stream should be large enough to apply backpressure");
+
+        let mut session = Session::new(temp.path(), environment(), SessionOptions::default());
+        let probe = Probe::new(["/bin/sh", "/bin/cat"]);
+        let mut sink = Vec::new();
+        let outcome = session
+            .submit(
+                "<interactive>",
+                format!(
+                    "def prior_mark(row) {{\n\
+                         export PRIOR_SEEN = 'yes'\n\
+                         return $row\n\
+                     }}\n\
+                     def exit_mark(row) {{\n\
+                         export EXIT_SEEN = 'yes'\n\
+                         return $row\n\
+                     }}\n\
+                     open large.txt | from text | each {{|row| prior_mark($row)}} | \
+                     to text | ^/bin/sh -c 'sleep 1; printf y; exec /bin/sleep 10' | \
+                     decode utf8 | first 1 | \
+                     each {{|row| exit_mark($row)}} | encode utf8 | save captured.bin | \
+                     cd {} | exit 9 | cd {} | pwd | to text | ^/bin/cat",
+                    prior.display(),
+                    later.display(),
+                ),
+                &probe,
+                &PosixPlatform,
+                &FakeClock::new(),
+                &mut sink,
+            )
+            .expect("explicit exit should complete after cancelling blocked peers");
+
+        completion
+            .send((
+                outcome,
+                session.cwd().to_owned(),
+                session.environment().get("PRIOR_SEEN").map(OsStr::to_owned),
+                session.environment().get("EXIT_SEEN").map(OsStr::to_owned),
+                fs::metadata(temp.path().join("captured.bin"))
+                    .expect("the eager source-prior save should remain observable")
+                    .len(),
+                sink,
+            ))
+            .expect("the test receiver should remain available");
+    });
+
+    let (outcome, cwd, prior_seen, exit_seen, captured_len, sink) = finished
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("middle-island exit must cancel external children before joining segment workers");
+    assert_eq!(outcome, SubmitOutcome::Exit(9));
+    assert_eq!(cwd.file_name(), Some(OsStr::new("prior")));
+    assert_eq!(prior_seen.as_deref(), Some(OsStr::new("yes")));
+    assert_eq!(exit_seen.as_deref(), Some(OsStr::new("yes")));
+    assert!(captured_len > 0);
+    assert!(sink.is_empty());
+}
+
+#[test]
+fn a_middle_island_exit_terminates_and_reaps_every_external_child() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[687, 688]]);
+    platform.feed_pipe_read(0, b"exit input".to_vec());
+    let probe = Probe::new(["/bin/tool", "/bin/other"]);
+    for control in &controls {
+        control
+            .steps
+            .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+            .expect("let explicit-exit cancellation reap every child");
+    }
+    let mut sink = Vec::new();
+
+    let outcome = session
+        .submit(
+            "<interactive>",
+            "^tool | decode bytes | first 1 | encode bytes | save captured.bin | \
+             cd /prior | exit 9 | cd /later | pwd | to text | ^other",
+            &probe,
+            &platform,
+            clock.as_ref(),
+            &mut sink,
+        )
+        .expect("explicit exit should complete after exact child cleanup");
+
+    assert_eq!(outcome, SubmitOutcome::Exit(9));
+    assert_eq!(session.cwd(), Path::new("/prior"));
+    for control in &controls {
+        assert_eq!(control.terminate_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(control.wait_entries.try_iter().collect::<Vec<_>>(), vec![1]);
+    }
+    assert_eq!(platform.active_endpoints(), 0);
+    assert_eq!(platform.foreground_releases(), 1);
+    assert!(sink.is_empty());
 }
 
 #[test]
