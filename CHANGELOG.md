@@ -32,6 +32,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added live Flash interactive session configuration and completion snapshots.
+  Trusted startup config can transactionally set `pipefail`, command-capture
+  limits, completion, and history without leaking its temporary setting
+  bindings into scripts or the prompt; safe mode and opt-out flags restore
+  clean defaults. Host completion now refreshes at each prompt from live scope,
+  cwd, child `PATH`, and bounded UTF-8 executable/path snapshots while keeping
+  host I/O outside the keypress callback.
 - Added a dedicated FlashOS platform adapter for Flash. The adapter keeps the
   classified Rust and `relibc` routes behind the portable platform contract and
   adds native-path-preserving home, configuration, cache, and state selection
