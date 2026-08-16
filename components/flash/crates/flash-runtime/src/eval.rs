@@ -83,7 +83,7 @@ impl RuntimeError {
         self.source.as_deref()
     }
 
-    fn with_source(mut self, source: Arc<SourceFile>) -> Self {
+    pub(crate) fn with_source(mut self, source: Arc<SourceFile>) -> Self {
         self.source = Some(source);
         self
     }

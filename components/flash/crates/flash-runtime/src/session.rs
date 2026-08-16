@@ -41,8 +41,10 @@ use crate::builtin::{SessionState, standard_registry};
 use crate::closure::OwnedClosureContext;
 use crate::command::CommandRegistry;
 use crate::eval::{
-    CancellationToken, Clock, Completion, EvalLimits, ExpandedWord, ResourceBudget, RuntimeError,
-    RuntimeErrorKind, evaluate_in_environment_owned_with_binding_types, expand_word,
+    Abort, CancellationToken, CapturePosition, CapturedChain, Clock, EvalLimits, EvaluationContext,
+    EvaluationHost, EvaluationPolicy, ExpandedWord, HostedEvaluationFailure,
+    HostedEvaluationOutcome, ResourceBudget, RuntimeError, RuntimeErrorKind, evaluate_with_host,
+    expand_word,
 };
 use crate::execute::{
     MixedPipelineControl, MixedSegment, aggregate_statuses, execute_foreground_status,
@@ -387,76 +389,74 @@ impl Session {
             match statement.kind() {
                 StatementKind::Import(_) if imports_analyzed => continue,
                 StatementKind::ModuleExport(_) if imports_analyzed => continue,
-                StatementKind::Job(job) => {
-                    if let Some(background_span) = job.background_span {
-                        let Some(jobs) = jobs.as_mut() else {
-                            let error = RuntimeError::new(
-                                RuntimeErrorKind::Unsupported {
-                                    feature: "background execution in a session without job control",
-                                },
-                                background_span,
-                            );
-                            return Err(runtime(source_file, &error));
-                        };
-                        if let Err(error) = validate_background_chain(
+                StatementKind::Job(job) if job.background_span.is_some() => {
+                    let background_span = job
+                        .background_span
+                        .expect("the guarded background statement has a marker");
+                    let Some(jobs) = jobs.as_mut() else {
+                        let error = RuntimeError::new(
+                            RuntimeErrorKind::Unsupported {
+                                feature: "background execution in a session without job control",
+                            },
+                            background_span,
+                        );
+                        return Err(runtime(source_file, &error));
+                    };
+                    if let Err(error) = validate_background_chain(
+                        &job.chain,
+                        source_file,
+                        scope,
+                        state.environment(),
+                    ) {
+                        return Err(runtime(source_file, &error));
+                    }
+                    let mut child_scope = ScopeStack::from_environment(state.environment());
+                    let direct_pipeline = one_background_pipeline(&job.chain).filter(|pipeline| {
+                        pipeline_is_all_external(pipeline, source_file, &mut child_scope, registry)
+                    });
+                    let plan = if let Some(pipeline) = direct_pipeline {
+                        plan_pipeline_with_options_and_binding_types(
+                            pipeline,
+                            state.cwd(),
+                            source_file,
+                            &mut child_scope,
+                            state.environment(),
+                            registry,
+                            probe,
+                            options,
+                            Arc::clone(&binding_types),
+                        )
+                        .map_err(|error| runtime(source_file, &error))?
+                    } else {
+                        background_shell_plan(
                             &job.chain,
                             source_file,
-                            scope,
+                            state.cwd(),
                             state.environment(),
-                        ) {
-                            return Err(runtime(source_file, &error));
-                        }
-                        let mut child_scope = ScopeStack::from_environment(state.environment());
-                        let direct_pipeline =
-                            one_background_pipeline(&job.chain).filter(|pipeline| {
-                                pipeline_is_all_external(
-                                    pipeline,
-                                    source_file,
-                                    &mut child_scope,
-                                    registry,
-                                )
-                            });
-                        let plan = if let Some(pipeline) = direct_pipeline {
-                            plan_pipeline_with_options_and_binding_types(
-                                pipeline,
-                                state.cwd(),
-                                source_file,
-                                &mut child_scope,
-                                state.environment(),
-                                registry,
-                                probe,
-                                options,
-                                Arc::clone(&binding_types),
-                            )
-                            .map_err(|error| runtime(source_file, &error))?
-                        } else {
-                            background_shell_plan(
-                                &job.chain,
-                                source_file,
-                                state.cwd(),
-                                state.environment(),
-                                options,
-                                platform,
-                            )
-                            .map_err(|error| runtime(source_file, &error))?
-                        };
-                        let command = source_file
-                            .slice(job.chain.span())
-                            .map(escape_job_label)
-                            .expect("a parsed chain span belongs to its source");
-                        jobs.start(&plan, platform, command)
-                            .map_err(|error| runtime(source_file, &error))?;
-                        state.set_current_status(Some(
-                            Status::exit(0, crate::Duration::ZERO)
-                                .expect("zero is a valid launch status"),
-                        ));
-                        continue;
-                    }
+                            options,
+                            platform,
+                        )
+                        .map_err(|error| runtime(source_file, &error))?
+                    };
+                    let command = source_file
+                        .slice(job.chain.span())
+                        .map(escape_job_label)
+                        .expect("a parsed chain span belongs to its source");
+                    jobs.start(&plan, platform, command)
+                        .map_err(|error| runtime(source_file, &error))?;
+                    state.set_current_status(Some(
+                        Status::exit(0, crate::Duration::ZERO)
+                            .expect("zero is a valid launch status"),
+                    ));
+                }
+                StatementKind::Job(job) => {
+                    let mut pending_scope = scope.clone();
+                    let mut pending_state = state.clone();
                     let inspection_only = chain_is_standalone_help(&job.chain, source_file);
                     let step = run_chain(
                         &job.chain,
-                        state,
-                        scope,
+                        &mut pending_state,
+                        &mut pending_scope,
                         options,
                         registry,
                         source_file,
@@ -469,11 +469,18 @@ impl Session {
                     )
                     .map_err(|interrupt| interrupt.into_submit(source_file))?;
                     match step {
-                        ChainStep::Exit(code) => return Ok(SubmitOutcome::Exit(code)),
-                        ChainStep::Status(status) if !inspection_only => {
-                            state.set_current_status(Some(status));
+                        ChainStep::Exit(code) => {
+                            *scope = pending_scope;
+                            *state = pending_state;
+                            return Ok(SubmitOutcome::Exit(code));
                         }
-                        ChainStep::Status(_) => {}
+                        ChainStep::Status(status) => {
+                            if !inspection_only {
+                                pending_state.set_current_status(Some(status));
+                            }
+                            *scope = pending_scope;
+                            *state = pending_state;
+                        }
                         ChainStep::Stopped(job) => {
                             debug_assert!(
                                 jobs.as_ref().and_then(|jobs| jobs.job(job)).is_some(),
@@ -483,19 +490,53 @@ impl Session {
                     }
                 }
                 _ => {
+                    let mut pending_scope = scope.clone();
+                    let mut pending_state = state.clone();
                     let one = Script::new(vec![statement.clone()], statement.span());
-                    let evaluated = evaluate_in_environment_owned_with_binding_types(
-                        &one,
-                        Arc::clone(&source),
-                        scope,
-                        state.environment_mut(),
-                        &EvalLimits::default(),
-                        Arc::clone(&binding_types),
-                    );
-                    match evaluated.map_err(|error| runtime(source_file, &error))? {
-                        Completion::Value(_) => {}
-                        Completion::Cancelled(_) => {
+                    let evaluated = {
+                        let mut host = SessionEvaluationHost {
+                            state: &mut pending_state,
+                            options,
+                            registry,
+                            probe,
+                            platform,
+                            clock,
+                            jobs,
+                            output,
+                        };
+                        evaluate_with_host(
+                            &one,
+                            Arc::clone(&source),
+                            &mut pending_scope,
+                            &EvalLimits::default(),
+                            Arc::clone(&binding_types),
+                            &mut host,
+                        )
+                    };
+                    match evaluated {
+                        Ok(HostedEvaluationOutcome::Value(_)) => {
+                            *scope = pending_scope;
+                            *state = pending_state;
+                        }
+                        Ok(HostedEvaluationOutcome::Exit(code)) => {
+                            *scope = pending_scope;
+                            *state = pending_state;
+                            return Ok(SubmitOutcome::Exit(code));
+                        }
+                        Ok(HostedEvaluationOutcome::Stopped(job)) => {
+                            debug_assert!(
+                                jobs.as_ref().and_then(|jobs| jobs.job(job)).is_some(),
+                                "a stopped managed outcome retains its coordinator record"
+                            );
+                        }
+                        Ok(HostedEvaluationOutcome::Cancelled(_)) => {
                             unreachable!("default evaluation limits never cancel")
+                        }
+                        Err(HostedEvaluationFailure::Runtime(error)) => {
+                            return Err(runtime(source_file, &error));
+                        }
+                        Err(HostedEvaluationFailure::Output(error)) => {
+                            return Err(SubmitError::Output(error));
                         }
                     }
                 }
@@ -534,6 +575,72 @@ enum ChainStep {
 enum Interrupt {
     Runtime(RuntimeError),
     Output(io::Error),
+}
+
+/// Session-owned evaluator host before reached-chain routing is enabled.
+///
+/// Language-owned state is transactional through this boundary. Effectful
+/// recursive positions continue to return their established unsupported
+/// diagnostics until the ordinary chain executor is connected.
+struct SessionEvaluationHost<'session> {
+    state: &'session mut SessionState,
+    options: &'session SessionOptions,
+    registry: &'session CommandRegistry,
+    probe: &'session dyn ExecutableProbe,
+    platform: &'session dyn Platform,
+    clock: &'session dyn Clock,
+    jobs: &'session mut Option<BackgroundJobs>,
+    output: &'session mut dyn Write,
+}
+
+impl EvaluationHost for SessionEvaluationHost<'_> {
+    fn environment(&mut self) -> &mut Environment {
+        self.state.environment_mut()
+    }
+
+    fn policy(&self) -> EvaluationPolicy {
+        EvaluationPolicy::General
+    }
+
+    fn execute_chain(
+        &mut self,
+        chain: &ConditionalChain,
+        _scope: &mut ScopeStack,
+        context: EvaluationContext,
+    ) -> Result<Status, Abort> {
+        let _ = (
+            self.options,
+            self.registry,
+            self.probe,
+            self.platform,
+            self.clock,
+            &self.jobs,
+            &self.output,
+        );
+        Err(Abort::Error(
+            RuntimeError::new(RuntimeErrorKind::ExecutionUnsupported, chain.span())
+                .with_source(context.source),
+        ))
+    }
+
+    fn capture_chain(
+        &mut self,
+        _chain: &ConditionalChain,
+        _scope: &mut ScopeStack,
+        span: Span,
+        position: CapturePosition,
+        context: EvaluationContext,
+    ) -> Result<CapturedChain, Abort> {
+        let kind = match position {
+            CapturePosition::Expression => RuntimeErrorKind::ExecutionUnsupported,
+            CapturePosition::Word => RuntimeErrorKind::Unsupported {
+                feature: "command substitution in a word",
+            },
+        };
+        Err(Abort::Error(
+            RuntimeError::new(kind, span).with_source(context.source),
+        ))
+    }
 }
 
 fn validate_background_chain(

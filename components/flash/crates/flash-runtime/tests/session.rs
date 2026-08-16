@@ -924,6 +924,46 @@ fn pure_bindings_persist_across_submissions() {
 }
 
 #[test]
+fn a_failing_statement_discards_its_pending_scope_and_environment() {
+    let mut session = session();
+    let probe = Probe::default();
+    let mut sink = Vec::new();
+
+    let error = session
+        .submit(
+            "<interactive>",
+            "mut keep = 0\n\
+             export COMMITTED = 'yes'\n\
+             while $keep < 1 {\n\
+                 $keep = 1\n\
+                 export LEAK = 'no'\n\
+                 $missing\n\
+             }",
+            &probe,
+            &terminal_platform(),
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect_err("the reached unknown binding should fail the final statement");
+
+    assert!(
+        error.render().contains("unknown binding \"missing\""),
+        "{}",
+        error.render()
+    );
+    assert_eq!(
+        session.environment().get("COMMITTED"),
+        Some(OsStr::new("yes"))
+    );
+    assert_eq!(session.environment().get("LEAK"), None);
+    assert_eq!(
+        submit(&mut session, "export RETAINED = $keep", &probe),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(session.environment().get("RETAINED"), Some(OsStr::new("0")));
+}
+
+#[test]
 fn nested_commands_run_only_in_selected_control_flow() {
     let mut session = session();
     let probe = Probe::default();
