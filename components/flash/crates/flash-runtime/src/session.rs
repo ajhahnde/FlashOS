@@ -449,46 +449,6 @@ impl Session {
                             .expect("zero is a valid launch status"),
                     ));
                 }
-                StatementKind::Job(job) => {
-                    let mut pending_scope = scope.clone();
-                    let mut pending_state = state.clone();
-                    let inspection_only = chain_is_standalone_help(&job.chain, source_file);
-                    let step = run_chain(
-                        &job.chain,
-                        &mut pending_state,
-                        &mut pending_scope,
-                        options,
-                        registry,
-                        source_file,
-                        &binding_types,
-                        probe,
-                        platform,
-                        clock,
-                        jobs,
-                        output,
-                    )
-                    .map_err(|interrupt| interrupt.into_submit(source_file))?;
-                    match step {
-                        ChainStep::Exit(code) => {
-                            *scope = pending_scope;
-                            *state = pending_state;
-                            return Ok(SubmitOutcome::Exit(code));
-                        }
-                        ChainStep::Status(status) => {
-                            if !inspection_only {
-                                pending_state.set_current_status(Some(status));
-                            }
-                            *scope = pending_scope;
-                            *state = pending_state;
-                        }
-                        ChainStep::Stopped(job) => {
-                            debug_assert!(
-                                jobs.as_ref().and_then(|jobs| jobs.job(job)).is_some(),
-                                "a stopped managed outcome retains its coordinator record"
-                            );
-                        }
-                    }
-                }
                 _ => {
                     let mut pending_scope = scope.clone();
                     let mut pending_state = state.clone();
@@ -577,11 +537,11 @@ enum Interrupt {
     Output(io::Error),
 }
 
-/// Session-owned evaluator host before reached-chain routing is enabled.
+/// Session-owned evaluator host for reached command pipelines.
 ///
-/// Language-owned state is transactional through this boundary. Effectful
-/// recursive positions continue to return their established unsupported
-/// diagnostics until the ordinary chain executor is connected.
+/// Language-owned state is transactional outside this boundary. The ordinary
+/// session executor retains ownership of planning, process activity, job
+/// transitions, status, and output for every reached chain.
 struct SessionEvaluationHost<'session> {
     state: &'session mut SessionState,
     options: &'session SessionOptions,
@@ -605,22 +565,38 @@ impl EvaluationHost for SessionEvaluationHost<'_> {
     fn execute_chain(
         &mut self,
         chain: &ConditionalChain,
-        _scope: &mut ScopeStack,
+        scope: &mut ScopeStack,
         context: EvaluationContext,
     ) -> Result<Status, Abort> {
-        let _ = (
+        let inspection_only = chain_is_standalone_help(chain, &context.source);
+        let error_source = Arc::clone(&context.source);
+        let _ = &context.cancel;
+        let step = run_chain(
+            chain,
+            self.state,
+            scope,
             self.options,
             self.registry,
+            &context.source,
+            &context.binding_types,
             self.probe,
             self.platform,
             self.clock,
-            &self.jobs,
-            &self.output,
-        );
-        Err(Abort::Error(
-            RuntimeError::new(RuntimeErrorKind::ExecutionUnsupported, chain.span())
-                .with_source(context.source),
-        ))
+            self.jobs,
+            context.manage_foreground,
+            self.output,
+        )
+        .map_err(|interrupt| interrupt.into_abort(error_source))?;
+        match step {
+            ChainStep::Status(status) => {
+                if !inspection_only {
+                    self.state.set_current_status(Some(status.clone()));
+                }
+                Ok(status)
+            }
+            ChainStep::Exit(code) => Err(Abort::Exit(code)),
+            ChainStep::Stopped(job) => Err(Abort::Stopped(job)),
+        }
     }
 
     fn capture_chain(
@@ -962,10 +938,11 @@ fn background_shell_plan(
 }
 
 impl Interrupt {
-    fn into_submit(self, source: &SourceFile) -> SubmitError {
+    fn into_abort(self, source: Arc<SourceFile>) -> Abort {
         match self {
-            Self::Runtime(error) => runtime(source, &error),
-            Self::Output(error) => SubmitError::Output(error),
+            Self::Runtime(error) if error.source().is_some() => Abort::Error(error),
+            Self::Runtime(error) => Abort::Error(error.with_source(source)),
+            Self::Output(error) => Abort::Output(error),
         }
     }
 }
@@ -989,6 +966,7 @@ fn run_chain(
     platform: &dyn Platform,
     clock: &dyn Clock,
     jobs: &mut Option<BackgroundJobs>,
+    manage_foreground: bool,
     output: &mut dyn Write,
 ) -> Result<ChainStep, Interrupt> {
     if let [and_chain] = chain.or_terms()
@@ -1006,7 +984,7 @@ fn run_chain(
             platform,
             clock,
             jobs,
-            true,
+            manage_foreground,
             output,
         );
     }

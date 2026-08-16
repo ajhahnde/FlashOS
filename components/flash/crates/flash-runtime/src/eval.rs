@@ -1124,6 +1124,9 @@ pub(crate) struct EvaluationContext {
     pub(crate) source: Arc<SourceFile>,
     pub(crate) binding_types: Arc<RuntimeBindingTypes>,
     pub(crate) cancel: CancellationToken,
+    /// Whether this pipeline is the complete submitted conditional chain and
+    /// may therefore publish a managed foreground job.
+    pub(crate) manage_foreground: bool,
 }
 
 /// Successful bounded output captured from one reached conditional chain.
@@ -2017,16 +2020,22 @@ impl Evaluator<'_> {
         self.expect_condition(&value, chain.span())
     }
 
-    fn context(&self) -> EvaluationContext {
+    fn context(&self, manage_foreground: bool) -> EvaluationContext {
         EvaluationContext {
             source: Arc::clone(&self.source),
             binding_types: Arc::clone(&self.binding_types),
             cancel: self.cancel.clone(),
+            manage_foreground,
         }
     }
 
-    fn execute_chain(&mut self, chain: &ConditionalChain, scope: &mut ScopeStack) -> Eval<Status> {
-        let context = self.context();
+    fn execute_chain(
+        &mut self,
+        chain: &ConditionalChain,
+        scope: &mut ScopeStack,
+        manage_foreground: bool,
+    ) -> Eval<Status> {
+        let context = self.context(manage_foreground);
         self.host.execute_chain(chain, scope, context)
     }
 
@@ -2037,7 +2046,7 @@ impl Evaluator<'_> {
         span: Span,
         position: CapturePosition,
     ) -> Eval<String> {
-        let context = self.context();
+        let context = self.context(false);
         let CapturedChain { text, status } = self
             .host
             .capture_chain(chain, scope, span, position, context)?;
@@ -2050,17 +2059,19 @@ impl Evaluator<'_> {
     /// A single-term chain is transparent. Multiple `||` terms return the last
     /// evaluated operand and branch over either `Bool` or `Status`.
     fn eval_chain(&mut self, chain: &ConditionalChain, scope: &mut ScopeStack) -> Eval<Value> {
+        let manage_foreground =
+            chain.or_terms().len() == 1 && chain.or_terms()[0].and_terms().len() == 1;
         let mut terms = chain.or_terms().iter();
         let first = terms
             .next()
             .expect("a parsed conditional chain contains an operand");
-        let mut value = self.eval_and_chain(first, scope)?;
+        let mut value = self.eval_and_chain(first, scope, manage_foreground)?;
         let mut value_span = first.span();
         for and_chain in terms {
             if self.expect_logic_condition(&value, value_span)? {
                 return Ok(value);
             }
-            value = self.eval_and_chain(and_chain, scope)?;
+            value = self.eval_and_chain(and_chain, scope, false)?;
             value_span = and_chain.span();
         }
         if chain.or_terms().len() > 1 {
@@ -2070,18 +2081,23 @@ impl Evaluator<'_> {
     }
 
     /// Evaluates one `&&` chain and returns its last evaluated operand.
-    fn eval_and_chain(&mut self, and_chain: &AndChain, scope: &mut ScopeStack) -> Eval<Value> {
+    fn eval_and_chain(
+        &mut self,
+        and_chain: &AndChain,
+        scope: &mut ScopeStack,
+        manage_foreground: bool,
+    ) -> Eval<Value> {
         let mut terms = and_chain.and_terms().iter();
         let first = terms
             .next()
             .expect("a parsed and-chain contains an operand");
-        let mut value = self.eval_pipeline(first, scope)?;
+        let mut value = self.eval_pipeline(first, scope, manage_foreground)?;
         let mut value_span = first.span();
         for pipeline in terms {
             if !self.expect_logic_condition(&value, value_span)? {
                 return Ok(value);
             }
-            value = self.eval_pipeline(pipeline, scope)?;
+            value = self.eval_pipeline(pipeline, scope, false)?;
             value_span = pipeline.span();
         }
         if and_chain.and_terms().len() > 1 {
@@ -2092,7 +2108,12 @@ impl Evaluator<'_> {
 
     /// Evaluates a pure single-stage expression or delegates one reached
     /// effectful pipeline through the active host.
-    fn eval_pipeline(&mut self, pipeline: &Pipeline, scope: &mut ScopeStack) -> Eval<Value> {
+    fn eval_pipeline(
+        &mut self,
+        pipeline: &Pipeline,
+        scope: &mut ScopeStack,
+        manage_foreground: bool,
+    ) -> Eval<Value> {
         if let [stage] = pipeline.stages()
             && let StageKind::Expression(expression) = stage.kind()
         {
@@ -2107,7 +2128,8 @@ impl Evaluator<'_> {
             ));
         }
         let chain = ConditionalChain::from_pipeline(pipeline.clone());
-        self.execute_chain(&chain, scope).map(Value::Status)
+        self.execute_chain(&chain, scope, manage_foreground)
+            .map(Value::Status)
     }
 
     /// Requires a value to be `Bool` or `Status` at a conditional-chain edge.

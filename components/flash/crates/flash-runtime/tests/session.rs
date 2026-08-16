@@ -977,6 +977,7 @@ fn nested_commands_run_only_in_selected_control_flow() {
         SubmitOutcome::Continued
     );
     assert_eq!(session.cwd(), Path::new("/selected"));
+    assert_eq!(session.current_status().and_then(Status::code), Some(0));
 }
 
 #[test]
