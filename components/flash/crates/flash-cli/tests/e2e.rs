@@ -210,6 +210,46 @@ fn explicit_environment_and_live_status_reads_reach_the_fsh_host_boundary() {
 }
 
 #[test]
+fn explicit_glob_reaches_module_initialization_and_real_argv() {
+    let temp = TempDir::new("glob-module-argv");
+    fs::create_dir_all(temp.path().join("inputs/nested")).unwrap();
+    fs::write(temp.path().join("inputs/a.fsh"), b"").unwrap();
+    fs::write(temp.path().join("inputs/nested/b.fsh"), b"").unwrap();
+    fs::write(temp.path().join("inputs/ignored.txt"), b"").unwrap();
+    let report = temp.path().join("report.bin");
+    temp.script(
+        "dependency.fsh",
+        "let files = glob('inputs/**/*.fsh')\nexport { files }\n",
+    );
+    let script = temp.script(
+        "glob.fsh",
+        "import { files } from './dependency.fsh'\n\
+         flash-e2e-process-observer-fixture ...$files\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fsh"))
+        .arg(&script)
+        .current_dir(temp.path())
+        .env("PATH", fixture_directory())
+        .env("FLASH_PROBE_REPORT", &report)
+        .output()
+        .expect("fsh should start");
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let observed = ProcessReport::read(&report);
+    assert_eq!(
+        observed.argv,
+        [
+            b"flash-e2e-process-observer-fixture".as_slice(),
+            b"inputs/a.fsh".as_slice(),
+            b"inputs/nested/b.fsh".as_slice(),
+        ]
+    );
+}
+
+#[test]
 fn completed_signal_maps_to_128_plus_its_number_without_a_shell_report() {
     let temp = TempDir::new("completed-signal");
     let script = temp.script("signal.fsh", &format!("^{} signal\n", status_fixture()));

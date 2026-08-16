@@ -3411,8 +3411,14 @@ impl<'a> StaticEffectAnalyzer<'a> {
                     .ok()
                     .and_then(ExpressionIntrinsic::lookup)
             {
-                if intrinsic == ExpressionIntrinsic::Env {
-                    self.summary.push(ModuleEffect::ChildEnvironment, call_span);
+                match intrinsic {
+                    ExpressionIntrinsic::Env => {
+                        self.summary.push(ModuleEffect::ChildEnvironment, call_span);
+                    }
+                    ExpressionIntrinsic::Glob => {
+                        self.summary.push(ModuleEffect::FilesystemRead, call_span);
+                    }
+                    ExpressionIntrinsic::Float | ExpressionIntrinsic::Int => {}
                 }
                 return;
             }

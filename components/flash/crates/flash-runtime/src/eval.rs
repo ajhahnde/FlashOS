@@ -10,13 +10,15 @@ use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant as SystemInstant;
 
 use flash_platform::{
-    DescriptorReadError, DescriptorWriteError, DirectoryReadError, FileActionError, PipeError,
-    PlatformError, SignalError, SpawnError, WaitError, WorkingDirectoryError,
+    DescriptorReadError, DescriptorWriteError, DirectoryEntry, DirectoryReadError, DirectoryStream,
+    FileActionError, PipeError, PlatformError, SignalError, SpawnError, WaitError,
+    WorkingDirectoryError,
 };
 use flash_syntax::{
     AndChain, Assignment, BinaryOperator, Block, CallExpression, Closure, ConditionalChain,
@@ -26,11 +28,13 @@ use flash_syntax::{
     UnaryOperator, VariableReference, WhileStatement, Word, WordPart, WordPartKind,
 };
 
+use crate::glob::{DEFAULT_GLOB_ENTRY_LIMIT, GlobPattern};
 use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
 use crate::module::{RuntimeBindingTypes, ValueType};
 use crate::operation::{self, OperationError};
 use crate::{
-    BindingMutability, Callable, Environment, Record, ScopeError, ScopeStack, Status, Value,
+    BindingMutability, Callable, Environment, NativePath, Record, ScopeError, ScopeStack, Status,
+    Value,
 };
 
 /// Successful automatic continuations allowed for one member in one blocking operation.
@@ -152,6 +156,8 @@ pub enum RestrictedCapability {
     ProcessExecution,
     /// Capturing the output of a command substitution.
     CommandSubstitution,
+    /// Reading directories for explicit filesystem matching.
+    FilesystemRead,
 }
 
 impl RestrictedCapability {
@@ -161,6 +167,7 @@ impl RestrictedCapability {
         match self {
             Self::ProcessExecution => "process execution",
             Self::CommandSubstitution => "command substitution",
+            Self::FilesystemRead => "filesystem reads",
         }
     }
 }
@@ -238,6 +245,10 @@ pub enum RuntimeErrorKind {
     StringInterpolationNotUtf8,
     /// A present native environment entry cannot be represented by `String`.
     EnvironmentValueNotUtf8 { name: String },
+    /// An explicit glob pattern is malformed.
+    GlobPattern { message: String },
+    /// An explicit glob inspected more entries than its finite traversal limit.
+    GlobLimitExceeded { limit: usize },
     /// An ordinary word interpolation produced a value that cannot become an
     /// argument. `actual` names the offending value family.
     WordValueNotWordEligible { actual: &'static str },
@@ -504,6 +515,10 @@ impl fmt::Display for RuntimeErrorKind {
             }
             Self::EnvironmentValueNotUtf8 { name } => {
                 write!(formatter, "environment entry {name:?} is not valid UTF-8")
+            }
+            Self::GlobPattern { message } => write!(formatter, "invalid glob pattern: {message}"),
+            Self::GlobLimitExceeded { limit } => {
+                write!(formatter, "glob exceeded its {limit}-entry traversal limit")
             }
             Self::WordValueNotWordEligible { actual } => write!(
                 formatter,
@@ -1152,6 +1167,9 @@ pub(crate) trait EvaluationHost {
     fn current_status(&self) -> Option<&Status>;
     fn policy(&self) -> EvaluationPolicy;
 
+    fn read_directory(&mut self, path: &Path)
+    -> Result<Box<dyn DirectoryStream>, RuntimeErrorKind>;
+
     fn execute_chain(
         &mut self,
         chain: &ConditionalChain,
@@ -1186,6 +1204,13 @@ impl EvaluationHost for PureEvaluationHost<'_> {
 
     fn policy(&self) -> EvaluationPolicy {
         self.policy
+    }
+
+    fn read_directory(
+        &mut self,
+        _path: &Path,
+    ) -> Result<Box<dyn DirectoryStream>, RuntimeErrorKind> {
+        Err(RuntimeErrorKind::ExecutionUnsupported)
     }
 
     fn execute_chain(
@@ -2691,27 +2716,31 @@ impl Evaluator<'_> {
                     ));
                 }
                 let argument = self.expression(&call.arguments[0], scope)?;
-                if intrinsic == ExpressionIntrinsic::Env {
-                    let Value::String(name) = argument else {
-                        return Err(self.operation(
-                            OperationError::UnsupportedOperands {
-                                operator: "env",
-                                operands: vec![argument.family_name()],
-                            },
-                            call.arguments[0].span(),
-                        ));
-                    };
-                    let value = self.host.environment().get(&name).map(OsStr::to_os_string);
-                    return value.map_or(Ok(Value::Null), |value| {
-                        value.into_string().map(Value::string).map_err(|_| {
-                            self.error(
-                                RuntimeErrorKind::EnvironmentValueNotUtf8 {
-                                    name: name.to_string(),
+                match intrinsic {
+                    ExpressionIntrinsic::Env => {
+                        let Value::String(name) = argument else {
+                            return Err(self.operation(
+                                OperationError::UnsupportedOperands {
+                                    operator: "env",
+                                    operands: vec![argument.family_name()],
                                 },
-                                span,
-                            )
-                        })
-                    });
+                                call.arguments[0].span(),
+                            ));
+                        };
+                        let value = self.host.environment().get(&name).map(OsStr::to_os_string);
+                        return value.map_or(Ok(Value::Null), |value| {
+                            value.into_string().map(Value::string).map_err(|_| {
+                                self.error(
+                                    RuntimeErrorKind::EnvironmentValueNotUtf8 {
+                                        name: name.to_string(),
+                                    },
+                                    span,
+                                )
+                            })
+                        });
+                    }
+                    ExpressionIntrinsic::Glob => return self.glob(&argument, span),
+                    ExpressionIntrinsic::Float | ExpressionIntrinsic::Int => {}
                 }
                 return intrinsic
                     .invoke(&argument)
@@ -2752,6 +2781,84 @@ impl Evaluator<'_> {
         }
 
         self.run_call(&callable, function, arguments, span)
+    }
+
+    fn glob(&mut self, value: &Value, span: Span) -> Eval<Value> {
+        if self.host.policy() == EvaluationPolicy::Startup {
+            return Err(self.error(
+                RuntimeErrorKind::RestrictedStartup {
+                    capability: RestrictedCapability::FilesystemRead,
+                },
+                span,
+            ));
+        }
+        let pattern = match value {
+            Value::String(pattern) => OsString::from(pattern.as_ref()),
+            Value::Path(pattern) => pattern.as_os_str().to_os_string(),
+            other => {
+                return Err(self.operation(
+                    OperationError::UnsupportedOperands {
+                        operator: "glob",
+                        operands: vec![other.family_name()],
+                    },
+                    span,
+                ));
+            }
+        };
+        let pattern = GlobPattern::parse(&pattern).map_err(|error| {
+            self.error(
+                RuntimeErrorKind::GlobPattern {
+                    message: error.message().to_owned(),
+                },
+                span,
+            )
+        })?;
+        let mut remaining = DEFAULT_GLOB_ENTRY_LIMIT;
+        let paths = pattern.expand(|directory| {
+            let entries = self.glob_directory(directory, span, remaining)?;
+            remaining -= entries.len();
+            Ok::<_, Abort>(entries)
+        })?;
+        Ok(Value::list(
+            paths
+                .into_iter()
+                .map(|path| Value::Path(NativePath::new(path.into_os_string())))
+                .collect(),
+        ))
+    }
+
+    fn glob_directory(
+        &mut self,
+        path: &Path,
+        span: Span,
+        remaining: usize,
+    ) -> Eval<Vec<DirectoryEntry>> {
+        self.check_cancel(span)?;
+        self.charge(span)?;
+        let mut stream = self
+            .host
+            .read_directory(path)
+            .map_err(|kind| self.error(kind, span))?;
+        let mut entries = Vec::new();
+        loop {
+            self.check_cancel(span)?;
+            self.charge(span)?;
+            match stream.next_entry() {
+                Ok(Some(_)) if entries.len() == remaining => {
+                    return Err(self.error(
+                        RuntimeErrorKind::GlobLimitExceeded {
+                            limit: DEFAULT_GLOB_ENTRY_LIMIT,
+                        },
+                        span,
+                    ));
+                }
+                Ok(Some(entry)) => entries.push(entry),
+                Ok(None) => return Ok(entries),
+                Err(error) => {
+                    return Err(self.error(RuntimeErrorKind::DirectoryRead(error), span));
+                }
+            }
+        }
     }
 
     /// Binds already-evaluated `arguments` to a callable's parameters and runs its
@@ -3023,5 +3130,169 @@ fn decode_double_escape(raw: &str) -> String {
                 .map_or_else(|| body.to_owned(), |scalar| scalar.to_string())
         }
         _ => body.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use flash_platform::{DirectoryEntry, DirectoryEntryKind, DirectoryReadError};
+    use flash_syntax::{ParseOutcome, SourceId, parse};
+
+    use super::*;
+
+    struct DirectoryHost {
+        environment: Environment,
+        advances: Arc<AtomicUsize>,
+    }
+
+    impl EvaluationHost for DirectoryHost {
+        fn environment(&mut self) -> &mut Environment {
+            &mut self.environment
+        }
+
+        fn current_status(&self) -> Option<&Status> {
+            None
+        }
+
+        fn policy(&self) -> EvaluationPolicy {
+            EvaluationPolicy::General
+        }
+
+        fn read_directory(
+            &mut self,
+            _path: &Path,
+        ) -> Result<Box<dyn DirectoryStream>, RuntimeErrorKind> {
+            Ok(Box::new(CountingDirectoryStream {
+                entries: vec![
+                    DirectoryEntry::new("a.fsh".into(), DirectoryEntryKind::File, Some(0)),
+                    DirectoryEntry::new("b.fsh".into(), DirectoryEntryKind::File, Some(0)),
+                ]
+                .into_iter(),
+                advances: Arc::clone(&self.advances),
+            }))
+        }
+
+        fn execute_chain(
+            &mut self,
+            _chain: &ConditionalChain,
+            _scope: &mut ScopeStack,
+            _context: EvaluationContext,
+        ) -> Result<Status, Abort> {
+            unreachable!("glob tests do not execute commands")
+        }
+
+        fn capture_chain(
+            &mut self,
+            _chain: &ConditionalChain,
+            _scope: &mut ScopeStack,
+            _span: Span,
+            _position: CapturePosition,
+            _context: EvaluationContext,
+        ) -> Result<CapturedChain, Abort> {
+            unreachable!("glob tests do not capture commands")
+        }
+    }
+
+    #[derive(Debug)]
+    struct CountingDirectoryStream {
+        entries: std::vec::IntoIter<DirectoryEntry>,
+        advances: Arc<AtomicUsize>,
+    }
+
+    impl DirectoryStream for CountingDirectoryStream {
+        fn next_entry(&mut self) -> Result<Option<DirectoryEntry>, DirectoryReadError> {
+            self.advances.fetch_add(1, Ordering::SeqCst);
+            Ok(self.entries.next())
+        }
+    }
+
+    fn evaluate_glob(
+        limits: &EvalLimits,
+        advances: Arc<AtomicUsize>,
+    ) -> Result<HostedEvaluationOutcome, HostedEvaluationFailure> {
+        let source = Arc::new(SourceFile::new(
+            SourceId::new(1),
+            "glob.fsh",
+            "glob('*.fsh')",
+        ));
+        let script = match parse(&source) {
+            ParseOutcome::Complete(script) => script,
+            other => panic!("glob fixture did not parse: {other:?}"),
+        };
+        let mut scope = ScopeStack::new();
+        let mut host = DirectoryHost {
+            environment: Environment::new(),
+            advances,
+        };
+        evaluate_with_host(
+            &script,
+            source,
+            &mut scope,
+            limits,
+            Arc::new(RuntimeBindingTypes::default()),
+            &mut host,
+        )
+    }
+
+    #[test]
+    fn glob_cancellation_aborts_mid_walk_without_returning_a_partial_list() {
+        let checks = Arc::new(AtomicUsize::new(0));
+        let token_checks = Arc::clone(&checks);
+        let token =
+            CancellationToken::from_fn(move || token_checks.fetch_add(1, Ordering::SeqCst) >= 3);
+        let advances = Arc::new(AtomicUsize::new(0));
+        let limits = EvalLimits::new(token, ResourceBudget::unlimited());
+
+        assert!(matches!(
+            evaluate_glob(&limits, Arc::clone(&advances)),
+            Ok(HostedEvaluationOutcome::Cancelled(_))
+        ));
+        assert_eq!(advances.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn glob_charges_each_walk_step_to_the_evaluation_budget() {
+        let advances = Arc::new(AtomicUsize::new(0));
+        let limits = EvalLimits::new(CancellationToken::never(), ResourceBudget::steps(5));
+
+        assert!(matches!(
+            evaluate_glob(&limits, Arc::clone(&advances)),
+            Err(HostedEvaluationFailure::Runtime(RuntimeError {
+                kind: RuntimeErrorKind::ResourceBudgetExceeded,
+                ..
+            }))
+        ));
+        assert_eq!(advances.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn glob_entry_limit_fails_before_a_partial_batch_can_escape() {
+        let source = Arc::new(SourceFile::new(SourceId::new(1), "glob.fsh", "glob('*')"));
+        let span = source.span(0..source.text().len()).unwrap();
+        let advances = Arc::new(AtomicUsize::new(0));
+        let mut host = DirectoryHost {
+            environment: Environment::new(),
+            advances: Arc::clone(&advances),
+        };
+        let mut evaluator = Evaluator {
+            source,
+            binding_types: Arc::new(RuntimeBindingTypes::default()),
+            cancel: CancellationToken::never(),
+            budget: ResourceBudget::unlimited(),
+            host: &mut host,
+        };
+
+        assert!(matches!(
+            evaluator.glob_directory(Path::new("."), span, 1),
+            Err(Abort::Error(RuntimeError {
+                kind: RuntimeErrorKind::GlobLimitExceeded {
+                    limit: DEFAULT_GLOB_ENTRY_LIMIT
+                },
+                ..
+            }))
+        ));
+        assert_eq!(advances.load(Ordering::SeqCst), 2);
     }
 }

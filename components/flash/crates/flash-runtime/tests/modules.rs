@@ -801,6 +801,7 @@ fn expression_intrinsic_analysis_reports_types_arity_and_shadowing() {
         "let whole = int(3.9)\n",
         "let decimal = float($whole)\n",
         "let home = env('HOME')\n",
+        "let files = glob('*.fsh')\n",
         "let latest = $status\n",
     );
     let sources = FakeSourceLoader::default().contains("/project/main.fsh", text);
@@ -826,6 +827,11 @@ fn expression_intrinsic_analysis_reports_types_arity_and_shadowing() {
             .iter()
             .any(|name| name.name() == "env" && name.kind() == NameKind::Intrinsic)
     );
+    assert!(
+        visible
+            .iter()
+            .any(|name| name.name() == "glob" && name.kind() == NameKind::Intrinsic)
+    );
     assert!(visible.iter().any(|name| {
         name.name() == "status"
             && name.kind() == NameKind::DynamicBinding
@@ -842,6 +848,14 @@ fn expression_intrinsic_analysis_reports_types_arity_and_shadowing() {
         .expect("an intrinsic call has shared signature metadata");
     assert_eq!(signature.intrinsic().name(), "int");
     assert_eq!(signature.active_parameter(), 0);
+    let glob_callee = text.find("glob('*.fsh')").unwrap() + 1;
+    let SemanticHover::Intrinsic(glob_hover) = queries.hover_at(root, glob_callee).unwrap() else {
+        panic!("glob has shared intrinsic hover metadata");
+    };
+    assert_eq!(
+        glob_hover.intrinsic().result_type(),
+        ValueType::List(Box::new(ValueType::Path))
+    );
     let effects = program.effects().direct(root).occurrences();
     assert!(
         !effects
@@ -853,6 +867,11 @@ fn expression_intrinsic_analysis_reports_types_arity_and_shadowing() {
         effects
             .iter()
             .any(|occurrence| occurrence.effect() == ModuleEffect::ChildEnvironment)
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|occurrence| occurrence.effect() == ModuleEffect::FilesystemRead)
     );
     assert!(
         effects
@@ -876,6 +895,7 @@ fn expression_intrinsic_analysis_reports_types_arity_and_shadowing() {
         ("int()\n", "SIG003"),
         ("float('text')\n", "SIG004"),
         ("env(1)\n", "SIG004"),
+        ("glob(true)\n", "SIG004"),
     ] {
         let sources = FakeSourceLoader::default().contains("/project/main.fsh", source);
         let error = ModuleProgramLoader::new(&paths, &sources)
@@ -4275,6 +4295,7 @@ fn semantic_queries_expose_visible_names_definitions_references_and_hover_withou
             ("args", NameKind::ScriptArguments),
             ("env", NameKind::Intrinsic),
             ("float", NameKind::Intrinsic),
+            ("glob", NameKind::Intrinsic),
             ("greet", NameKind::ImportedFunction),
             ("inside", NameKind::Binding),
             ("int", NameKind::Intrinsic),

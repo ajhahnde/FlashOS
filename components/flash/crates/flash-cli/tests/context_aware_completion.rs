@@ -131,6 +131,16 @@ fn expression_completion_uses_intrinsics_and_respects_lexical_shadowing() {
     assert_eq!(env[0].value(), "env");
     assert_eq!(env[0].kind(), CompletionKind::Intrinsic);
 
+    let glob_source = "let files = gl('*.fsh')";
+    let glob_cursor = glob_source.find('(').unwrap();
+    let glob = CompletionEngine::new(CompletionCatalog::from_runtime(
+        &registry,
+        &ScopeStack::new(),
+    ))
+    .complete(glob_source, glob_cursor);
+    assert_eq!(glob[0].value(), "glob");
+    assert_eq!(glob[0].kind(), CompletionKind::Intrinsic);
+
     let mut value_shadow = ScopeStack::new();
     value_shadow
         .declare("float", BindingMutability::Immutable, Value::Null)

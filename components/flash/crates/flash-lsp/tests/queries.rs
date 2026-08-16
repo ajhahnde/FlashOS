@@ -107,6 +107,7 @@ fn semantic_completion_hover_and_signature_help_use_shared_program_data() {
         "let copied = $greet\n",
         "let whole = int(3.9)\n",
         "let home = env('HOME')\n",
+        "let files = glob('*.fsh')\n",
         "let latest = $status\n",
         "pwd\n",
         "kill --kill 1\n",
@@ -221,6 +222,35 @@ fn semantic_completion_hover_and_signature_help_use_shared_program_data() {
             .as_str()
             .unwrap()
             .contains("env(name: String) -> Any")
+    );
+
+    let glob_call = root.find("glob('*.fsh')").unwrap() + 1;
+    let glob_hover = request(
+        &workspace,
+        PositionEncoding::Utf16,
+        &control,
+        "textDocument/hover",
+        positional(&root_uri, root, glob_call, PositionEncoding::Utf16),
+    )
+    .unwrap();
+    assert!(
+        glob_hover["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("glob(pattern: String | Path) -> List[Path]")
+    );
+    let glob_argument = root.find("'*.fsh'").unwrap() + 2;
+    let glob_signature = request(
+        &workspace,
+        PositionEncoding::Utf16,
+        &control,
+        "textDocument/signatureHelp",
+        positional(&root_uri, root, glob_argument, PositionEncoding::Utf16),
+    )
+    .unwrap();
+    assert_eq!(
+        glob_signature["signatures"][0]["label"],
+        "glob(pattern: String | Path) -> List[Path]"
     );
 
     let status_read = root.find("$status").unwrap() + 2;

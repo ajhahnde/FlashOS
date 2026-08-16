@@ -617,7 +617,25 @@ let files = glob("scripts/**/*.fsh")
 command "example-program" ...$files
 ```
 
-`glob` returns path values. Expansion into separate command arguments remains explicit through `...`.
+`glob(pattern)` accepts one `String` or `Path` and returns a deterministically
+sorted `List[Path]`. Expansion into separate command arguments remains explicit
+through `...`; an unmatched pattern returns an empty list and therefore spreads
+to no arguments.
+
+Within one path component, `*` matches zero or more characters, `?` matches one,
+and character classes such as `[abc]`, `[a-z]`, and `[!abc]` match one selected
+character. A backslash quotes the following pattern character. A component that
+is exactly `**` recursively matches directory levels, so
+`scripts/**/*.fsh` includes matches directly in `scripts` and below it.
+
+Wildcard components do not select leading-dot names unless the component starts
+with a literal dot. Recursive matching does not follow directory symlinks;
+symlinks can still be returned as final matches. Relative patterns produce
+relative paths, absolute patterns produce absolute paths, and native path units
+are preserved without lossy UTF-8 conversion. A malformed pattern, directory
+read failure, cancellation, or evaluation-budget exhaustion fails the complete
+expression instead of returning partial matches. One expression may inspect at
+most 1,000,000 directory entries.
 
 ### No source reparsing
 

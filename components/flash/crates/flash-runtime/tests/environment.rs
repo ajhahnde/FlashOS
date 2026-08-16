@@ -162,6 +162,15 @@ fn env_intrinsic_is_available_during_restricted_startup_evaluation() {
     assert_eq!(env.get("COPIED_THEME"), Some(OsStr::new("dark")));
 }
 
+#[test]
+fn glob_intrinsic_is_rejected_as_startup_filesystem_io() {
+    let limits = EvalLimits::startup(CancellationToken::never(), ResourceBudget::unlimited());
+    assert!(matches!(
+        run_value_with_limits("glob('*.fsh')", &mut Environment::new(), &limits).unwrap_err(),
+        RuntimeErrorKind::RestrictedStartup { .. }
+    ));
+}
+
 #[cfg(unix)]
 #[test]
 fn env_intrinsic_rejects_present_non_utf8_values_without_loss() {

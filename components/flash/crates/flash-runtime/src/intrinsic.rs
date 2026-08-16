@@ -9,21 +9,23 @@ use crate::operation::{self, OperationError};
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ExpressionIntrinsic {
     Env,
-    Int,
     Float,
+    Glob,
+    Int,
 }
 
 impl ExpressionIntrinsic {
     /// Every expression intrinsic in deterministic name order.
-    pub const ALL: [Self; 3] = [Self::Env, Self::Float, Self::Int];
+    pub const ALL: [Self; 4] = [Self::Env, Self::Float, Self::Glob, Self::Int];
 
     /// Resolves one exact intrinsic spelling.
     #[must_use]
     pub fn lookup(name: &str) -> Option<Self> {
         match name {
             "env" => Some(Self::Env),
-            "int" => Some(Self::Int),
             "float" => Some(Self::Float),
+            "glob" => Some(Self::Glob),
+            "int" => Some(Self::Int),
             _ => None,
         }
     }
@@ -33,8 +35,9 @@ impl ExpressionIntrinsic {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Env => "env",
-            Self::Int => "int",
             Self::Float => "float",
+            Self::Glob => "glob",
+            Self::Int => "int",
         }
     }
 
@@ -43,6 +46,7 @@ impl ExpressionIntrinsic {
     pub const fn parameter_name(self) -> &'static str {
         match self {
             Self::Env => "name",
+            Self::Glob => "pattern",
             Self::Int | Self::Float => "value",
         }
     }
@@ -55,11 +59,12 @@ impl ExpressionIntrinsic {
 
     /// The statically known result family.
     #[must_use]
-    pub const fn result_type(self) -> ValueType {
+    pub fn result_type(self) -> ValueType {
         match self {
             Self::Env => ValueType::Any,
-            Self::Int => ValueType::Int,
             Self::Float => ValueType::Float,
+            Self::Glob => ValueType::List(Box::new(ValueType::Path)),
+            Self::Int => ValueType::Int,
         }
     }
 
@@ -68,6 +73,10 @@ impl ExpressionIntrinsic {
     pub const fn accepts_type(self, value_type: &ValueType) -> bool {
         match self {
             Self::Env => matches!(value_type, ValueType::Any | ValueType::String),
+            Self::Glob => matches!(
+                value_type,
+                ValueType::Any | ValueType::String | ValueType::Path
+            ),
             Self::Int | Self::Float => matches!(
                 value_type,
                 ValueType::Any | ValueType::Int | ValueType::Float
@@ -80,6 +89,7 @@ impl ExpressionIntrinsic {
     pub const fn parameter_type_label(self) -> &'static str {
         match self {
             Self::Env => "String",
+            Self::Glob => "String | Path",
             Self::Int | Self::Float => "Int | Float",
         }
     }
@@ -91,6 +101,9 @@ impl ExpressionIntrinsic {
             Self::Env => {
                 "Reads a child-environment entry by name, returning String or Null when absent."
             }
+            Self::Glob => {
+                "Matches an explicit filesystem pattern and returns sorted native Path values."
+            }
             Self::Int => "Converts an Int or Float value to Int by truncating toward zero.",
             Self::Float => "Converts an Int or Float value to Float.",
         }
@@ -101,6 +114,7 @@ impl ExpressionIntrinsic {
     pub fn invoke(self, value: &Value) -> Result<Value, OperationError> {
         match self {
             Self::Env => Err(OperationError::HostContextRequired { operation: "env" }),
+            Self::Glob => Err(OperationError::HostContextRequired { operation: "glob" }),
             Self::Int => operation::to_int(value),
             Self::Float => operation::to_float(value),
         }

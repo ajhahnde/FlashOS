@@ -15,6 +15,7 @@ pub mod eval;
 pub mod execute;
 pub mod file;
 pub mod format;
+mod glob;
 pub mod help;
 pub mod internal;
 pub mod intrinsic;

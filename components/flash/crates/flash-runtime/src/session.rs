@@ -26,8 +26,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 use flash_platform::{
-    DescriptorEndpoint, DescriptorReadError, DescriptorWriteError, FileOpenMode, FileOpenRequest,
-    JobSignal, Platform, ProcessGroupId,
+    DescriptorEndpoint, DescriptorReadError, DescriptorWriteError, DirectoryReadRequest,
+    DirectoryStream, FileOpenMode, FileOpenRequest, JobSignal, Platform, ProcessGroupId,
 };
 use flash_syntax::{
     Closure, CommandHeadKind, CommandItemKind, ConditionalChain, Diagnostic, Expression,
@@ -588,6 +588,15 @@ impl EvaluationHost for SessionEvaluationHost<'_> {
 
     fn policy(&self) -> EvaluationPolicy {
         EvaluationPolicy::General
+    }
+
+    fn read_directory(
+        &mut self,
+        path: &Path,
+    ) -> Result<Box<dyn DirectoryStream>, crate::eval::RuntimeErrorKind> {
+        self.platform
+            .read_directory(DirectoryReadRequest::new(path, self.state.cwd()))
+            .map_err(crate::eval::RuntimeErrorKind::DirectoryRead)
     }
 
     fn execute_chain(

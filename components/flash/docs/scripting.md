@@ -491,6 +491,12 @@ let scripts = glob("scripts/**/*.fsh")
 command "example" ...$scripts
 ```
 
+`glob` accepts a string or path pattern and returns a sorted list of native path
+values. `*`, `?`, and character classes match within one component; a complete
+`**` component recurses without following directory symlinks. Leading-dot names
+require an explicitly leading dot in that component, and no matches produces an
+empty list rather than the original pattern.
+
 For the complete expansion rules and eligible argument value types, see [Commands and argument expansion](language-guide.md#commands-and-argument-expansion).
 
 ## Command substitution
