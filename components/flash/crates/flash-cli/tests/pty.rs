@@ -315,11 +315,9 @@ fn interactive(cwd: &Path) -> Pty {
 
 fn configured(cwd: &Path, source: &str, extra_env: &[(&str, &str)]) -> Pty {
     let home = unique_dir("config-home");
-    let config_directory = if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/flash")
-    } else {
-        home.join(".config/flash")
-    };
+    let config_root = home.join(".config");
+    let state_root = home.join(".local/state");
+    let config_directory = config_root.join("flash");
     fs::create_dir_all(&config_directory).expect("create config directory");
     let mut directory_permissions = fs::metadata(&config_directory).unwrap().permissions();
     directory_permissions.set_mode(0o700);
@@ -331,7 +329,15 @@ fn configured(cwd: &Path, source: &str, extra_env: &[(&str, &str)]) -> Pty {
     permissions.set_mode(0o600);
     fs::set_permissions(&config, permissions).expect("secure startup config");
     let home = home.to_str().expect("config home is UTF-8");
-    let mut environment = vec![("HOME", home)];
+    let config_root = config_root.to_str().expect("config root is UTF-8");
+    let state_root = state_root.to_str().expect("state root is UTF-8");
+    // Runner/user XDG overrides must not redirect config or history outside
+    // this fixture. A test-specific override in `extra_env` still wins below.
+    let mut environment = vec![
+        ("HOME", home),
+        ("XDG_CONFIG_HOME", config_root),
+        ("XDG_STATE_HOME", state_root),
+    ];
     environment.extend_from_slice(extra_env);
     Pty::spawn(&[], &environment, cwd)
 }
