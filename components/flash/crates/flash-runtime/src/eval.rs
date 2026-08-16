@@ -1,14 +1,15 @@
-//! Pure tree-walking evaluation of a parsed script.
+//! Host-injected tree-walking evaluation of a parsed script.
 //!
-//! This layer turns a `Script` into a `Value` without any process, terminal,
-//! filesystem, or environment dependency. Command execution and boolean
-//! short-circuiting are deferred to the slices that own them and currently
-//! surface as precise unsupported errors.
+//! The evaluator owns Flash expression, statement, callable, and control-flow
+//! semantics while an injected host owns environment mutation and reached
+//! command effects. Public pure-evaluation entry points use a host that rejects
+//! process execution with the established structured diagnostics.
 
 use std::any::Any;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
+use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant as SystemInstant;
@@ -28,7 +29,9 @@ use flash_syntax::{
 use crate::intrinsic::ExpressionIntrinsic;
 use crate::module::{RuntimeBindingTypes, ValueType};
 use crate::operation::{self, OperationError};
-use crate::{BindingMutability, Callable, Environment, Record, ScopeError, ScopeStack, Value};
+use crate::{
+    BindingMutability, Callable, Environment, Record, ScopeError, ScopeStack, Status, Value,
+};
 
 /// Successful automatic continuations allowed for one member in one blocking operation.
 pub(crate) const AUTOMATIC_RESUME_LIMIT: usize = 16;
@@ -1025,7 +1028,7 @@ pub struct EvalLimits {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EvaluationPolicy {
+pub(crate) enum EvaluationPolicy {
     General,
     Startup,
 }
@@ -1067,14 +1070,34 @@ pub enum Completion {
     Cancelled(Cancellation),
 }
 
-/// An in-flight evaluation abort: a runtime error or a cancellation.
+/// Rich completion returned to an evaluator host such as an interactive session.
+#[allow(dead_code)] // Session-only variants are connected in the next seam phase.
+pub(crate) enum HostedEvaluationOutcome {
+    Value(Value),
+    Cancelled(Cancellation),
+    Exit(u8),
+    Stopped(crate::job::JobId),
+}
+
+/// Failures that remain distinct from evaluator control outcomes.
+#[allow(dead_code)] // Fatal session output is connected in the next seam phase.
+pub(crate) enum HostedEvaluationFailure {
+    Runtime(RuntimeError),
+    Output(io::Error),
+}
+
+/// An in-flight evaluation abort, including session control and fatal effects.
 ///
 /// This is the internal short-circuit channel. A `RuntimeError` converts into the
 /// `Error` arm through `?`, while cancellation rides the separate `Cancelled` arm
 /// so it never becomes a `RuntimeError` at the public boundary.
-enum Abort {
+#[allow(dead_code)] // Session-only outcomes are connected in the next seam phase.
+pub(crate) enum Abort {
     Error(RuntimeError),
     Cancelled(Cancellation),
+    Exit(u8),
+    Stopped(crate::job::JobId),
+    Output(io::Error),
 }
 
 impl Abort {
@@ -1082,7 +1105,7 @@ impl Abort {
     fn with_frame(self, frame: CallFrame) -> Self {
         match self {
             Self::Error(error) => Self::Error(error.with_frame(frame)),
-            cancelled @ Self::Cancelled(_) => cancelled,
+            other => other,
         }
     }
 }
@@ -1095,6 +1118,96 @@ impl From<RuntimeError> for Abort {
 
 /// The internal evaluation result type, short-circuiting on error or cancel.
 type Eval<T> = Result<T, Abort>;
+
+/// Source and analysis identity supplied to an evaluation host invocation.
+pub(crate) struct EvaluationContext {
+    pub(crate) source: Arc<SourceFile>,
+    pub(crate) binding_types: Arc<RuntimeBindingTypes>,
+    pub(crate) cancel: CancellationToken,
+}
+
+/// Successful bounded output captured from one reached conditional chain.
+pub(crate) struct CapturedChain {
+    pub(crate) text: String,
+    pub(crate) status: Status,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum CapturePosition {
+    Expression,
+    Word,
+}
+
+/// The effect boundary used by recursive language evaluation.
+pub(crate) trait EvaluationHost {
+    fn environment(&mut self) -> &mut Environment;
+    fn policy(&self) -> EvaluationPolicy;
+
+    fn execute_chain(
+        &mut self,
+        chain: &ConditionalChain,
+        scope: &mut ScopeStack,
+        context: EvaluationContext,
+    ) -> Result<Status, Abort>;
+
+    fn capture_chain(
+        &mut self,
+        chain: &ConditionalChain,
+        scope: &mut ScopeStack,
+        span: Span,
+        position: CapturePosition,
+        context: EvaluationContext,
+    ) -> Result<CapturedChain, Abort>;
+}
+
+/// Host used by the public evaluator APIs that deliberately cannot run jobs.
+struct PureEvaluationHost<'environment> {
+    environment: &'environment mut Environment,
+    policy: EvaluationPolicy,
+}
+
+impl EvaluationHost for PureEvaluationHost<'_> {
+    fn environment(&mut self) -> &mut Environment {
+        self.environment
+    }
+
+    fn policy(&self) -> EvaluationPolicy {
+        self.policy
+    }
+
+    fn execute_chain(
+        &mut self,
+        chain: &ConditionalChain,
+        _scope: &mut ScopeStack,
+        context: EvaluationContext,
+    ) -> Result<Status, Abort> {
+        let _ = (&context.binding_types, &context.cancel);
+        Err(Abort::Error(
+            RuntimeError::new(RuntimeErrorKind::ExecutionUnsupported, chain.span())
+                .with_source(context.source),
+        ))
+    }
+
+    fn capture_chain(
+        &mut self,
+        _chain: &ConditionalChain,
+        _scope: &mut ScopeStack,
+        span: Span,
+        position: CapturePosition,
+        context: EvaluationContext,
+    ) -> Result<CapturedChain, Abort> {
+        let _ = (&context.binding_types, &context.cancel);
+        let kind = match position {
+            CapturePosition::Expression => RuntimeErrorKind::ExecutionUnsupported,
+            CapturePosition::Word => RuntimeErrorKind::Unsupported {
+                feature: "command substitution in a word",
+            },
+        };
+        Err(Abort::Error(
+            RuntimeError::new(kind, span).with_source(context.source),
+        ))
+    }
+}
 
 /// Evaluates a parsed script against a scope stack, returning its final value.
 ///
@@ -1185,49 +1298,80 @@ pub(crate) fn evaluate_in_environment_owned_with_binding_types(
     limits: &EvalLimits,
     binding_types: Arc<RuntimeBindingTypes>,
 ) -> Result<Completion, RuntimeError> {
+    let mut host = PureEvaluationHost {
+        environment: env,
+        policy: limits.policy,
+    };
+    match evaluate_with_host(script, source, scope, limits, binding_types, &mut host) {
+        Ok(HostedEvaluationOutcome::Value(value)) => Ok(Completion::Value(value)),
+        Ok(HostedEvaluationOutcome::Cancelled(cancellation)) => {
+            Ok(Completion::Cancelled(cancellation))
+        }
+        Err(HostedEvaluationFailure::Runtime(error)) => Err(error),
+        Ok(HostedEvaluationOutcome::Exit(_) | HostedEvaluationOutcome::Stopped(_))
+        | Err(HostedEvaluationFailure::Output(_)) => {
+            unreachable!("the pure evaluation host cannot produce session outcomes")
+        }
+    }
+}
+
+pub(crate) fn evaluate_with_host(
+    script: &flash_syntax::Script,
+    source: Arc<SourceFile>,
+    scope: &mut ScopeStack,
+    limits: &EvalLimits,
+    binding_types: Arc<RuntimeBindingTypes>,
+    host: &mut dyn EvaluationHost,
+) -> Result<HostedEvaluationOutcome, HostedEvaluationFailure> {
     let mut evaluator = Evaluator {
         source,
         binding_types,
         cancel: limits.cancel.clone(),
         budget: limits.budget,
-        policy: limits.policy,
-        env,
+        host,
     };
     let mut last = Value::Null;
     for statement in script.statements() {
         let flow = match evaluator.statement(statement, scope) {
             Ok(flow) => flow,
-            Err(Abort::Cancelled(cancellation)) => return Ok(Completion::Cancelled(cancellation)),
-            Err(Abort::Error(error)) => return Err(error),
+            Err(Abort::Cancelled(cancellation)) => {
+                return Ok(HostedEvaluationOutcome::Cancelled(cancellation));
+            }
+            Err(Abort::Error(error)) => {
+                return Err(HostedEvaluationFailure::Runtime(error));
+            }
+            Err(Abort::Exit(code)) => return Ok(HostedEvaluationOutcome::Exit(code)),
+            Err(Abort::Stopped(job)) => return Ok(HostedEvaluationOutcome::Stopped(job)),
+            Err(Abort::Output(error)) => return Err(HostedEvaluationFailure::Output(error)),
         };
         match flow {
             Flow::Fallthrough(Some(result)) => last = result.value,
             Flow::Fallthrough(None) => {}
             Flow::Break(span) => {
-                return Err(RuntimeError::new(
+                return Err(HostedEvaluationFailure::Runtime(RuntimeError::new(
                     RuntimeErrorKind::ControlOutsideLoop {
                         control: ControlKind::Break,
                     },
                     span,
-                ));
+                )));
             }
             Flow::Continue(span) => {
-                return Err(RuntimeError::new(
+                return Err(HostedEvaluationFailure::Runtime(RuntimeError::new(
                     RuntimeErrorKind::ControlOutsideLoop {
                         control: ControlKind::Continue,
                     },
                     span,
-                ));
+                )));
             }
             Flow::Return(_, span) => {
-                return Err(RuntimeError::new(
+                return Err(HostedEvaluationFailure::Runtime(RuntimeError::new(
                     RuntimeErrorKind::ReturnOutsideFunction,
                     span,
-                ));
+                )));
             }
         }
     }
-    Ok(Completion::Value(last))
+    Ok(HostedEvaluationOutcome::Value(last))
 }
 
 /// Evaluates one parsed closure command argument into its captured callable
@@ -1257,19 +1401,25 @@ pub(crate) fn evaluate_closure_argument_with_binding_types(
 ) -> Result<Value, RuntimeError> {
     let limits = EvalLimits::default();
     let mut env = Environment::new();
+    let mut host = PureEvaluationHost {
+        environment: &mut env,
+        policy: limits.policy,
+    };
     let evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types,
         cancel: limits.cancel,
         budget: limits.budget,
-        policy: limits.policy,
-        env: &mut env,
+        host: &mut host,
     };
     match evaluator.make_closure(closure, scope) {
         Ok(value) => Ok(value),
         Err(Abort::Error(error)) => Err(error),
         Err(Abort::Cancelled(_)) => {
             unreachable!("creating a closure does not poll cancellation")
+        }
+        Err(Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
+            unreachable!("the pure evaluation host cannot produce session outcomes")
         }
     }
 }
@@ -1319,19 +1469,25 @@ pub fn apply_callable(
         ));
     }
 
+    let mut host = PureEvaluationHost {
+        environment: env,
+        policy: limits.policy,
+    };
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::clone(&function.binding_types),
         cancel: limits.cancel.clone(),
         budget: limits.budget,
-        policy: limits.policy,
-        env,
+        host: &mut host,
     };
     // Cancellation is polled before entering the body, matching an ordinary call.
     if let Err(abort) = evaluator.check_cancel(span) {
         return match abort {
             Abort::Cancelled(cancellation) => Ok(Completion::Cancelled(cancellation)),
             Abort::Error(error) => Err(error),
+            Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_) => {
+                unreachable!("the pure evaluation host cannot produce session outcomes")
+            }
         };
     }
     let arguments = arguments
@@ -1342,6 +1498,9 @@ pub fn apply_callable(
         Ok(value) => Ok(Completion::Value(value)),
         Err(Abort::Cancelled(cancellation)) => Ok(Completion::Cancelled(cancellation)),
         Err(Abort::Error(error)) => Err(error),
+        Err(Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
+            unreachable!("the pure evaluation host cannot produce session outcomes")
+        }
     }
 }
 
@@ -1405,19 +1564,25 @@ pub fn expand_word(
     let limits = EvalLimits::default();
     // Word expansion never touches the environment; a throwaway is sufficient.
     let mut env = Environment::new();
+    let mut host = PureEvaluationHost {
+        environment: &mut env,
+        policy: limits.policy,
+    };
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::new(RuntimeBindingTypes::default()),
         cancel: limits.cancel.clone(),
         budget: limits.budget,
-        policy: limits.policy,
-        env: &mut env,
+        host: &mut host,
     };
     match evaluator.expand_word(word, scope) {
         Ok(expanded) => Ok(expanded),
         Err(Abort::Error(error)) => Err(error),
         Err(Abort::Cancelled(_)) => {
             unreachable!("a never-cancelling token cannot produce a cancellation")
+        }
+        Err(Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
+            unreachable!("the pure evaluation host cannot produce session outcomes")
         }
     }
 }
@@ -1440,19 +1605,25 @@ pub fn expand_spread(
     let limits = EvalLimits::default();
     // Spread expansion never touches the environment; a throwaway is sufficient.
     let mut env = Environment::new();
+    let mut host = PureEvaluationHost {
+        environment: &mut env,
+        policy: limits.policy,
+    };
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::new(RuntimeBindingTypes::default()),
         cancel: limits.cancel.clone(),
         budget: limits.budget,
-        policy: limits.policy,
-        env: &mut env,
+        host: &mut host,
     };
     match evaluator.expand_spread(variable, item_span, scope) {
         Ok(expanded) => Ok(expanded),
         Err(Abort::Error(error)) => Err(error),
         Err(Abort::Cancelled(_)) => {
             unreachable!("a never-cancelling token cannot produce a cancellation")
+        }
+        Err(Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
+            unreachable!("the pure evaluation host cannot produce session outcomes")
         }
     }
 }
@@ -1490,13 +1661,12 @@ struct FlowValue {
     span: Span,
 }
 
-struct Evaluator<'environment> {
+struct Evaluator<'host> {
     source: Arc<SourceFile>,
     binding_types: Arc<RuntimeBindingTypes>,
     cancel: CancellationToken,
     budget: ResourceBudget,
-    policy: EvaluationPolicy,
-    env: &'environment mut Environment,
+    host: &'host mut dyn EvaluationHost,
 }
 
 impl Evaluator<'_> {
@@ -1550,7 +1720,7 @@ impl Evaluator<'_> {
             StatementKind::Match(match_statement) => self.match_statement(match_statement, scope),
             StatementKind::Control(control) => self.control(control, scope, span),
             StatementKind::Job(job) => {
-                if self.policy == EvaluationPolicy::Startup {
+                if self.host.policy() == EvaluationPolicy::Startup {
                     return Err(self.error(
                         RuntimeErrorKind::RestrictedStartup {
                             capability: RestrictedCapability::ProcessExecution,
@@ -1627,11 +1797,11 @@ impl Evaluator<'_> {
                     )
                 })?;
                 let name = self.text(name.span()).to_owned();
-                self.env.set(name, encoded);
+                self.host.environment().set(name, encoded);
             }
             EnvironmentStatement::Unset { name } => {
                 let name = self.text(name.span()).to_owned();
-                self.env.remove(&name);
+                self.host.environment().remove(&name);
             }
         }
         Ok(())
@@ -1847,6 +2017,34 @@ impl Evaluator<'_> {
         self.expect_condition(&value, chain.span())
     }
 
+    fn context(&self) -> EvaluationContext {
+        EvaluationContext {
+            source: Arc::clone(&self.source),
+            binding_types: Arc::clone(&self.binding_types),
+            cancel: self.cancel.clone(),
+        }
+    }
+
+    fn execute_chain(&mut self, chain: &ConditionalChain, scope: &mut ScopeStack) -> Eval<Status> {
+        let context = self.context();
+        self.host.execute_chain(chain, scope, context)
+    }
+
+    fn capture_chain(
+        &mut self,
+        chain: &ConditionalChain,
+        scope: &mut ScopeStack,
+        span: Span,
+        position: CapturePosition,
+    ) -> Eval<String> {
+        let context = self.context();
+        let CapturedChain { text, status } = self
+            .host
+            .capture_chain(chain, scope, span, position, context)?;
+        let _ = status;
+        Ok(text)
+    }
+
     /// Evaluates a conditional chain to a value.
     ///
     /// A single-term chain is transparent. Multiple `||` terms return the last
@@ -1892,32 +2090,24 @@ impl Evaluator<'_> {
         Ok(value)
     }
 
-    /// Evaluates a single-stage expression pipeline. A multi-stage pipeline or a
-    /// command stage needs process execution and is unsupported here.
+    /// Evaluates a pure single-stage expression or delegates one reached
+    /// effectful pipeline through the active host.
     fn eval_pipeline(&mut self, pipeline: &Pipeline, scope: &mut ScopeStack) -> Eval<Value> {
-        let [stage] = pipeline.stages() else {
-            if self.policy == EvaluationPolicy::Startup {
-                return Err(self.error(
-                    RuntimeErrorKind::RestrictedStartup {
-                        capability: RestrictedCapability::ProcessExecution,
-                    },
-                    pipeline.span(),
-                ));
-            }
-            return Err(self.error(RuntimeErrorKind::ExecutionUnsupported, pipeline.span()));
-        };
-        match stage.kind() {
-            StageKind::Expression(expression) => self.expression(expression, scope),
-            StageKind::Command(_) if self.policy == EvaluationPolicy::Startup => Err(self.error(
+        if let [stage] = pipeline.stages()
+            && let StageKind::Expression(expression) = stage.kind()
+        {
+            return self.expression(expression, scope);
+        }
+        if self.host.policy() == EvaluationPolicy::Startup {
+            return Err(self.error(
                 RuntimeErrorKind::RestrictedStartup {
                     capability: RestrictedCapability::ProcessExecution,
                 },
                 pipeline.span(),
-            )),
-            StageKind::Command(_) => {
-                Err(self.error(RuntimeErrorKind::ExecutionUnsupported, pipeline.span()))
-            }
+            ));
         }
+        let chain = ConditionalChain::from_pipeline(pipeline.clone());
+        self.execute_chain(&chain, scope).map(Value::Status)
     }
 
     /// Requires a value to be `Bool` or `Status` at a conditional-chain edge.
@@ -2042,7 +2232,9 @@ impl Evaluator<'_> {
         match expression.kind() {
             // A parenthesized pure expression is evaluated; a grouped command is not.
             ExpressionKind::GroupedJob(chain) => self.eval_chain(chain, scope),
-            ExpressionKind::CommandSubstitution(_) if self.policy == EvaluationPolicy::Startup => {
+            ExpressionKind::CommandSubstitution(_)
+                if self.host.policy() == EvaluationPolicy::Startup =>
+            {
                 Err(self.error(
                     RuntimeErrorKind::RestrictedStartup {
                         capability: RestrictedCapability::CommandSubstitution,
@@ -2050,9 +2242,9 @@ impl Evaluator<'_> {
                     span,
                 ))
             }
-            ExpressionKind::CommandSubstitution(_) => {
-                Err(self.error(RuntimeErrorKind::ExecutionUnsupported, span))
-            }
+            ExpressionKind::CommandSubstitution(chain) => self
+                .capture_chain(chain, scope, span, CapturePosition::Expression)
+                .map(Value::string),
             _ => unreachable!("caller restricts this to grouped jobs and substitutions"),
         }
     }
@@ -2225,8 +2417,8 @@ impl Evaluator<'_> {
                 let resolved = self.expression(expression, scope)?;
                 value.push(self.encode_scalar(&resolved, span)?);
             }
-            WordPartKind::CommandSubstitution(_) => {
-                if self.policy == EvaluationPolicy::Startup {
+            WordPartKind::CommandSubstitution(chain) => {
+                if self.host.policy() == EvaluationPolicy::Startup {
                     return Err(self.error(
                         RuntimeErrorKind::RestrictedStartup {
                             capability: RestrictedCapability::CommandSubstitution,
@@ -2234,7 +2426,7 @@ impl Evaluator<'_> {
                         span,
                     ));
                 }
-                return Err(self.unsupported("command substitution in a word", span));
+                value.push(self.capture_chain(chain, scope, span, CapturePosition::Word)?);
             }
             WordPartKind::DoubleQuoted(_) => unreachable!("handled before provenance tracking"),
         }

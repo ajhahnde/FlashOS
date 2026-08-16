@@ -924,6 +924,44 @@ fn pure_bindings_persist_across_submissions() {
 }
 
 #[test]
+fn nested_commands_run_only_in_selected_control_flow() {
+    let mut session = session();
+    let probe = Probe::default();
+
+    assert_eq!(
+        submit(
+            &mut session,
+            "if false { cd /skipped }\nif true { cd /selected }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(session.cwd(), Path::new("/selected"));
+}
+
+#[test]
+fn command_substitution_captures_only_when_reached() {
+    let mut session = session();
+    let probe = Probe::default();
+
+    assert_eq!(
+        submit(
+            &mut session,
+            "if false { let ignored = $(cd /skipped) }\n\
+             let captured = $(pwd)\n\
+             export CAPTURED = $captured",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(session.cwd(), Path::new("/work"));
+    assert_eq!(
+        session.environment().get("CAPTURED"),
+        Some(OsStr::new("/work"))
+    );
+}
+
+#[test]
 fn cd_updates_the_logical_cwd_across_submissions() {
     let mut session = session();
     let probe = Probe::default();
