@@ -288,6 +288,7 @@ struct ControlledBackgroundPlatform {
     pipe_write_failures: Mutex<Vec<usize>>,
     pipe_write_failure_barrier: Mutex<Option<Arc<Barrier>>>,
     pipe_read_data: Mutex<BTreeMap<usize, Vec<u8>>>,
+    descriptor_read_data: Mutex<VecDeque<Vec<u8>>>,
     spawn_calls: AtomicUsize,
     spawn_failure: Mutex<Option<usize>>,
     active_endpoints: Arc<AtomicUsize>,
@@ -403,6 +404,13 @@ impl ControlledBackgroundPlatform {
             .lock()
             .expect("pipe data lock")
             .insert(pipe_index, data.into());
+    }
+
+    fn feed_descriptor_read(&self, data: impl Into<Vec<u8>>) {
+        self.descriptor_read_data
+            .lock()
+            .expect("descriptor data lock")
+            .push_back(data.into());
     }
 
     fn synchronize_pipe_write_failures(&self, count: usize) {
@@ -553,6 +561,7 @@ impl ControlledBackgroundPlatform {
                 pipe_write_failures: Mutex::new(Vec::new()),
                 pipe_write_failure_barrier: Mutex::new(None),
                 pipe_read_data: Mutex::new(BTreeMap::new()),
+                descriptor_read_data: Mutex::new(VecDeque::new()),
                 spawn_calls: AtomicUsize::new(0),
                 spawn_failure: Mutex::new(None),
                 active_endpoints: Arc::new(AtomicUsize::new(0)),
@@ -653,9 +662,19 @@ impl Platform for ControlledBackgroundPlatform {
     fn read_descriptor(
         &self,
         _endpoint: &dyn DescriptorEndpoint,
-        _buffer: &mut [u8],
+        buffer: &mut [u8],
     ) -> Result<usize, DescriptorReadError> {
-        Ok(0)
+        let Some(data) = self
+            .descriptor_read_data
+            .lock()
+            .expect("descriptor data lock")
+            .pop_front()
+        else {
+            return Ok(0);
+        };
+        let amount = data.len().min(buffer.len());
+        buffer[..amount].copy_from_slice(&data[..amount]);
+        Ok(amount)
     }
 
     fn enter_foreground(
@@ -990,7 +1009,9 @@ fn command_substitution_captures_only_when_reached() {
             &mut session,
             "if false { let ignored = $(cd /skipped) }\n\
              let captured = $(pwd)\n\
-             export CAPTURED = $captured",
+             let label = \"cwd=$(pwd)\"\n\
+             export CAPTURED = $captured\n\
+             export CAPTURED_LABEL = $label",
             &probe,
         ),
         SubmitOutcome::Continued
@@ -1000,6 +1021,80 @@ fn command_substitution_captures_only_when_reached() {
         session.environment().get("CAPTURED"),
         Some(OsStr::new("/work"))
     );
+    assert_eq!(
+        session.environment().get("CAPTURED_LABEL"),
+        Some(OsStr::new("cwd=/work"))
+    );
+}
+
+#[test]
+fn command_substitution_captures_a_mixed_internal_tail() {
+    let clock = FakeClock::new();
+    let mut session = session();
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[901]]);
+    let probe = Probe::new(["/bin/tool"]);
+    platform.feed_pipe_read(0, b"abc".to_vec());
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("complete the external producer");
+    let mut sink = Vec::new();
+
+    assert_eq!(
+        session
+            .submit(
+                "<interactive>",
+                "let captured = $(^tool | decode utf8)\nexport CAPTURED = $captured",
+                &probe,
+                &platform,
+                &clock,
+                &mut sink,
+            )
+            .expect("the mixed internal tail should capture"),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(
+        session.environment().get("CAPTURED"),
+        Some(OsStr::new("abc"))
+    );
+    assert!(sink.is_empty());
+    assert_eq!(platform.active_endpoints(), 0);
+}
+
+#[test]
+fn command_substitution_captures_a_mixed_external_tail() {
+    let clock = FakeClock::new();
+    let mut session = session();
+    let (platform, controls) = ControlledBackgroundPlatform::in_groups_for_session(&[&[902]]);
+    let probe = Probe::new(["/bin/tool"]);
+    platform.feed_descriptor_read(b"external tail\r\n".to_vec());
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(7))))
+        .expect("complete the external tail");
+    let mut sink = Vec::new();
+
+    assert_eq!(
+        session
+            .submit(
+                "<interactive>",
+                "let captured = $(which pwd | get kind | encode utf8 | ^tool)\n\
+                 export CAPTURED = $captured",
+                &probe,
+                &platform,
+                &clock,
+                &mut sink,
+            )
+            .expect("the mixed external tail should capture"),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(
+        session.environment().get("CAPTURED"),
+        Some(OsStr::new("external tail"))
+    );
+    assert_eq!(session.current_status().and_then(Status::code), Some(7));
+    assert!(sink.is_empty());
+    assert_eq!(platform.active_endpoints(), 0);
 }
 
 #[test]
