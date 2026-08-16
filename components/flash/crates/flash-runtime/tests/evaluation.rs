@@ -75,6 +75,19 @@ fn ratified_numeric_conversions_are_callable_expressions() {
 }
 
 #[test]
+fn current_status_is_dynamic_and_reserved_from_lexical_declaration() {
+    assert_eq!(ok("$status"), Value::Null);
+    assert!(matches!(
+        err("let status = 1"),
+        RuntimeErrorKind::Scope(ScopeError::ReservedBinding(name)) if name == "status"
+    ));
+    assert!(matches!(
+        err("$status = null"),
+        RuntimeErrorKind::Scope(ScopeError::ImmutableBinding(name)) if name == "status"
+    ));
+}
+
+#[test]
 fn bindings_and_assignment_follow_scope_rules() {
     assert_eq!(
         ok("let base = 10\nmut total = $base\n$total = $total + 5\n$total"),

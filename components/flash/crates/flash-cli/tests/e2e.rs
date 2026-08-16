@@ -175,6 +175,41 @@ fn completed_program_codes_propagate_exactly_without_diagnostics() {
 }
 
 #[test]
+fn explicit_environment_and_live_status_reads_reach_the_fsh_host_boundary() {
+    let temp = TempDir::new("dynamic-session-reads");
+    let script = temp.script(
+        "dynamic-session-reads.fsh",
+        &format!(
+            concat!(
+                "if env('FLASH_DYNAMIC') == 'present' && $status == null {{\n",
+                "    ^{} exit 0\n",
+                "}} else {{\n",
+                "    exit 91\n",
+                "}}\n",
+                "if $status.ok && $status.code == 0 && $status.signal == null ",
+                "&& $status.stages == [] {{\n",
+                "    exit 0\n",
+                "}} else {{\n",
+                "    exit 92\n",
+                "}}\n",
+            ),
+            status_fixture(),
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_fsh"))
+        .arg(script)
+        .current_dir(temp.path())
+        .env("PATH", fixture_directory())
+        .env("FLASH_DYNAMIC", "present")
+        .output()
+        .expect("fsh should start");
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+}
+
+#[test]
 fn completed_signal_maps_to_128_plus_its_number_without_a_shell_report() {
     let temp = TempDir::new("completed-signal");
     let script = temp.script("signal.fsh", &format!("^{} signal\n", status_fixture()));

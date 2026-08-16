@@ -34,7 +34,7 @@ use crate::command::{
     Carrier, CommandClassification, CommandLifecycle, CommandOutput, CommandRegistry,
 };
 use crate::documentation::Documentation;
-use crate::intrinsic::ExpressionIntrinsic;
+use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
 
 /// Host-free cooperative cancellation for static source analysis.
 #[derive(Clone)]
@@ -437,6 +437,8 @@ pub struct ModuleNameImport {
 /// The lexical binding selected by one statically resolved name read.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ModuleReferenceTarget {
+    /// The reserved live current-status value supplied by the evaluation host.
+    DynamicStatus,
     /// The synthetic immutable `args: List[String]` root-program input.
     ScriptArguments,
     /// A declaration in the same canonical source module.
@@ -658,6 +660,7 @@ impl ModuleNameRegistry {
                     declaration_span,
                 } if target_module == module => Some((binding.name(), *declaration_span)),
                 ModuleReferenceTarget::ScriptArguments
+                | ModuleReferenceTarget::DynamicStatus
                 | ModuleReferenceTarget::Local { .. }
                 | ModuleReferenceTarget::Imported { .. } => None,
             })
@@ -715,6 +718,14 @@ impl ModuleNameRegistry {
                     .slice(identifier.span())
                     .expect("parsed identifiers belong to their module source")
                     .to_owned();
+                if DynamicBinding::lookup(&name).is_some() {
+                    errors.push(ModuleNameError::ReservedBinding {
+                        module: entry.module().clone(),
+                        name,
+                        declaration_span: identifier.span(),
+                    });
+                    continue;
+                }
                 names.locals.entry(name).or_insert(identifier.span());
             }
             registry.by_module.insert(entry.module().clone(), names);
@@ -793,6 +804,14 @@ impl ModuleNameRegistry {
                         .slice(identifier.span())
                         .expect("parsed identifiers belong to their module source")
                         .to_owned();
+                    if DynamicBinding::lookup(&name).is_some() {
+                        errors.push(ModuleNameError::ReservedBinding {
+                            module: entry.module().clone(),
+                            name,
+                            declaration_span: identifier.span(),
+                        });
+                        continue;
+                    }
                     let target_names = registry
                         .by_module
                         .get(edge.target())
@@ -1989,6 +2008,7 @@ impl<'a> SignatureValidator<'a> {
 
     fn reference_type(&self, target: &ModuleReferenceTarget) -> Option<ValueType> {
         match target {
+            ModuleReferenceTarget::DynamicStatus => Some(ValueType::Any),
             ModuleReferenceTarget::ScriptArguments => {
                 Some(ValueType::List(Box::new(ValueType::String)))
             }
@@ -2110,7 +2130,9 @@ impl<'a> SignatureValidator<'a> {
             return Ok(None);
         };
         let (target_module, declaration_span) = match reference.target() {
-            ModuleReferenceTarget::ScriptArguments => return Ok(None),
+            ModuleReferenceTarget::DynamicStatus | ModuleReferenceTarget::ScriptArguments => {
+                return Ok(None);
+            }
             ModuleReferenceTarget::Local {
                 module,
                 declaration_span,
@@ -2304,8 +2326,23 @@ impl<'a> ReferenceResolver<'a> {
         control: &'a AnalysisControl,
     ) -> Self {
         let source_span = entry.script().span();
-        let mut scopes = Vec::with_capacity(usize::from(is_root) + 1);
+        let mut scopes = Vec::with_capacity(usize::from(is_root) + 2);
         let mut visible = Vec::new();
+        let dynamic_target = ModuleReferenceTarget::DynamicStatus;
+        scopes.push(ReferenceScope {
+            bindings: BTreeMap::from([(
+                DynamicBinding::CurrentStatus.name().to_owned(),
+                Some(dynamic_target.clone()),
+            )]),
+            span: source_span,
+        });
+        visible.push(ModuleVisibleBinding {
+            name: DynamicBinding::CurrentStatus.name().to_owned(),
+            target: dynamic_target,
+            scope_span: source_span,
+            visible_from: source_span.start(),
+            depth: 0,
+        });
         if is_root {
             let target = ModuleReferenceTarget::ScriptArguments;
             scopes.push(ReferenceScope {
@@ -2317,7 +2354,7 @@ impl<'a> ReferenceResolver<'a> {
                 target,
                 scope_span: source_span,
                 visible_from: source_span.start(),
-                depth: 0,
+                depth: scopes.len().saturating_sub(1),
             });
         }
         let mut root = BTreeMap::new();
@@ -2707,6 +2744,14 @@ impl<'a> ReferenceResolver<'a> {
 
     fn ensure_available(&mut self, declaration_span: Span) -> bool {
         let name = self.text(declaration_span).to_owned();
+        if DynamicBinding::lookup(&name).is_some() {
+            self.errors.push(ModuleNameError::ReservedBinding {
+                module: self.entry.module().clone(),
+                name,
+                declaration_span,
+            });
+            return false;
+        }
         let scope = self
             .scopes
             .last()
@@ -2778,6 +2823,9 @@ impl<'a> ReferenceResolver<'a> {
 
 fn binding_span(target: &ModuleReferenceTarget) -> Span {
     match target {
+        ModuleReferenceTarget::DynamicStatus => {
+            unreachable!("the reserved dynamic binding cannot collide as a lexical binding")
+        }
         ModuleReferenceTarget::ScriptArguments => {
             unreachable!("the synthetic parent input cannot collide in a module scope")
         }
@@ -3303,7 +3351,18 @@ impl<'a> StaticEffectAnalyzer<'a> {
         }
         match expression.kind() {
             ExpressionKind::Literal(literal) => self.literal(literal),
-            ExpressionKind::Variable(_) | ExpressionKind::Symbol(_) => {}
+            ExpressionKind::Variable(_) => {
+                if self
+                    .names
+                    .reference(&self.module, expression.span())
+                    .is_some_and(|reference| {
+                        matches!(reference.target(), ModuleReferenceTarget::DynamicStatus)
+                    })
+                {
+                    self.summary.push(ModuleEffect::Status, expression.span());
+                }
+            }
+            ExpressionKind::Symbol(_) => {}
             ExpressionKind::List(items) => {
                 for item in items {
                     self.expression(item);
@@ -3346,13 +3405,15 @@ impl<'a> StaticEffectAnalyzer<'a> {
         }
         let Some(reference) = self.names.reference(&self.module, callee.span()) else {
             if let ExpressionKind::Symbol(identifier) = callee.kind()
-                && self
+                && let Some(intrinsic) = self
                     .source
                     .slice(identifier.span())
                     .ok()
                     .and_then(ExpressionIntrinsic::lookup)
-                    .is_some()
             {
+                if intrinsic == ExpressionIntrinsic::Env {
+                    self.summary.push(ModuleEffect::ChildEnvironment, call_span);
+                }
                 return;
             }
             self.expression(callee);
@@ -3369,7 +3430,7 @@ impl<'a> StaticEffectAnalyzer<'a> {
                 declaration_span,
                 ..
             } => (target_module.clone(), *declaration_span),
-            ModuleReferenceTarget::ScriptArguments => {
+            ModuleReferenceTarget::DynamicStatus | ModuleReferenceTarget::ScriptArguments => {
                 self.summary.push(ModuleEffect::OpaqueExternal, call_span);
                 return;
             }
@@ -4645,6 +4706,12 @@ impl<'a> ModuleProgramLoader<'a> {
 /// A failure while building explicit module export/import-name tables.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ModuleNameError {
+    /// A lexical declaration attempts to occupy a reserved dynamic name.
+    ReservedBinding {
+        module: ModuleId,
+        name: String,
+        declaration_span: Span,
+    },
     /// An export list names no top-level lexical declaration or function.
     UnknownExport {
         module: ModuleId,
@@ -4693,7 +4760,8 @@ impl ModuleNameError {
     #[must_use]
     pub const fn module(&self) -> &ModuleId {
         match self {
-            Self::UnknownExport { module, .. }
+            Self::ReservedBinding { module, .. }
+            | Self::UnknownExport { module, .. }
             | Self::DuplicateExport { module, .. }
             | Self::ImportConflict { module, .. }
             | Self::UnknownReference { module, .. }
@@ -4706,6 +4774,14 @@ impl ModuleNameError {
     #[must_use]
     pub fn diagnostic(&self) -> Diagnostic {
         match self {
+            Self::ReservedBinding {
+                declaration_span,
+                name,
+                ..
+            } => Diagnostic::new(Severity::Error, "MOD011", self.to_string()).with_primary(
+                *declaration_span,
+                format!("`{name}` is a reserved dynamic binding"),
+            ),
             Self::UnknownExport {
                 export_span, name, ..
             } => Diagnostic::new(Severity::Error, "MOD005", self.to_string()).with_primary(
@@ -4764,6 +4840,11 @@ impl ModuleNameError {
 impl fmt::Display for ModuleNameError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ReservedBinding { module, name, .. } => write!(
+                formatter,
+                "module `{}` cannot declare reserved binding `{name}`",
+                module.path().display()
+            ),
             Self::UnknownExport { module, name, .. } => write!(
                 formatter,
                 "module `{}` cannot export unknown name `{name}`",

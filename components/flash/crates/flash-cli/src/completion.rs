@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use flash_runtime::ScopeStack;
 use flash_runtime::command::{CommandClassification, CommandRegistry};
-use flash_runtime::intrinsic::ExpressionIntrinsic;
+use flash_runtime::intrinsic::{DynamicBinding, ExpressionIntrinsic};
 use flash_syntax::{
     CompletionContext, CompletionTarget, ParseOutcome, SourceFile, SourceId, completion_target,
     parse,
@@ -109,6 +109,12 @@ impl CompletionCatalog {
                 functions.insert(name.to_owned());
             }
         }
+        variables.extend(
+            DynamicBinding::ALL
+                .into_iter()
+                .map(DynamicBinding::name)
+                .map(str::to_owned),
+        );
         let intrinsics = ExpressionIntrinsic::ALL
             .into_iter()
             .map(ExpressionIntrinsic::name)

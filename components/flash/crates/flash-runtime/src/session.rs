@@ -582,6 +582,10 @@ impl EvaluationHost for SessionEvaluationHost<'_> {
         self.state.environment_mut()
     }
 
+    fn current_status(&self) -> Option<&Status> {
+        self.state.current_status()
+    }
+
     fn policy(&self) -> EvaluationPolicy {
         EvaluationPolicy::General
     }

@@ -1000,6 +1000,48 @@ fn nested_commands_run_only_in_selected_control_flow() {
 }
 
 #[test]
+fn current_status_reads_are_live_across_foreground_commands() {
+    let mut session = session();
+    let probe = Probe::default();
+
+    assert_eq!(
+        submit(
+            &mut session,
+            "if $status == null { export BEFORE_STATUS = 'none' }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(
+        session.environment().get("BEFORE_STATUS"),
+        Some(OsStr::new("none"))
+    );
+    assert_eq!(
+        submit(&mut session, "def current_code() { $status.code }", &probe,),
+        SubmitOutcome::Continued
+    );
+
+    assert_eq!(
+        submit(&mut session, "cd /status-read", &probe),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(
+        submit(
+            &mut session,
+            "if $status.ok && current_code() == 0 && $status.signal == null {\n\
+                 export AFTER_STATUS = 'success'\n\
+             }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(
+        session.environment().get("AFTER_STATUS"),
+        Some(OsStr::new("success"))
+    );
+}
+
+#[test]
 fn nested_commands_compose_through_conditions_loops_match_and_grouping() {
     let mut session = session();
     let probe = Probe::default();

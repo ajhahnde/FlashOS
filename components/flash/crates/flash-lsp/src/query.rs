@@ -328,6 +328,15 @@ fn hover(
                     intrinsic.documentation(),
                 )
             }
+            Some(SemanticHover::DynamicBinding(hover)) => {
+                let binding = hover.binding();
+                format!(
+                    "```flash\ndynamic ${}: {}\n```\n\n{}",
+                    binding.name(),
+                    binding.result_type(),
+                    binding.documentation(),
+                )
+            }
             Some(SemanticHover::Binding(binding)) => {
                 format!(
                     "```flash\nlet {}: {}\n```",

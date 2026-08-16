@@ -106,6 +106,8 @@ fn semantic_completion_hover_and_signature_help_use_shared_program_data() {
         "let message = greet('world')\n",
         "let copied = $greet\n",
         "let whole = int(3.9)\n",
+        "let home = env('HOME')\n",
+        "let latest = $status\n",
         "pwd\n",
         "kill --kill 1\n",
     );
@@ -204,6 +206,38 @@ fn semantic_completion_hover_and_signature_help_use_shared_program_data() {
         "int(value: Int | Float) -> Int"
     );
     assert_eq!(intrinsic_signature["activeParameter"], 0);
+
+    let env_call = root.find("env('HOME')").unwrap() + 1;
+    let env_hover = request(
+        &workspace,
+        PositionEncoding::Utf16,
+        &control,
+        "textDocument/hover",
+        positional(&root_uri, root, env_call, PositionEncoding::Utf16),
+    )
+    .unwrap();
+    assert!(
+        env_hover["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("env(name: String) -> Any")
+    );
+
+    let status_read = root.find("$status").unwrap() + 2;
+    let status_hover = request(
+        &workspace,
+        PositionEncoding::Utf16,
+        &control,
+        "textDocument/hover",
+        positional(&root_uri, root, status_read, PositionEncoding::Utf16),
+    )
+    .unwrap();
+    assert!(
+        status_hover["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("dynamic $status: Any")
+    );
 
     let command = root.find("pwd\n").unwrap() + 1;
     let command_hover = request(

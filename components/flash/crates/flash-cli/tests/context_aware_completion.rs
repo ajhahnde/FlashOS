@@ -98,6 +98,7 @@ fn variable_completion_uses_visible_scope_and_replaces_the_dollar_word() {
             && !completion.append_whitespace()
     }));
     assert!(engine.complete(source, 6).is_empty());
+    assert_eq!(engine.complete("echo $sta", 9)[0].value(), "$status");
 }
 
 #[test]
@@ -119,6 +120,16 @@ fn expression_completion_uses_intrinsics_and_respects_lexical_shadowing() {
     );
     assert_eq!(intrinsic[0].replacement(), 12..14);
     assert!(!intrinsic[0].append_whitespace());
+
+    let env_source = "let home = en('HOME')";
+    let env_cursor = env_source.find('(').unwrap();
+    let env = CompletionEngine::new(CompletionCatalog::from_runtime(
+        &registry,
+        &ScopeStack::new(),
+    ))
+    .complete(env_source, env_cursor);
+    assert_eq!(env[0].value(), "env");
+    assert_eq!(env[0].kind(), CompletionKind::Intrinsic);
 
     let mut value_shadow = ScopeStack::new();
     value_shadow

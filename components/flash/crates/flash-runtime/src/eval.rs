@@ -26,7 +26,7 @@ use flash_syntax::{
     UnaryOperator, VariableReference, WhileStatement, Word, WordPart, WordPartKind,
 };
 
-use crate::intrinsic::ExpressionIntrinsic;
+use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
 use crate::module::{RuntimeBindingTypes, ValueType};
 use crate::operation::{self, OperationError};
 use crate::{
@@ -236,6 +236,8 @@ pub enum RuntimeErrorKind {
     /// A double-quoted value interpolation produced native units that cannot
     /// be represented by the UTF-8 `String` value family.
     StringInterpolationNotUtf8,
+    /// A present native environment entry cannot be represented by `String`.
+    EnvironmentValueNotUtf8 { name: String },
     /// An ordinary word interpolation produced a value that cannot become an
     /// argument. `actual` names the offending value family.
     WordValueNotWordEligible { actual: &'static str },
@@ -499,6 +501,9 @@ impl fmt::Display for RuntimeErrorKind {
             }
             Self::StringInterpolationNotUtf8 => {
                 formatter.write_str("double-quoted value interpolation is not valid UTF-8")
+            }
+            Self::EnvironmentValueNotUtf8 { name } => {
+                write!(formatter, "environment entry {name:?} is not valid UTF-8")
             }
             Self::WordValueNotWordEligible { actual } => write!(
                 formatter,
@@ -1144,6 +1149,7 @@ pub(crate) enum CapturePosition {
 /// The effect boundary used by recursive language evaluation.
 pub(crate) trait EvaluationHost {
     fn environment(&mut self) -> &mut Environment;
+    fn current_status(&self) -> Option<&Status>;
     fn policy(&self) -> EvaluationPolicy;
 
     fn execute_chain(
@@ -1172,6 +1178,10 @@ struct PureEvaluationHost<'environment> {
 impl EvaluationHost for PureEvaluationHost<'_> {
     fn environment(&mut self) -> &mut Environment {
         self.environment
+    }
+
+    fn current_status(&self) -> Option<&Status> {
+        None
     }
 
     fn policy(&self) -> EvaluationPolicy {
@@ -1744,8 +1754,9 @@ impl Evaluator<'_> {
     }
 
     fn declaration(&mut self, declaration: &Declaration, scope: &mut ScopeStack) -> Eval<()> {
+        let name = self.text(declaration.name.span()).to_owned();
+        self.ensure_lexical_name(&name, declaration.name.span())?;
         let value = self.expression(&declaration.value, scope)?;
-        let name = self.text(declaration.name.span());
         let mutability = if declaration.mutable {
             BindingMutability::Mutable
         } else {
@@ -1768,9 +1779,15 @@ impl Evaluator<'_> {
     }
 
     fn assignment(&mut self, assignment: &Assignment, scope: &mut ScopeStack) -> Eval<()> {
+        let name = self.text(assignment.target.name.span()).to_owned();
+        if DynamicBinding::lookup(&name).is_some() {
+            return Err(self.error(
+                RuntimeErrorKind::Scope(ScopeError::ImmutableBinding(name.clone())),
+                assignment.target.span,
+            ));
+        }
         let value = self.expression(&assignment.value, scope)?;
-        let name = self.text(assignment.target.name.span());
-        scope.assign(name, value).map_err(|error| {
+        scope.assign(&name, value).map_err(|error| {
             let span = if matches!(error, ScopeError::TypeMismatch { .. }) {
                 assignment.value.span()
             } else {
@@ -1843,8 +1860,9 @@ impl Evaluator<'_> {
     }
 
     fn for_statement(&mut self, statement: &ForStatement, scope: &mut ScopeStack) -> Eval<Flow> {
-        let iterable = self.expression(&statement.iterable, scope)?;
         let name = self.text(statement.binding.span()).to_owned();
+        self.ensure_lexical_name(&name, statement.binding.span())?;
+        let iterable = self.expression(&statement.iterable, scope)?;
         let boundary = statement.iterable.span();
         match iterable {
             Value::List(items) => {
@@ -1943,6 +1961,7 @@ impl Evaluator<'_> {
             }
             Pattern::Binding(identifier) => {
                 let name = self.text(identifier.span());
+                self.ensure_lexical_name(name, identifier.span())?;
                 scope
                     .declare(name, BindingMutability::Immutable, subject.clone())
                     .map_err(|error| {
@@ -2180,12 +2199,7 @@ impl Evaluator<'_> {
             ExpressionKind::Literal(literal) => self.literal(literal, scope),
             ExpressionKind::Variable(variable) => {
                 let name = self.text(variable.name.span());
-                scope.get(name).cloned().ok_or_else(|| {
-                    self.error(
-                        RuntimeErrorKind::Scope(ScopeError::UnknownBinding(name.to_owned())),
-                        span,
-                    )
-                })
+                self.binding_value(name, scope, span)
             }
             ExpressionKind::Symbol(_) => Err(self.unsupported("bare symbol", span)),
             ExpressionKind::List(elements) => {
@@ -2427,12 +2441,7 @@ impl Evaluator<'_> {
             }
             WordPartKind::Variable(identifier) => {
                 let name = self.text(identifier.span());
-                let resolved = scope.get(name).cloned().ok_or_else(|| {
-                    self.error(
-                        RuntimeErrorKind::Scope(ScopeError::UnknownBinding(name.to_owned())),
-                        span,
-                    )
-                })?;
+                let resolved = self.binding_value(name, scope, span)?;
                 value.push(self.encode_scalar(&resolved, span)?);
             }
             WordPartKind::BracedInterpolation(expression) => {
@@ -2483,12 +2492,7 @@ impl Evaluator<'_> {
     ) -> Eval<Vec<ExpandedWord>> {
         self.charge(item_span)?;
         let name = self.text(variable.name.span());
-        let resolved = scope.get(name).cloned().ok_or_else(|| {
-            self.error(
-                RuntimeErrorKind::Scope(ScopeError::UnknownBinding(name.to_owned())),
-                item_span,
-            )
-        })?;
+        let resolved = self.binding_value(name, scope, item_span)?;
         let elements = match resolved {
             Value::List(elements) => elements,
             other => {
@@ -2557,12 +2561,43 @@ impl Evaluator<'_> {
         self.error(RuntimeErrorKind::Operation(error), span)
     }
 
+    fn ensure_lexical_name(&self, name: &str, span: Span) -> Eval<()> {
+        if DynamicBinding::lookup(name).is_some() {
+            Err(self.error(
+                RuntimeErrorKind::Scope(ScopeError::ReservedBinding(name.to_owned())),
+                span,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn binding_value(&self, name: &str, scope: &ScopeStack, span: Span) -> Eval<Value> {
+        if let Some(dynamic) = DynamicBinding::lookup(name) {
+            return Ok(match dynamic {
+                DynamicBinding::CurrentStatus => self
+                    .host
+                    .current_status()
+                    .cloned()
+                    .map(Value::Status)
+                    .unwrap_or(Value::Null),
+            });
+        }
+        scope.get(name).cloned().ok_or_else(|| {
+            self.error(
+                RuntimeErrorKind::Scope(ScopeError::UnknownBinding(name.to_owned())),
+                span,
+            )
+        })
+    }
+
     fn function_definition(
         &self,
         definition: &FunctionDefinition,
         scope: &mut ScopeStack,
     ) -> Eval<()> {
         let name: Arc<str> = Arc::from(self.text(definition.name.span()));
+        self.ensure_lexical_name(&name, definition.name.span())?;
         let parameters = self.parameters(&definition.parameters)?;
         let inspection = self
             .binding_types
@@ -2612,6 +2647,7 @@ impl Evaluator<'_> {
         let mut resolved = Vec::with_capacity(parameters.len());
         for parameter in parameters {
             let name = self.text(parameter.name.span());
+            self.ensure_lexical_name(name, parameter.name.span())?;
             if resolved
                 .iter()
                 .any(|existing: &CallableParameter| existing.name.as_ref() == name)
@@ -2655,6 +2691,28 @@ impl Evaluator<'_> {
                     ));
                 }
                 let argument = self.expression(&call.arguments[0], scope)?;
+                if intrinsic == ExpressionIntrinsic::Env {
+                    let Value::String(name) = argument else {
+                        return Err(self.operation(
+                            OperationError::UnsupportedOperands {
+                                operator: "env",
+                                operands: vec![argument.family_name()],
+                            },
+                            call.arguments[0].span(),
+                        ));
+                    };
+                    let value = self.host.environment().get(&name).map(OsStr::to_os_string);
+                    return value.map_or(Ok(Value::Null), |value| {
+                        value.into_string().map(Value::string).map_err(|_| {
+                            self.error(
+                                RuntimeErrorKind::EnvironmentValueNotUtf8 {
+                                    name: name.to_string(),
+                                },
+                                span,
+                            )
+                        })
+                    });
+                }
                 return intrinsic
                     .invoke(&argument)
                     .map_err(|error| self.operation(error, span));
@@ -2829,12 +2887,7 @@ impl Evaluator<'_> {
     fn callee_value(&mut self, callee: &Expression, scope: &mut ScopeStack) -> Eval<Value> {
         if let ExpressionKind::Symbol(identifier) = callee.kind() {
             let name = self.text(identifier.span());
-            return scope.get(name).cloned().ok_or_else(|| {
-                self.error(
-                    RuntimeErrorKind::Scope(ScopeError::UnknownBinding(name.to_owned())),
-                    callee.span(),
-                )
-            });
+            return self.binding_value(name, scope, callee.span());
         }
         self.expression(callee, scope)
     }

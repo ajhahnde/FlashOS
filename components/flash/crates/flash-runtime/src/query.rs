@@ -9,7 +9,7 @@ use flash_syntax::{
 };
 
 use crate::command::{CommandClassification, CommandRegistry, CommandSignature, NamespaceClass};
-use crate::intrinsic::ExpressionIntrinsic;
+use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
 use crate::module::{
     FunctionSignature, ModuleEffectSummary, ModuleId, ModuleNameImport, ModuleProgram,
     ModuleReferenceTarget, ValueType,
@@ -38,11 +38,25 @@ impl SourceLocation {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum NameKind {
     Intrinsic,
+    DynamicBinding,
     ScriptArguments,
     Binding,
     Function,
     ImportedBinding,
     ImportedFunction,
+}
+
+/// Hover data for one reserved value supplied by the active evaluation host.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DynamicBindingHover {
+    binding: DynamicBinding,
+}
+
+impl DynamicBindingHover {
+    #[must_use]
+    pub const fn binding(self) -> DynamicBinding {
+        self.binding
+    }
 }
 
 /// Hover data for one unshadowed expression intrinsic.
@@ -193,6 +207,7 @@ impl NamedImportEffects {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SemanticHover {
     Intrinsic(IntrinsicHover),
+    DynamicBinding(DynamicBindingHover),
     Binding(BindingHover),
     Function(FunctionHover),
     Command(CommandMetadata),
@@ -291,6 +306,7 @@ impl SemanticQueries<'_> {
                 let (definition, value_type, function, imported) =
                     self.target_metadata(binding.target());
                 let kind = match (binding.target(), function, imported) {
+                    (ModuleReferenceTarget::DynamicStatus, _, _) => NameKind::DynamicBinding,
                     (ModuleReferenceTarget::ScriptArguments, _, _) => NameKind::ScriptArguments,
                     (_, true, true) => NameKind::ImportedFunction,
                     (_, false, true) => NameKind::ImportedBinding,
@@ -389,6 +405,11 @@ impl SemanticQueries<'_> {
     #[must_use]
     pub fn hover_at(&self, module: &ModuleId, offset: usize) -> Option<SemanticHover> {
         if let Some((name, target)) = self.program.names().target_at(module, offset) {
+            if matches!(target, ModuleReferenceTarget::DynamicStatus) {
+                return Some(SemanticHover::DynamicBinding(DynamicBindingHover {
+                    binding: DynamicBinding::CurrentStatus,
+                }));
+            }
             let (definition, value_type, function, _) = self.target_metadata(&target);
             if function {
                 let definition = definition?;
@@ -504,6 +525,14 @@ impl SemanticQueries<'_> {
         &self,
         target: &ModuleReferenceTarget,
     ) -> (Option<SourceLocation>, ValueType, bool, bool) {
+        if matches!(target, ModuleReferenceTarget::DynamicStatus) {
+            return (
+                None,
+                DynamicBinding::CurrentStatus.result_type(),
+                false,
+                false,
+            );
+        }
         let Some(definition) = target_location(target) else {
             return (
                 None,
@@ -617,7 +646,7 @@ impl SemanticQueries<'_> {
 
 fn target_location(target: &ModuleReferenceTarget) -> Option<SourceLocation> {
     match target {
-        ModuleReferenceTarget::ScriptArguments => None,
+        ModuleReferenceTarget::DynamicStatus | ModuleReferenceTarget::ScriptArguments => None,
         ModuleReferenceTarget::Local {
             module,
             declaration_span,
