@@ -3195,6 +3195,58 @@ mod tests {
         }
     }
 
+    struct CancellingCaptureHost {
+        environment: Environment,
+    }
+
+    impl EvaluationHost for CancellingCaptureHost {
+        fn environment(&mut self) -> &mut Environment {
+            &mut self.environment
+        }
+
+        fn current_status(&self) -> Option<&Status> {
+            None
+        }
+
+        fn policy(&self) -> EvaluationPolicy {
+            EvaluationPolicy::General
+        }
+
+        fn read_directory(
+            &mut self,
+            _path: &Path,
+        ) -> Result<Box<dyn DirectoryStream>, RuntimeErrorKind> {
+            unreachable!("capture cancellation does not read directories")
+        }
+
+        fn execute_chain(
+            &mut self,
+            _chain: &ConditionalChain,
+            _scope: &mut ScopeStack,
+            _context: EvaluationContext,
+        ) -> Result<Status, Abort> {
+            unreachable!("capture cancellation does not execute an uncaptured chain")
+        }
+
+        fn capture_chain(
+            &mut self,
+            _chain: &ConditionalChain,
+            _scope: &mut ScopeStack,
+            span: Span,
+            _position: CapturePosition,
+            context: EvaluationContext,
+        ) -> Result<CapturedChain, Abort> {
+            assert!(
+                context.cancel.is_cancelled(),
+                "the active evaluator token reaches recursive capture"
+            );
+            Err(Abort::Cancelled(Cancellation::new(
+                context.cancel.reason(),
+                span,
+            )))
+        }
+    }
+
     #[derive(Debug)]
     struct CountingDirectoryStream {
         entries: std::vec::IntoIter<DirectoryEntry>,
@@ -3250,6 +3302,47 @@ mod tests {
             Ok(HostedEvaluationOutcome::Cancelled(_))
         ));
         assert_eq!(advances.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn recursive_capture_cancellation_remains_a_distinct_hosted_outcome() {
+        let source = Arc::new(SourceFile::new(
+            SourceId::new(1),
+            "capture.fsh",
+            "def capture() { return $(^tool) }\ncapture()",
+        ));
+        let script = match parse(&source) {
+            ParseOutcome::Complete(script) => script,
+            other => panic!("capture fixture did not parse: {other:?}"),
+        };
+        let polls = Arc::new(AtomicUsize::new(0));
+        let token_polls = Arc::clone(&polls);
+        let limits = EvalLimits::new(
+            CancellationToken::from_fn(move || token_polls.fetch_add(1, Ordering::SeqCst) >= 1),
+            ResourceBudget::unlimited(),
+        );
+        let mut scope = ScopeStack::new();
+        let mut host = CancellingCaptureHost {
+            environment: Environment::new(),
+        };
+
+        let outcome = match evaluate_with_host(
+            &script,
+            Arc::clone(&source),
+            &mut scope,
+            &limits,
+            Arc::new(RuntimeBindingTypes::default()),
+            &mut host,
+        ) {
+            Ok(outcome) => outcome,
+            Err(_) => panic!("cancellation must not become a hosted evaluation failure"),
+        };
+        let HostedEvaluationOutcome::Cancelled(cancellation) = outcome else {
+            panic!("recursive capture should preserve cancellation");
+        };
+        assert_eq!(cancellation.reason(), CancelReason::Requested);
+        assert_eq!(source.slice(cancellation.span()).unwrap(), "$(^tool)");
+        assert_eq!(polls.load(Ordering::SeqCst), 2);
     }
 
     #[test]

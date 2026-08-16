@@ -4313,6 +4313,80 @@ fn an_aggregate_foreground_stop_retains_one_complete_addressable_job() {
 }
 
 #[test]
+fn a_nested_foreground_stop_discards_pending_state_and_retains_the_job() {
+    let clock = Arc::new(FakeClock::new());
+    let mut session = session();
+    session.enable_interactive_job_control(clock.clone());
+    let (platform, controls) = ControlledBackgroundPlatform::new(&[613]);
+    let probe = Probe::new(["/bin/tool"]);
+
+    assert_eq!(
+        rendered(
+            &mut session,
+            "def stop_nested() {\n    cd /pending-stop\n    ^tool\n}",
+            &probe,
+            &platform,
+            clock.as_ref(),
+        ),
+        ""
+    );
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Stopped { signal: 19 }))
+        .expect("stop the nested managed foreground member");
+
+    assert_eq!(
+        rendered(
+            &mut session,
+            "stop_nested()",
+            &probe,
+            &platform,
+            clock.as_ref(),
+        ),
+        ""
+    );
+    assert_eq!(
+        controls[0]
+            .wait_entries
+            .recv()
+            .expect("observer-owned nested stop"),
+        1
+    );
+    assert_eq!(
+        session.cwd(),
+        Path::new("/work"),
+        "the stopped call must discard its pending cwd mutation"
+    );
+    assert!(
+        session.current_status().is_none(),
+        "the stopped call must not publish a pending status"
+    );
+    let job = session
+        .background_job(job_id(1))
+        .expect("the nested stopped foreground job remains addressable");
+    assert!(matches!(job.state(), JobState::Stopped { .. }));
+    assert_eq!(
+        job.placement(),
+        Some(flash_runtime::job::JobPlacement::Foreground)
+    );
+    let stopped = session
+        .next_job_notice()
+        .expect("the nested stop queues one notice");
+    assert_eq!(stopped.job(), job_id(1));
+    assert_eq!(stopped.kind(), &JobNoticeKind::Stopped);
+
+    controls[0]
+        .steps
+        .send(Ok(ProcessTransition::Completed(ProcessStatus::Exited(0))))
+        .expect("release the retained nested observer");
+    assert_eq!(
+        rendered(&mut session, "wait %1", &probe, &platform, clock.as_ref()),
+        ""
+    );
+    assert!(session.background_job(job_id(1)).is_none());
+}
+
+#[test]
 fn a_foreground_handoff_failure_cleans_every_started_member_without_publication() {
     let clock = Arc::new(FakeClock::new());
     let mut session = session();

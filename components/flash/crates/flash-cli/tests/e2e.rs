@@ -210,6 +210,50 @@ fn explicit_environment_and_live_status_reads_reach_the_fsh_host_boundary() {
 }
 
 #[test]
+fn recursive_command_composition_reaches_the_fsh_host_boundary() {
+    let temp = TempDir::new("recursive-command-composition");
+    let report = temp.path().join("report.bin");
+    let script = temp.script(
+        "recursive-command-composition.fsh",
+        &format!(
+            concat!(
+                "def capture_probe() {{\n",
+                "    if ^{0} exit 0 {{\n",
+                "        return $(^{1} source 3 0)\n",
+                "    }} else {{\n",
+                "        return 'unreached'\n",
+                "    }}\n",
+                "}}\n",
+                "let captured = capture_probe()\n",
+                "flash-e2e-process-observer-fixture $captured\n",
+            ),
+            status_fixture(),
+            stream_fixture(),
+        ),
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fsh"))
+        .arg(&script)
+        .current_dir(temp.path())
+        .env("PATH", fixture_directory())
+        .env("FLASH_PROBE_REPORT", &report)
+        .output()
+        .expect("fsh should start");
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let observed = ProcessReport::read(&report);
+    assert_eq!(
+        observed.argv,
+        [
+            b"flash-e2e-process-observer-fixture".as_slice(),
+            b"xxx".as_slice(),
+        ]
+    );
+}
+
+#[test]
 fn explicit_glob_reaches_module_initialization_and_real_argv() {
     let temp = TempDir::new("glob-module-argv");
     fs::create_dir_all(temp.path().join("inputs/nested")).unwrap();
