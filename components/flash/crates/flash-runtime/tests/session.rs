@@ -1000,6 +1000,184 @@ fn nested_commands_run_only_in_selected_control_flow() {
 }
 
 #[test]
+fn nested_commands_compose_through_conditions_loops_match_and_grouping() {
+    let mut session = session();
+    let probe = Probe::default();
+
+    assert_eq!(
+        submit(
+            &mut session,
+            "if cd /condition { cd selected } else { cd /skipped }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(session.cwd(), Path::new("/condition/selected"));
+
+    assert_eq!(
+        submit(
+            &mut session,
+            "mut iteration = 0\n\
+             while true {\n\
+                 $iteration = $iteration + 1\n\
+                 if $iteration == 1 {\n\
+                     cd continued\n\
+                     continue\n\
+                 }\n\
+                 cd broken\n\
+                 break\n\
+             }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(
+        session.cwd(),
+        Path::new("/condition/selected/continued/broken")
+    );
+
+    assert_eq!(
+        submit(
+            &mut session,
+            "for path in ['/for-first', '/for-last'] { cd $path }\n\
+             match 2 {\n\
+                 1 => { cd /skipped }\n\
+                 2 => { cd /matched }\n\
+             }\n\
+             let grouped = (cd /grouped)",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(session.cwd(), Path::new("/grouped"));
+    assert_eq!(session.current_status().and_then(Status::code), Some(0));
+}
+
+#[test]
+fn callable_failures_and_exit_keep_the_statement_transaction_boundary() {
+    let probe = Probe::default();
+
+    let mut runtime_failure = session();
+    assert_eq!(
+        submit(
+            &mut runtime_failure,
+            "def fail() {\n\
+                 cd /runtime-leak\n\
+                 missing-command\n\
+             }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    let mut sink = Vec::new();
+    runtime_failure
+        .submit(
+            "<interactive>",
+            "fail()",
+            &probe,
+            &FakePlatform::full(),
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect_err("a command resolution failure should escape the callable");
+    assert_eq!(runtime_failure.cwd(), Path::new("/work"));
+    assert!(runtime_failure.current_status().is_none());
+
+    let mut output_failure = session();
+    assert_eq!(
+        submit(
+            &mut output_failure,
+            "def fail_output() {\n\
+                 cd /output-leak\n\
+                 pwd\n\
+             }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    let error = output_failure
+        .submit(
+            "<interactive>",
+            "fail_output()",
+            &probe,
+            &terminal_platform(),
+            &FakeClock::new(),
+            &mut FailingOutput,
+        )
+        .expect_err("a fatal output failure should escape the callable");
+    let flash_runtime::session::SubmitError::Output(error) = error else {
+        panic!("a callable sink failure must retain its output-error channel: {error:?}");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("the injected session output failed")
+    );
+    assert_eq!(output_failure.cwd(), Path::new("/work"));
+    assert!(output_failure.current_status().is_none());
+
+    let mut explicit_exit = session();
+    assert_eq!(
+        submit(
+            &mut explicit_exit,
+            "def leave() {\n\
+                 cd /committed-exit\n\
+                 exit 7\n\
+             }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(
+        submit(&mut explicit_exit, "leave()", &probe),
+        SubmitOutcome::Exit(7)
+    );
+    assert_eq!(explicit_exit.cwd(), Path::new("/committed-exit"));
+}
+
+#[test]
+fn named_functions_and_closures_reuse_the_active_session_host() {
+    let mut session = session();
+    let probe = Probe::default();
+
+    assert_eq!(
+        submit(
+            &mut session,
+            "def enter(path) {\n\
+                 cd $path\n\
+                 return $(pwd)\n\
+             }\n\
+             let entered = enter('/function')\n\
+             export ENTERED = $entered",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(session.cwd(), Path::new("/function"));
+    assert_eq!(
+        session.environment().get("ENTERED"),
+        Some(OsStr::new("/function"))
+    );
+
+    assert_eq!(
+        submit(
+            &mut session,
+            "let enter_closure = {|path| cd $path}\n\
+             let result = $enter_closure('/closure')\n\
+             if $result { export CLOSURE_REACHED = 'yes' }",
+            &probe,
+        ),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(session.cwd(), Path::new("/closure"));
+    assert_eq!(
+        session.environment().get("CLOSURE_REACHED"),
+        Some(OsStr::new("yes"))
+    );
+    assert_eq!(session.current_status().and_then(Status::code), Some(0));
+}
+
+#[test]
 fn command_substitution_captures_only_when_reached() {
     let mut session = session();
     let probe = Probe::default();
