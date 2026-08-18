@@ -223,7 +223,7 @@ The final `required` job combines these results into the stable status used by r
 
 [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) generates host-executable Flash coverage using the pinned Flash toolchain and pinned `cargo-llvm-cov`.
 
-Before upload, [`ci/check_coverage.py`](check_coverage.py) rejects a missing/empty report, reports without executed first-party lines, and reports that omit one of the five workspace crates. There is no minimum percentage threshold.
+Before upload, [`ci/check_coverage.py`](check_coverage.py) rejects a missing/empty report, reports without executed first-party lines, and reports that omit any of the workspace crates. There is no minimum percentage threshold.
 
 Codecov upload uses GitHub OIDC rather than a persistent token. [`codecov.yml`](../codecov.yml) currently disables Codecov project/patch statuses, comments, and GitHub checks.
 
