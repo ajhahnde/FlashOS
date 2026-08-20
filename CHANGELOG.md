@@ -38,6 +38,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added typed Flash command capture. `$(bytes: chain)` now preserves exact
+  bounded output as a `Bytes` value, including NUL and non-UTF-8 data, while
+  `$(text: chain)` explicitly selects the existing strict UTF-8 and trailing-
+  newline behavior and `$(chain)` remains its shorthand. Both modes share
+  status, cancellation, cleanup, redirection, and transactional execution;
+  byte results cannot be inserted into command words implicitly.
 - Added `fsh plan [--] SOURCE` for deterministic inspection of one exact Flash
   command pipeline. It shares canonical parsing, static analysis, ordinary
   expansion and PATH resolution, structural preflight, and complete escaped-
