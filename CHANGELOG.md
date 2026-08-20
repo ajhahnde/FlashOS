@@ -20,21 +20,16 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   every pull request now reports the gate, while dependency review and Cargo
   policy run only for relevant manifests, lockfiles, policy, Dependabot, or
   workflow changes and controlled skips remain inexpensive.
-- Streamlined hosted CI without weakening the artifact path: repository and
-  product checks now share one job, documentation and explicitly isolated
-  policy, reporting, and host-tool changes skip the costly clean image/QEMU
-  gate behind the stable aggregate result, and dependency policy is path-scoped
-  plus weekly. Draft pull requests are optional fast-feedback containers for
-  incomplete work; complete candidates may enter ready review directly and run
-  applicable clean image/QEMU and informational Coverage evidence once.
-  Protected `main` relies on the exact-head evidence enforced before merge,
-  then reruns only the fast source gates on the squash commit for an honest
-  visible status; it neither rebuilds images nor adds custom provenance logic.
-  Weekly clean-room CI retains hosted-environment drift detection. The image
-  container no longer receives unnecessary privileged host access, routine
-  dependency updates are grouped, source SBOMs are generated before binary
-  artifacts enter the workspace, and published release assets can no longer be
-  overwritten by a rerun.
+- Focused hosted CI on one reliable product signal. Draft pull requests run
+  source feedback, while every ready candidate builds and boots the canonical
+  hard-drive image. Protected `main` receives a visible check by proving that
+  its merged tree exactly matches the candidate that passed product and
+  dependency qualification, without rerunning flaky host tests. Live-media
+  qualification, image SBOM generation, and provenance remain release gates;
+  coverage and recurring drift work no longer compete with the product badge.
+  The image container remains unprivileged, selected packages are cooked from
+  tracked sources, routine dependency updates remain grouped, and published
+  release assets cannot be overwritten by a rerun.
 
 ### Added
 

@@ -504,32 +504,31 @@ The standard CI workflow runs two independent jobs for:
   tests, the product-profile contract, and whitespace validation;
 - Flash formatting, Clippy, and host tests;
 
-The image workflow begins only after these required jobs succeed. Manual runs
-and any change that can affect produced images receive full image and runtime
-qualification. Changes limited to documentation, licenses, or explicitly
-isolated policy, reporting, and host-tool paths retain the stable aggregate CI
-result but skip the expensive image gate. Unknown paths qualify rather than
-silently losing runtime evidence.
+The image workflow begins only after these required jobs succeed. Draft pull
+requests stop after source feedback. Every ready candidate and every manual CI
+run builds and boots the canonical hard-drive image, avoiding a path classifier
+whose correctness would otherwise become part of the product claim.
 
 Protected `main` requires the exact pull-request head to pass the stable CI and
-Security aggregates before merge. The resulting squash commit has a different
-commit identity, so the ordinary workflow reruns the repository and Flash
-source gates to provide a visible status on that commit. It does not repeat the
-image build or QEMU boots; weekly clean-room CI detects later
-hosted-environment drift.
+Security aggregates before merge. The dedicated protected-main workflow then
+finds the merged pull request, proves that its head and the protected-main commit have
+the same Git tree, and verifies successful candidate build, QEMU, aggregate,
+and dependency-policy jobs. It publishes the visible `qualified` check without
+rerunning the source suite or product build.
 
 ### Clean-container image producer
 
-The reusable image workflow:
+For a ready candidate, the reusable image workflow:
 
 1. builds the repository-owned CI container;
-2. builds the x86_64 disk and live images inside that container;
-3. collects staged target package payloads;
-4. generates an image-oriented CycloneDX SBOM;
-5. copies the disk, live image, and SBOM into a promotion directory;
-6. records SHA-256 checksums;
-7. verifies those checksums;
-8. uploads the files as one workflow artifact.
+2. builds the x86_64 hard-drive image inside that container;
+3. validates the produced target baseline;
+4. records and verifies SHA-256 checksums;
+5. uploads the files as one workflow artifact.
+
+Release qualification enables the additional evidence path. It also builds
+the live image, collects staged target package payloads, generates an
+image-oriented CycloneDX SBOM, and binds both image digests into that inventory.
 
 The hosted build uses a dedicated Docker environment and explicit Make
 variables. It cooks selected image packages from their tracked recipes; the
@@ -539,14 +538,16 @@ execution environment.
 
 ### Independent runtime consumer
 
-A separate job:
+A separate candidate job:
 
 1. checks out the same repository revision;
 2. installs QEMU and UEFI firmware;
 3. downloads the promoted image artifact;
 4. verifies its `SHA256SUMS`;
-5. boots the downloaded disk image over NVMe;
-6. boots the downloaded live image over USB mass storage.
+5. boots the downloaded disk image over NVMe.
+
+Release qualification additionally boots the downloaded live image over USB
+mass storage. The consumer never rebuilds either image before testing it.
 
 The consumer does not rebuild the images before testing them. This connects runtime results to the checksummed bytes produced by the image job.
 
@@ -574,20 +575,17 @@ A checksum proves the identity and integrity of a particular byte sequence. It d
 
 ## Host coverage reporting
 
-The independent Coverage workflow instruments the complete Flash host test
-suite, validates one LCOV report, and uploads it to Codecov. Its structural
+The manually dispatched Coverage workflow instruments the complete Flash host
+test suite, validates one LCOV report, and uploads it to Codecov. Its structural
 guard requires reported source from every Flash workspace crate and at least
 one executed first-party line. Codecov statuses, comments, and GitHub checks
-remain disabled while the new Rust baseline is established, and Coverage is
-not part of the standard CI `required` aggregate. It runs for relevant
-non-draft pull-request candidates and when manually dispatched; draft work
-waits until the ready-for-review transition before spending the additional
-instrumented test run.
+remain disabled, and Coverage is not part of the standard CI `required`
+aggregate.
 
 Coverage is an observation about lines compiled and executed on the host. It
 does not measure target-selected Redox paths, image packaging, QEMU behavior,
-the kernel, or physical hardware. The public badge must therefore remain
-labelled as Flash host coverage rather than as a whole-system quality score.
+the kernel, or physical hardware, so it is not used as the public product
+qualification signal.
 
 ## Security checks
 
@@ -603,11 +601,11 @@ Its current jobs include:
 Every pull request reports the aggregate so repository rules can require it.
 Dependency review and Cargo policy execute only when the changed paths include
 dependency manifests, lockfiles, policy, Dependabot configuration, or the
-workflow itself; the aggregate verifies a controlled skip otherwise. A weekly
-schedule still detects newly published advisories without requiring unrelated
-source and documentation changes to repeat identical policy work. A passing
-dependency-policy workflow does not constitute a full security audit of
-FlashOS, its upstream operating-system components, or produced images.
+workflow itself; the aggregate verifies a controlled skip otherwise. Manual
+dispatch remains available for an explicit dependency-policy audit without
+turning recurring advisory drift into a status on an unchanged `main` commit.
+A passing dependency-policy workflow does not constitute a full security audit
+of FlashOS, its upstream operating-system components, or produced images.
 
 Security vulnerabilities must be handled through the process in the [Security Policy](../.github/SECURITY.md), not through public verification logs alone.
 
@@ -811,8 +809,10 @@ Do not remove an assertion solely because a change fails it. First determine whe
 | General development workflow             | [Development](development.md)                                         |
 | Static product-profile contract          | [`ci/check_profile.py`](../ci/check_profile.py)                       |
 | QEMU runtime contract                    | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                             |
+| Protected-main evidence transfer         | [`ci/check_main_qualification.py`](../ci/check_main_qualification.py) |
 | Public local helper behavior             | [`flashos.sh`](../flashos.sh)                                         |
 | Standard hosted CI orchestration         | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             |
+| Protected-main status workflow           | [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml) |
 | Informational host coverage              | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) |
 | Coverage report completeness             | [`ci/check_coverage.py`](../ci/check_coverage.py)                     |
 | Codecov reporting policy                 | [`codecov.yml`](../codecov.yml)                                       |

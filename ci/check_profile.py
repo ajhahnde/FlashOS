@@ -206,10 +206,8 @@ if f"FlashOS {version}" not in readme or f"Version-{version}-" not in readme:
     fail("README version drifted from versions.env")
 
 for expected in (
-    "actions/workflows/ci.yml/badge.svg",
-    "actions/workflows/security.yml/badge.svg",
-    "https://img.shields.io/codecov/c/github/ajhahnde/FlashOS",
-    "label=Flash%20host%20coverage",
+    "actions/workflows/main-qualification.yml/badge.svg?branch=main&amp;event=push",
+    'alt="Product qualified"',
     f"Version-{version}-",
     "Status-pre--alpha-",
     "Target-x86__64--unknown--redox-",
@@ -225,6 +223,7 @@ for expected in (
     # A release must never be built from the profile that carries the
     # development logins.
     "config-name: flashos-release",
+    "release-evidence: true",
     # Both SBOMs must ship, and each must be named for what it describes. A
     # single unqualified document previously covered only the source workspace.
     "FlashOS-${{ steps.version.outputs.version }}-source.cdx.json",
@@ -245,6 +244,8 @@ for expected in (
     # package payload rather than from the repository working tree.
     "FlashOS-x86_64-image.cdx.json",
     "dist/payload",
+    "release-evidence:",
+    "if: inputs.release-evidence",
     # The container runs as root over a runner-owned bind mount. Git must
     # trust exactly that mount for the in-tree Flash workspace snapshot.
     "GIT_CONFIG_COUNT=1",
@@ -272,12 +273,13 @@ if "pull_request:\n    paths:" in security_workflow:
     fail("security-required must report for every pull request")
 if "  push:\n    branches: [main]" in security_workflow:
     fail("security workflow must not repeat dependency policy after PR merge")
+if "  schedule:" in security_workflow:
+    fail("dependency drift is manual rather than a recurring main status")
 
 coverage_workflow = (ROOT / ".github/workflows/coverage.yml").read_text()
 for expected in (
     "name: Coverage",
-    "types: [opened, synchronize, reopened, ready_for_review]",
-    "github.event.pull_request.draft == false",
+    "workflow_dispatch:",
     "id-token: write",
     "rustup component add llvm-tools-preview",
     "tool: cargo-llvm-cov@0.8.7",
@@ -293,36 +295,53 @@ for expected in (
         fail(f"coverage workflow contract is missing: {expected}")
 if "  push:\n    branches: [main]" in coverage_workflow:
     fail("coverage must qualify the PR candidate instead of merged main")
+if "  pull_request:" in coverage_workflow or "  schedule:" in coverage_workflow:
+    fail("coverage must remain an explicitly requested diagnostic")
 
 ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text()
 if "python3 -m unittest discover -s ci/tests -p 'test_*.py'" not in ci_workflow:
     fail("standard CI must run the coverage-contract unit tests")
 if "python3 ci/check_flashos_platform.py" not in ci_workflow:
     fail("standard CI must validate the FlashOS platform source baseline")
-if "qualify_image" not in ci_workflow or '"skipped"' not in ci_workflow:
-    fail("standard CI must retain its documented conditional image gate")
 for expected in (
     "types: [opened, synchronize, reopened, ready_for_review]",
-    "push:\n    branches: [main]",
-    'cron: "0 4 * * 0"',
-    'if [ "${EVENT_NAME}" = "push" ]; then',
-    "Protected main already received exact-head candidate evidence.",
+    "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
     "github.event.pull_request.draft == false",
-    ".github/workflows/coverage.yml",
-    ".github/workflows/security.yml",
-    "tools/flashos/*",
-    "ci/check_coverage.py",
+    "release-evidence: false",
     "PR_DRAFT:",
-    "QUALIFY_IMAGE:",
-    "required image qualification was unexpectedly skipped",
+    "ready candidates require successful product qualification",
 ):
     if expected not in ci_workflow:
         fail(f"standard CI candidate-qualification contract is missing: {expected}")
-if (ROOT / ".github/workflows/main-qualification.yml").exists():
-    fail(
-        "protected merges must rely on pre-merge qualification without a "
-        "post-merge status workflow"
-    )
+for forbidden in ("  push:\n", "  schedule:\n", "qualify_image"):
+    if forbidden in ci_workflow:
+        fail(
+            "standard CI must not retain redundant orchestration: "
+            f"{forbidden.strip()}"
+        )
+
+main_workflow = (ROOT / ".github/workflows/main-qualification.yml").read_text()
+for expected in (
+    "name: Product qualified",
+    "push:\n    branches: [main]",
+    "actions: read",
+    "pull-requests: read",
+    "name: qualified",
+    "python3 ci/check_main_qualification.py",
+):
+    if expected not in main_workflow:
+        fail(f"main qualification workflow contract is missing: {expected}")
+
+main_qualification = (ROOT / "ci/check_main_qualification.py").read_text()
+for expected in (
+    'CANDIDATE_WORKFLOW = "ci.yml"',
+    'SECURITY_WORKFLOW = "security.yml"',
+    '"image-and-runtime / qemu-artifact-consumer"',
+    'SECURITY_JOBS = {"security-required"}',
+    'f"/repos/{repository}/commits/{main_sha}/pulls"',
+):
+    if expected not in main_qualification:
+        fail(f"main qualification evidence contract is missing: {expected}")
 
 if "--clobber" in release_workflow:
     fail("release publication must not overwrite existing release assets")

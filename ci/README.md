@@ -45,10 +45,10 @@ If this document and an executable check disagree, the executable implementation
 
 ## Pipeline
 
-The main CI path is:
+The candidate and protected-main path is:
 
 ```text
-pull request / schedule / manual run
+pull request
     │
     ├── repository-quality
     │   └── root checks + Python/product checks
@@ -59,16 +59,26 @@ pull request / schedule / manual run
     └── image-and-runtime
         └── _image.yml
             ├── containerized image build
-            │   └── disk + live image + SBOM + SHA256SUMS
+            │   └── hard-drive image + SHA256SUMS
             │
             └── separate QEMU consumer
-                ├── disk image over NVMe
-                └── live image over USB
-                    ↓
-                CI / required
+                └── disk image over NVMe
+                        ↓
+                    CI / required
+                        ↓
+                  exact-tree merge
+                        ↓
+              Product qualified / qualified
 ```
 
-Coverage and security run separately. Releases reuse `_image.yml` with the release profile before packaging or publishing anything.
+Draft pull requests stop after the source jobs. Every ready candidate receives
+the canonical image and QEMU qualification. The protected-main workflow does
+not rerun those tests: it verifies that the merged tree exactly equals the
+candidate tree and links the successful `required` and `security-required`
+evidence to the new `main` commit. Coverage is manual, while security reports
+on every pull request and can also be requested manually. Releases reuse
+`_image.yml` with the full release evidence path before packaging or publishing
+anything.
 
 Host tests, image construction, QEMU checks, and physical hardware testing are separate verification layers. See [Verification and Testing](../docs/verification.md) for their exact scope.
 
@@ -204,7 +214,7 @@ The smoke test covers the paths above, not general hardware compatibility, full 
 
 ### Standard CI
 
-The main workflow is [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs for pull requests, protected `main` updates, the configured weekly schedule, and manual dispatch.
+The candidate workflow is [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs for pull requests and manual dispatch.
 
 The two source-quality jobs are:
 
@@ -215,13 +225,23 @@ The two source-quality jobs are:
 
 `image-and-runtime` calls `_image.yml` after both source-quality jobs pass.
 
-Draft pull requests skip the image build. Non-draft changes that can affect produced images run it. Explicitly runtime-neutral paths can skip it; unknown paths take the safe path and qualify the images.
+Draft pull requests skip the image build. Every non-draft candidate builds and
+boots the canonical hard-drive image, so the final result does not depend on a
+path classifier.
 
-The final `required` job combines these results into the stable status used by repository rules. Coverage is not part of this aggregate.
+The final `required` job combines these results into the stable status used by
+repository rules. [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml)
+then reports `qualified` on the protected-main commit only after
+[`check_main_qualification.py`](check_main_qualification.py) verifies the
+associated pull request, exact Git-tree identity, complete candidate jobs, and
+`security-required` evidence. This preserves a meaningful visible check on
+`main` without executing the suite twice.
 
 ### Coverage
 
-[`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) generates host-executable Flash coverage using the pinned Flash toolchain and pinned `cargo-llvm-cov`.
+[`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) is a
+manually requested diagnostic that generates host-executable Flash coverage
+using the pinned Flash toolchain and pinned `cargo-llvm-cov`.
 
 Before upload, [`ci/check_coverage.py`](check_coverage.py) rejects a missing/empty report, reports without executed first-party lines, and reports that omit any of the workspace crates. There is no minimum percentage threshold.
 
@@ -235,24 +255,29 @@ The percentage is Flash host coverage; it does not include target-only Redox cod
 
 Inputs:
 
-| Input            | Purpose                               |
-| ---------------- | ------------------------------------- |
-| `artifact-name`  | Promoted artifact name                |
-| `retention-days` | Artifact retention                    |
-| `config-name`    | x86_64 profile; defaults to `flashos` |
+| Input              | Purpose                                                |
+| ------------------ | ------------------------------------------------------ |
+| `artifact-name`    | Promoted artifact name                                 |
+| `retention-days`   | Artifact retention                                     |
+| `config-name`      | x86_64 profile; defaults to `flashos`                  |
+| `release-evidence` | Also build/boot live media and generate the image SBOM |
 
-The producer builds both image forms using [`ci/container/Dockerfile`](container/Dockerfile), validates target artifacts, collects staged package payloads, generates the image CycloneDX SBOM, creates `SHA256SUMS`, verifies it, and uploads the result.
+The candidate producer uses [`ci/container/Dockerfile`](container/Dockerfile)
+to build the hard-drive image, validates target artifacts, creates and verifies
+`SHA256SUMS`, and uploads the result. A separate runner verifies the checksums
+again and boots that exact image over NVMe.
 
-The normal promoted artifact contains:
+The candidate artifact contains:
 
 ```text
 FlashOS-x86_64-harddrive.img
-FlashOS-x86_64-live.iso
-FlashOS-x86_64-image.cdx.json
 SHA256SUMS
 ```
 
-A separate runner downloads this artifact, verifies its checksums, then boots the hard-drive image over NVMe and the live image over USB mass storage. Release-profile runs also enable the root-lock assertion.
+Release qualification sets `release-evidence: true`. It additionally builds
+and boots the live image over USB mass storage, collects staged target payloads,
+and generates the image CycloneDX SBOM. The release profile also enables the
+root-lock assertion.
 
 Failed runtime jobs attempt to preserve:
 
@@ -293,6 +318,7 @@ Release image qualification reuses `_image.yml` with:
 
 ```text
 config-name: flashos-release
+release-evidence: true
 ```
 
 For tagged runs, the tag must match the version in [`versions.env`](../versions.env):
@@ -326,7 +352,7 @@ source/product checks
     ↓
 containerized image producer
     ↓
-disk + live image + image SBOM + SHA256SUMS
+hard-drive image + SHA256SUMS
     ↓
 workflow artifact
     ↓
@@ -334,7 +360,7 @@ separate runtime consumer
     ↓
 checksum verification
     ↓
-NVMe + USB QEMU tests
+NVMe QEMU test
 ```
 
 Release packaging starts from a separately built and qualified release-profile artifact:
@@ -355,11 +381,12 @@ release candidate
 optional tag publication
 ```
 
-| Artifact                  | Contents                                              |
-| ------------------------- | ----------------------------------------------------- |
-| CI/release image artifact | Raw disk, raw live image, image SBOM, checksums       |
-| Release candidate         | Compressed images, source SBOM, image SBOM, checksums |
-| QEMU diagnostics          | Serial logs and image checksums                       |
+| Artifact               | Contents                                              |
+| ---------------------- | ----------------------------------------------------- |
+| Candidate image        | Raw hard-drive image and checksums                    |
+| Release image evidence | Raw disk, raw live image, image SBOM, and checksums   |
+| Release candidate      | Compressed images, source SBOM, image SBOM, checksums |
+| QEMU diagnostics       | Serial logs and image checksums                       |
 
 The pipeline also uses pinned Rust toolchains, Cargo lockfiles/policies, immutable Git recipe revisions, full commit pins for third-party Actions, a digest-pinned CI base image, checksum verification of the Rust installer, and SHA-256 verification across artifact handoffs.
 
@@ -516,9 +543,11 @@ Keep third-party Actions pinned to full commit SHAs and external Git package sou
 | Operation map             | [`check_flashos_operation_map.py`](check_flashos_operation_map.py)                         |
 | Capability classification | [`check_flashos_capability_classification.py`](check_flashos_capability_classification.py) |
 | QEMU runtime checks       | [`qemu_smoke.py`](qemu_smoke.py)                                                           |
+| Main qualification        | [`check_main_qualification.py`](check_main_qualification.py)                              |
 | Coverage validation       | [`check_coverage.py`](check_coverage.py)                                                   |
 | Hosted build environment  | [`container/Dockerfile`](container/Dockerfile)                                             |
 | Standard CI               | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                                  |
+| Protected-main status     | [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml)  |
 | Coverage                  | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml)                      |
 | Image build/runtime       | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)                          |
 | Security                  | [`.github/workflows/security.yml`](../.github/workflows/security.yml)                      |

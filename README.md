@@ -9,14 +9,8 @@
   </p>
 
   <p>
-    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml">
-      <img src="https://github.com/ajhahnde/FlashOS/actions/workflows/ci.yml/badge.svg" alt="CI">
-    </a>
-    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml">
-      <img src="https://github.com/ajhahnde/FlashOS/actions/workflows/security.yml/badge.svg" alt="Security">
-    </a>
-    <a href="https://app.codecov.io/gh/ajhahnde/FlashOS">
-      <img src="https://img.shields.io/codecov/c/github/ajhahnde/FlashOS?style=square&label=Flash%20host%20coverage" alt="Flash host coverage">
+    <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/main-qualification.yml">
+      <img src="https://github.com/ajhahnde/FlashOS/actions/workflows/main-qualification.yml/badge.svg?branch=main&amp;event=push" alt="Product qualified">
     </a>
     <img src="https://img.shields.io/badge/Version-0.1.0-f59e0b?style=square" alt="FlashOS 0.1.0">
     <img src="https://img.shields.io/badge/Status-pre--alpha-f59e0b?style=square" alt="Pre-alpha">

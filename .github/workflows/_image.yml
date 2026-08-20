@@ -19,6 +19,11 @@ on:
         required: false
         default: flashos
         type: string
+      release-evidence:
+        description: Build and qualify live media and generate the image SBOM.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -30,6 +35,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Build the FlashOS CI container
         run: >-
@@ -38,9 +45,10 @@ jobs:
           --tag "flashos-ci:${GITHUB_SHA}"
           .
 
-      - name: Build the x86_64 disk and live images in the clean container
+      - name: Build the qualified x86_64 images in the clean container
         env:
           CONFIG_NAME: ${{ inputs.config-name }}
+          RELEASE_EVIDENCE: ${{ inputs.release-evidence }}
         run: |
           set -euo pipefail
           # The hosted checkout belongs to the runner UID, while the build
@@ -51,6 +59,10 @@ jobs:
           # tracked sources. The transitional binary feed is moving and can
           # otherwise mix userland built from a different Redox tree with
           # FlashOS's pinned source-built kernel.
+          targets=("build/x86_64/${CONFIG_NAME}/harddrive.img")
+          if [ "${RELEASE_EVIDENCE}" = "true" ]; then
+            targets+=("build/x86_64/${CONFIG_NAME}/redox-live.iso")
+          fi
           docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --workdir /workspace \
@@ -67,8 +79,7 @@ jobs:
               REPO_BINARY=0 \
               REPO_NONSTOP=0 \
               FSTOOLS_NO_MOUNT=1 \
-              "build/x86_64/${CONFIG_NAME}/harddrive.img" \
-              "build/x86_64/${CONFIG_NAME}/redox-live.iso"
+              "${targets[@]}"
 
       - name: Validate the FlashOS platform build baseline
         run: python3 ci/check_flashos_platform.py --artifacts
@@ -78,6 +89,7 @@ jobs:
       # describes what the image actually contains, which a scan of the
       # repository working tree does not.
       - name: Collect the staged image payload
+        if: inputs.release-evidence
         run: |
           set -euo pipefail
           # dist/image must exist before the SBOM step, which writes into it
@@ -97,6 +109,7 @@ jobs:
           echo "staged payload collected from ${found} recipes"
 
       - name: Generate the image SBOM
+        if: inputs.release-evidence
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         env:
           SYFT_SOURCE_NAME: FlashOS-x86_64-image
@@ -109,19 +122,23 @@ jobs:
       - name: Stage the immutable images
         env:
           CONFIG_NAME: ${{ inputs.config-name }}
+          RELEASE_EVIDENCE: ${{ inputs.release-evidence }}
         run: |
           set -euo pipefail
           mkdir -p dist/image
           cp "build/x86_64/${CONFIG_NAME}/harddrive.img" \
             dist/image/FlashOS-x86_64-harddrive.img
-          cp "build/x86_64/${CONFIG_NAME}/redox-live.iso" \
-            dist/image/FlashOS-x86_64-live.iso
+          if [ "${RELEASE_EVIDENCE}" = "true" ]; then
+            cp "build/x86_64/${CONFIG_NAME}/redox-live.iso" \
+              dist/image/FlashOS-x86_64-live.iso
+          fi
           # Bind the SBOM to the artifacts it describes and give it a component
           # list. Syft finds nothing in the staged payload on its own: these are
           # bare Redox ELF binaries with no package manifest for it to read. The
           # authoritative inventory is the recipe set that produced them.
           # External sources are pinned; in-tree Flash is bound to this exact
           # checkout through its filtered workspace snapshot.
+          if [ "${RELEASE_EVIDENCE}" = "true" ]; then
           python3 - <<'BIND'
           import hashlib, json, pathlib, re, tomllib
 
@@ -200,13 +217,17 @@ jobs:
           sbom_path.write_text(json.dumps(sbom, indent=2))
           print(f"image SBOM describes {len(components)} components")
           BIND
+          fi
           (
             cd dist/image
-            sha256sum \
-              FlashOS-x86_64-harddrive.img \
-              FlashOS-x86_64-live.iso \
-              FlashOS-x86_64-image.cdx.json \
-              > SHA256SUMS
+            artifacts=(FlashOS-x86_64-harddrive.img)
+            if [ "${RELEASE_EVIDENCE}" = "true" ]; then
+              artifacts+=(
+                FlashOS-x86_64-live.iso
+                FlashOS-x86_64-image.cdx.json
+              )
+            fi
+            sha256sum "${artifacts[@]}" > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
 
@@ -227,6 +248,8 @@ jobs:
       CONFIG_NAME: ${{ inputs.config-name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install QEMU and UEFI firmware
         run: |
@@ -265,6 +288,7 @@ jobs:
             "${smoke_flags[@]}"
 
       - name: Boot the exact live image over USB
+        if: inputs.release-evidence
         run: |
           set -euo pipefail
           smoke_flags=()
