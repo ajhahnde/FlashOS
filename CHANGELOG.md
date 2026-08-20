@@ -10,6 +10,11 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Flash now executes `command NAME [ARG...]` through the same resolved external
+  stage contract as `^NAME`. Dynamically selected commands preserve native
+  argv, byte pipelines, redirections, status, capture, callables, conditional
+  execution, and background supervision while continuing to bypass the
+  internal-command namespace without reparsing text.
 - Candidate and release image builders now pin their source-package header
   generator and cook selected packages from tracked recipes instead of
   combining the pinned source-built kernel with a moving binary userland feed.
