@@ -282,15 +282,13 @@ Use a progressive workflow so that inexpensive failures are found before a full 
 
 Use a draft pull request when incomplete work benefits from hosted source
 feedback. A complete, locally green change may open directly for review and
-run its applicable candidate gates once. The full clean image and QEMU path
-runs for ready changes that can affect produced artifacts or their runtime
-qualification, and reruns after later candidate updates. Explicitly isolated
-documentation, policy, reporting, and host-tool changes retain the stable
-source aggregate without rebuilding the operating-system images. Protected
-`main` relies on the exact-head checks enforced before merge, then reruns only
-the fast repository and Flash source gates on the squash commit so its CI
-status remains visible. It does not rebuild or reboot the images after merge;
-weekly clean-room CI separately detects hosted-environment drift.
+run its candidate gates once. Every ready candidate builds the canonical
+hard-drive image and boots it over NVMe; later candidate updates requalify the
+new head. Protected `main` does not rerun the suite. Its dedicated status
+workflow verifies that the merged tree exactly matches the successfully
+qualified pull-request tree and transfers the candidate and dependency-policy
+evidence to the new commit. Coverage and broader release evidence are explicit
+manual or release operations rather than recurring merge gates.
 
 The helper interface provides a concise view of the working tree:
 

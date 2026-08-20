@@ -1,0 +1,29 @@
+name: Product qualified
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: main-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualified:
+    name: qualified
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Transfer exact candidate evidence to main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 ci/check_main_qualification.py

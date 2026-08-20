@@ -25,6 +25,7 @@ jobs:
       artifact-name: flashos-x86_64-release-${{ github.sha }}
       retention-days: 14
       config-name: flashos-release
+      release-evidence: true
     permissions:
       contents: read
 

@@ -3,10 +3,6 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches: [main]
-  schedule:
-    - cron: "0 4 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -21,74 +17,11 @@ jobs:
     name: repository-quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    outputs:
-      qualify_image: ${{ steps.scope.outputs.qualify_image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      # Keep one stable CI workflow for every candidate, but reserve the
-      # roughly ten-minute clean image and boot path for changes that can
-      # affect produced artifacts or their runtime qualification. Explicitly
-      # isolated policy, reporting, and host-tool paths skip it. Unknown paths
-      # deliberately take the safe path and qualify.
-      - name: Decide whether runtime qualification is needed
-        id: scope
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE_SHA: ${{ github.event.before }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-          qualify=true
-          if [ "${EVENT_NAME}" = "push" ]; then
-            # Protected main already received exact-head candidate evidence.
-            # Re-run the fast source gates on the squash commit so the branch
-            # has an honest visible status without rebuilding OS artifacts.
-            qualify=false
-            if [ -n "${BEFORE_SHA}" ] &&
-               [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ] &&
-               git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-              base="${BEFORE_SHA}"
-            else
-              base=""
-            fi
-          elif [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
-            if [ "${EVENT_NAME}" = "pull_request" ]; then
-              base="${BASE_SHA}"
-            elif [ -n "${BEFORE_SHA}" ] &&
-                 [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ] &&
-                 git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-              base="${BEFORE_SHA}"
-            else
-              base=""
-            fi
-
-            if [ -n "${base}" ]; then
-              qualify=false
-              mapfile -t changed < <(git diff --name-only "${base}" "${HEAD_SHA}")
-              for path in "${changed[@]}"; do
-                case "${path}" in
-                  *.md|docs/*|LICENSE|LICENSES/*|.github/ISSUE_TEMPLATE/*|\
-                  .github/dependabot.yml|.github/workflows/coverage.yml|\
-                  .github/workflows/security.yml|codecov.yml|deny.toml|\
-                  components/flash/deny.toml|flashos.sh|flashos.zsh|\
-                  tools/flashos/*|ci/check_coverage.py|\
-                  ci/tests/test_check_coverage.py)
-                    ;;
-                  *)
-                    qualify=true
-                    break
-                    ;;
-                esac
-              done
-            fi
-          fi
-          echo "qualify_image=${qualify}" >> "${GITHUB_OUTPUT}"
-          echo "base_sha=${base:-}" >> "${GITHUB_OUTPUT}"
-          echo "Image and QEMU qualification required: ${qualify}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Cache Cargo downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -137,7 +70,7 @@ jobs:
 
       - name: Reject whitespace errors
         env:
-          BASE_SHA: ${{ steps.scope.outputs.base_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if [ -n "${BASE_SHA}" ]; then
@@ -155,6 +88,8 @@ jobs:
         working-directory: components/flash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Cache Flash Cargo downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -183,14 +118,14 @@ jobs:
   image:
     name: image-and-runtime
     if: >-
-      needs.quality.outputs.qualify_image == 'true' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.draft == false)
     needs: [quality, flash]
     uses: ./.github/workflows/_image.yml
     with:
-      artifact-name: flashos-x86_64-ci-${{ github.sha }}
+      artifact-name: flashos-x86_64-ci-${{ github.event.pull_request.head.sha || github.sha }}
       retention-days: 7
+      release-evidence: false
     permissions:
       contents: read
 
@@ -205,7 +140,6 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_DRAFT: ${{ github.event.pull_request.draft || false }}
-          QUALIFY_IMAGE: ${{ needs.quality.outputs.qualify_image }}
           ROOT_RESULT: ${{ needs.quality.result }}
           SHELL_RESULT: ${{ needs.flash.result }}
           IMAGE_RESULT: ${{ needs.image.result }}
@@ -235,19 +169,11 @@ jobs:
             exit 0
           fi
 
-          if [ "${IMAGE_RESULT}" != "skipped" ]; then
-            echo "::error::image qualification did not succeed"
-            exit 1
-          fi
-
-          if [ "${QUALIFY_IMAGE}" != "true" ]; then
-            exit 0
-          fi
-
           if [ "${EVENT_NAME}" = "pull_request" ] &&
-             [ "${PR_DRAFT}" = "true" ]; then
+             [ "${PR_DRAFT}" = "true" ] &&
+             [ "${IMAGE_RESULT}" = "skipped" ]; then
             exit 0
           fi
 
-          echo "::error::required image qualification was unexpectedly skipped"
+          echo "::error::ready candidates require successful product qualification"
           exit 1

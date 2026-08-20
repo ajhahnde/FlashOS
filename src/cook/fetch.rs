@@ -1100,7 +1100,7 @@ mod tests {
         os::unix::fs::{PermissionsExt, symlink},
         path::PathBuf,
         process::Command,
-        time::{SystemTime, UNIX_EPOCH},
+        sync::atomic::{AtomicU64, Ordering},
     };
 
     struct TestRepository {
@@ -1109,15 +1109,13 @@ mod tests {
 
     impl TestRepository {
         fn new() -> Self {
-            let unique = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+            static NEXT: AtomicU64 = AtomicU64::new(1);
+            let unique = NEXT.fetch_add(1, Ordering::Relaxed);
             let root = std::env::temp_dir().join(format!(
                 "flashos-workspace-source-{}-{unique}",
                 std::process::id()
             ));
-            fs::create_dir_all(&root).unwrap();
+            fs::create_dir(&root).unwrap();
             let repository = Self { root };
             repository.git(&["init", "--quiet"]);
             repository.git(&["config", "user.email", "test@example.invalid"]);
@@ -1149,7 +1147,7 @@ mod tests {
 
     impl Drop for TestRepository {
         fn drop(&mut self) {
-            fs::remove_dir_all(&self.root).unwrap();
+            let _ = fs::remove_dir_all(&self.root);
         }
     }
 
