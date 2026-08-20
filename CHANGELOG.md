@@ -10,6 +10,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Refreshed the observed x86_64 `relibc` binary-package provenance to the
+  current Redox build-tree revision published by the transitional package
+  source. The configured `relibc` source pin and all capability and runtime
+  claims remain unchanged.
 - Made dependency policy merge-blocking through a stable security aggregate:
   every pull request now reports the gate, while dependency review and Cargo
   policy run only for relevant manifests, lockfiles, policy, Dependabot, or
