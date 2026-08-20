@@ -10,11 +10,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
-- Candidate and release images now cook selected packages from their tracked
-  recipes instead of combining the pinned source-built kernel with a moving
-  binary userland feed. Platform artifact validation binds the staged `relibc`
-  source identity to its configured revision; capability claims remain
-  unchanged and QEMU still owns runtime qualification.
+- Candidate and release image builders now pin their source-package header
+  generator and cook selected packages from tracked recipes instead of
+  combining the pinned source-built kernel with a moving binary userland feed.
+  Platform artifact validation binds the staged `relibc` source identity to
+  its configured revision; capability claims remain unchanged and QEMU still
+  owns runtime qualification.
 - Made dependency policy merge-blocking through a stable security aggregate:
   every pull request now reports the gate, while dependency review and Cargo
   policy run only for relevant manifests, lockfiles, policy, Dependabot, or

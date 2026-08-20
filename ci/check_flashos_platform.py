@@ -81,6 +81,16 @@ def validate_source_contract(baseline: dict) -> None:
     expected_toolchain = f"ARG RUST_TOOLCHAIN={build.get('root_toolchain')}"
     if expected_toolchain not in container_source:
         fail("the hosted image builder does not use build.root_toolchain")
+    expected_cbindgen = f"ARG CBINDGEN_VERSION={build.get('cbindgen_version')}"
+    if expected_cbindgen not in container_source:
+        fail("the hosted image builder does not use build.cbindgen_version")
+    normalized_container = " ".join(container_source.replace("\\\n", " ").split())
+    expected_cbindgen_install = (
+        '/root/.cargo/bin/cargo install --locked --version "${CBINDGEN_VERSION}" '
+        "cbindgen"
+    )
+    if expected_cbindgen_install not in normalized_container:
+        fail("the hosted image builder does not install its pinned cbindgen")
     if (
         "ENV REPO_BINARY=0" not in container_source
         or "ENV REPO_BINARY=1" in container_source
