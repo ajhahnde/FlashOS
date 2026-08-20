@@ -38,6 +38,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added `fsh plan [--] SOURCE` for deterministic inspection of one exact Flash
+  command pipeline. It shares canonical parsing, static analysis, ordinary
+  expansion and PATH resolution, structural preflight, and complete escaped-
+  native plan rendering while refusing substitution and broader script shapes
+  without opening redirections, mutating session state, starting processes, or
+  accessing config, history, or a terminal.
 - Added live Flash interactive session configuration and completion snapshots.
   Trusted startup config can transactionally set `pipefail`, command-capture
   limits, completion, and history without leaking its temporary setting
