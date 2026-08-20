@@ -141,7 +141,9 @@ To allow the build system to use transitional binary packages where available, a
 printf '%s\n' 'REPO_BINARY?=1' >> .config
 ```
 
-This can reduce the amount of source compilation required for an initial image. Omit it when you specifically need locally cooked packages instead of available binary packages.
+This can reduce the amount of source compilation required for local evaluation.
+Hosted candidate and release qualification always cook the selected recipes
+from source and do not use this override.
 
 Avoid adding unrelated build variables until the default configuration works. Development-specific overrides and package workflows belong in [Development](development.md).
 

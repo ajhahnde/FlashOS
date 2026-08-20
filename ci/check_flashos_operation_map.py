@@ -162,7 +162,7 @@ def validate(document: dict, root: Path = ROOT) -> None:
     }
     require_keys(document, top_fields, "document")
     expected_scalars = {
-        "schema_version": 1,
+        "schema_version": 2,
         "platform": "flashos",
         "architecture": "x86_64",
         "target": TARGET,
@@ -208,17 +208,16 @@ def validate(document: dict, root: Path = ROOT) -> None:
         fail("libc source tables are missing")
     require_keys(
         libc_source,
-        {"repository", "mapping_revision", "binary_revision", "mapping_scope"},
+        {"repository", "mapping_revision", "mapping_scope"},
         "libc_source",
     )
     libc_expected = {
         "repository": libc.get("source"),
         "mapping_revision": libc.get("configured_revision"),
-        "binary_revision": libc.get("binary_revision"),
         "mapping_scope": "configured-source",
     }
     if libc_source != libc_expected:
-        fail("libc_source does not preserve configured and binary identities")
+        fail("libc_source does not preserve the configured source identity")
 
     evidence = load_toml(
         root / "components/flash/platforms/flashos-x86_64-capability-evidence.toml"

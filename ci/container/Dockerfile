@@ -21,6 +21,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
 ARG RUST_TOOLCHAIN=nightly-2026-05-24
+ARG CBINDGEN_VERSION=0.29.0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -35,12 +36,14 @@ RUN apt-get update \
     && echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum --check --strict - \
     && chmod +x /tmp/rustup-init \
     && /tmp/rustup-init -y --default-toolchain "${RUST_TOOLCHAIN}" --profile minimal \
-    && rm /tmp/rustup-init
+    && rm /tmp/rustup-init \
+    && /root/.cargo/bin/cargo install --locked \
+       --version "${CBINDGEN_VERSION}" cbindgen
 
 ENV PATH="/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ENV PODMAN_BUILD=0
 ENV SKIP_CHECK_TOOLS=1
-ENV REPO_BINARY=1
+ENV REPO_BINARY=0
 ENV REPO_NONSTOP=0
 ENV FSTOOLS_NO_MOUNT=1
 
