@@ -246,8 +246,8 @@ That checker requires exact ordered coverage of every capability requirement
 and validates each reference to the evidence inventory and mapped ABI seam. It
 preserves the unknown Rust source commit by stopping standard-library routes at
 their public APIs, maps direct adapter calls to the configured `relibc` source
-revision and Redox userland paths, keeps the distinct staged binary-package
-revision visible, and records currently internal or unrouted operations
+revision and Redox userland paths, requires that revision in source-built image
+packages, and records currently internal or unrouted operations
 explicitly. A pass does not classify support, prove that a mapped symbol
 behaves correctly, or replace target execution evidence.
 
@@ -531,7 +531,11 @@ The reusable image workflow:
 7. verifies those checksums;
 8. uploads the files as one workflow artifact.
 
-The hosted build uses a dedicated Docker environment and explicit Make variables. A normal local Podman build exercises related repository logic but is not an identical execution environment.
+The hosted build uses a dedicated Docker environment and explicit Make
+variables. It cooks selected image packages from their tracked recipes; the
+optional moving binary feed is not a candidate or release input. A normal local
+Podman build exercises related repository logic but is not an identical
+execution environment.
 
 ### Independent runtime consumer
 
@@ -558,8 +562,9 @@ These are failure diagnostics. They are not regular release assets.
 
 ### Rebuildability and reproducibility
 
-The repository uses lockfiles, pinned external recipe revisions, a
-checkout-bound in-tree Flash workspace snapshot, pinned GitHub Actions,
+The repository uses lockfiles, source-cooked selected image recipes, pinned
+external recipe revisions, a checkout-bound in-tree Flash workspace snapshot,
+pinned GitHub Actions,
 checksums, and a controlled hosted build environment to reduce uncontrolled
 drift and improve traceability.
 

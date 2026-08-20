@@ -47,6 +47,10 @@ jobs:
           # container runs as root. Trust only the fixed source mount so Git
           # can snapshot the in-tree Flash workspace without weakening its
           # ownership check for any other path.
+          # Candidate and release images cook the selected recipes from their
+          # tracked sources. The transitional binary feed is moving and can
+          # otherwise mix userland built from a different Redox tree with
+          # FlashOS's pinned source-built kernel.
           docker run --rm \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --workdir /workspace \
@@ -60,7 +64,7 @@ jobs:
               "CONFIG_NAME=${CONFIG_NAME}" \
               PODMAN_BUILD=0 \
               SKIP_CHECK_TOOLS=1 \
-              REPO_BINARY=1 \
+              REPO_BINARY=0 \
               REPO_NONSTOP=0 \
               FSTOOLS_NO_MOUNT=1 \
               "build/x86_64/${CONFIG_NAME}/harddrive.img" \

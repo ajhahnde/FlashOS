@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +57,24 @@ target_pointer_width="64"
                 "target_pointer_width": "64",
             },
         )
+
+    def test_relibc_artifact_must_match_the_configured_source(self) -> None:
+        libc = {
+            "name": "relibc",
+            "configured_revision": "configured-revision",
+        }
+        target = {"triple": "x86_64-unknown-redox"}
+        stage = {
+            "name": "relibc",
+            "target": "x86_64-unknown-redox",
+            "source_identifier": "configured-revision",
+            "commit_identifier": "image-builder-commit",
+        }
+        platform_check.validate_relibc_package(stage, libc, target)
+
+        stage["source_identifier"] = "moving-binary-feed-revision"
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            platform_check.validate_relibc_package(stage, libc, target)
 
 
 if __name__ == "__main__":

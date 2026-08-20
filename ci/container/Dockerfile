@@ -40,7 +40,7 @@ RUN apt-get update \
 ENV PATH="/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ENV PODMAN_BUILD=0
 ENV SKIP_CHECK_TOOLS=1
-ENV REPO_BINARY=1
+ENV REPO_BINARY=0
 ENV REPO_NONSTOP=0
 ENV FSTOOLS_NO_MOUNT=1
 

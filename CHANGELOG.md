@@ -10,10 +10,11 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
-- Refreshed the observed x86_64 `relibc` binary-package provenance to the
-  current Redox build-tree revision published by the transitional package
-  source. The configured `relibc` source pin and all capability and runtime
-  claims remain unchanged.
+- Candidate and release images now cook selected packages from their tracked
+  recipes instead of combining the pinned source-built kernel with a moving
+  binary userland feed. Platform artifact validation binds the staged `relibc`
+  source identity to its configured revision; capability claims remain
+  unchanged and QEMU still owns runtime qualification.
 - Made dependency policy merge-blocking through a stable security aggregate:
   every pull request now reports the gate, while dependency review and Cargo
   policy run only for relevant manifests, lockfiles, policy, Dependabot, or
@@ -58,8 +59,8 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 - Added a checked per-operation FlashOS x86_64 platform map for Flash. Every
   portable capability requirement now resolves to its current Flash-internal,
   Rust standard-library, direct `relibc`, or unrouted boundary. The map
-  preserves the unknown target compiler source commit and the distinct
-  configured `relibc` source and staged binary-package revisions, and it keeps
+  preserves the unknown target compiler source commit and the configured
+  `relibc` source revision, and it keeps
   support classification and runtime qualification explicitly deferred.
 - Added a checked FlashOS x86_64 capability-evidence inventory for Flash. It
   compares all 14 current portable capability groups with the selected Redox
@@ -69,9 +70,9 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   deferred instead of being inferred from the Unix target family, adapter
   methods, or successful builds.
 - Added a machine-readable FlashOS x86_64 platform baseline for Flash. It
-  records the configured Rust and `relibc` inputs separately from observed
-  compiler, binary-package, dynamic-linker, and ELF identity, with source checks
-  in ordinary CI and artifact checks in the clean-room image path. The baseline
+  records the configured Rust and `relibc` inputs alongside observed compiler,
+  source-built package, dynamic-linker, and ELF identity, with source checks in
+  ordinary CI and artifact checks in the clean-room image path. The baseline
   establishes the adapter target without claiming capability support or runtime
   qualification.
 - Added arbitrary alternating mixed-pipeline execution. Maximal internal

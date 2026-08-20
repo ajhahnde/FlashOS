@@ -264,6 +264,10 @@ SHA256SUMS
 
 The “clean-room” job name refers to the fresh hosted-runner/container boundary. It is not a bit-for-bit reproducibility claim.
 
+Candidate and release images cook selected packages from tracked recipes. The
+optional transitional binary feed remains available for local iteration but is
+not an input to promoted-image qualification.
+
 ### Security
 
 [`.github/workflows/security.yml`](../.github/workflows/security.yml) handles dependency review and Cargo policy.

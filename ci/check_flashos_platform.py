@@ -45,7 +45,7 @@ def require_table(document: dict, name: str) -> dict:
 
 
 def validate_source_contract(baseline: dict) -> None:
-    require_equal(baseline.get("schema_version"), 1, "schema_version")
+    require_equal(baseline.get("schema_version"), 2, "schema_version")
     require_equal(baseline.get("platform"), "flashos", "platform")
     require_equal(baseline.get("architecture"), "x86_64", "architecture")
     require_equal(
@@ -70,6 +70,7 @@ def validate_source_contract(baseline: dict) -> None:
         fail("the FlashOS base profile no longer includes relibc")
 
     build = require_table(baseline, "build")
+    require_equal(build.get("image_package_rule"), "source", "build.image_package_rule")
     root_toolchain = load_toml(ROOT / "rust-toolchain.toml")
     require_equal(
         require_table(root_toolchain, "toolchain").get("channel"),
@@ -80,6 +81,11 @@ def validate_source_contract(baseline: dict) -> None:
     expected_toolchain = f"ARG RUST_TOOLCHAIN={build.get('root_toolchain')}"
     if expected_toolchain not in container_source:
         fail("the hosted image builder does not use build.root_toolchain")
+    if (
+        "ENV REPO_BINARY=0" not in container_source
+        or "ENV REPO_BINARY=1" in container_source
+    ):
+        fail("the hosted image container does not default to source packages")
 
     compiler = require_table(baseline, "compiler")
     rust_recipe = load_toml(ROOT / "recipes/dev/rust/recipe.toml")
@@ -116,6 +122,21 @@ def validate_source_contract(baseline: dict) -> None:
         fail("standard CI does not validate the source platform baseline")
     if "python3 ci/check_flashos_platform.py --artifacts" not in image_source:
         fail("image CI does not validate platform build artifacts")
+    if "REPO_BINARY=0" not in image_source or "REPO_BINARY=1" in image_source:
+        fail("image CI does not require source packages")
+
+
+def validate_relibc_package(relibc_stage: dict, libc: dict, target: dict) -> None:
+    require_equal(relibc_stage.get("name"), libc.get("name"), "libc.name")
+    require_equal(relibc_stage.get("target"), target.get("triple"), "libc target")
+    require_equal(
+        relibc_stage.get("source_identifier"),
+        libc.get("configured_revision"),
+        "libc.configured_revision artifact source",
+    )
+    commit_identifier = relibc_stage.get("commit_identifier")
+    if not isinstance(commit_identifier, str) or not commit_identifier:
+        fail("libc package has no build-tree commit identifier")
 
 
 def parse_version_output(output: str) -> dict[str, str]:
@@ -301,13 +322,7 @@ def validate_artifacts(baseline: dict) -> None:
 
     libc = require_table(baseline, "libc")
     relibc_stage = load_toml(RELIBC_TARGET / "stage.toml")
-    require_equal(relibc_stage.get("name"), libc.get("name"), "libc.name")
-    require_equal(relibc_stage.get("target"), target.get("triple"), "libc target")
-    require_equal(
-        relibc_stage.get("commit_identifier"),
-        libc.get("binary_revision"),
-        "libc.binary_revision",
-    )
+    validate_relibc_package(relibc_stage, libc, target)
     executable = require_table(baseline, "executable")
     require_equal(
         executable.get("format"), target.get("object_format"), "executable.format"
