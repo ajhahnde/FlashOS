@@ -68,7 +68,7 @@ pull request
                         ↓
                   exact-tree merge
                         ↓
-              Product qualified / qualified
+                  Main verified / verified
 ```
 
 Draft pull requests stop after the source jobs. Every ready candidate receives
@@ -231,7 +231,7 @@ path classifier.
 
 The final `required` job combines these results into the stable status used by
 repository rules. [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml)
-then reports `qualified` on the protected-main commit only after
+then reports `verified` on the protected-main commit only after
 [`check_main_qualification.py`](check_main_qualification.py) verifies the
 associated pull request, exact Git-tree identity, complete candidate jobs, and
 `security-required` evidence. This preserves a meaningful visible check on

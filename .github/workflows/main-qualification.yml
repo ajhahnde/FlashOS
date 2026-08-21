@@ -1,4 +1,4 @@
-name: Product qualified
+name: Main verified
 
 on:
   push:
@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  qualified:
-    name: qualified
+  verified:
+    name: verified
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
