@@ -513,7 +513,7 @@ Protected `main` requires the exact pull-request head to pass the stable CI and
 Security aggregates before merge. The dedicated protected-main workflow then
 finds the merged pull request, proves that its head and the protected-main commit have
 the same Git tree, and verifies successful candidate build, QEMU, aggregate,
-and dependency-policy jobs. It publishes the visible `qualified` check without
+and dependency-policy jobs. It publishes the visible `verified` check without
 rerunning the source suite or product build.
 
 ### Clean-container image producer

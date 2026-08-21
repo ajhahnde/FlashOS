@@ -352,7 +352,7 @@ Ready-candidate workflows build and checksum the canonical hard-drive image,
 then pass it to a separate NVMe QEMU consumer. Release workflows additionally
 build and boot the live image, generate the image inventory, and package and
 attest the qualified release candidate. Protected `main` receives its visible
-qualification status by verifying exact tree identity with that pre-merge
+verification status by verifying exact tree identity with that pre-merge
 candidate rather than by rerunning source tests.
 
 These mechanisms provide traceability and evidence for specific artifacts. They should not be described as a blanket guarantee that every local build on every host is bit-for-bit identical.

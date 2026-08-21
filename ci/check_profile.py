@@ -207,7 +207,7 @@ if f"FlashOS {version}" not in readme or f"Version-{version}-" not in readme:
 
 for expected in (
     "actions/workflows/main-qualification.yml/badge.svg?branch=main&amp;event=push",
-    'alt="Product qualified"',
+    'alt="Main verified"',
     f"Version-{version}-",
     "Status-pre--alpha-",
     "Target-x86__64--unknown--redox-",
@@ -322,11 +322,11 @@ for forbidden in ("  push:\n", "  schedule:\n", "qualify_image"):
 
 main_workflow = (ROOT / ".github/workflows/main-qualification.yml").read_text()
 for expected in (
-    "name: Product qualified",
+    "name: Main verified",
     "push:\n    branches: [main]",
     "actions: read",
     "pull-requests: read",
-    "name: qualified",
+    "name: verified",
     "python3 ci/check_main_qualification.py",
 ):
     if expected not in main_workflow:
