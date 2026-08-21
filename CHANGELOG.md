@@ -38,6 +38,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added structured Flash error handling. `try { ... } catch error { ... }`
+  catches runtime errors into an immutable queryable `Error`, while `throw`
+  raises a source-anchored string error or rethrows an existing error without
+  losing its source, labels, frames, cause, or status. Catching restores the
+  pre-try language state without claiming rollback of output, files, or child
+  effects, and cancellation, exit, stopped jobs, fatal host failures, and
+  ordinary unsuccessful statuses remain distinct.
 - Added typed Flash command capture. `$(bytes: chain)` now preserves exact
   bounded output as a `Bytes` value, including NUL and non-UTF-8 data, while
   `$(text: chain)` explicitly selects the existing strict UTF-8 and trailing-
