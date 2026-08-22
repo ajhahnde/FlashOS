@@ -342,7 +342,7 @@ This check validates configuration and repository structure. It does not boot an
 
 ### Runtime contract
 
-[`ci/qemu_smoke.py`](../ci/qemu_smoke.py) boots an already-built image and checks the observable x86_64 QEMU path. Its assertions cover firmware and bootloader progress, kernel startup, selected driver initialization, the exact versioned FlashOS login identity, login, the Flash prompt, external pipelines, and target-side interactive editing behavior. The login assertion also rejects inherited Redox product-branding strings while retaining technical identifiers such as RedoxFS.
+[`ci/qemu_smoke.py`](../ci/qemu_smoke.py) boots an already-built image and checks the observable x86_64 QEMU path. Its assertions cover firmware and bootloader progress, kernel startup, selected driver initialization, the exact versioned FlashOS login identity, login, the Flash prompt, an internal command, and target-side interactive editing behavior. External-process lifecycle and file-action behavior remain separately pending target-runtime qualification. The login assertion also rejects inherited Redox product-branding strings while retaining technical identifiers such as RedoxFS.
 
 The smoke test consumes image bytes in snapshot mode and does not use a successful boot as permission to modify the promoted artifact.
 
