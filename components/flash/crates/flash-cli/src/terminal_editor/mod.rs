@@ -10,6 +10,7 @@ pub mod history;
 pub mod key;
 pub mod render;
 
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::time::Duration;
 
@@ -29,6 +30,8 @@ use render::render_submission;
 
 /// How many submissions one session recalls.
 const HISTORY_CAPACITY: usize = 1000;
+/// How many terminal bytes one readiness notification can drain.
+const INPUT_BUFFER_CAPACITY: usize = 256;
 
 /// Access to what a writer has accumulated, for test observation only.
 ///
@@ -57,6 +60,7 @@ pub struct TerminalEditor<P, R, W> {
     completion: CompletionEngine,
     hints: HintEngine,
     drawn_cursor_row: usize,
+    pending_input: VecDeque<u8>,
     persistence: Option<Box<dyn HistoryPersistence>>,
 }
 
@@ -71,6 +75,7 @@ impl<P: Platform, R: Read, W: Write> TerminalEditor<P, R, W> {
             completion: CompletionEngine::new(CompletionCatalog::new()),
             hints: HintEngine::new(),
             drawn_cursor_row: 0,
+            pending_input: VecDeque::new(),
             persistence: None,
         }
     }
@@ -90,21 +95,36 @@ impl<P: Platform, R: Read, W: Write> TerminalEditor<P, R, W> {
     }
 
     fn read_byte(&mut self, timeout: Duration) -> Result<Option<Option<u8>>, EditorError> {
-        let mut byte = [0_u8; 1];
-        match self.platform.read_terminal_input(&mut byte, timeout) {
-            Ok(None) => Ok(None),
-            Ok(Some(0)) => Ok(Some(None)),
-            Ok(Some(_)) => Ok(Some(Some(byte[0]))),
-            Err(PlatformError::Unsupported { .. }) => match self.input.read(&mut byte) {
-                Ok(0) => Ok(Some(None)),
-                Ok(_) => Ok(Some(Some(byte[0]))),
-                Err(error) => Err(EditorError::with_source("terminal read failed", error)),
-            },
-            Err(error) => Err(EditorError::with_source(
-                "reading terminal input failed",
-                error,
-            )),
+        if let Some(byte) = self.pending_input.pop_front() {
+            return Ok(Some(Some(byte)));
         }
+
+        let mut bytes = [0_u8; INPUT_BUFFER_CAPACITY];
+        let read = match self.platform.read_terminal_input(&mut bytes, timeout) {
+            Ok(None) => return Ok(None),
+            Ok(Some(0)) => return Ok(Some(None)),
+            Ok(Some(read)) => read,
+            Err(PlatformError::Unsupported { .. }) => match self.input.read(&mut bytes) {
+                Ok(0) => return Ok(Some(None)),
+                Ok(read) => read,
+                Err(error) => {
+                    return Err(EditorError::with_source("terminal read failed", error));
+                }
+            },
+            Err(error) => {
+                return Err(EditorError::with_source(
+                    "reading terminal input failed",
+                    error,
+                ));
+            }
+        };
+        if read > bytes.len() {
+            return Err(EditorError::new(
+                "terminal read exceeded the supplied input buffer",
+            ));
+        }
+        self.pending_input.extend(&bytes[..read]);
+        Ok(Some(self.pending_input.pop_front()))
     }
 
     fn draw(&mut self, rendered: &str) -> Result<(), EditorError> {

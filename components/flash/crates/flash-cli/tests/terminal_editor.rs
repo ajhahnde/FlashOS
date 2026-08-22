@@ -511,6 +511,47 @@ fn a_typed_line_submits_its_text() {
 }
 
 #[test]
+fn one_terminal_read_drains_a_batched_submission_through_enter() {
+    use std::cell::Cell;
+    use std::io::{self, Read};
+    use std::rc::Rc;
+
+    struct OneBurst {
+        bytes: Option<&'static [u8]>,
+        reads: Rc<Cell<usize>>,
+    }
+
+    impl Read for OneBurst {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            self.reads.set(self.reads.get() + 1);
+            let Some(bytes) = self.bytes.take() else {
+                return Ok(0);
+            };
+            buffer[..bytes.len()].copy_from_slice(bytes);
+            Ok(bytes.len())
+        }
+    }
+
+    let reads = Rc::new(Cell::new(0));
+    let input = OneBurst {
+        bytes: Some(b"echo batched\r"),
+        reads: Rc::clone(&reads),
+    };
+    let platform =
+        FakePlatform::with_terminal(Capabilities::full(), true, TerminalSize::new(80, 24));
+    let mut editor = TerminalEditor::new(platform, input, Vec::new());
+
+    let event = editor.read_line(&EditorPrompt::default()).unwrap();
+
+    assert_eq!(event, EditorEvent::Submitted("echo batched".to_owned()));
+    assert_eq!(
+        reads.get(),
+        1,
+        "the complete ready chunk must be drained once"
+    );
+}
+
+#[test]
 fn tab_applies_a_unique_editor_neutral_completion() {
     use flash_cli::completion::CompletionCatalog;
     use flash_runtime::ScopeStack;

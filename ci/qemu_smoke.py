@@ -164,6 +164,16 @@ def send(data: bytes) -> None:
     process.stdin.flush()
 
 
+def send_editor_input(payload: bytes, terminator: bytes) -> None:
+    """Queue one complete editor interaction in the guest terminal.
+
+    The portable editor drains one ready terminal chunk into its internal byte
+    queue. Keeping the text and its final Enter/Ctrl-C in the same write proves
+    that target path and avoids manufacturing a draw/read race in the driver.
+    """
+    send(payload + terminator)
+
+
 # The raw-mode editor redraws its whole submission on every keystroke, so the serial
 # stream carries escape sequences and repeats the prompt constantly. Waiting for
 # a bare prompt therefore proves nothing: it is already satisfied by the typing
@@ -182,14 +192,13 @@ INTERACTIVE_TIMEOUT = 180
 
 
 def submit_line(payload: bytes, row: bytes) -> int:
-    """Type `payload`, wait for the editor to draw `row`, then submit it.
+    """Submit `payload` atomically and prove the editor drew `row`.
 
-    The editor renders at the top of its loop, before reading each byte, so the
-    awaited row is the last thing drawn before the guest blocks on input. That
-    makes this a synchronisation point as well as an assertion: Enter is sent
-    only once the row has arrived, and the returned offset scopes the caller's
-    assertion to what happens afterwards — the command result rather than the
-    echo.
+    The editor drains the text and Enter from one ready input chunk, while still
+    rendering after every decoded key before it consumes the next. The returned
+    offset scopes all later assertions to this submission; expected output that
+    also occurs in the typed row must therefore include its leading terminal
+    newline.
 
     Whether the row itself proves anything depends on the payload. One carrying
     control bytes, as the editing and recall assertions do, is editor-specific:
@@ -198,13 +207,11 @@ def submit_line(payload: bytes, row: bytes) -> int:
     rely on the assertion that follows the returned offset.
     """
     row_start = len(captured)
-    send(payload)
+    send_editor_input(payload, b"\r")
     # Highlighting may insert CSI style sequences within the visible row. Match
-    # its terminal text so synchronization still proves the completed edit.
+    # its terminal text so the assertion still proves the completed edit.
     collect_until(row, row_start, visible=True)
-    submitted = len(captured)
-    send(b"\r")
-    return submitted
+    return row_start
 
 
 failure: BaseException | None = None
@@ -237,8 +244,8 @@ try:
     collect_until(b"Login successful!", login_start)
     collect_until(b">> ", login_start)
     shell_start = len(captured)
-    send(b"printf 'hallo\\nwelt\\n' | head -n 1\r")
-    collect_until(b"hallo", shell_start)
+    send_editor_input(b"printf 'hallo\\nwelt\\n' | head -n 1", b"\r")
+    collect_until(b"\r\nhallo", shell_start)
     collect_until(EMPTY_PRIMARY_DRAW, shell_start)
 
     # Boot is done. Re-arm the deadline so the assertions below get their own
@@ -251,11 +258,11 @@ try:
     # on the real image: its selection is compiled for the target only, so no
     # host test can reach it.
     edit_mark = submit_line(b"echo hallo\x7f\x7fx", b">> echo halx")
-    collect_until(b"halx", edit_mark)
+    collect_until(b"\r\nhalx", edit_mark)
     collect_until(EMPTY_PRIMARY_DRAW, edit_mark)
 
     recall_mark = submit_line(b"\x1b[A", b">> echo halx")
-    collect_until(b"halx", recall_mark)
+    collect_until(b"\r\nhalx", recall_mark)
     collect_until(EMPTY_PRIMARY_DRAW, recall_mark)
 
     # A block spans two physical lines, so the continuation prompt has to appear
@@ -275,15 +282,13 @@ try:
     # Ctrl-C abandons the line without running it. The editor owns this in raw
     # mode: the terminal's own interrupt handling is switched off for the read.
     cancel_start = len(captured)
-    send(b"echo never")
-    collect_until(b">> echo never", cancel_start)
-    abandon_mark = len(captured)
-    send(b"\x03")
-    collect_until(EMPTY_PRIMARY_DRAW, abandon_mark)
+    send_editor_input(b"echo never", b"\x03")
+    collect_until(b">> echo never", cancel_start, visible=True)
+    collect_until(EMPTY_PRIMARY_DRAW, cancel_start)
     # The prompt alone does not separate an abandoned line from an executed
     # one. A shell writes its output before it re-prompts, so by the time the
     # empty row arrives an execution would already be in the capture.
-    if b"never" in captured[abandon_mark:]:
+    if b"\r\nnever" in captured[cancel_start:]:
         raise AssertionError("Ctrl-C ran the line instead of abandoning it")
 
     # Exit status reaches the || branch. Host tests cover the semantics; this
@@ -291,7 +296,7 @@ try:
     status_mark = submit_line(
         b"^false || echo fellback", b">> ^false || echo fellback"
     )
-    collect_until(b"fellback", status_mark)
+    collect_until(b"\r\nfellback", status_mark)
     collect_until(EMPTY_PRIMARY_DRAW, status_mark)
 
     # RedoxFS write, read back, and remove, as the unprivileged user. Each step
@@ -305,7 +310,7 @@ try:
     read_mark = submit_line(
         b"cat /home/user/smoke.txt", b">> cat /home/user/smoke.txt"
     )
-    collect_until(b"persisted", read_mark)
+    collect_until(b"\r\npersisted", read_mark)
     collect_until(EMPTY_PRIMARY_DRAW, read_mark)
     remove_mark = submit_line(
         b"rm /home/user/smoke.txt", b">> rm /home/user/smoke.txt"
@@ -315,7 +320,7 @@ try:
         b"cat /home/user/smoke.txt || echo removed",
         b">> cat /home/user/smoke.txt || echo removed",
     )
-    collect_until(b"removed", gone_mark)
+    collect_until(b"\r\nremoved", gone_mark)
     collect_until(EMPTY_PRIMARY_DRAW, gone_mark)
 
     # A direct non-zero external completion must return through the managed
@@ -333,17 +338,15 @@ try:
     # failed redirection is a shell error, not a command status, so it cannot
     # activate `||` — the boundary is asserted by the read that follows, whose
     # non-zero exit status does.
-    denied_start = len(captured)
-    send(b"echo nope > /etc/smoke.txt")
-    collect_until(b">> echo nope > /etc/smoke.txt", denied_start, visible=True)
-    written_mark = len(captured)
-    send(b"\r")
-    collect_until(EMPTY_PRIMARY_DRAW, written_mark)
+    denied_mark = submit_line(
+        b"echo nope > /etc/smoke.txt", b">> echo nope > /etc/smoke.txt"
+    )
+    collect_until(EMPTY_PRIMARY_DRAW, denied_mark)
     absent_mark = submit_line(
         b"cat /etc/smoke.txt || echo denied",
         b">> cat /etc/smoke.txt || echo denied",
     )
-    collect_until(b"denied", absent_mark)
+    collect_until(b"\r\ndenied", absent_mark)
     collect_until(EMPTY_PRIMARY_DRAW, absent_mark)
 
     if args.expect_root_locked:
@@ -351,8 +354,7 @@ try:
         # unmatchable hash, so the attempt below must land back on the login
         # prompt; reaching a shell here is a security regression in the image,
         # not a test problem.
-        logout_start = len(captured)
-        send(b"\x04")
+        logout_start = submit_line(b"exit", b">> exit")
         collect_until(b"username:", logout_start)
         attempt_start = len(captured)
         send(b"root\r")
