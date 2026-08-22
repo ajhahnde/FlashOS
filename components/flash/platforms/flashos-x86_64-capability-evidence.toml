@@ -276,7 +276,7 @@ path = "ci/qemu_smoke.py"
 markers = [
   "# A direct non-zero external completion must return through the managed",
   'b"cat /home/user/definitely-missing"',
-  'collect_until(EMPTY_PROMPT_ROW, missing_mark)',
+  'collect_until(EMPTY_PRIMARY_DRAW, missing_mark)',
 ]
 observation = "The current interactive image returns from a direct foreground child failure to a usable prompt through the managed foreground path."
 
