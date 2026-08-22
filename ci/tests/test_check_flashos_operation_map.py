@@ -56,9 +56,8 @@ class FlashOSOperationMapTests(unittest.TestCase):
 
     def test_unrouted_operation_cannot_claim_an_abi_seam(self) -> None:
         document = copy.deepcopy(operation_check.load_toml(operation_check.MAP_PATH))
-        operation = next(
-            item for item in document["operation"] if item["boundary"] == "unrouted"
-        )
+        operation = document["operation"][0]
+        operation["boundary"] = "unrouted"
         operation["abi_seams"] = ["rust-filesystem"]
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             operation_check.validate(document)

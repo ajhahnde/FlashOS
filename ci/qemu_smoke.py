@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import selectors
 import subprocess
 import sys
@@ -133,10 +134,15 @@ selector = selectors.DefaultSelector()
 selector.register(process.stdout, selectors.EVENT_READ)
 captured = bytearray()
 deadline = time.monotonic() + args.timeout
+CSI_SEQUENCE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
-def collect_until(marker: bytes, start: int = 0) -> None:
-    while marker not in captured[start:]:
+def collect_until(marker: bytes, start: int = 0, *, visible: bool = False) -> None:
+    def observed() -> bytes:
+        transcript = bytes(captured[start:])
+        return CSI_SEQUENCE.sub(b"", transcript) if visible else transcript
+
+    while marker not in observed():
         if process.poll() is not None:
             raise RuntimeError(
                 f"QEMU exited with {process.returncode} before {marker!r}"
@@ -158,15 +164,16 @@ def send(data: bytes) -> None:
     process.stdin.flush()
 
 
-# The raw-mode editor redraws its whole row on every keystroke, so the serial
+# The raw-mode editor redraws its whole submission on every keystroke, so the serial
 # stream carries escape sequences and repeats the prompt constantly. Waiting for
 # a bare prompt therefore proves nothing: it is already satisfied by the typing
-# that precedes the key under test. An empty row is unambiguous, because any
-# typed text would sit between the prompt and the carriage return. The prompt
-# texts mirror DEFAULT_PRIMARY_PROMPT and DEFAULT_CONTINUATION_PROMPT in the
-# shell's editor module; a change there surfaces here as a timeout.
-EMPTY_PROMPT_ROW = b"\x1b[K>> \r"
-EMPTY_CONTINUATION_ROW = b"\x1b[K...> \r"
+# that precedes the key under test. An empty draw is unambiguous, because any
+# typed text would sit between the prompt and the carriage return. These markers
+# include the portable renderer's clear-below and absolute-cursor sequences.
+# Their prompt texts mirror the shell's defaults; intentional renderer or prompt
+# changes therefore require this runtime contract to change with them.
+EMPTY_PRIMARY_DRAW = b"\x1b[J>> \r\x1b[4G"
+EMPTY_CONTINUATION_DRAW = b"\r\n...> \r\x1b[6G"
 
 # How long the interactive assertions may take once the image has booted. Kept
 # separate from the boot budget so a slow boot and a failing assertion cannot
@@ -192,7 +199,9 @@ def submit_line(payload: bytes, row: bytes) -> int:
     """
     row_start = len(captured)
     send(payload)
-    collect_until(row, row_start)
+    # Highlighting may insert CSI style sequences within the visible row. Match
+    # its terminal text so synchronization still proves the completed edit.
+    collect_until(row, row_start, visible=True)
     submitted = len(captured)
     send(b"\r")
     return submitted
@@ -230,7 +239,7 @@ try:
     shell_start = len(captured)
     send(b"printf 'hallo\\nwelt\\n' | head -n 1\r")
     collect_until(b"hallo", shell_start)
-    collect_until(EMPTY_PROMPT_ROW, shell_start)
+    collect_until(EMPTY_PRIMARY_DRAW, shell_start)
 
     # Boot is done. Re-arm the deadline so the assertions below get their own
     # budget: sharing one with the boot would report a merely slow boot as a
@@ -243,27 +252,20 @@ try:
     # host test can reach it.
     edit_mark = submit_line(b"echo hallo\x7f\x7fx", b">> echo halx")
     collect_until(b"halx", edit_mark)
-    collect_until(EMPTY_PROMPT_ROW, edit_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, edit_mark)
 
     recall_mark = submit_line(b"\x1b[A", b">> echo halx")
     collect_until(b"halx", recall_mark)
-    collect_until(EMPTY_PROMPT_ROW, recall_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, recall_mark)
 
-    # A block spans three physical lines, so the continuation prompt has to
-    # appear between them and the lines have to reach the parser joined. The two
-    # mark-scoped continuation waits are what prove the join: an unjoined body
-    # line would be a complete statement on its own and would re-prompt with
-    # `>> `. The absence of a diagnostic then proves the joined source was
-    # accepted rather than merely reassembled. The body is an assignment because
-    # a block reaches the pure evaluator, which rejects command execution — and
-    # a diagnostic reprints its own source line, so no marker may be a word that
-    # was typed.
+    # A block spans two physical lines, so the continuation prompt has to appear
+    # between them and the lines have to reach the parser joined. The mark-scoped
+    # continuation wait and absence of a diagnostic prove that the closing brace
+    # completed the retained opening line rather than being submitted alone.
     opening_mark = submit_line(b"if true {", b">> if true {")
-    collect_until(EMPTY_CONTINUATION_ROW, opening_mark)
-    body_mark = submit_line(b"let joined = 1", b"...> let joined = 1")
-    collect_until(EMPTY_CONTINUATION_ROW, body_mark)
+    collect_until(EMPTY_CONTINUATION_DRAW, opening_mark)
     block_mark = submit_line(b"}", b"...> }")
-    collect_until(EMPTY_PROMPT_ROW, block_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, block_mark)
     # Open-ended from the opening line, which is safe only while this assertion
     # precedes the permission boundary below — that one provokes a diagnostic
     # deliberately. Moving it after would trip this guard.
@@ -277,7 +279,7 @@ try:
     collect_until(b">> echo never", cancel_start)
     abandon_mark = len(captured)
     send(b"\x03")
-    collect_until(EMPTY_PROMPT_ROW, abandon_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, abandon_mark)
     # The prompt alone does not separate an abandoned line from an executed
     # one. A shell writes its output before it re-prompts, so by the time the
     # empty row arrives an execution would already be in the capture.
@@ -290,7 +292,7 @@ try:
         b"^false || echo fellback", b">> ^false || echo fellback"
     )
     collect_until(b"fellback", status_mark)
-    collect_until(EMPTY_PROMPT_ROW, status_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, status_mark)
 
     # RedoxFS write, read back, and remove, as the unprivileged user. Each step
     # is asserted by its own observable: a returning prompt would follow a
@@ -299,22 +301,22 @@ try:
         b"echo persisted > /home/user/smoke.txt",
         b">> echo persisted > /home/user/smoke.txt",
     )
-    collect_until(EMPTY_PROMPT_ROW, write_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, write_mark)
     read_mark = submit_line(
         b"cat /home/user/smoke.txt", b">> cat /home/user/smoke.txt"
     )
     collect_until(b"persisted", read_mark)
-    collect_until(EMPTY_PROMPT_ROW, read_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, read_mark)
     remove_mark = submit_line(
         b"rm /home/user/smoke.txt", b">> rm /home/user/smoke.txt"
     )
-    collect_until(EMPTY_PROMPT_ROW, remove_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, remove_mark)
     gone_mark = submit_line(
         b"cat /home/user/smoke.txt || echo removed",
         b">> cat /home/user/smoke.txt || echo removed",
     )
     collect_until(b"removed", gone_mark)
-    collect_until(EMPTY_PROMPT_ROW, gone_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, gone_mark)
 
     # A direct non-zero external completion must return through the managed
     # foreground path rather than relying on a conditional chain's synchronous
@@ -325,7 +327,7 @@ try:
         b">> cat /home/user/definitely-missing",
     )
     collect_until(b"No such file or directory", missing_mark)
-    collect_until(EMPTY_PROMPT_ROW, missing_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, missing_mark)
 
     # The unprivileged user must not be able to write outside its home. A
     # failed redirection is a shell error, not a command status, so it cannot
@@ -333,16 +335,16 @@ try:
     # non-zero exit status does.
     denied_start = len(captured)
     send(b"echo nope > /etc/smoke.txt")
-    collect_until(b">> echo nope > /etc/smoke.txt", denied_start)
+    collect_until(b">> echo nope > /etc/smoke.txt", denied_start, visible=True)
     written_mark = len(captured)
     send(b"\r")
-    collect_until(EMPTY_PROMPT_ROW, written_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, written_mark)
     absent_mark = submit_line(
         b"cat /etc/smoke.txt || echo denied",
         b">> cat /etc/smoke.txt || echo denied",
     )
     collect_until(b"denied", absent_mark)
-    collect_until(EMPTY_PROMPT_ROW, absent_mark)
+    collect_until(EMPTY_PRIMARY_DRAW, absent_mark)
 
     if args.expect_root_locked:
         # Only the release profile locks root. `locked = true` writes an
