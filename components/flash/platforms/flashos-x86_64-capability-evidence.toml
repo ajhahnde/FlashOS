@@ -155,10 +155,11 @@ markers = [
   "fn is_output_terminal(&self) -> bool",
   "fn terminal_size(&self)",
   "fn enter_raw_mode(&self)",
+  "fn read_terminal_input(",
   "fn snapshot_terminal_mode(&self)",
   "fn apply_terminal_mode(&self, token: &dyn TerminalModeToken)",
 ]
-observation = "The selected adapter detects both terminal ends, reads size, owns raw-mode entry and restoration, and snapshots or reapplies opaque terminal attributes for stopped jobs."
+observation = "The selected adapter detects both terminal ends, reads size, performs bounded terminal reads, owns raw-mode entry and restoration, and snapshots or reapplies opaque terminal attributes for stopped jobs."
 
 [[source_evidence]]
 id = "runtime-monotonic-clock"
@@ -172,14 +173,14 @@ markers = [
 observation = "Flash currently obtains monotonic readings from a runtime clock seam rather than a Platform method."
 
 [[source_evidence]]
-id = "redox-standard-directories-gap"
+id = "flashos-standard-directories"
 path = "components/flash/crates/flash-cli/src/main.rs"
 markers = [
-  "fn run_interactive(_no_config: bool, _no_history: bool)",
+  "fn run_interactive(no_config: bool, no_history: bool)",
   "ConfigPlatform::current()",
   "HistoryPlatform::current()",
 ]
-observation = "The Redox interactive path accepts but ignores config/history switches, while standard-directory selectors are used only by the macOS/Linux path."
+observation = "The Redox interactive path selects the FlashOS configuration and state conventions and honors both discovery-disabling switches before opening either file."
 
 [[source_evidence]]
 id = "adapter-directory-read"
@@ -362,10 +363,10 @@ classification = "deferred"
 [[capability]]
 name = "terminal-info"
 rust_variant = "TerminalInfo"
-requirements = ["detect terminal input and output independently", "read terminal dimensions", "enter and restore raw input mode", "snapshot foreground job terminal attributes", "reapply stopped-job terminal attributes"]
+requirements = ["detect terminal input and output independently", "read terminal dimensions", "enter and restore raw input mode", "read terminal input with a bounded wait", "snapshot foreground job terminal attributes", "reapply stopped-job terminal attributes"]
 source_evidence = ["redox-selects-posix", "runtime-foreground-terminal", "adapter-terminal-info", "adapter-declares-full"]
 runtime_evidence = ["qemu-terminal-editor"]
-source_observation = "The selected target path, job coordinator, and adapter contain terminal detection, sizing, raw-mode entry/restoration, and opaque stopped-job mode preservation."
+source_observation = "The selected target path, job coordinator, and adapter contain terminal detection, sizing, bounded input, raw-mode entry/restoration, and opaque stopped-job mode preservation."
 runtime_observation = "The current image proves target-only raw editing, recall, multiline input, Ctrl-C abandonment, and prompt recovery; it does not assert a non-default terminal size or directly observe stopped-job mode restoration."
 classification = "deferred"
 
@@ -383,9 +384,9 @@ classification = "deferred"
 name = "standard-directories"
 rust_variant = "StandardDirectories"
 requirements = ["discover home, configuration, cache, and state locations", "preserve native path values", "define target-specific fallback conventions"]
-source_evidence = ["redox-standard-directories-gap", "redox-selects-posix", "adapter-declares-full"]
+source_evidence = ["flashos-standard-directories", "redox-selects-posix", "adapter-declares-full"]
 runtime_evidence = []
-source_observation = "The Redox path currently disables config/history integration and has no Redox directory convention despite the adapter's full declaration."
+source_observation = "The Redox path selects the FlashOS configuration and state conventions, preserves absolute native roots, and honors the no-config and no-history discovery gates."
 runtime_observation = "No current FlashOS target-runtime evidence loads configuration, persists history, or discovers cache/state paths."
 classification = "deferred"
 
