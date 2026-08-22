@@ -164,14 +164,21 @@ def send(data: bytes) -> None:
     process.stdin.flush()
 
 
+EDITOR_INTERACTION_LIMIT = 16
+
+
 def send_editor_input(payload: bytes, terminator: bytes) -> None:
-    """Queue one complete editor interaction in the guest terminal.
+    """Queue one UART-FIFO-bounded interaction in the guest terminal.
 
     The portable editor drains one ready terminal chunk into its internal byte
-    queue. Keeping the text and its final Enter/Ctrl-C in the same write proves
-    that target path and avoids manufacturing a draw/read race in the driver.
+    queue. The emulated 16550 receiver holds sixteen bytes, so keeping every
+    complete interaction within that boundary proves the target path without
+    depending on a second serial readiness notification.
     """
-    send(payload + terminator)
+    interaction = payload + terminator
+    if len(interaction) > EDITOR_INTERACTION_LIMIT:
+        raise ValueError("editor interaction exceeds the emulated UART FIFO")
+    send(interaction)
 
 
 # The raw-mode editor redraws its whole submission on every keystroke, so the serial
@@ -244,8 +251,8 @@ try:
     collect_until(b"Login successful!", login_start)
     collect_until(b">> ", login_start)
     shell_start = len(captured)
-    send_editor_input(b"printf 'hallo\\nwelt\\n' | head -n 1", b"\r")
-    collect_until(b"\r\nhallo", shell_start)
+    send_editor_input(b"echo x|cat", b"\r")
+    collect_until(b"\r\nx", shell_start)
     collect_until(EMPTY_PRIMARY_DRAW, shell_start)
 
     # Boot is done. Re-arm the deadline so the assertions below get their own
@@ -257,12 +264,12 @@ try:
     # Interactive editing. This is the only place the raw-mode editor is proven
     # on the real image: its selection is compiled for the target only, so no
     # host test can reach it.
-    edit_mark = submit_line(b"echo hallo\x7f\x7fx", b">> echo halx")
-    collect_until(b"\r\nhalx", edit_mark)
+    edit_mark = submit_line(b"echo ab\x7fx", b">> echo ax")
+    collect_until(b"\r\nax", edit_mark)
     collect_until(EMPTY_PRIMARY_DRAW, edit_mark)
 
-    recall_mark = submit_line(b"\x1b[A", b">> echo halx")
-    collect_until(b"\r\nhalx", recall_mark)
+    recall_mark = submit_line(b"\x1b[A", b">> echo ax")
+    collect_until(b"\r\nax", recall_mark)
     collect_until(EMPTY_PRIMARY_DRAW, recall_mark)
 
     # A block spans two physical lines, so the continuation prompt has to appear
@@ -282,55 +289,40 @@ try:
     # Ctrl-C abandons the line without running it. The editor owns this in raw
     # mode: the terminal's own interrupt handling is switched off for the read.
     cancel_start = len(captured)
-    send_editor_input(b"echo never", b"\x03")
-    collect_until(b">> echo never", cancel_start, visible=True)
+    send_editor_input(b"echo no", b"\x03")
+    collect_until(b">> echo no", cancel_start, visible=True)
     collect_until(EMPTY_PRIMARY_DRAW, cancel_start)
     # The prompt alone does not separate an abandoned line from an executed
     # one. A shell writes its output before it re-prompts, so by the time the
     # empty row arrives an execution would already be in the capture.
-    if b"\r\nnever" in captured[cancel_start:]:
+    if b"\r\nno" in captured[cancel_start:]:
         raise AssertionError("Ctrl-C ran the line instead of abandoning it")
 
     # Exit status reaches the || branch. Host tests cover the semantics; this
     # proves the status survives a real process spawn through relibc.
-    status_mark = submit_line(
-        b"^false || echo fellback", b">> ^false || echo fellback"
-    )
-    collect_until(b"\r\nfellback", status_mark)
+    status_mark = submit_line(b"^false||echo x", b">> ^false||echo x")
+    collect_until(b"\r\nx", status_mark)
     collect_until(EMPTY_PRIMARY_DRAW, status_mark)
 
     # RedoxFS write, read back, and remove, as the unprivileged user. Each step
     # is asserted by its own observable: a returning prompt would follow a
     # failed removal just as readily as a successful one.
-    write_mark = submit_line(
-        b"echo persisted > /home/user/smoke.txt",
-        b">> echo persisted > /home/user/smoke.txt",
-    )
+    write_mark = submit_line(b"echo x>f", b">> echo x>f")
     collect_until(EMPTY_PRIMARY_DRAW, write_mark)
-    read_mark = submit_line(
-        b"cat /home/user/smoke.txt", b">> cat /home/user/smoke.txt"
-    )
-    collect_until(b"\r\npersisted", read_mark)
+    read_mark = submit_line(b"cat f", b">> cat f")
+    collect_until(b"\r\nx", read_mark)
     collect_until(EMPTY_PRIMARY_DRAW, read_mark)
-    remove_mark = submit_line(
-        b"rm /home/user/smoke.txt", b">> rm /home/user/smoke.txt"
-    )
+    remove_mark = submit_line(b"rm f", b">> rm f")
     collect_until(EMPTY_PRIMARY_DRAW, remove_mark)
-    gone_mark = submit_line(
-        b"cat /home/user/smoke.txt || echo removed",
-        b">> cat /home/user/smoke.txt || echo removed",
-    )
-    collect_until(b"\r\nremoved", gone_mark)
+    gone_mark = submit_line(b"cat f||echo r", b">> cat f||echo r")
+    collect_until(b"\r\nr", gone_mark)
     collect_until(EMPTY_PRIMARY_DRAW, gone_mark)
 
     # A direct non-zero external completion must return through the managed
     # foreground path rather than relying on a conditional chain's synchronous
     # wait. This is the real-image regression for a missing-file `cat` printing
     # its diagnostic and then stranding the prompt on Redox.
-    missing_mark = submit_line(
-        b"cat /home/user/definitely-missing",
-        b">> cat /home/user/definitely-missing",
-    )
+    missing_mark = submit_line(b"cat z", b">> cat z")
     collect_until(b"No such file or directory", missing_mark)
     collect_until(EMPTY_PRIMARY_DRAW, missing_mark)
 
@@ -338,15 +330,10 @@ try:
     # failed redirection is a shell error, not a command status, so it cannot
     # activate `||` — the boundary is asserted by the read that follows, whose
     # non-zero exit status does.
-    denied_mark = submit_line(
-        b"echo nope > /etc/smoke.txt", b">> echo nope > /etc/smoke.txt"
-    )
+    denied_mark = submit_line(b"echo x>/f", b">> echo x>/f")
     collect_until(EMPTY_PRIMARY_DRAW, denied_mark)
-    absent_mark = submit_line(
-        b"cat /etc/smoke.txt || echo denied",
-        b">> cat /etc/smoke.txt || echo denied",
-    )
-    collect_until(b"\r\ndenied", absent_mark)
+    absent_mark = submit_line(b"cat /f||echo d", b">> cat /f||echo d")
+    collect_until(b"\r\nd", absent_mark)
     collect_until(EMPTY_PRIMARY_DRAW, absent_mark)
 
     if args.expect_root_locked:

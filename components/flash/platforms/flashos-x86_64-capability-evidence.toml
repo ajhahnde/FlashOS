@@ -235,8 +235,8 @@ observation = "The selected adapter installs an ignored hang-up disposition for 
 id = "qemu-pipeline"
 path = "ci/qemu_smoke.py"
 markers = [
-  "send_editor_input(b\"printf 'hallo\\\\nwelt\\\\n' | head -n 1\", b\"\\r\")",
-  'collect_until(b"\r\nhallo", shell_start)',
+  'send_editor_input(b"echo x|cat", b"\r")',
+  'collect_until(b"\r\nx", shell_start)',
 ]
 observation = "The current image streams bytes through an external pipeline and returns to the prompt."
 
@@ -245,8 +245,8 @@ id = "qemu-terminal-editor"
 path = "ci/qemu_smoke.py"
 markers = [
   "# Interactive editing. This is the only place the raw-mode editor is proven",
-  'edit_mark = submit_line(b"echo hallo\x7f\x7fx", b">> echo halx")',
-  'send_editor_input(b"echo never", b"\x03")',
+  'edit_mark = submit_line(b"echo ab\x7fx", b">> echo ax")',
+  'send_editor_input(b"echo no", b"\x03")',
 ]
 observation = "The current image enters the target-only raw editor, handles byte editing and recall, and restores an empty prompt after Ctrl-C abandons input."
 
@@ -255,8 +255,8 @@ id = "qemu-process-status"
 path = "ci/qemu_smoke.py"
 markers = [
   "# Exit status reaches the || branch.",
-  'b"^false || echo fellback"',
-  'collect_until(b"\r\nfellback", status_mark)',
+  'status_mark = submit_line(b"^false||echo x", b">> ^false||echo x")',
+  'collect_until(b"\r\nx", status_mark)',
 ]
 observation = "The current image directly spawns an external command, observes its nonzero completion, and evaluates the fallback branch."
 
@@ -264,9 +264,9 @@ observation = "The current image directly spawns an external command, observes i
 id = "qemu-file-actions"
 path = "ci/qemu_smoke.py"
 markers = [
-  'b"echo persisted > /home/user/smoke.txt"',
-  'b"cat /home/user/smoke.txt"',
-  'b"echo nope > /etc/smoke.txt"',
+  'write_mark = submit_line(b"echo x>f", b">> echo x>f")',
+  'read_mark = submit_line(b"cat f", b">> cat f")',
+  'denied_mark = submit_line(b"echo x>/f", b">> echo x>/f")',
 ]
 observation = "The current image performs a successful redirection and readback and observes a denied redirection outside the user boundary."
 
@@ -275,7 +275,7 @@ id = "qemu-foreground-return"
 path = "ci/qemu_smoke.py"
 markers = [
   "# A direct non-zero external completion must return through the managed",
-  'b"cat /home/user/definitely-missing"',
+  'missing_mark = submit_line(b"cat z", b">> cat z")',
   'collect_until(EMPTY_PRIMARY_DRAW, missing_mark)',
 ]
 observation = "The current interactive image returns from a direct foreground child failure to a usable prompt through the managed foreground path."
