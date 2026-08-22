@@ -38,6 +38,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added grammar-aware Flash path completion. Bounded, cancellable, generation-
+  stamped host snapshots now cover recursive cwd paths without following
+  directory symlinks, while the parser-derived completion engine handles bare,
+  quoted, interpolated, executable, redirection, and explicit `glob(...)`
+  positions. Insertions preserve wildcard spelling and reversible escaping,
+  omit unrepresentable native names, reject stale snapshots, and perform no
+  source execution or implicit argument expansion.
 - Added structured Flash error handling. `try { ... } catch error { ... }`
   catches runtime errors into an immutable queryable `Error`, while `throw`
   raises a source-anchored string error or rethrows an existing error without
