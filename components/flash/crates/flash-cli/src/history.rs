@@ -7,7 +7,7 @@ use std::fmt;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Seek, Write};
 use std::ops::{Deref, DerefMut};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use fd_lock::RwLock;
@@ -467,6 +467,11 @@ fn prepare_history_path(path: &Path) -> io::Result<()> {
             let mut builder = DirBuilder::new();
             builder.recursive(true).mode(HISTORY_DIRECTORY_MODE);
             builder.create(parent)?;
+            // Redox currently does not preserve the requested DirBuilder mode
+            // for recursively created directories. Finalize the private leaf
+            // before creating the history file; existing directories still go
+            // through validation above and are never silently repaired.
+            fs::set_permissions(parent, fs::Permissions::from_mode(HISTORY_DIRECTORY_MODE))?;
             validate_directory(parent)?;
         }
         Err(error) => return Err(error),
