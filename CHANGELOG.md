@@ -38,6 +38,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added a machine-checked Flash v1 host-conformance inventory. Every recovered
+  language, runtime, checker, formatter, language-server, interactive, job,
+  completion, portable-editor, and platform-route family now names executable
+  owners in the locked workspace suite. CI also rejects unclassified runtime
+  refusal boundaries and locks the intentional six-setting interactive config
+  surface while keeping target compilation, image integration, and FlashOS
+  runtime qualification as separate evidence.
 - Added grammar-aware Flash path completion. Bounded, cancellable, generation-
   stamped host snapshots now cover recursive cwd paths without following
   directory symlinks, while the parser-derived completion engine handles bare,

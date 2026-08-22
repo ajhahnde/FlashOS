@@ -31,6 +31,7 @@ Product-specific checks live under `ci/` so they can be used both locally and fr
 | [`ci/check_flashos_capabilities.py`](check_flashos_capabilities.py)                           | Capability evidence inventory                                                  |
 | [`ci/check_flashos_operation_map.py`](check_flashos_operation_map.py)                         | Flash operation mapping to Rust, relibc, and Redox interfaces                  |
 | [`ci/check_flashos_capability_classification.py`](check_flashos_capability_classification.py) | Native/shimmed/unsupported capability classification                           |
+| [`ci/check_flash_conformance.py`](check_flash_conformance.py)                                | Flash v1 executable host-conformance inventory and refusal-boundary audit       |
 | [`ci/check_coverage.py`](check_coverage.py)                                                   | LCOV report completeness                                                       |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                                           | x86_64 serial runtime smoke tests                                              |
 | [`ci/container/Dockerfile`](container/Dockerfile)                                             | Hosted image-build environment                                                 |
@@ -83,6 +84,28 @@ anything.
 Host tests, image construction, QEMU checks, and physical hardware testing are separate verification layers. See [Verification and Testing](../docs/verification.md) for their exact scope.
 
 ## Repository checks
+
+### Flash v1 host conformance
+
+Run the inventory and source-boundary check from the repository root:
+
+```bash
+python3 ci/check_flash_conformance.py
+```
+
+[`components/flash/conformance/v1.toml`](../components/flash/conformance/v1.toml)
+maps each frozen host-v1 semantic family to enabled executable tests in the
+locked Flash workspace. The checker requires the complete family and layer
+inventory, verifies every test owner and platform contract path, confirms the
+standard CI wiring and exact six-setting interactive config surface, and
+rejects unclassified runtime refusal boundaries or source markers that imply
+unfinished v1 behavior.
+
+The checker validates ownership; `cargo test --workspace --locked` executes
+every listed owner as part of the same `flash-quality` job. Passing both is the
+host-v1 conformance signal. It does not establish Redox target compilation,
+image integration, FlashOS runtime support, release readiness, or hardware
+behavior.
 
 ### Product profile
 
@@ -147,7 +170,7 @@ The corresponding data files are:
 - [`flashos-x86_64-operation-map.toml`](../components/flash/platforms/flashos-x86_64-operation-map.toml)
 - [`flashos-x86_64-capability-classification.toml`](../components/flash/platforms/flashos-x86_64-capability-classification.toml)
 
-The current classification records 38 operations as native and the three standard-directory operations as a FlashOS policy shim. Runtime qualification remains separate from that classification.
+The current classification records 41 operations as native and the three standard-directory operations as a FlashOS policy shim. Runtime qualification remains separate from that classification.
 
 ## QEMU runtime checks
 
@@ -219,10 +242,10 @@ The candidate workflow is [`.github/workflows/ci.yml`](../.github/workflows/ci.y
 
 The two source-quality jobs are:
 
-| Job                  | Checks                                                                |
-| -------------------- | --------------------------------------------------------------------- |
-| `repository-quality` | Root formatting/tests, Ruff, Python tests, product checks, whitespace |
-| `flash-quality`      | Flash formatting, Clippy with warnings denied, locked host tests      |
+| Job                  | Checks                                                                            |
+| -------------------- | --------------------------------------------------------------------------------- |
+| `repository-quality` | Root formatting/tests, Ruff, Python tests, product checks, whitespace             |
+| `flash-quality`      | Flash formatting, Clippy, v1 conformance inventory, and locked host tests          |
 
 `image-and-runtime` calls `_image.yml` after both source-quality jobs pass.
 

@@ -112,7 +112,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Tests
+      - name: Validate the Flash v1 conformance inventory
+        run: python3 ../../ci/check_flash_conformance.py
+
+      - name: Host v1 conformance and workspace tests
         run: cargo test --workspace --locked
 
   image:

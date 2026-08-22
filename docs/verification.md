@@ -31,6 +31,7 @@ FlashOS treats every check as evidence for a bounded claim. Passing one layer do
 | Layer                | Primary evidence                                                  | Supported claim                                                               | Not established                                          |
 | -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
 | Source quality       | Formatting, linting, and host tests                               | The checked source satisfies its host-side quality rules                      | Target compilation or image behavior                     |
+| Host v1 conformance  | Checked Flash inventory plus locked workspace tests               | Every frozen host-v1 family has enabled executable owners that passed         | FlashOS target support or image behavior                  |
 | Host coverage        | Validated Flash LCOV report                                       | Host tests executed the reported Flash source lines                           | Redox, QEMU, kernel, or hardware-path coverage           |
 | Target compilation   | Redox-target build                                                | The selected component compiles for the current target ABI                    | Package installation or runtime behavior                 |
 | Platform baseline    | Source and built-artifact baseline checks                         | The selected target, compiler, libc, dynamic linker, and ELF identity agree   | Capability availability or target runtime behavior       |
@@ -94,12 +95,17 @@ These commands check the host-side `flashos_build` package and its committed dep
 From `components/flash/`:
 
 ```bash
+python3 ../../ci/check_flash_conformance.py
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 ```
 
-These checks cover the Flash host workspace, including its syntax, runtime, platform abstractions, and command-line packages as exercised by their tests.
+The conformance checker validates the complete host-v1 family inventory,
+enabled executable owners, CI wiring, platform-contract coverage, and explicit
+runtime-refusal classifications. The locked workspace suite then executes all
+of those owners across syntax, runtime, CLI, REPL, checker, formatter,
+language-server, and portable platform layers.
 
 Host tests cannot reach every target-specific path. In particular, the FlashOS image selects target-side terminal and process integrations that require separate target compilation and runtime qualification.
 
@@ -262,7 +268,7 @@ python3 ci/check_flashos_capability_classification.py
 That checker requires exact ordered operation and capability coverage,
 validates native routes against the operation map, rejects a native verdict for
 an unrouted operation, and derives every capability verdict from its strongest
-operation verdict. The current decision records 38 native operations and a
+operation verdict. The current decision records 41 native operations and a
 three-operation FlashOS standard-directory policy shim, with no deliberately
 unsupported or kernel-work result. Target qualification remains pending and
 requires later runtime evidence.
