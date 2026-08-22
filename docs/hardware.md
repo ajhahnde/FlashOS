@@ -83,7 +83,7 @@ The hosted runtime workflow separately exercises:
 | `harddrive.img`  | NVMe                |
 | `redox-live.iso` | USB mass storage    |
 
-The QEMU smoke contract checks observable boot, login, Flash, external-process, filesystem, permission, and selected driver-startup behavior. It attaches the tested image in snapshot mode so that guest writes do not change the supplied artifact.
+The QEMU smoke contract checks observable boot, login, Flash internal-command and interactive-editor behavior, release root policy, and selected driver startup. External-process lifecycle and file-action behavior remain separately pending target-runtime qualification. The smoke harness attaches the tested image in snapshot mode so guest writes do not change the supplied artifact.
 
 These results establish the expected emulated baseline before physical testing. They do not qualify a physical motherboard, firmware implementation, USB controller, storage controller, display adapter, keyboard, or audio codec.
 

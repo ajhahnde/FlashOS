@@ -45,6 +45,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   positions. Insertions preserve wildcard spelling and reversible escaping,
   omit unrepresentable native names, reject stale snapshots, and perform no
   source execution or implicit argument expansion.
+- Added portable Flash interactive behavior across the host and target editor
+  source paths. The shared contract now covers grapheme/display-cell editing,
+  editable multiline submissions, in-flight resize, completion, highlighting,
+  hints, persistent history, configurable prompts, and background notices that
+  redraw without losing typed input. FlashOS image runtime qualification remains
+  a separate gate.
 - Added structured Flash error handling. `try { ... } catch error { ... }`
   catches runtime errors into an immutable queryable `Error`, while `throw`
   raises a source-anchored string error or rethrows an existing error without
@@ -77,10 +83,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   with deterministic FlashOS fallbacks. It is compiled by the Redox-target
   `fsh` build but remains unselected with no advertised capabilities until the
   later target-runtime qualification and bring-up work.
-- Added a checked FlashOS x86_64 platform classification for Flash. All 41
+- Added a checked FlashOS x86_64 platform classification for Flash. All 44
   required operations and all 14 capability groups now have explicit native,
   shimmed, deliberately unsupported, or separately authorized kernel-work
-  verdicts. The current result is 38 native operations plus a three-operation
+  verdicts. The current result is 41 native operations plus a three-operation
   FlashOS standard-directory policy shim, with no deliberately unsupported or
   kernel-work verdicts; target-runtime qualification remains pending.
 - Added a checked per-operation FlashOS x86_64 platform map for Flash. Every

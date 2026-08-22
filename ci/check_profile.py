@@ -402,11 +402,13 @@ qemu_smoke = (ROOT / "ci/qemu_smoke.py").read_text()
 for expected in (
     'choices=("nvme", "usb")',
     "snapshot=on",
+    "QUALIFICATION_VCPUS = 1",
+    "str(QUALIFICATION_VCPUS)",
     'expected_banner = f"FlashOS {version}".encode()',
     'b"Redox OS distribution"',
 ):
     if expected not in qemu_smoke:
-        fail(f"QEMU immutability/bus contract is missing: {expected}")
+        fail(f"QEMU qualification contract is missing: {expected}")
 
 uses_pattern = re.compile(r"^\s*(?:-\s+)?uses:\s+([^\s#]+)")
 for workflow_path in sorted((ROOT / ".github/workflows").glob("*.yml")):

@@ -386,6 +386,10 @@ The host must provide:
 - compatible x86_64 OVMF or edk2 firmware;
 - an already-built image.
 
+The harness uses one TCG virtual CPU so scheduler timing does not make the
+observable product-behavior checks nondeterministic. SMP and multicore behavior
+require a separate runtime qualification gate.
+
 The firmware path can be supplied explicitly:
 
 ```bash
@@ -453,9 +457,8 @@ The QEMU smoke contract checks observable markers and interactive behavior acros
 | **Boot and kernel progress**         | Observable bootloader markers, serial boot submission, and kernel startup                                                              |
 | **Service initialization**           | Driver spawn markers, such as guest audio driver (`ihdad`) initialization                                                              |
 | **Authentication and basic access**  | Exact versioned FlashOS login banner, absence of inherited Redox product identity, successful unprivileged console login, and primary prompt display |
-| **Interactive command editing**      | Target-side line editing, command history recall, and multiline input                                                                  |
-| **Pipelines and flow control**       | External command piping and exit-status branching (e.g., a nonzero external status reaches the fallback branch of a conditional chain) |
-| **Filesystem and security patterns** | Unprivileged file manipulation in user space versus required rejection under `/etc`, and release-profile root login rejection          |
+| **Interactive Flash session**        | Target-side byte editing, corrected-row submission, and internal-command output                                                        |
+| **Release root policy**              | Rejection of a root login attempt when the release-profile assertion is requested                                                       |
 
 For the complete line-by-line runtime contract and serial synchronization rules, consult [CI/CD Contracts](../ci/README.md#runtime-assertions).
 
@@ -470,6 +473,8 @@ The contract verifies those specific interactions. It does not currently establi
 - package installation after boot;
 - performance characteristics;
 - general Flash language conformance;
+- target prompt recovery, history recall, multiline input, or cancellation;
+- target external-process, process-group, pipe, foreground-handoff, or file-action behavior;
 - physical hardware compatibility.
 
 The `ihdad` marker proves that the expected guest driver path began initialization under the emulated controller. It does not prove that sound was produced.

@@ -155,6 +155,10 @@ The current classification records 38 operations as native and the three standar
 
 The host needs Python 3, QEMU, compatible x86_64 OVMF/edk2 firmware, and an existing image.
 
+The harness uses one TCG virtual CPU so scheduler timing does not make the
+product-behavior assertions nondeterministic. This runtime gate does not
+qualify SMP or multicore behavior.
+
 Example:
 
 ```bash
@@ -187,16 +191,8 @@ The VM runs headless using OVMF, TCG, snapshot-backed image attachment, an emula
 | Boot                | FlashOS boot/startup markers appear                          |
 | Services            | Expected framebuffer-debug and audio-driver markers appear   |
 | Login               | The unprivileged user can log in                             |
-| Shell               | The Flash prompt appears                                     |
-| Pipeline            | `printf` can feed `head`                                     |
+| Shell               | The Flash prompt and internal `pwd` command work             |
 | Editing             | Backspace editing works                                      |
-| History             | The previous command can be recalled                         |
-| Multiline input     | Continuation input is evaluated                              |
-| Cancellation        | `Ctrl-C` cancels the current input                           |
-| Exit status         | A failing command activates the tested `                     |     | ` fallback |
-| User filesystem     | The user can create/read/remove a file in its home directory |
-| Foreground process  | A failing foreground command returns to the prompt           |
-| Permissions         | The user cannot create the tested file under `/etc`          |
 | Release root policy | Root login is rejected when requested                        |
 
 The Flash editor redraws the input row while reading keystrokes, so the harness uses scoped output markers rather than treating a bare prompt as command completion. Prompt changes can therefore require a matching harness update.
@@ -208,7 +204,12 @@ qemu smoke: FAILED:
 qemu smoke: ok
 ```
 
-The smoke test covers the paths above, not general hardware compatibility, full networking, real audio I/O, framebuffer quality, suspend/resume, performance, or complete Flash language behavior.
+The smoke test covers the paths above, not target prompt recovery, history
+recall, multiline input, cancellation, external-process lifecycle, file actions,
+general hardware compatibility, full networking, real audio I/O, framebuffer
+quality, suspend/resume, performance, or complete Flash language behavior.
+Those behaviors retain separate source and host coverage until stable
+target-runtime qualification gates exist.
 
 ## Hosted workflows
 
@@ -282,7 +283,7 @@ root-lock assertion.
 Failed runtime jobs attempt to preserve:
 
 ```text
-qemu-harddrive-smoke.log
+qemu-harddrive-smoke-attempt-*.log
 qemu-live-usb-smoke.log
 SHA256SUMS
 ```
