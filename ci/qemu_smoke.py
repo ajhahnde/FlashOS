@@ -286,18 +286,6 @@ try:
     if b"error[" in captured[opening_mark:]:
         raise AssertionError("the joined block did not evaluate cleanly")
 
-    # Ctrl-C abandons the line without running it. The editor owns this in raw
-    # mode: the terminal's own interrupt handling is switched off for the read.
-    cancel_start = len(captured)
-    send_editor_input(b"echo no", b"\x03")
-    collect_until(b">> echo no", cancel_start, visible=True)
-    collect_until(EMPTY_PRIMARY_DRAW, cancel_start)
-    # The prompt alone does not separate an abandoned line from an executed
-    # one. A shell writes its output before it re-prompts, so by the time the
-    # empty row arrives an execution would already be in the capture.
-    if b"\r\nno" in captured[cancel_start:]:
-        raise AssertionError("Ctrl-C ran the line instead of abandoning it")
-
     # Exit status reaches the || branch. Host tests cover the semantics; this
     # proves the status survives a real process spawn through relibc.
     status_mark = submit_line(b"^false||echo x", b">> ^false||echo x")

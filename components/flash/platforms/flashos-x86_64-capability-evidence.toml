@@ -246,9 +246,9 @@ path = "ci/qemu_smoke.py"
 markers = [
   "# Interactive editing. This is the only place the raw-mode editor is proven",
   'edit_mark = submit_line(b"echo ab\x7fx", b">> echo ax")',
-  'send_editor_input(b"echo no", b"\x03")',
+  'recall_mark = submit_line(b"\x1b[A", b">> echo ax")',
 ]
-observation = "The current image enters the target-only raw editor, handles byte editing and recall, and restores an empty prompt after Ctrl-C abandons input."
+observation = "The current image enters the target-only raw editor and handles byte editing and recall. Ctrl-C cancellation remains covered by host pseudoterminal acceptance, not claimed by this bounded target observation."
 
 [[runtime_evidence]]
 id = "qemu-process-status"

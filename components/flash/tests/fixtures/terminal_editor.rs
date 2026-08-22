@@ -163,14 +163,17 @@ fn normalize_macos_stty(state: &[u8]) -> String {
     String::from_utf8_lossy(state)
         .trim()
         .split(':')
-        .map(|field| {
-            field
-                .strip_prefix("lflag=")
-                .and_then(|value| u32::from_str_radix(value, 16).ok())
-                .map_or_else(
-                    || field.to_owned(),
-                    |value| format!("lflag={:x}", value & !0x2000_0000),
-                )
+        .enumerate()
+        .map(|(index, field)| {
+            // `stty -g` emits iflag:oflag:cflag:lflag:..., without names.
+            // PENDIN is therefore masked only from the fourth field.
+            if index == 3 {
+                u32::from_str_radix(field, 16)
+                    .map(|value| format!("{:x}", value & !0x2000_0000))
+                    .unwrap_or_else(|_| field.to_owned())
+            } else {
+                field.to_owned()
+            }
         })
         .collect::<Vec<_>>()
         .join(":")
