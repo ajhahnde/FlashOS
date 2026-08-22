@@ -149,6 +149,26 @@ impl Pty {
         }
     }
 
+    /// Block until `needle` appears after `anchor` in output produced after
+    /// `start`. Waiting for both in one captured snapshot matters when the pty
+    /// reader receives an external notice and its redraw in separate reads.
+    fn wait_for_after_from(&self, start: usize, anchor: &str, needle: &str) -> String {
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            let text = self.rendered_from(start);
+            if let Some(index) = text.rfind(anchor)
+                && text[index + anchor.len()..].contains(needle)
+            {
+                return text;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {needle:?} after {anchor:?}; rendered since mark:\n{text}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Block until `needle` has appeared at least `count` times in all output.
     fn wait_for_count(&self, needle: &str, count: usize) -> String {
         let deadline = Instant::now() + TIMEOUT;
@@ -522,14 +542,7 @@ fn external_output_redraws_a_live_portable_edit_buffer() {
     let mark = pty.mark();
     pty.send(b"preserved-buffer");
 
-    let rendered = pty.wait_for_from(mark, "[1] Done     external worker");
-    assert!(
-        rendered
-            .split("[1] Done     external worker")
-            .nth(1)
-            .is_some_and(|tail| tail.contains(">> preserved-buffer")),
-        "the notice must be followed by a redraw of the active source: {rendered}"
-    );
+    pty.wait_for_after_from(mark, "[1] Done     external worker", ">> preserved-buffer");
 
     pty.send(b"\r");
     pty.wait_for("submitted: preserved-buffer");
