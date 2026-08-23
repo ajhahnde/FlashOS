@@ -214,8 +214,10 @@ The VM runs headless using OVMF, TCG, snapshot-backed image attachment, an emula
 | Boot                | FlashOS boot/startup markers appear                          |
 | Services            | Expected framebuffer-debug and audio-driver markers appear   |
 | Login               | The unprivileged user can log in                             |
-| Shell               | The Flash prompt and internal `pwd` command work             |
+| Shell               | The Flash prompt, `pwd`, directory changes, and scripts work |
 | Editing             | Backspace editing works                                      |
+| Pipelines           | External bytes and structured directory data complete       |
+| Jobs                | Foreground return and two background wait paths complete     |
 | Release root policy | Root login is rejected when requested                        |
 
 The Flash editor redraws the input row while reading keystrokes, so the harness uses scoped output markers rather than treating a bare prompt as command completion. Prompt changes can therefore require a matching harness update.
@@ -228,11 +230,11 @@ qemu smoke: ok
 ```
 
 The smoke test covers the paths above, not target prompt recovery, history
-recall, multiline input, cancellation, external-process lifecycle, file actions,
-general hardware compatibility, full networking, real audio I/O, framebuffer
-quality, suspend/resume, performance, or complete Flash language behavior.
-Those behaviors retain separate source and host coverage until stable
-target-runtime qualification gates exist.
+recall, multiline input, cancellation, signal delivery, stopped/continued/
+signaled child transitions, general hardware compatibility, full networking,
+real audio I/O, framebuffer quality, suspend/resume, performance, or complete
+Flash language behavior. Those behaviors retain separate source and host
+coverage until stable target-runtime qualification gates exist.
 
 ## Hosted workflows
 

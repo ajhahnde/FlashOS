@@ -169,7 +169,7 @@ def validate(document: dict, root: Path = ROOT) -> None:
         "platform_baseline": "flashos-x86_64.toml",
         "capability_evidence": "flashos-x86_64-capability-evidence.toml",
         "contract_source": "components/flash/crates/flash-platform/src/lib.rs",
-        "selected_adapter": "flash-platform-posix::PosixPlatform",
+        "selected_adapter": "flash-platform-flashos::FlashOsPlatform",
         "classification": "deferred",
     }
     for field, expected in expected_scalars.items():

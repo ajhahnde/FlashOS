@@ -463,7 +463,9 @@ The QEMU smoke contract checks observable markers and interactive behavior acros
 | **Boot and kernel progress**         | Observable bootloader markers, serial boot submission, and kernel startup                                                              |
 | **Service initialization**           | Driver spawn markers, such as guest audio driver (`ihdad`) initialization                                                              |
 | **Authentication and basic access**  | Exact versioned FlashOS login banner, absence of inherited Redox product identity, successful unprivileged console login, and primary prompt display |
-| **Interactive Flash session**        | Target-side byte editing, corrected-row submission, and internal-command output                                                        |
+| **Interactive Flash session**        | Target-side byte editing, corrected-row submission, logical directory changes, and internal-command output                             |
+| **Flash runtime paths**              | Script execution, stdout redirection, a two-member external byte pipeline, structured directory enumeration, and foreground return      |
+| **Background execution**             | Addressable child launch/wait and conditional-chain supervisor re-execution without a runtime diagnostic                                |
 | **Release root policy**              | Rejection of a root login attempt when the release-profile assertion is requested                                                       |
 
 For the complete line-by-line runtime contract and serial synchronization rules, consult [CI/CD Contracts](../ci/README.md#runtime-assertions).
@@ -480,7 +482,7 @@ The contract verifies those specific interactions. It does not currently establi
 - performance characteristics;
 - general Flash language conformance;
 - target prompt recovery, history recall, multiline input, or cancellation;
-- target external-process, process-group, pipe, foreground-handoff, or file-action behavior;
+- target signal delivery, stopped/continued/signaled child transitions, or stopped-job terminal-mode restoration;
 - physical hardware compatibility.
 
 The `ihdad` marker proves that the expected guest driver path began initialization under the emulated controller. It does not prove that sound was produced.

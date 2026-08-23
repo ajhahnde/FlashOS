@@ -10,6 +10,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- FlashOS now selects its dedicated Flash platform adapter for every target
+  execution mode. The image-qualified path runs interactive foreground work,
+  scripts, structured directory commands, external pipelines, redirections,
+  addressable background waits, and conditional-chain supervisors. Background
+  children remain owned and observed by the Redox session thread, while the
+  indivisible signal/stop-transition capability stays explicitly unadvertised.
 - Flash now executes `command NAME [ARG...]` through the same resolved external
   stage contract as `^NAME`. Dynamically selected commands preserve native
   argv, byte pipelines, redirections, status, capture, callables, conditional

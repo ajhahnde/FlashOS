@@ -233,9 +233,9 @@ try:
             )
 
     # Boot is done. Re-arm the deadline so authentication and interactive
-    # assertions get their own budget. The required image gate stays on
-    # internal Flash behavior because target process lifecycle qualification
-    # remains pending.
+    # assertions get their own budget. The commands below exercise the selected
+    # FlashOS adapter from its target-only editor through internal, external,
+    # script, pipeline, and job-control paths.
     deadline = time.monotonic() + INTERACTIVE_TIMEOUT
 
     if args.expect_root_locked:
@@ -256,11 +256,49 @@ try:
 
     # Interactive editing. This is the only place the raw-mode editor is proven
     # on the real image: its selection is compiled for the target only, so no
-    # host test can reach it. `pwd` is an internal Flash command, so its output
-    # proves that the corrected row reaches the interactive evaluator without
-    # making target process scheduling part of this gate.
+    # host test can reach it. Reaching the prompt also proves that the adapter's
+    # FlashOS standard-directory policy initialized config and history.
     edit_mark = submit_line(b"pwz\x7fd", b">> pwd")
     collect_until(b"\r\n/home/user", edit_mark)
+
+    # Select and validate a logical cwd, create a script through a redirected
+    # external process, and execute it through the non-interactive fsh path.
+    submit_line(b"cd /tmp", b">> cd /tmp")
+    cwd_mark = submit_line(b"pwd", b">> pwd")
+    collect_until(b"\r\n/tmp", cwd_mark)
+    submit_line(b"^echo pwd>x", b">> ^echo pwd>x")
+    script_mark = submit_line(b"^fsh x", b">> ^fsh x")
+    collect_until(b"\r\n/tmp", script_mark)
+
+    # A two-process byte pipeline proves descriptor ownership, process spawn,
+    # multi-member group placement, waiting, and foreground terminal handoff.
+    pipeline_mark = submit_line(b"^echo p|^cat", b">> ^echo p|^cat")
+    collect_until(b"\r\np", pipeline_mark)
+
+    # Structured directory enumeration remains in-process while consuming the
+    # same FlashOS directory-read seam. The temporary directory contains only
+    # the script created above, so the rendered length is deterministic.
+    structured_mark = submit_line(b"ls|length", b">> ls|length")
+    collect_until(b"\r\n1", structured_mark)
+
+    # Exercise addressable background launch and waiting without claiming the
+    # still-unqualified FlashOS signal/stop-transition capability. Every
+    # interaction stays within the target editor's emulated UART FIFO limit.
+    job_mark = len(captured)
+    submit_line(b"^sleep 1&", b">> ^sleep 1&")
+    collect_until(b"[4] ", job_mark)
+    submit_line(b"wait %4", b">> wait %4")
+
+    # A conditional background chain is re-executed through fsh's supervisor,
+    # qualifying executable discovery and the supervisor hang-up disposition.
+    submit_line(b"^true&&^true&", b">> ^true&&^true&")
+    collect_until(b"[5] ", job_mark)
+    submit_line(b"wait %5", b">> wait %5")
+    completion_mark = submit_line(b"pwd", b">> pwd")
+    collect_until(b"\r\n/tmp", completion_mark)
+    job_transcript = bytes(captured[job_mark:])
+    if b"error[RUN001]" in job_transcript:
+        raise RuntimeError("FlashOS job-control bring-up produced a runtime error")
 except BaseException as error:
     failure = error
 finally:
@@ -286,6 +324,11 @@ verified = [
     "FlashOS identity",
     "TUI login",
     "Flash internal command",
+    "Flash target runtime",
+    "non-interactive Flash script",
+    "external pipeline",
+    "structured directory command",
+    "foreground and background job execution",
     "IHDA audio driver",
     "interactive editing",
 ]
