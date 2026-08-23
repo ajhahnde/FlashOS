@@ -50,6 +50,28 @@ class FlashOSTargetMatrixTests(unittest.TestCase):
         self.assertEqual(b"".join(chunks), source)
         self.assertTrue(all(len(chunk) <= 7 for chunk in chunks))
 
+    def test_external_output_markers_remain_visible_after_prompt_redraw(self) -> None:
+        matrix = target_matrix.load_target_matrix()
+        argv_case = next(
+            case
+            for case in matrix.cases
+            if case.identifier == "argv-environment-pipelines-and-redirections"
+        )
+        argv_step = argv_case.steps[0]
+        glob_case = next(
+            case
+            for case in matrix.cases
+            if case.identifier == "directory-glob-and-grammar-completion"
+        )
+        glob_step = glob_case.steps[0]
+
+        self.assertIn(b"^printf '<%s>\\n' 'argv ok'", argv_step.payload)
+        self.assertIn(b"^printf 'two\\n' >> matrix.txt", argv_step.payload)
+        self.assertIn(b"<argv ok>\r\r\n", argv_step.expected)
+        self.assertIn(b"onetwo\r\r\n", argv_step.expected)
+        self.assertIn(b"^echo glob-done", glob_step.payload)
+        self.assertIn(b"glob-done\r\r\n", glob_step.expected)
+
 
 if __name__ == "__main__":
     unittest.main()
