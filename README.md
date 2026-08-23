@@ -69,7 +69,7 @@ Instructions for live images, local configuration, login details, troubleshootin
 
 ## Documentation tree
 
-The following tree shows the canonical navigation paths between the central public Markdown documents. It intentionally excludes implementation-specific READMEs, test-fixture documentation, and individual historical files retained under `docs/upstream/`.
+The following tree shows the canonical navigation paths between the central public Markdown documents and load-bearing verification entry points. It intentionally excludes most implementation-specific READMEs, test-fixture documentation, and individual historical files retained under `docs/upstream/`.
 
 - [`README.md`](README.md) — Project overview and main entry point
 
@@ -91,6 +91,8 @@ The following tree shows the canonical navigation paths between the central publ
       - [`components/flash/docs/scripting.md`](components/flash/docs/scripting.md) — Script and process execution
       - [`components/flash/docs/architecture.md`](components/flash/docs/architecture.md) — Internal crate and runtime architecture
       - [`components/flash/docs/development.md`](components/flash/docs/development.md) — Flash development and testing
+
+    - [`components/flash/scheduling/README.md`](components/flash/scheduling/README.md) — Replayable host scheduling-stress campaigns
 
   - [`ci/README.md`](ci/README.md) — Technical contracts for local and hosted CI
   - [`CHANGELOG.md`](CHANGELOG.md) — Public change history

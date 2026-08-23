@@ -22,6 +22,7 @@ Some areas maintain separate documentation because their responsibilities extend
 
 - [Flash Overview](../components/flash/README.md) — Entry point for Flash (`fsh`), its design, usage, and component documentation.
 - [Flash Documentation Index](../components/flash/docs/README.md) — Language, scripting, internal architecture, development, and testing guides for Flash.
+- [Flash Scheduling Stress](../components/flash/scheduling/README.md) — Seeded host pipeline-cancellation and job-control campaigns, retained results, and exact replay.
 - [CI/CD Contracts](../ci/README.md) — Technical contracts implemented by the local CI scripts and their integration with hosted workflows.
 
 ## Project records and policies
