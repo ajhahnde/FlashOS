@@ -1,5 +1,7 @@
 # Scheduling stress
 
+[FlashOS](../../../README.md) › [Flash](../README.md) › Scheduling Stress
+
 Flash's host scheduling stress cases exercise the real `fsh` executable over a
 pseudoterminal. They use deterministic nonzero seeds to vary process and job
 actions while retaining bounded waits, exact child-reaping checks, and terminal
@@ -70,3 +72,7 @@ Redox target builds prove compilation separately, while image/QEMU or hardware
 qualification owns target runtime claims. Campaign completion is bounded
 evidence for the exercised seeds and scenarios, not proof that scheduling
 defects are absent.
+
+---
+
+[← Previous: Development](../docs/development.md) · [Flash documentation](../docs/README.md) · [Next: Fuzz targets →](../fuzz/README.md)
