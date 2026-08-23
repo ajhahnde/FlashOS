@@ -318,6 +318,8 @@ def main() -> int:
                 "TERM": "xterm-256color",
             }
         )
+        completion_environment = dict(environment)
+        completion_environment["PATH"] = str(path_dir)
         empty_script = run_dir / "empty.fsh"
         empty_script.write_text("")
         command_count = int(settings["command_iterations"])
@@ -436,7 +438,7 @@ def main() -> int:
             warmups,
             samples,
             cwd=completion_dir,
-            env=environment,
+            env=completion_environment,
         )
         measurements.append(record("host-completion-cold", "ns", [completion_cold]))
         measurements.append(
@@ -473,6 +475,7 @@ def main() -> int:
             "config_disabled": True,
             "history_disabled": True,
             "locale": "C",
+            "completion_path_isolated": True,
             "manual_cache_flush": False,
             "sample_order": "surface-grouped; cold first; warmups discarded",
         },

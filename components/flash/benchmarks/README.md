@@ -54,9 +54,10 @@ python3 benchmarks/run.py --profile qualification
 
 The runner builds optimized `fsh` and `flash-benchmark-fixture` binaries unless
 `--no-build` is supplied. It uses an isolated temporary home, disables config
-and history, fixes the locale to `C`, creates deterministic completion and
-pipeline fixtures, discards warmups, and writes a unique ignored JSON result
-under `benchmarks/results/` by default.
+and history, fixes the locale to `C`, limits completion discovery to the fixed
+fixture directory, creates deterministic completion and pipeline fixtures,
+discards warmups, and writes a unique ignored JSON result under
+`benchmarks/results/` by default.
 
 Evaluate a qualification run only against a matching environment budget:
 

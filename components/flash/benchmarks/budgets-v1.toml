@@ -5,7 +5,7 @@ contract_sha256 = "4c08c59c0b6289c355db7f428aba7e0909598a97b6705101bdcd84a2e152c
 [[environments]]
 id = "host-darwin-arm64"
 evidence = "evidence/host-darwin-arm64-v1.json"
-evidence_sha256 = "d62bce4fcebb4f89ab361ce4c23152b9731751802eb85e5a818f19ca32e3741c"
+evidence_sha256 = "5c3aaf8424f93aea2992cba3a5ba68aeeaae2c941e5bf9730fcbf9cac85a48b9"
 match = { kind = "host", os = "macos", architecture = "arm64" }
 
 [[environments]]
@@ -18,82 +18,82 @@ match = { kind = "flashos-qemu-tcg", machine = "q35", cpu = "core2duo", vcpus = 
 environment = "host-darwin-arm64"
 case_id = "host-startup-cold"
 statistic = "maximum"
-baseline = 11866667
+baseline = 5352708
 factor_numerator = 4
 factor_denominator = 1
-limit = 47466668
+limit = 21410832
 
 [[budgets]]
 environment = "host-darwin-arm64"
 case_id = "host-startup-warm"
 statistic = "p95"
-baseline = 5878791
+baseline = 5250541
 factor_numerator = 3
 factor_denominator = 1
-limit = 17636373
+limit = 15751623
 
 [[budgets]]
 environment = "host-darwin-arm64"
 case_id = "host-first-prompt-cold"
 statistic = "maximum"
-baseline = 63206042
+baseline = 18985791
 factor_numerator = 4
 factor_denominator = 1
-limit = 252824168
+limit = 75943164
 
 [[budgets]]
 environment = "host-darwin-arm64"
 case_id = "host-first-prompt-warm"
 statistic = "p95"
-baseline = 20599750
+baseline = 19203000
 factor_numerator = 3
 factor_denominator = 1
-limit = 61799250
+limit = 57609000
 
 [[budgets]]
 environment = "host-darwin-arm64"
 case_id = "host-command-overhead-warm"
 statistic = "p95"
-baseline = 1889902
+baseline = 1648383
 factor_numerator = 3
 factor_denominator = 1
-limit = 5669706
+limit = 4945149
 
 [[budgets]]
 environment = "host-darwin-arm64"
 case_id = "host-pipeline-throughput-warm"
 statistic = "median"
-baseline = 1227503868
+baseline = 1310059034
 factor_numerator = 3
 factor_denominator = 1
-limit = 409167956
+limit = 436686344
 
 [[budgets]]
 environment = "host-darwin-arm64"
 case_id = "host-structured-stream-memory-warm"
 statistic = "maximum"
-baseline = 6144000
+baseline = 6111232
 factor_numerator = 3
 factor_denominator = 1
-limit = 18432000
+limit = 18333696
 
 [[budgets]]
 environment = "host-darwin-arm64"
 case_id = "host-completion-cold"
 statistic = "maximum"
-baseline = 14799334
+baseline = 1246292
 factor_numerator = 4
 factor_denominator = 1
-limit = 59197336
+limit = 4985168
 
 [[budgets]]
 environment = "host-darwin-arm64"
 case_id = "host-completion-warm"
 statistic = "p95"
-baseline = 13686750
+baseline = 970167
 factor_numerator = 3
 factor_denominator = 1
-limit = 41060250
+limit = 2910501
 
 [[budgets]]
 environment = "flashos-qemu-tcg-core2duo"
