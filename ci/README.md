@@ -160,6 +160,7 @@ The current FlashOS capability data is checked with:
 python3 ci/check_flashos_capabilities.py
 python3 ci/check_flashos_operation_map.py
 python3 ci/check_flashos_capability_classification.py
+python3 ci/check_flashos_capability_report.py
 ```
 
 These scripts keep the live `Capability` enum, evidence inventory, operation map, and architectural classification in sync.
@@ -169,12 +170,31 @@ The corresponding data files are:
 - [`flashos-x86_64-capability-evidence.toml`](../components/flash/platforms/flashos-x86_64-capability-evidence.toml)
 - [`flashos-x86_64-operation-map.toml`](../components/flash/platforms/flashos-x86_64-operation-map.toml)
 - [`flashos-x86_64-capability-classification.toml`](../components/flash/platforms/flashos-x86_64-capability-classification.toml)
+- [`flashos-x86_64-capability-report-v1.toml`](../components/flash/platforms/flashos-x86_64-capability-report-v1.toml)
+- [`flashos-x86_64-runtime-fixtures-v1.toml`](../components/flash/platforms/flashos-x86_64-runtime-fixtures-v1.toml)
 
 The current classification records 41 operations as native and the three standard-directory operations as a FlashOS policy shim. Runtime qualification remains separate from that classification.
+
+The versioned report records the adapter's current advertised set and keeps
+each group connected to the bounded runtime fixtures that reach it. `Signals`
+remains withheld. The checker also binds report versions to the Flash workspace
+and FlashOS release, proves exact ordered capability coverage, verifies the
+adapter bitset, and requires the QEMU runner to consume the same fixtures.
+This bounded report is not the later exhaustive target matrix.
 
 ## QEMU runtime checks
 
 [`ci/qemu_smoke.py`](qemu_smoke.py) boots an existing x86_64 image and tests the current serial interface. It does not build or modify the source image.
+
+The interaction rows and expected markers live in
+[`flashos-x86_64-runtime-fixtures-v1.toml`](../components/flash/platforms/flashos-x86_64-runtime-fixtures-v1.toml).
+The QEMU harness consumes that versioned suite directly. To render the same
+ordered checks for a manually observed real system without claiming that they
+were run, use:
+
+```bash
+python3 ci/flashos_runtime_fixtures.py
+```
 
 The host needs Python 3, QEMU, compatible x86_64 OVMF/edk2 firmware, and an existing image.
 
@@ -201,6 +221,7 @@ Without `--ovmf`, the script searches its configured Linux and Homebrew location
 | `--ovmf PATH`           | Explicit firmware file                  |
 | `--log PATH`            | Full serial log                         |
 | `--timeout SECONDS`     | Initial boot-marker timeout             |
+| `--fixtures PATH`       | Versioned target-runtime fixture suite  |
 | `--disk-interface nvme` | Attach through emulated NVMe            |
 | `--disk-interface usb`  | Attach as USB mass storage              |
 | `--expect-root-locked`  | Also test the release root-login policy |

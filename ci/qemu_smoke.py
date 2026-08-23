@@ -12,6 +12,12 @@ import sys
 import time
 from pathlib import Path
 
+from flashos_runtime_fixtures import (
+    FIXTURE_PATH,
+    FixtureContractError,
+    load_fixture_suite,
+)
+
 DEFAULT_OVMF_PATHS = (
     "/usr/share/OVMF/OVMF_CODE.fd",
     "/usr/share/OVMF/OVMF_CODE_4M.fd",
@@ -42,6 +48,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log", type=Path, default=Path("qemu-smoke.log"))
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument(
+        "--fixtures",
+        type=Path,
+        default=FIXTURE_PATH,
+        help="Versioned FlashOS runtime fixture suite",
+    )
+    parser.add_argument(
         "--disk-interface",
         choices=("nvme", "usb"),
         default="nvme",
@@ -65,6 +77,10 @@ def resolve_ovmf(explicit: Path | None) -> Path:
 
 args = parse_args()
 version = release_version()
+try:
+    runtime_suite = load_fixture_suite(args.fixtures)
+except FixtureContractError as error:
+    raise SystemExit(f"qemu smoke: invalid runtime fixtures: {error}") from error
 image = args.image.resolve()
 if not image.is_file():
     raise SystemExit(f"qemu smoke: image not found: {image}")
@@ -169,7 +185,7 @@ def send(data: bytes) -> None:
     process.stdin.flush()
 
 
-EDITOR_INTERACTION_LIMIT = 16
+EDITOR_INTERACTION_LIMIT = runtime_suite.max_interaction_bytes
 
 
 def send_editor_input(payload: bytes, terminator: bytes) -> None:
@@ -201,7 +217,7 @@ def submit_line(payload: bytes, row: bytes) -> int:
     controls; the returned offset scopes the evaluator-output assertion.
     """
     row_start = len(captured)
-    send_editor_input(payload, b"\r")
+    send_editor_input(payload, runtime_suite.terminator)
     # Highlighting may insert CSI style sequences within the visible row. Match
     # its terminal text so the assertion still proves the completed edit.
     collect_until(row, row_start, visible=True)
@@ -252,53 +268,26 @@ try:
     collect_until(b"password:", login_start)
     send(b"user\r")
     collect_until(b"Login successful!", login_start)
-    collect_until(b">> ", login_start)
+    collect_until(runtime_suite.prompt, login_start)
 
-    # Interactive editing. This is the only place the raw-mode editor is proven
-    # on the real image: its selection is compiled for the target only, so no
-    # host test can reach it. Reaching the prompt also proves that the adapter's
-    # FlashOS standard-directory policy initialized config and history.
-    edit_mark = submit_line(b"pwz\x7fd", b">> pwd")
-    collect_until(b"\r\n/home/user", edit_mark)
-
-    # Select and validate a logical cwd, create a script through a redirected
-    # external process, and execute it through the non-interactive fsh path.
-    submit_line(b"cd /tmp", b">> cd /tmp")
-    cwd_mark = submit_line(b"pwd", b">> pwd")
-    collect_until(b"\r\n/tmp", cwd_mark)
-    submit_line(b"^echo pwd>x", b">> ^echo pwd>x")
-    script_mark = submit_line(b"^fsh x", b">> ^fsh x")
-    collect_until(b"\r\n/tmp", script_mark)
-
-    # A two-process byte pipeline proves descriptor ownership, process spawn,
-    # multi-member group placement, waiting, and foreground terminal handoff.
-    pipeline_mark = submit_line(b"^echo p|^cat", b">> ^echo p|^cat")
-    collect_until(b"\r\np", pipeline_mark)
-
-    # Structured directory enumeration remains in-process while consuming the
-    # same FlashOS directory-read seam. The temporary directory contains only
-    # the script created above, so the rendered length is deterministic.
-    structured_mark = submit_line(b"ls|length", b">> ls|length")
-    collect_until(b"\r\n1", structured_mark)
-
-    # Exercise addressable background launch and waiting without claiming the
-    # still-unqualified FlashOS signal/stop-transition capability. Every
-    # interaction stays within the target editor's emulated UART FIFO limit.
-    job_mark = len(captured)
-    submit_line(b"^sleep 1&", b">> ^sleep 1&")
-    collect_until(b"[4] ", job_mark)
-    submit_line(b"wait %4", b">> wait %4")
-
-    # A conditional background chain is re-executed through fsh's supervisor,
-    # qualifying executable discovery and the supervisor hang-up disposition.
-    submit_line(b"^sleep 1&&true&", b">> ^sleep 1&&true&")
-    collect_until(b"[5] ", job_mark)
-    submit_line(b"wait %5", b">> wait %5")
-    completion_mark = submit_line(b"pwd", b">> pwd")
-    collect_until(b"\r\n/tmp", completion_mark)
-    job_transcript = bytes(captured[job_mark:])
-    if b"error[RUN001]" in job_transcript:
-        raise RuntimeError("FlashOS job-control bring-up produced a runtime error")
+    # The same ordered, versioned suite is suitable for the automated QEMU
+    # consumer and for manually observed real systems. Keeping the commands and
+    # expected markers outside this transport harness prevents those two
+    # evidence paths from drifting. The current suite remains deliberately
+    # bounded; the exhaustive target matrix is a separate qualification gate.
+    for fixture in runtime_suite.fixtures:
+        fixture_start = len(captured)
+        for step in fixture.steps:
+            step_start = submit_line(step.payload, step.rendered)
+            if step.expected is not None:
+                collect_until(step.expected, step_start)
+        fixture_transcript = bytes(captured[fixture_start:])
+        for rejected in fixture.rejected:
+            if rejected in fixture_transcript:
+                raise RuntimeError(
+                    f"FlashOS runtime fixture {fixture.identifier!r} "
+                    f"observed rejected marker {rejected!r}"
+                )
 except BaseException as error:
     failure = error
 finally:
@@ -331,6 +320,7 @@ verified = [
     "foreground and background job execution",
     "IHDA audio driver",
     "interactive editing",
+    f"runtime fixtures v{runtime_suite.suite_version}",
 ]
 if args.expect_root_locked:
     verified.append("locked root account")

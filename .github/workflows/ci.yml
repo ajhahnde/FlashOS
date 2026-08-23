@@ -68,6 +68,9 @@ jobs:
       - name: Validate the FlashOS platform capability classification
         run: python3 ci/check_flashos_capability_classification.py
 
+      - name: Validate the versioned FlashOS capability report
+        run: python3 ci/check_flashos_capability_report.py
+
       - name: Reject whitespace errors
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
