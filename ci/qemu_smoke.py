@@ -17,6 +17,12 @@ from flashos_runtime_fixtures import (
     FixtureContractError,
     load_fixture_suite,
 )
+from flashos_target_matrix import (
+    MATRIX_PATH,
+    TargetMatrixContractError,
+    load_target_matrix,
+    script_transport_chunks,
+)
 
 DEFAULT_OVMF_PATHS = (
     "/usr/share/OVMF/OVMF_CODE.fd",
@@ -54,6 +60,12 @@ def parse_args() -> argparse.Namespace:
         help="Versioned FlashOS runtime fixture suite",
     )
     parser.add_argument(
+        "--target-matrix",
+        type=Path,
+        default=MATRIX_PATH,
+        help="Versioned exhaustive FlashOS target-capability matrix",
+    )
+    parser.add_argument(
         "--disk-interface",
         choices=("nvme", "usb"),
         default="nvme",
@@ -81,6 +93,10 @@ try:
     runtime_suite = load_fixture_suite(args.fixtures)
 except FixtureContractError as error:
     raise SystemExit(f"qemu smoke: invalid runtime fixtures: {error}") from error
+try:
+    target_matrix = load_target_matrix(args.target_matrix)
+except TargetMatrixContractError as error:
+    raise SystemExit(f"qemu smoke: invalid target matrix: {error}") from error
 image = args.image.resolve()
 if not image.is_file():
     raise SystemExit(f"qemu smoke: image not found: {image}")
@@ -104,9 +120,7 @@ command = [
     f"if=pflash,format=raw,unit=0,file={ovmf},readonly=on",
 ]
 
-command.extend(
-    ["-drive", f"file={image},format=raw,if=none,id=drv0,snapshot=on"]
-)
+command.extend(["-drive", f"file={image},format=raw,if=none,id=drv0,snapshot=on"])
 if args.disk_interface == "nvme":
     command.extend(["-device", "nvme,drive=drv0,serial=NVME_SERIAL"])
 
@@ -186,19 +200,25 @@ def send(data: bytes) -> None:
 
 
 EDITOR_INTERACTION_LIMIT = runtime_suite.max_interaction_bytes
+EDITOR_INTERACTION_SETTLE = 0.05
+SCRIPT_TRANSPORT_SETTLE = 0.05
 
 
-def send_editor_input(payload: bytes, terminator: bytes) -> None:
+def send_editor_input(
+    payload: bytes,
+    terminator: bytes,
+) -> None:
     """Queue one UART-FIFO-bounded interaction in the guest terminal.
 
     The portable editor drains one ready terminal chunk into its internal byte
     queue. The emulated 16550 receiver holds sixteen bytes, so keeping every
     complete interaction within that boundary proves the target path without
-    depending on a second serial readiness notification.
+    depending on another notification within the batch.
     """
     interaction = payload + terminator
     if len(interaction) > EDITOR_INTERACTION_LIMIT:
         raise ValueError("editor interaction exceeds the emulated UART FIFO")
+    time.sleep(EDITOR_INTERACTION_SETTLE)
     send(interaction)
 
 
@@ -206,22 +226,56 @@ def send_editor_input(payload: bytes, terminator: bytes) -> None:
 # separate from the boot budget so a slow boot and a failing assertion cannot
 # produce the same diagnostic.
 INTERACTIVE_TIMEOUT = 180
+TARGET_MATRIX_TIMEOUT = 900
 
 
-def submit_line(payload: bytes, row: bytes) -> int:
-    """Submit `payload` atomically and return its scoped transcript offset.
+def submit_line(
+    payload: bytes,
+    row: bytes,
+) -> int:
+    """Submit `payload` and return its scoped transcript offset.
 
-    The editor drains the text and Enter from one ready input chunk, while still
-    rendering after every decoded key before it consumes the next. Matching the
-    completed visible row proves editor behavior when the payload includes edit
-    controls; the returned offset scopes the evaluator-output assertion.
+    Each row uses one bounded UART batch because the target serial path does
+    not guarantee a second readiness notification within one interaction.
     """
+    if len(payload + runtime_suite.terminator) > EDITOR_INTERACTION_LIMIT:
+        raise ValueError("editor interaction exceeds the emulated UART FIFO")
     row_start = len(captured)
     send_editor_input(payload, runtime_suite.terminator)
     # Highlighting may insert CSI style sequences within the visible row. Match
     # its terminal text so the assertion still proves the completed edit.
     collect_until(row, row_start, visible=True)
     return row_start
+
+
+def materialize_matrix_script(source: bytes) -> None:
+    """Stream exact source into a bounded foreground reader that creates `m`."""
+    command = f"^head -c{len(source)}>m".encode()
+    interaction = command + target_matrix.terminator
+    if len(interaction) > target_matrix.max_interaction_bytes:
+        raise ValueError("target matrix script reader exceeds the UART boundary")
+    submit_line(command, target_matrix.primary_prompt + command)
+    for chunk in script_transport_chunks(
+        source, target_matrix.script_transport_chunk_bytes
+    ):
+        if len(chunk) > target_matrix.max_interaction_bytes:
+            raise ValueError("target matrix script chunk exceeds the UART boundary")
+        time.sleep(SCRIPT_TRANSPORT_SETTLE)
+        send(chunk)
+
+
+def collect_matrix_expectations(step, start: int) -> None:
+    for expected in step.expected:
+        if expected in {
+            target_matrix.primary_prompt,
+            target_matrix.continuation_prompt,
+            target_matrix.configured_prompt,
+        }:
+            # The target console can defer a completed prompt until the next
+            # input arrives. The following rendered row proves that transition;
+            # all non-prompt observations remain scoped to this step.
+            continue
+        collect_until(expected, start, visible=True)
 
 
 failure: BaseException | None = None
@@ -288,6 +342,40 @@ try:
                     f"FlashOS runtime fixture {fixture.identifier!r} "
                     f"observed rejected marker {rejected!r}"
                 )
+
+    # The exhaustive matrix deliberately follows the bounded fixtures. It
+    # qualifies every advertised capability and required target surface while
+    # retaining Signals as a separately withheld group. Long source cases are
+    # materialized through bounded commands; live editor interactions remain
+    # within the same proven UART boundary as the smoke fixtures.
+    deadline = time.monotonic() + TARGET_MATRIX_TIMEOUT
+    for case in target_matrix.cases:
+        case_start = len(captured)
+        for step in case.steps:
+            if step.send == "line":
+                assert step.rendered is not None
+                observation_start = submit_line(step.payload, step.rendered)
+                collect_matrix_expectations(step, observation_start)
+            elif step.send == "script":
+                materialize_matrix_script(step.payload)
+                command = b"^fsh m"
+                observation_start = submit_line(
+                    command, target_matrix.primary_prompt + command
+                )
+                collect_matrix_expectations(step, observation_start)
+            else:
+                observation_start = len(captured)
+                send_editor_input(step.payload, b"")
+                if step.rendered is not None:
+                    collect_until(step.rendered, observation_start, visible=True)
+                collect_matrix_expectations(step, observation_start)
+        case_transcript = bytes(captured[case_start:])
+        for rejected in case.rejected:
+            if rejected in case_transcript:
+                raise RuntimeError(
+                    f"FlashOS target matrix case {case.identifier!r} "
+                    f"observed rejected marker {rejected!r}"
+                )
 except BaseException as error:
     failure = error
 finally:
@@ -321,6 +409,7 @@ verified = [
     "IHDA audio driver",
     "interactive editing",
     f"runtime fixtures v{runtime_suite.suite_version}",
+    f"target capability matrix v{target_matrix.matrix_version}",
 ]
 if args.expect_root_locked:
     verified.append("locked root account")

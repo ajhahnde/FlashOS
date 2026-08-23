@@ -284,8 +284,16 @@ python3 ci/check_flashos_capability_report.py
 ```
 
 The report records every advertised group plus explicit limitations and keeps
-`Signals` withheld. It is not an exhaustive target matrix, physical-hardware
-evidence, or release qualification.
+`Signals` withheld. The linked exhaustive target contract is
+[`components/flash/platforms/flashos-x86_64-target-matrix-v1.toml`](../components/flash/platforms/flashos-x86_64-target-matrix-v1.toml).
+Validate its complete advertised-capability, operation, and required-surface
+coverage with:
+
+```bash
+python3 ci/check_flashos_target_matrix.py
+```
+
+The target matrix is not physical-hardware evidence or release qualification.
 
 ## Product-profile verification
 
@@ -475,9 +483,11 @@ across several general evidence classes. While
 [CI/CD Contracts](../ci/README.md),
 [`ci/qemu_smoke.py`](../ci/qemu_smoke.py), and the versioned
 [`flashos-x86_64-runtime-fixtures-v1.toml`](../components/flash/platforms/flashos-x86_64-runtime-fixtures-v1.toml)
-suite remain the authoritative sources for exact serial markers, assertion
-sequences, parameters, and artifact paths, the qualification tests cover these
-interaction categories:
+suite and the exhaustive advertised-capability
+[`flashos-x86_64-target-matrix-v1.toml`](../components/flash/platforms/flashos-x86_64-target-matrix-v1.toml)
+remain the authoritative sources for exact serial markers, assertion sequences,
+parameters, and artifact paths. The qualification tests cover these interaction
+categories:
 
 | Category                             | Nature of tested interaction                                                                                                           |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -487,6 +497,7 @@ interaction categories:
 | **Interactive Flash session**        | Target-side byte editing, corrected-row submission, logical directory changes, and internal-command output                             |
 | **Flash runtime paths**              | Script execution, stdout redirection, a two-member external byte pipeline, structured directory enumeration, and foreground return      |
 | **Background execution**             | Addressable child launch/wait and conditional-chain supervisor re-execution without a runtime diagnostic                                |
+| **Advertised capability matrix**      | Startup, configuration, scripts, built-ins, argv/environment, directories, pipelines, redirections, cancellation, history, completion, structured data, typed capture, structured errors, dynamic execution, statuses, globbing, Unicode/multiline editing, supported jobs, and clean exit |
 | **Release root policy**              | Rejection of a root login attempt when the release-profile assertion is requested                                                       |
 
 For the complete line-by-line runtime contract and serial synchronization rules, consult [CI/CD Contracts](../ci/README.md#runtime-assertions).
@@ -501,8 +512,7 @@ The contract verifies those specific interactions. It does not currently establi
 - long-duration stability;
 - package installation after boot;
 - performance characteristics;
-- general Flash language conformance;
-- target prompt recovery, history recall, multiline input, or cancellation;
+- inputs outside the exact target-matrix cases or general Flash language conformance;
 - target signal delivery, stopped/continued/signaled child transitions, or stopped-job terminal-mode restoration;
 - physical hardware compatibility.
 
@@ -511,10 +521,13 @@ checklist with:
 
 ```bash
 python3 ci/flashos_runtime_fixtures.py
+python3 ci/flashos_target_matrix.py
 ```
 
-Rendering the checklist is not a physical run. Hardware qualification still
-requires the exact-device and explicit-approval workflow in
+The second command renders the exact startup, language, session, editor, job,
+and clean-exit matrix used by QEMU. Rendering either checklist is not a target
+observation or physical run. Hardware qualification still requires the
+exact-device and explicit-approval workflow in
 [Hardware Support](hardware.md).
 
 The `ihdad` marker proves that the expected guest driver path began initialization under the emulated controller. It does not prove that sound was produced.
@@ -853,6 +866,8 @@ Do not remove an assertion solely because a change fails it. First determine whe
 | Overall verification model               | This document                                                         |
 | General development workflow             | [Development](development.md)                                         |
 | Static product-profile contract          | [`ci/check_profile.py`](../ci/check_profile.py)                       |
+| Advertised capability report             | [`ci/check_flashos_capability_report.py`](../ci/check_flashos_capability_report.py) |
+| Target capability matrix                 | [`ci/check_flashos_target_matrix.py`](../ci/check_flashos_target_matrix.py) |
 | QEMU runtime contract                    | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                             |
 | Protected-main evidence transfer         | [`ci/check_main_qualification.py`](../ci/check_main_qualification.py) |
 | Public local helper behavior             | [`flashos.sh`](../flashos.sh)                                         |

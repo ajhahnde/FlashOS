@@ -161,6 +161,7 @@ python3 ci/check_flashos_capabilities.py
 python3 ci/check_flashos_operation_map.py
 python3 ci/check_flashos_capability_classification.py
 python3 ci/check_flashos_capability_report.py
+python3 ci/check_flashos_target_matrix.py
 ```
 
 These scripts keep the live `Capability` enum, evidence inventory, operation map, and architectural classification in sync.
@@ -172,6 +173,7 @@ The corresponding data files are:
 - [`flashos-x86_64-capability-classification.toml`](../components/flash/platforms/flashos-x86_64-capability-classification.toml)
 - [`flashos-x86_64-capability-report-v1.toml`](../components/flash/platforms/flashos-x86_64-capability-report-v1.toml)
 - [`flashos-x86_64-runtime-fixtures-v1.toml`](../components/flash/platforms/flashos-x86_64-runtime-fixtures-v1.toml)
+- [`flashos-x86_64-target-matrix-v1.toml`](../components/flash/platforms/flashos-x86_64-target-matrix-v1.toml)
 
 The current classification records 41 operations as native and the three standard-directory operations as a FlashOS policy shim. Runtime qualification remains separate from that classification.
 
@@ -180,7 +182,11 @@ each group connected to the bounded runtime fixtures that reach it. `Signals`
 remains withheld. The checker also binds report versions to the Flash workspace
 and FlashOS release, proves exact ordered capability coverage, verifies the
 adapter bitset, and requires the QEMU runner to consume the same fixtures.
-This bounded report is not the later exhaustive target matrix.
+The linked target matrix assigns every advertised operation to one owning case,
+covers the required startup, language, session, editor, job, and clean-exit
+surfaces, and keeps the withheld `Signals` group outside the qualified set. Its
+checker also requires both the automated and operator-observed consumers to
+use the same ordered contract.
 
 ## QEMU runtime checks
 
@@ -188,12 +194,15 @@ This bounded report is not the later exhaustive target matrix.
 
 The interaction rows and expected markers live in
 [`flashos-x86_64-runtime-fixtures-v1.toml`](../components/flash/platforms/flashos-x86_64-runtime-fixtures-v1.toml).
-The QEMU harness consumes that versioned suite directly. To render the same
-ordered checks for a manually observed real system without claiming that they
-were run, use:
+The exhaustive advertised-capability cases live in
+[`flashos-x86_64-target-matrix-v1.toml`](../components/flash/platforms/flashos-x86_64-target-matrix-v1.toml).
+The QEMU harness consumes both versioned suites directly. To render either
+ordered contract for an operator-observed target without claiming that it was
+run, use:
 
 ```bash
 python3 ci/flashos_runtime_fixtures.py
+python3 ci/flashos_target_matrix.py
 ```
 
 The host needs Python 3, QEMU, compatible x86_64 OVMF/edk2 firmware, and an existing image.
@@ -222,6 +231,7 @@ Without `--ovmf`, the script searches its configured Linux and Homebrew location
 | `--log PATH`            | Full serial log                         |
 | `--timeout SECONDS`     | Initial boot-marker timeout             |
 | `--fixtures PATH`       | Versioned target-runtime fixture suite  |
+| `--target-matrix PATH`  | Versioned target capability matrix      |
 | `--disk-interface nvme` | Attach through emulated NVMe            |
 | `--disk-interface usb`  | Attach as USB mass storage              |
 | `--expect-root-locked`  | Also test the release root-login policy |
@@ -230,18 +240,24 @@ The VM runs headless using OVMF, TCG, snapshot-backed image attachment, an emula
 
 ### What is tested
 
-| Area                | Check                                                        |
-| ------------------- | ------------------------------------------------------------ |
-| Boot                | FlashOS boot/startup markers appear                          |
-| Services            | Expected framebuffer-debug and audio-driver markers appear   |
-| Login               | The unprivileged user can log in                             |
-| Shell               | The Flash prompt, `pwd`, directory changes, and scripts work |
-| Editing             | Backspace editing works                                      |
-| Pipelines           | External bytes and structured directory data complete       |
-| Jobs                | Foreground return and two background wait paths complete     |
-| Release root policy | Root login is rejected when requested                        |
+| Area                     | Check                                                                 |
+| ------------------------ | --------------------------------------------------------------------- |
+| Boot                     | FlashOS boot/startup markers appear                                   |
+| Services                 | Expected framebuffer-debug and audio-driver markers appear            |
+| Login                    | The unprivileged user can log in                                      |
+| Bounded smoke            | Prompt, editing, directories, scripts, pipelines, and waits work      |
+| Advertised capabilities  | Every required target-matrix surface completes in its declared order  |
+| Withheld capability      | `Signals` remains outside the qualified set                           |
+| Release root policy      | Root login is rejected when requested                                 |
 
 The Flash editor redraws the input row while reading keystrokes, so the harness uses scoped output markers rather than treating a bare prompt as command completion. Prompt changes can therefore require a matching harness update.
+
+Every live-editor submission fits within the emulated UART's 16-byte receive
+boundary. Matrix scripts are streamed as exact bytes, in chunks no larger than
+that boundary, to a foreground `head -cN` reader and then executed from the
+resulting target-side file. This keeps transport mechanics separate from the
+script behavior being qualified and avoids relying on a second readiness event
+within one editor row.
 
 The full serial stream is written to the requested log on success and failure.
 
@@ -250,12 +266,13 @@ qemu smoke: FAILED:
 qemu smoke: ok
 ```
 
-The smoke test covers the paths above, not target prompt recovery, history
-recall, multiline input, cancellation, signal delivery, stopped/continued/
-signaled child transitions, general hardware compatibility, full networking,
-real audio I/O, framebuffer quality, suspend/resume, performance, or complete
-Flash language behavior. Those behaviors retain separate source and host
-coverage until stable target-runtime qualification gates exist.
+The exact matrix covers target prompt recovery, history recall, completion,
+multiline and Unicode editing, cancellation, configuration, typed capture,
+structured errors, dynamic execution, globbing, supported jobs, and clean
+exit. It does not cover inputs outside those cases, signal delivery,
+stopped/continued/signaled child transitions, general hardware compatibility,
+full networking, real audio I/O, framebuffer quality, suspend/resume,
+performance, or complete Flash language behavior.
 
 ## Hosted workflows
 
@@ -589,6 +606,8 @@ Keep third-party Actions pinned to full commit SHAs and external Git package sou
 | Capability evidence       | [`check_flashos_capabilities.py`](check_flashos_capabilities.py)                           |
 | Operation map             | [`check_flashos_operation_map.py`](check_flashos_operation_map.py)                         |
 | Capability classification | [`check_flashos_capability_classification.py`](check_flashos_capability_classification.py) |
+| Capability report         | [`check_flashos_capability_report.py`](check_flashos_capability_report.py)                 |
+| Target capability matrix  | [`check_flashos_target_matrix.py`](check_flashos_target_matrix.py)                         |
 | QEMU runtime checks       | [`qemu_smoke.py`](qemu_smoke.py)                                                           |
 | Main qualification        | [`check_main_qualification.py`](check_main_qualification.py)                              |
 | Coverage validation       | [`check_coverage.py`](check_coverage.py)                                                   |

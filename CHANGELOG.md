@@ -10,6 +10,9 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Flash now uses bounded nonblocking raw-terminal reads on Redox instead of
+  lossy PTY readiness notifications, preventing independent console editor
+  actions from remaining indefinitely unread.
 - FlashOS now selects its dedicated Flash platform adapter for every target
   execution mode. The image-qualified path runs interactive foreground work,
   scripts, structured directory commands, external pipelines, redirections,
@@ -44,6 +47,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added an exhaustive FlashOS target-capability matrix for the adapter's
+  advertised set. Every advertised classified operation has one owning case,
+  while QEMU executes the exact startup, configuration, language, session,
+  editor, supported-job, and clean-exit contract that can also be rendered for
+  operator-observed targets. `Signals`, physical hardware, and release
+  qualification remain explicitly separate.
 - Added a versioned FlashOS capability report backed by one reusable target-
   runtime fixture suite. The automated QEMU consumer and manually run real-
   system checklist now share exact ordered interactions and expected markers;
