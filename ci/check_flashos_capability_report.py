@@ -130,6 +130,7 @@ def validate(document: dict, root: Path = ROOT) -> None:
         "capability_evidence",
         "capability_classification",
         "runtime_fixtures",
+        "target_matrix",
         "contract_source",
         "selected_adapter",
         "qualification",
@@ -156,6 +157,7 @@ def validate(document: dict, root: Path = ROOT) -> None:
             "flashos-x86_64-capability-classification.toml"
         ),
         "runtime_fixtures": "flashos-x86_64-runtime-fixtures-v1.toml",
+        "target_matrix": "flashos-x86_64-target-matrix-v1.toml",
         "contract_source": "components/flash/crates/flash-platform/src/lib.rs",
         "selected_adapter": "flash-platform-flashos::FlashOsPlatform",
         "qualification": "bounded",
