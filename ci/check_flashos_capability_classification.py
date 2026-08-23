@@ -135,7 +135,7 @@ def validate(document: dict, root: Path = ROOT) -> None:
         "capability_evidence": "flashos-x86_64-capability-evidence.toml",
         "operation_map": "flashos-x86_64-operation-map.toml",
         "contract_source": "components/flash/crates/flash-platform/src/lib.rs",
-        "selected_adapter": "flash-platform-posix::PosixPlatform",
+        "selected_adapter": "flash-platform-flashos::FlashOsPlatform",
         "classification": "complete",
         "target_qualification": "pending",
     }
