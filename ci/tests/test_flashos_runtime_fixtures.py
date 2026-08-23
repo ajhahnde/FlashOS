@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -42,6 +43,22 @@ class FlashOSRuntimeFixtureTests(unittest.TestCase):
 
         with self.assertRaises(runtime_fixtures.FixtureContractError):
             runtime_fixtures.parse_fixture_suite(document)
+
+    def test_waited_jobs_leave_a_real_system_observation_window(self) -> None:
+        suite = runtime_fixtures.load_fixture_suite()
+        fixtures = {fixture.identifier: fixture for fixture in suite.fixtures}
+        patterns = {
+            "background-child": rb"\^sleep ([0-9]+)&",
+            "background-supervisor": rb"\^sleep ([0-9]+)&&true&",
+        }
+
+        for identifier, pattern in patterns.items():
+            fixture = fixtures[identifier]
+            match = re.fullmatch(pattern, fixture.steps[0].payload)
+            self.assertIsNotNone(match)
+            assert match is not None
+            self.assertGreaterEqual(int(match.group(1)), 9)
+            self.assertTrue(fixture.steps[1].payload.startswith(b"wait %"))
 
 
 if __name__ == "__main__":
