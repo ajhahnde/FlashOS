@@ -1,0 +1,132 @@
+schema_version = 1
+suite_version = 1
+contract_sha256 = "4c08c59c0b6289c355db7f428aba7e0909598a97b6705101bdcd84a2e152cdb6"
+
+[[environments]]
+id = "host-darwin-arm64"
+evidence = "evidence/host-darwin-arm64-v1.json"
+evidence_sha256 = "d62bce4fcebb4f89ab361ce4c23152b9731751802eb85e5a818f19ca32e3741c"
+match = { kind = "host", os = "macos", architecture = "arm64" }
+
+[[environments]]
+id = "flashos-qemu-tcg-core2duo"
+evidence = "evidence/flashos-qemu-tcg-v1.json"
+evidence_sha256 = "128b95f9c9d4e62b25fceb802b1ffab26e1cedb2ebcd5dceb4ce5021d277f0e9"
+match = { kind = "flashos-qemu-tcg", machine = "q35", cpu = "core2duo", vcpus = 1 }
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-startup-cold"
+statistic = "maximum"
+baseline = 11866667
+factor_numerator = 4
+factor_denominator = 1
+limit = 47466668
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-startup-warm"
+statistic = "p95"
+baseline = 5878791
+factor_numerator = 3
+factor_denominator = 1
+limit = 17636373
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-first-prompt-cold"
+statistic = "maximum"
+baseline = 63206042
+factor_numerator = 4
+factor_denominator = 1
+limit = 252824168
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-first-prompt-warm"
+statistic = "p95"
+baseline = 20599750
+factor_numerator = 3
+factor_denominator = 1
+limit = 61799250
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-command-overhead-warm"
+statistic = "p95"
+baseline = 1889902
+factor_numerator = 3
+factor_denominator = 1
+limit = 5669706
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-pipeline-throughput-warm"
+statistic = "median"
+baseline = 1227503868
+factor_numerator = 3
+factor_denominator = 1
+limit = 409167956
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-structured-stream-memory-warm"
+statistic = "maximum"
+baseline = 6144000
+factor_numerator = 3
+factor_denominator = 1
+limit = 18432000
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-completion-cold"
+statistic = "maximum"
+baseline = 14799334
+factor_numerator = 4
+factor_denominator = 1
+limit = 59197336
+
+[[budgets]]
+environment = "host-darwin-arm64"
+case_id = "host-completion-warm"
+statistic = "p95"
+baseline = 13686750
+factor_numerator = 3
+factor_denominator = 1
+limit = 41060250
+
+[[budgets]]
+environment = "flashos-qemu-tcg-core2duo"
+case_id = "flashos-first-prompt-cold"
+statistic = "maximum"
+baseline = 819268750
+factor_numerator = 3
+factor_denominator = 1
+limit = 2457806250
+
+[[budgets]]
+environment = "flashos-qemu-tcg-core2duo"
+case_id = "flashos-command-latency-warm"
+statistic = "p95"
+baseline = 428130375
+factor_numerator = 3
+factor_denominator = 1
+limit = 1284391125
+
+[[budgets]]
+environment = "flashos-qemu-tcg-core2duo"
+case_id = "flashos-pipeline-throughput-warm"
+statistic = "median"
+baseline = 1014725
+factor_numerator = 3
+factor_denominator = 1
+limit = 338241
+
+[[budgets]]
+environment = "flashos-qemu-tcg-core2duo"
+case_id = "flashos-completion-latency-warm"
+statistic = "p95"
+baseline = 56840125
+factor_numerator = 3
+factor_denominator = 1
+limit = 170520375
