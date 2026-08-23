@@ -267,6 +267,8 @@ def main() -> int:
     if sys.platform not in {"linux", "darwin"}:
         raise SystemExit("Flash host benchmarks support Linux and macOS")
     if not args.no_build:
+        build_environment = dict(os.environ)
+        build_environment["RUSTC"] = str(rustc)
         subprocess.run(
             [
                 cargo,
@@ -281,6 +283,7 @@ def main() -> int:
                 "flash-benchmark-fixture",
             ],
             cwd=ROOT,
+            env=build_environment,
             check=True,
         )
     binary = (ROOT / "target/release/fsh").resolve()
