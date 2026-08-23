@@ -291,7 +291,7 @@ try:
 
     # A conditional background chain is re-executed through fsh's supervisor,
     # qualifying executable discovery and the supervisor hang-up disposition.
-    submit_line(b"^true&&^true&", b">> ^true&&^true&")
+    submit_line(b"^sleep 1&&true&", b">> ^sleep 1&&true&")
     collect_until(b"[5] ", job_mark)
     submit_line(b"wait %5", b">> wait %5")
     completion_mark = submit_line(b"pwd", b">> pwd")

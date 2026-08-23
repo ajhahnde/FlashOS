@@ -261,7 +261,7 @@ markers = [
   'pipeline_mark = submit_line(b"^echo p|^cat", b">> ^echo p|^cat")',
   'structured_mark = submit_line(b"ls|length", b">> ls|length")',
   'submit_line(b"wait %4", b">> wait %4")',
-  'submit_line(b"^true&&^true&", b">> ^true&&^true&")',
+  'submit_line(b"^sleep 1&&true&", b">> ^sleep 1&&true&")',
   'if b"error[RUN001]" in job_transcript:',
 ]
 observation = "The current image changes its logical directory, creates and executes a script, runs a two-member external byte pipeline, enumerates structured directory data, waits for a background child, and waits for a background conditional-chain supervisor without a runtime diagnostic."
