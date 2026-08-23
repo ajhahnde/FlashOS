@@ -58,6 +58,12 @@ class FlashOSTargetMatrixTests(unittest.TestCase):
             if case.identifier == "argv-environment-pipelines-and-redirections"
         )
         argv_step = argv_case.steps[0]
+        dynamic_case = next(
+            case
+            for case in matrix.cases
+            if case.identifier == "dynamic-capture-error-and-status-language"
+        )
+        dynamic_step = dynamic_case.steps[0]
         glob_case = next(
             case
             for case in matrix.cases
@@ -69,8 +75,11 @@ class FlashOSTargetMatrixTests(unittest.TestCase):
         self.assertIn(b"^printf 'two\\n' >> matrix.txt", argv_step.payload)
         self.assertIn(b"<argv ok>\r\r\n", argv_step.expected)
         self.assertIn(b"onetwo\r\r\n", argv_step.expected)
-        self.assertIn(b"^echo glob-done", glob_step.payload)
-        self.assertIn(b"glob-done\r\r\n", glob_step.expected)
+        self.assertIn(b"command $cmd 'dynamic-ok\\n'", dynamic_step.payload)
+        self.assertIn(b"dynamic-ok\r\r\n", dynamic_step.expected)
+        self.assertIn(b"^printf '%s,\\n' ...$matches", glob_step.payload)
+        self.assertIn(b"a.fsh,\r\r\n", glob_step.expected)
+        self.assertIn(b"b.fsh,\r\r\n", glob_step.expected)
 
 
 if __name__ == "__main__":
