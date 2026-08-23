@@ -44,6 +44,13 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Added
 
+- Added a versioned FlashOS capability report backed by one reusable target-
+  runtime fixture suite. The automated QEMU consumer and manually run real-
+  system checklist now share exact ordered interactions and expected markers;
+  CI binds the report to the selected adapter, route classification, product
+  versions, and fixture coverage. The report is deliberately bounded, keeps
+  `Signals` withheld, and does not claim exhaustive, physical, or release
+  qualification.
 - Added a machine-checked Flash v1 host-conformance inventory. Every recovered
   language, runtime, checker, formatter, language-server, interactive, job,
   completion, portable-editor, and platform-route family now names executable

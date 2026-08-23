@@ -273,6 +273,20 @@ three-operation FlashOS standard-directory policy shim, with no deliberately
 unsupported or kernel-work result. Target qualification remains pending and
 requires later runtime evidence.
 
+The bounded, versioned advertised-capability report is
+[`components/flash/platforms/flashos-x86_64-capability-report-v1.toml`](../components/flash/platforms/flashos-x86_64-capability-report-v1.toml).
+Validate its relationship to the current Flash workspace version, FlashOS
+release, adapter bitset, route classification, and reusable target fixtures
+with:
+
+```bash
+python3 ci/check_flashos_capability_report.py
+```
+
+The report records every advertised group plus explicit limitations and keeps
+`Signals` withheld. It is not an exhaustive target matrix, physical-hardware
+evidence, or release qualification.
+
 ## Product-profile verification
 
 Run the static FlashOS product contract from the repository root:
@@ -456,7 +470,14 @@ The generated smoke log is diagnostic evidence from the session. It is not a rep
 
 ### Runtime assertions
 
-The QEMU smoke contract checks observable markers and interactive behavior across several general evidence classes. While [CI/CD Contracts](../ci/README.md) and [`ci/qemu_smoke.py`](../ci/qemu_smoke.py) remain the authoritative sources for exact serial markers, assertion sequences, parameters, and artifact paths, the qualification tests cover these interaction categories:
+The QEMU smoke contract checks observable markers and interactive behavior
+across several general evidence classes. While
+[CI/CD Contracts](../ci/README.md),
+[`ci/qemu_smoke.py`](../ci/qemu_smoke.py), and the versioned
+[`flashos-x86_64-runtime-fixtures-v1.toml`](../components/flash/platforms/flashos-x86_64-runtime-fixtures-v1.toml)
+suite remain the authoritative sources for exact serial markers, assertion
+sequences, parameters, and artifact paths, the qualification tests cover these
+interaction categories:
 
 | Category                             | Nature of tested interaction                                                                                                           |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -484,6 +505,17 @@ The contract verifies those specific interactions. It does not currently establi
 - target prompt recovery, history recall, multiline input, or cancellation;
 - target signal delivery, stopped/continued/signaled child transitions, or stopped-job terminal-mode restoration;
 - physical hardware compatibility.
+
+Render the identical ordered inputs and observations as a real-system
+checklist with:
+
+```bash
+python3 ci/flashos_runtime_fixtures.py
+```
+
+Rendering the checklist is not a physical run. Hardware qualification still
+requires the exact-device and explicit-approval workflow in
+[Hardware Support](hardware.md).
 
 The `ihdad` marker proves that the expected guest driver path began initialization under the emulated controller. It does not prove that sound was produced.
 
