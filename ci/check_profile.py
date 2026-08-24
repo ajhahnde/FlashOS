@@ -280,6 +280,8 @@ for expected in (
     "GIT_CONFIG_COUNT=1",
     "GIT_CONFIG_KEY_0=safe.directory",
     "GIT_CONFIG_VALUE_0=/workspace",
+    "name: Record the selected recipe resolution",
+    "repo-lock",
     "python3 ci/check_flashos_platform.py --artifacts",
     "--disk-interface nvme",
     "--disk-interface usb",
