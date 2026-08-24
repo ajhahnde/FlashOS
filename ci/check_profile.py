@@ -128,6 +128,8 @@ if release_users.get("root", {}).get("locked") is not True:
     fail("the release profile must lock the root account")
 if "password" in release_users.get("root", {}):
     fail("a locked account must not also carry a password")
+if release_users.get("user", {}).get("password") != "":
+    fail("the release user must remain passwordless")
 
 for account, settings in sorted(release_users.items()):
     password = settings.get("password")
@@ -285,6 +287,7 @@ for expected in (
     "python3 ci/check_flashos_platform.py --artifacts",
     "--disk-interface nvme",
     "--disk-interface usb",
+    "--expect-passwordless-user",
     "source-ref:",
     "type=gha,scope=${CACHE_SCOPE}",
     "ignore-error=true",
@@ -292,6 +295,8 @@ for expected in (
 ):
     if expected not in image_workflow:
         fail(f"image workflow contract is missing: {expected}")
+if image_workflow.count("--expect-passwordless-user") != 2:
+    fail("both release QEMU consumers must assert the passwordless user")
 
 security_workflow = (ROOT / ".github/workflows/security.yml").read_text()
 if not security_workflow.startswith("name: Security\n"):
@@ -476,6 +481,9 @@ for expected in (
     "str(QUALIFICATION_VCPUS)",
     'expected_banner = f"FlashOS {version}".encode()',
     'b"Redox OS distribution"',
+    '"--expect-passwordless-user"',
+    "if args.expect_passwordless_user:",
+    'reject=b"password:"',
 ):
     if expected not in qemu_smoke:
         fail(f"QEMU qualification contract is missing: {expected}")

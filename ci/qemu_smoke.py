@@ -86,6 +86,11 @@ def parse_args() -> argparse.Namespace:
         help="Assert that the root account rejects a login attempt",
     )
     parser.add_argument(
+        "--expect-passwordless-user",
+        action="store_true",
+        help="Assert that the ordinary user logs in without a password prompt",
+    )
+    parser.add_argument(
         "--benchmark-output",
         type=Path,
         help="Retain bounded target performance observations as JSON",
@@ -200,12 +205,20 @@ deadline = time.monotonic() + args.timeout
 CSI_SEQUENCE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
-def collect_until(marker: bytes, start: int = 0, *, visible: bool = False) -> None:
+def collect_until(
+    marker: bytes,
+    start: int = 0,
+    *,
+    visible: bool = False,
+    reject: bytes | None = None,
+) -> None:
     def observed() -> bytes:
         transcript = bytes(captured[start:])
         return CSI_SEQUENCE.sub(b"", transcript) if visible else transcript
 
     while marker not in observed():
+        if reject is not None and reject in observed():
+            raise RuntimeError(f"observed rejected marker {reject!r} before {marker!r}")
         if process.poll() is not None:
             raise RuntimeError(
                 f"QEMU exited with {process.returncode} before {marker!r}"
@@ -348,8 +361,13 @@ try:
         collect_until(b"username:", rejected_start)
     login_start = len(captured)
     send(b"user\r")
-    collect_until(b"password:", login_start)
-    send(b"user\r")
+    if args.expect_passwordless_user:
+        collect_until(b"Login successful!", login_start, reject=b"password:")
+        if b"password:" in bytes(captured[login_start:]):
+            raise RuntimeError("passwordless user login requested a password")
+    else:
+        collect_until(b"password:", login_start)
+        send(b"user\r")
     collect_until(b"Login successful!", login_start)
     first_prompt_started = time.perf_counter_ns()
     collect_until(runtime_suite.prompt, login_start)
@@ -582,4 +600,6 @@ verified = [
 ]
 if args.expect_root_locked:
     verified.append("locked root account")
+if args.expect_passwordless_user:
+    verified.append("passwordless user account")
 print(f"verified: {', '.join(verified)}")
