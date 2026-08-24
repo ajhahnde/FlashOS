@@ -105,6 +105,9 @@ jobs:
         with:
           ref: ${{ inputs['source-sha'] }}
 
+      - name: Prepare the source SBOM destination
+        run: mkdir -p dist/candidate
+
       - name: Generate the source SBOM before downloading binaries
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         env:
@@ -135,7 +138,6 @@ jobs:
         run: |
           set -euo pipefail
           (cd dist/input && sha256sum --check SHA256SUMS)
-          mkdir -p dist/candidate
           zstd --threads=0 --ultra -19 \
             dist/input/FlashOS-x86_64-harddrive.img \
             -o "dist/candidate/FlashOS-${VERSION}-x86_64-harddrive.img.zst"

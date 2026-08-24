@@ -254,6 +254,10 @@ for expected in (
     "python3 ci/check_candidate_qualification.py",
     "config-name: flashos-release",
     "release-evidence: true",
+    "name: Prepare the source SBOM destination",
+    "run: mkdir -p dist/candidate",
+    "name: Generate the source SBOM before downloading binaries",
+    "name: Download the once-built release images",
     "FlashOS-${{ inputs.version }}-source.cdx.json",
     "FlashOS-${VERSION}-x86_64-harddrive.img.zst",
     "FlashOS-${VERSION}-x86_64-live.iso.zst",
@@ -264,6 +268,22 @@ for expected in (
 ):
     if expected not in candidate_workflow:
         fail(f"release candidate contract is missing: {expected}")
+
+candidate_destination = candidate_workflow.index(
+    "name: Prepare the source SBOM destination"
+)
+source_sbom = candidate_workflow.index(
+    "name: Generate the source SBOM before downloading binaries"
+)
+candidate_download = candidate_workflow.index(
+    "name: Download the once-built release images"
+)
+if not candidate_destination < source_sbom < candidate_download:
+    fail("release candidate must prepare the source SBOM destination before scanning")
+if "run: mkdir -p dist/candidate" not in candidate_workflow[
+    candidate_destination:source_sbom
+]:
+    fail("release candidate source SBOM destination preparation is incomplete")
 
 image_workflow = (ROOT / ".github/workflows/_image.yml").read_text()
 for expected in (
