@@ -43,7 +43,7 @@ class FlashV1ExerciseContractTests(unittest.TestCase):
         document["compatibility"] = [
             record
             for record in document["compatibility"]
-            if record["id"] != "capture-entry-functions"
+            if record["id"] != "namespace-evolution-machinery"
         ]
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             exercise_check.validate(document)
