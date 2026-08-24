@@ -1,193 +1,176 @@
-name: release
+name: Publish release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
+      tag:
+        description: Exact existing release tag (for example v0.2.0).
+        type: string
+        required: true
+      candidate-run-id:
+        description: Successful Release candidate workflow run ID.
+        type: string
+        required: true
       publish:
-        description: Publish only when this run is dispatched on a tag.
+        description: Publish after validation; false is a non-publishing dry run.
         type: boolean
         default: false
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
-  image:
-    name: rebuild-and-qualify
-    uses: ./.github/workflows/_image.yml
-    with:
-      artifact-name: flashos-x86_64-release-${{ github.sha }}
-      retention-days: 14
-      config-name: flashos-release
-      release-evidence: true
-    permissions:
-      contents: read
-
-  package:
-    name: package
-    needs: image
+  validate:
+    name: validate-exact-candidate
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
 
-      - name: Validate and expose the release version
-        id: version
-        shell: bash
+      - name: Download the selected candidate run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] ||
+             [[ ! "${CANDIDATE_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::tag or candidate run ID has an invalid form"
+            exit 1
+          fi
+          mkdir -p dist/selection
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" \
+            > dist/selection/run.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
+            > dist/selection/artifacts.json
+          selection="$(python3 ci/release_candidate.py select \
+            --run dist/selection/run.json \
+            --artifacts dist/selection/artifacts.json \
+            --repository "${GITHUB_REPOSITORY}" \
+            --run-id "${CANDIDATE_RUN_ID}")"
+          attempt="$(jq -r .run_attempt <<<"${selection}")"
+          artifact="$(jq -r .artifact_name <<<"${selection}")"
+          mkdir -p dist/release
+          gh run download "${CANDIDATE_RUN_ID}" --name "${artifact}" --dir dist/release
+          echo "${attempt}" > dist/candidate-run-attempt
+
+      - name: Validate run, tag, tree, manifest, inventory, and checksums
+        env:
+          TAG: ${{ inputs.tag }}
+          CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
         run: |
           set -euo pipefail
           source versions.env
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            tag="${GITHUB_REF_NAME}"
-            expected="v${FLASHOS_RELEASE_VERSION}"
-            if [ "${tag}" != "${expected}" ]; then
-              echo "::error::tag ${tag} does not match versions.env (${expected})"
-              exit 1
-            fi
-          else
-            tag="v${FLASHOS_RELEASE_VERSION}-dev.${GITHUB_RUN_NUMBER}"
-          fi
-          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::release tag is not semantic: ${tag}"
+          if [ "${TAG}" != "v${FLASHOS_RELEASE_VERSION}" ]; then
+            echo "::error::tag does not match versions.env"
             exit 1
           fi
-          echo "version=${tag#v}" >> "${GITHUB_OUTPUT}"
+          source_commit="$(git rev-parse "${TAG}^{commit}")"
+          source_tree="$(git rev-parse "${TAG}^{tree}")"
+          run_attempt="$(cat dist/candidate-run-attempt)"
+          python3 ci/release_candidate.py validate \
+            --bundle dist/release \
+            --repository "${GITHUB_REPOSITORY}" \
+            --version "${FLASHOS_RELEASE_VERSION}" \
+            --source-commit "${source_commit}" \
+            --source-tree "${source_tree}" \
+            --run-id "${CANDIDATE_RUN_ID}" \
+            --run-attempt "${run_attempt}" \
+            --tag "${TAG}" \
+            --verify-compressed
 
-      # Generate this before downloading binary artifacts so the source SBOM
-      # describes the checkout and Cargo graph, not the promoted image files.
-      - name: Generate the source SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
-        env:
-          SYFT_SOURCE_NAME: FlashOS-source
-          SYFT_SOURCE_VERSION: ${{ steps.version.outputs.version }}
-        with:
-          path: .
-          format: cyclonedx-json
-          output-file: dist/release/FlashOS-${{ steps.version.outputs.version }}-source.cdx.json
-          upload-artifact: false
-
-      - name: Download the qualified images
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: flashos-x86_64-release-${{ github.sha }}
-          path: dist/input
-
-      - name: Verify and compress the qualified images
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          (
-            cd dist/input
-            sha256sum --check SHA256SUMS
-          )
-          mkdir -p dist/release
-          zstd --threads=0 --ultra -19 \
-            dist/input/FlashOS-x86_64-harddrive.img \
-            -o "dist/release/FlashOS-${VERSION}-x86_64-harddrive.img.zst"
-          zstd --threads=0 --ultra -19 \
-            dist/input/FlashOS-x86_64-live.iso \
-            -o "dist/release/FlashOS-${VERSION}-x86_64-live.iso.zst"
-
-      # The image SBOM is the separate document produced next to the qualified
-      # image and describes the staged package payload that actually ships.
-      - name: Promote the qualified image SBOM
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          cp dist/input/FlashOS-x86_64-image.cdx.json \
-            "dist/release/FlashOS-${VERSION}-image.cdx.json"
-
-      - name: Checksum the release candidate
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        working-directory: dist/release
-        run: |
-          set -euo pipefail
-          sha256sum \
-            "FlashOS-${VERSION}-x86_64-harddrive.img.zst" \
-            "FlashOS-${VERSION}-x86_64-live.iso.zst" \
-            "FlashOS-${VERSION}-source.cdx.json" \
-            "FlashOS-${VERSION}-image.cdx.json" \
-            > SHA256SUMS
-          sha256sum --check SHA256SUMS
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: |
-            dist/release/FlashOS-${{ steps.version.outputs.version }}-x86_64-harddrive.img.zst
-            dist/release/FlashOS-${{ steps.version.outputs.version }}-x86_64-live.iso.zst
-            dist/release/FlashOS-${{ steps.version.outputs.version }}-source.cdx.json
-            dist/release/FlashOS-${{ steps.version.outputs.version }}-image.cdx.json
-            dist/release/SHA256SUMS
-
-      - name: Upload the release candidate
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: flashos-release-${{ steps.version.outputs.version }}
-          path: dist/release/
-          retention-days: 14
-          if-no-files-found: error
-
-  publish:
-    name: publish
-    needs: package
-    if: >-
-      github.ref_type == 'tag' &&
-      (github.event_name == 'push' ||
-       (github.event_name == 'workflow_dispatch' && inputs.publish))
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    environment: production
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download the release candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: flashos-release-${{ needs.package.outputs.version }}
-          path: dist/release
-
-      - name: Verify the release candidate
-        working-directory: dist/release
-        run: sha256sum --check SHA256SUMS
-
-      - name: Publish the GitHub Release
+      - name: Refuse an existing release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          VERSION: ${{ needs.package.outputs.version }}
+          TAG: ${{ inputs.tag }}
         run: |
-          set -euo pipefail
-          cd dist/release
-          assets=(
-            "FlashOS-${VERSION}-x86_64-harddrive.img.zst"
-            "FlashOS-${VERSION}-x86_64-live.iso.zst"
-            "FlashOS-${VERSION}-source.cdx.json"
-            "FlashOS-${VERSION}-image.cdx.json"
-            "SHA256SUMS"
-          )
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "::error::release ${TAG} already exists; published assets are immutable"
             exit 1
           fi
+
+      - name: Record dry-run result
+        if: inputs.publish != true
+        run: echo "Candidate validated; no release was created." >> "${GITHUB_STEP_SUMMARY}"
+
+  publish:
+    name: publish-validated-bytes
+    if: inputs.publish == true
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Download the exact candidate again
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/selection dist/release
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" \
+            > dist/selection/run.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
+            > dist/selection/artifacts.json
+          selection="$(python3 ci/release_candidate.py select \
+            --run dist/selection/run.json \
+            --artifacts dist/selection/artifacts.json \
+            --repository "${GITHUB_REPOSITORY}" \
+            --run-id "${CANDIDATE_RUN_ID}")"
+          attempt="$(jq -r .run_attempt <<<"${selection}")"
+          artifact="$(jq -r .artifact_name <<<"${selection}")"
+          gh run download "${CANDIDATE_RUN_ID}" --name "${artifact}" --dir dist/release
+          echo "${attempt}" > dist/candidate-run-attempt
+
+      - name: Revalidate immediately before publication
+        env:
+          TAG: ${{ inputs.tag }}
+          CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
+        run: |
+          set -euo pipefail
+          source versions.env
+          python3 ci/release_candidate.py validate \
+            --bundle dist/release \
+            --repository "${GITHUB_REPOSITORY}" \
+            --version "${FLASHOS_RELEASE_VERSION}" \
+            --source-commit "$(git rev-parse "${TAG}^{commit}")" \
+            --source-tree "$(git rev-parse "${TAG}^{tree}")" \
+            --run-id "${CANDIDATE_RUN_ID}" \
+            --run-attempt "$(cat dist/candidate-run-attempt)" \
+            --tag "${TAG}" \
+            --verify-compressed
+
+      - name: Publish without rebuilding or substituting assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "::error::release ${TAG} already exists; published assets are immutable"
+            exit 1
+          fi
+          assets=(dist/release/*)
           gh release create "${TAG}" "${assets[@]}" \
             --title "FlashOS ${TAG}" \
-            --generate-notes \
+            --notes-file "dist/release/FlashOS-${TAG#v}-release-notes.md" \
             --verify-tag

@@ -24,6 +24,21 @@ on:
         required: false
         default: false
         type: boolean
+      source-ref:
+        description: Exact commit to build and qualify.
+        required: false
+        default: ""
+        type: string
+      cold-cache:
+        description: Disable BuildKit cache restore and save for diagnostics.
+        required: false
+        default: false
+        type: boolean
+      runtime-evidence-name:
+        description: Workflow artifact name for QEMU logs and results.
+        required: false
+        default: qemu-evidence
+        type: string
 
 permissions:
   contents: read
@@ -36,19 +51,39 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.source-ref || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prepare the BuildKit builder
+        run: docker buildx create --driver docker-container --use --name flashos-ci
 
       - name: Build the FlashOS CI container
-        run: >-
-          docker build
-          --file ci/container/Dockerfile
-          --tag "flashos-ci:${GITHUB_SHA}"
-          .
+        env:
+          COLD_CACHE: ${{ inputs.cold-cache }}
+          CACHE_SCOPE: flashos-ci-v1-${{ hashFiles('ci/container/Dockerfile', 'rust-toolchain.toml') }}
+          SOURCE_REF: ${{ inputs.source-ref || github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          cache_args=()
+          if [ "${COLD_CACHE}" = "true" ]; then
+            cache_args+=(--no-cache)
+          else
+            cache_args+=(
+              --cache-from "type=gha,scope=${CACHE_SCOPE}"
+              --cache-to "type=gha,mode=max,scope=${CACHE_SCOPE},ignore-error=true"
+            )
+          fi
+          docker buildx build \
+            --load \
+            --file ci/container/Dockerfile \
+            --tag "flashos-ci:${SOURCE_REF}" \
+            "${cache_args[@]}" \
+            .
 
       - name: Build the qualified x86_64 images in the clean container
         env:
           CONFIG_NAME: ${{ inputs.config-name }}
           RELEASE_EVIDENCE: ${{ inputs.release-evidence }}
+          SOURCE_REF: ${{ inputs.source-ref || github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           # The hosted checkout belongs to the runner UID, while the build
@@ -70,7 +105,7 @@ jobs:
             --env GIT_CONFIG_COUNT=1 \
             --env GIT_CONFIG_KEY_0=safe.directory \
             --env GIT_CONFIG_VALUE_0=/workspace \
-            "flashos-ci:${GITHUB_SHA}" \
+            "flashos-ci:${SOURCE_REF}" \
             make \
               ARCH=x86_64 \
               "CONFIG_NAME=${CONFIG_NAME}" \
@@ -131,6 +166,7 @@ jobs:
           if [ "${RELEASE_EVIDENCE}" = "true" ]; then
             cp "build/x86_64/${CONFIG_NAME}/redox-live.iso" \
               dist/image/FlashOS-x86_64-live.iso
+            cp cookbook.lock dist/image/cookbook.lock
           fi
           # Bind the SBOM to the artifacts it describes and give it a component
           # list. Syft finds nothing in the staged payload on its own: these are
@@ -225,6 +261,7 @@ jobs:
               artifacts+=(
                 FlashOS-x86_64-live.iso
                 FlashOS-x86_64-image.cdx.json
+                cookbook.lock
               )
             fi
             sha256sum "${artifacts[@]}" > SHA256SUMS
@@ -249,7 +286,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.source-ref || github.event.pull_request.head.sha || github.sha }}
 
       - name: Install QEMU and UEFI firmware
         run: |
@@ -280,29 +317,20 @@ jobs:
             flashos-release) smoke_flags+=(--expect-root-locked) ;;
             *) echo "::error::unknown image profile: $CONFIG_NAME"; exit 1 ;;
           esac
-          for attempt in 1 2; do
-            if python3 ci/qemu_smoke.py \
-              --image dist/image/FlashOS-x86_64-harddrive.img \
-              --disk-interface nvme \
-              --log "dist/qemu-harddrive-smoke-attempt-${attempt}.log" \
-              --benchmark-output "dist/qemu-harddrive-performance-attempt-${attempt}.json" \
-              --timeout 180 \
-              "${smoke_flags[@]}"
-            then
-              exit 0
-            fi
-            if [ "$attempt" -eq 1 ]; then
-              echo "::warning::QEMU smoke attempt 1 failed; retrying the same promoted image"
-            fi
-          done
-          exit 1
+          python3 ci/qemu_smoke.py \
+            --image dist/image/FlashOS-x86_64-harddrive.img \
+            --disk-interface nvme \
+            --log dist/qemu-harddrive-smoke.log \
+            --benchmark-output dist/qemu-harddrive-performance.json \
+            --timeout 180 \
+            "${smoke_flags[@]}"
 
       - name: Upload the target benchmark evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: qemu-performance-${{ github.sha }}
-          path: dist/qemu-harddrive-performance-attempt-*.json
+          name: qemu-performance-${{ inputs.source-ref || github.sha }}
+          path: dist/qemu-harddrive-performance.json
           retention-days: 14
           if-no-files-found: warn
 
@@ -323,15 +351,61 @@ jobs:
             --timeout 180 \
             "${smoke_flags[@]}"
 
-      - name: Upload boot diagnostics on failure
-        if: failure()
+      - name: Record immutable QEMU results
+        if: success()
+        env:
+          RELEASE_EVIDENCE: ${{ inputs.release-evidence }}
+          SOURCE_REF: ${{ inputs.source-ref || github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          image_dir = Path("dist/image")
+
+          def digest(path):
+              value = hashlib.sha256()
+              with path.open("rb") as source:
+                  for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                      value.update(chunk)
+              return value.hexdigest()
+
+          results = {
+              "schema": 1,
+              "source_commit": os.environ["SOURCE_REF"],
+              "harddrive": {
+                  "interface": "nvme",
+                  "result": "success",
+                  "attempt": 1,
+                  "sha256": digest(image_dir / "FlashOS-x86_64-harddrive.img"),
+                  "log": "qemu-harddrive-smoke.log",
+              },
+          }
+          if os.environ["RELEASE_EVIDENCE"] == "true":
+              results["live"] = {
+                  "interface": "usb",
+                  "result": "success",
+                  "attempt": 1,
+                  "sha256": digest(image_dir / "FlashOS-x86_64-live.iso"),
+                  "log": "qemu-live-usb-smoke.log",
+              }
+          Path("dist/qemu-results.json").write_text(
+              json.dumps(results, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Upload QEMU evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: qemu-boot-failure-${{ github.sha }}
+          name: ${{ inputs.runtime-evidence-name }}
           path: |
-            dist/qemu-harddrive-smoke-attempt-*.log
-            dist/qemu-harddrive-performance-attempt-*.json
+            dist/qemu-harddrive-smoke.log
+            dist/qemu-harddrive-performance.json
             dist/qemu-live-usb-smoke.log
+            dist/qemu-results.json
             dist/image/SHA256SUMS
           retention-days: 14
           if-no-files-found: warn

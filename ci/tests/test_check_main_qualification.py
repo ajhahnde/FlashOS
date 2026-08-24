@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "ci"))
 SPEC = importlib.util.spec_from_file_location(
     "check_main_qualification", ROOT / "ci/check_main_qualification.py"
 )
@@ -27,7 +28,14 @@ class FakeClient:
         return self.responses[key]
 
 
-def responses(*, candidate_tree=TREE_SHA, candidate_jobs=None, security_jobs=None):
+def responses(
+    *,
+    candidate_tree=TREE_SHA,
+    candidate_jobs=None,
+    security_jobs=None,
+    changed_paths=None,
+    changed_files=None,
+):
     pull = {
         "number": 47,
         "merged_at": "2026-08-20T18:48:00Z",
@@ -35,6 +43,7 @@ def responses(*, candidate_tree=TREE_SHA, candidate_jobs=None, security_jobs=Non
         "draft": False,
         "base": {"ref": "main"},
         "head": {"sha": HEAD_SHA},
+        "state": "open",
     }
     run_query = (
         ("event", "pull_request"),
@@ -44,9 +53,13 @@ def responses(*, candidate_tree=TREE_SHA, candidate_jobs=None, security_jobs=Non
     )
     jobs_query = (("filter", "latest"), ("per_page", "100"))
     if candidate_jobs is None:
-        candidate_jobs = MODULE.CANDIDATE_JOBS
+        candidate_jobs = MODULE.CANDIDATE_JOBS | MODULE.IMAGE_JOBS
     if security_jobs is None:
         security_jobs = MODULE.SECURITY_JOBS
+    if changed_paths is None:
+        changed_paths = ["src/lib.rs"]
+    if changed_files is None:
+        changed_files = [{"filename": path} for path in changed_paths]
     return {
         (f"/repos/example/flashos/commits/{MAIN_SHA}/pulls", ()): [pull],
         (f"/repos/example/flashos/git/commits/{MAIN_SHA}", ()): {
@@ -55,6 +68,10 @@ def responses(*, candidate_tree=TREE_SHA, candidate_jobs=None, security_jobs=Non
         (f"/repos/example/flashos/git/commits/{HEAD_SHA}", ()): {
             "tree": {"sha": candidate_tree}
         },
+        (
+            "/repos/example/flashos/pulls/47/files",
+            (("page", "1"), ("per_page", "100")),
+        ): changed_files,
         ("/repos/example/flashos/actions/workflows/ci.yml/runs", run_query): {
             "workflow_runs": [
                 {
@@ -69,10 +86,7 @@ def responses(*, candidate_tree=TREE_SHA, candidate_jobs=None, security_jobs=Non
             ]
         },
         ("/repos/example/flashos/actions/runs/10/jobs", jobs_query): {
-            "jobs": [
-                {"name": name, "conclusion": "success"}
-                for name in candidate_jobs
-            ]
+            "jobs": [{"name": name, "conclusion": "success"} for name in candidate_jobs]
         },
         ("/repos/example/flashos/actions/workflows/security.yml/runs", run_query): {
             "workflow_runs": [
@@ -88,10 +102,7 @@ def responses(*, candidate_tree=TREE_SHA, candidate_jobs=None, security_jobs=Non
             ]
         },
         ("/repos/example/flashos/actions/runs/11/jobs", jobs_query): {
-            "jobs": [
-                {"name": name, "conclusion": "success"}
-                for name in security_jobs
-            ]
+            "jobs": [{"name": name, "conclusion": "success"} for name in security_jobs]
         },
     }
 
@@ -118,12 +129,54 @@ class QualificationTests(unittest.TestCase):
         incomplete = MODULE.CANDIDATE_JOBS - {
             "image-and-runtime / qemu-artifact-consumer"
         }
-        with self.assertRaisesRegex(MODULE.QualificationError, "required jobs"):
+        with self.assertRaisesRegex(
+            MODULE.QualificationError, "image jobs are missing"
+        ):
             MODULE.qualify_main(
                 FakeClient(responses(candidate_jobs=incomplete)),
                 "example/flashos",
                 MAIN_SHA,
             )
+
+    def test_accepts_a_classified_fast_lane_without_image_jobs(self):
+        evidence = MODULE.qualify_main(
+            FakeClient(
+                responses(
+                    candidate_jobs=MODULE.CANDIDATE_JOBS,
+                    changed_paths=["docs/verification.md"],
+                )
+            ),
+            "example/flashos",
+            MAIN_SHA,
+        )
+        self.assertEqual(evidence.lane, "fast")
+        self.assertFalse(evidence.image_required)
+
+    def test_rejects_image_work_for_a_classified_fast_lane(self):
+        with self.assertRaisesRegex(MODULE.QualificationError, "image jobs ran"):
+            MODULE.qualify_main(
+                FakeClient(responses(changed_paths=["docs/verification.md"])),
+                "example/flashos",
+                MAIN_SHA,
+            )
+
+    def test_rename_from_product_source_to_docs_still_requires_image_work(self):
+        evidence = MODULE.qualify_main(
+            FakeClient(
+                responses(
+                    changed_files=[
+                        {
+                            "status": "renamed",
+                            "filename": "docs/old-source.md",
+                            "previous_filename": "src/old-source.rs",
+                        }
+                    ]
+                )
+            ),
+            "example/flashos",
+            MAIN_SHA,
+        )
+        self.assertTrue(evidence.image_required)
 
     def test_rejects_missing_security_qualification(self):
         with self.assertRaisesRegex(MODULE.QualificationError, "required jobs"):
@@ -132,6 +185,55 @@ class QualificationTests(unittest.TestCase):
                 "example/flashos",
                 MAIN_SHA,
             )
+
+    def test_dependency_change_requires_the_underlying_security_jobs(self):
+        with self.assertRaisesRegex(MODULE.QualificationError, "dependency policy"):
+            MODULE.qualify_main(
+                FakeClient(
+                    responses(
+                        candidate_jobs=MODULE.CANDIDATE_JOBS,
+                        changed_paths=[".github/dependabot.yml"],
+                    )
+                ),
+                "example/flashos",
+                MAIN_SHA,
+            )
+
+        evidence = MODULE.qualify_main(
+            FakeClient(
+                responses(
+                    candidate_jobs=MODULE.CANDIDATE_JOBS,
+                    security_jobs=MODULE.SECURITY_JOBS | MODULE.SECURITY_POLICY_JOBS,
+                    changed_paths=[".github/dependabot.yml"],
+                )
+            ),
+            "example/flashos",
+            MAIN_SHA,
+        )
+        self.assertEqual(evidence.lane, "fast")
+
+    def test_candidate_source_accepts_the_exact_reviewable_pr_head(self):
+        payload = responses()
+        payload[(f"/repos/example/flashos/commits/{HEAD_SHA}/pulls", ())] = payload[
+            (f"/repos/example/flashos/commits/{MAIN_SHA}/pulls", ())
+        ]
+        evidence = MODULE.qualify_candidate_source(
+            FakeClient(payload), "example/flashos", HEAD_SHA
+        )
+        self.assertEqual(evidence.candidate_sha, HEAD_SHA)
+        self.assertEqual(evidence.tree_sha, TREE_SHA)
+        self.assertEqual(evidence.candidate_run_id, 10)
+        self.assertEqual(evidence.security_run_id, 11)
+
+    def test_candidate_source_accepts_an_exact_tree_merged_commit(self):
+        payload = responses()
+        pull = payload[(f"/repos/example/flashos/commits/{MAIN_SHA}/pulls", ())][0]
+        pull["state"] = "closed"
+        evidence = MODULE.qualify_candidate_source(
+            FakeClient(payload), "example/flashos", MAIN_SHA
+        )
+        self.assertEqual(evidence.candidate_sha, HEAD_SHA)
+        self.assertEqual(evidence.tree_sha, TREE_SHA)
 
 
 if __name__ == "__main__":

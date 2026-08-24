@@ -572,29 +572,39 @@ The standard CI workflow runs two independent jobs for:
   tests, the product-profile contract, and whitespace validation;
 - Flash formatting, Clippy, and host tests;
 
-The image workflow begins only after these required jobs succeed. Draft pull
-requests stop after source feedback. Every ready candidate and every manual CI
-run builds and boots the canonical hard-drive image, avoiding a path classifier
-whose correctness would otherwise become part of the product claim.
+The workflow first classifies the exact changed paths. Draft pull requests stop
+after source feedback. Ready pull requests skip the image only when every path
+belongs to the explicit documentation, policy, reporting, or isolated host-tool
+allowlist. Product source, target integration, recipes, profiles, image/QEMU
+tooling, CI orchestration, mixed changes, and unknown paths fail closed into the
+product lane. Manual CI defaults to the product lane.
+
+The classifier is unit tested, its decision and reasons appear in the workflow
+summary, and the stable `required` aggregate rejects any job result that does
+not agree with that decision. Root and Flash Cargo downloads and build outputs
+use separate toolchain/lockfile/profile cache identities. Manual `cold-cache`
+runs provide the comparison path; cache hits never replace a validator or test.
 
 Protected `main` requires the exact pull-request head to pass the stable CI and
 Security aggregates before merge. The dedicated protected-main workflow then
-finds the merged pull request, proves that its head and the protected-main commit have
-the same Git tree, and verifies successful candidate build, QEMU, aggregate,
-and dependency-policy jobs. It publishes the visible `verified` check without
-rerunning the source suite or product build.
+finds the merged pull request, proves that its head and the protected-main
+commit have the same Git tree, independently reclassifies the PR paths, and
+verifies the appropriate image-job result plus successful stable CI and
+dependency-policy aggregates. It publishes the visible `verified` check
+without rerunning the source suite or product build.
 
 ### Clean-container image producer
 
 For a ready candidate, the reusable image workflow:
 
-1. builds the repository-owned CI container;
+1. restores safe BuildKit layers or explicitly starts cold, then builds the
+   repository-owned CI container;
 2. builds the x86_64 hard-drive image inside that container;
 3. validates the produced target baseline;
 4. records and verifies SHA-256 checksums;
 5. uploads the files as one workflow artifact.
 
-Release qualification enables the additional evidence path. It also builds
+Release-candidate qualification enables the additional evidence path. It also builds
 the live image, collects staged target package payloads, generates an
 image-oriented CycloneDX SBOM, and binds both image digests into that inventory.
 
@@ -603,6 +613,11 @@ variables. It cooks selected image packages from their tracked recipes; the
 optional moving binary feed is not a candidate or release input. A normal local
 Podman build exercises related repository logic but is not an identical
 execution environment.
+
+BuildKit keys include the container definition and pinned root toolchain, while
+Docker still validates each layer's actual input graph. Cache export failure is
+non-fatal. Final images, staged release payload, candidate bundles, manifests,
+SBOMs, attestations, and QEMU passes are never authoritative cache entries.
 
 ### Independent runtime consumer
 
@@ -614,20 +629,22 @@ A separate candidate job:
 4. verifies its `SHA256SUMS`;
 5. boots the downloaded disk image over NVMe.
 
-Release qualification additionally boots the downloaded live image over USB
+Release-candidate qualification additionally boots the downloaded live image over USB
 mass storage. The consumer never rebuilds either image before testing it.
 
 The consumer does not rebuild the images before testing them. This connects runtime results to the checksummed bytes produced by the image job.
 
-If a boot job fails, the workflow attempts to upload:
+The candidate gate accepts only a first-attempt pass. A later diagnostic retry
+cannot turn an initial release failure green. The workflow uploads the evidence
+available on both success and failure:
 
 ```text
 qemu-harddrive-smoke.log
+qemu-harddrive-performance.json
 qemu-live-usb-smoke.log
+qemu-results.json
 SHA256SUMS
 ```
-
-These are failure diagnostics. They are not regular release assets.
 
 ### Rebuildability and reproducibility
 
@@ -670,8 +687,8 @@ Every pull request reports the aggregate so repository rules can require it.
 Dependency review and Cargo policy execute only when the changed paths include
 dependency manifests, lockfiles, policy, Dependabot configuration, or the
 workflow itself; the aggregate verifies a controlled skip otherwise. Manual
-dispatch remains available for an explicit dependency-policy audit without
-turning recurring advisory drift into a status on an unchanged `main` commit.
+dispatch and a weekly run provide explicit dependency-policy audits without
+turning advisory drift into a recurring status on unchanged `main`.
 A passing dependency-policy workflow does not constitute a full security audit
 of FlashOS, its upstream operating-system components, or produced images.
 
@@ -679,33 +696,54 @@ Security vulnerabilities must be handled through the process in the [Security Po
 
 ## Release evidence
 
-The release workflow uses the `flashos-release` image profile and reuses the image qualification workflow before packaging a candidate.
+Candidate production and release publication are separate manual workflows.
+The candidate workflow never publishes; the publication workflow never builds,
+compresses, generates, attests, or substitutes candidate files.
 
-### Version binding
+### Exact candidate input
 
-For a tagged release, the tag must equal:
+Candidate production accepts:
 
-```text
-v<FLASHOS_RELEASE_VERSION>
-```
+- a full source commit SHA;
+- a semantic version equal to `FLASHOS_RELEASE_VERSION`;
+- a repository-relative reviewed Markdown release-notes path; and
+- an optional cold-cache diagnostic flag.
 
-where the version is read from `versions.env`.
+Before image work begins, the workflow proves that the source is either the
+head of one non-draft PR or the exact-tree merged result of one PR. It verifies
+that PR's successful `required` and `security-required` runs and records their
+run IDs. A draft, unrelated commit, unequal merged tree, stale successful run,
+or ambiguous PR association is rejected.
 
-A mismatched tag fails before release packaging.
+The reusable producer then builds the `flashos-release` disk and live images
+once. Separate consumers verify checksums and boot those exact raw bytes over
+NVMe and USB. Both release QEMU paths must pass on attempt one.
 
 ### Candidate contents
 
-After image qualification, the packaging job:
+After runtime qualification, the same candidate run:
 
 - downloads the qualified disk, live image, image SBOM, and image checksums;
 - verifies the incoming checksums;
-- compresses the disk and live image;
+- carries the generated `cookbook.lock` that resolved the qualified image build;
+- compresses the exact QEMU-qualified disk and live bytes and verifies that
+  decompression retains their raw digests;
 - generates a source-oriented CycloneDX SBOM before promoted binaries enter
   the workspace;
 - promotes the image-oriented SBOM produced with the images;
+- includes reviewed release notes, both QEMU logs, the target performance
+  record, and the machine-readable QEMU result;
 - creates and verifies release-candidate SHA-256 checksums;
-- creates a build-provenance attestation for the compressed images, both SBOMs, and checksum file;
+- writes `candidate-manifest.json` binding the repository, producer run and
+  attempt, source commit/tree, version, profile, qualifying PR run IDs, pinned
+  inputs, raw image digests, both QEMU results, exact filename allowlist, sizes,
+  and digests;
+- creates build-provenance attestations for every candidate file; and
 - uploads the resulting candidate as a workflow artifact.
+
+The artifact name includes the producer run ID and run attempt. Reruns do not
+replace or masquerade as an earlier candidate. Expired artifacts are not
+recoverable publication inputs; produce and qualify a new candidate instead.
 
 The two SBOMs have different scopes:
 
@@ -718,10 +756,22 @@ Neither document should be interpreted outside its stated scope. An SBOM is an i
 
 ### Publication boundary
 
-Release publication occurs only under the workflow's tag and publication
-conditions. Before creating the GitHub Release, the publication job downloads
-the packaged candidate and verifies its checksums again. An existing release
-is rejected; a workflow rerun cannot overwrite already-published assets.
+The publication workflow accepts an exact existing tag and candidate run ID.
+Its default mode is a non-publishing dry run. It verifies the selected run is a
+successful `candidate.yml` workflow in this repository, selects its exact run
+attempt, rejects missing/ambiguous/expired artifacts, and then checks:
+
+- tag equality with `v<FLASHOS_RELEASE_VERSION>`;
+- candidate source commit/tree equality with the tag commit/tree;
+- manifest schema and pinned input graph against the tag checkout;
+- the exact allowlisted inventory, regular-file boundary, sizes, and digests;
+- every `SHA256SUMS` entry;
+- decompressed disk/live digests against the raw images QEMU consumed; and
+- absence of an existing GitHub Release.
+
+When publication is explicitly selected, the protected `production`
+environment repeats the download and validation immediately before creating
+the release. Existing releases are immutable and never overwritten.
 
 The published assets consist of:
 
@@ -729,11 +779,16 @@ The published assets consist of:
 - compressed x86_64 live image;
 - source SBOM;
 - image SBOM;
+- reviewed release notes;
+- QEMU logs, result, and target performance evidence;
+- generated cookbook resolution;
+- candidate manifest;
 - `SHA256SUMS`.
 
-The build-provenance attestation is associated with the candidate subjects through GitHub's attestation mechanism. It records workflow provenance; it does not prove bit-for-bit reproducibility or independent review of the resulting operating system.
-
-Successful QEMU qualification is represented by the prerequisite workflow result. Serial smoke logs are not included in the normal published asset set.
+The build-provenance attestations are associated with candidate subjects
+through GitHub's attestation mechanism. They record workflow provenance; they
+do not prove bit-for-bit reproducibility or independent review of the resulting
+operating system.
 
 ## Physical hardware qualification
 
@@ -879,7 +934,11 @@ Do not remove an assertion solely because a change fails it. First determine whe
 | Advertised capability report             | [`ci/check_flashos_capability_report.py`](../ci/check_flashos_capability_report.py) |
 | Target capability matrix                 | [`ci/check_flashos_target_matrix.py`](../ci/check_flashos_target_matrix.py) |
 | QEMU runtime contract                    | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                             |
+| Change classification                    | [`ci/classify_changes.py`](../ci/classify_changes.py)                 |
+| Required CI aggregation                  | [`ci/aggregate_ci.py`](../ci/aggregate_ci.py)                         |
 | Protected-main evidence transfer         | [`ci/check_main_qualification.py`](../ci/check_main_qualification.py) |
+| Candidate evidence resolution            | [`ci/check_candidate_qualification.py`](../ci/check_candidate_qualification.py) |
+| Candidate manifest validation            | [`ci/release_candidate.py`](../ci/release_candidate.py)               |
 | Public local helper behavior             | [`flashos.sh`](../flashos.sh)                                         |
 | Standard hosted CI orchestration         | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             |
 | Protected-main status workflow           | [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml) |
@@ -888,7 +947,8 @@ Do not remove an assertion solely because a change fails it. First determine whe
 | Codecov reporting policy                 | [`codecov.yml`](../codecov.yml)                                       |
 | Image production and runtime consumption | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)     |
 | Dependency-policy workflow               | [`.github/workflows/security.yml`](../.github/workflows/security.yml) |
-| Release packaging and publication        | [`.github/workflows/release.yml`](../.github/workflows/release.yml)   |
+| Release-candidate production             | [`.github/workflows/candidate.yml`](../.github/workflows/candidate.yml) |
+| Release publication                      | [`.github/workflows/release.yml`](../.github/workflows/release.yml)   |
 | Exact CI and artifact contracts          | [CI/CD Contracts](../ci/README.md)                                    |
 | Physical device evidence                 | [Hardware Compatibility](hardware.md)                                 |
 | Security reporting                       | [Security Policy](../.github/SECURITY.md)                             |

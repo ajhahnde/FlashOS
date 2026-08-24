@@ -3,6 +3,8 @@ name: Security
 on:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
 
 permissions:
   contents: read
@@ -17,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      qualify_security: ${{ steps.scope.outputs.qualify_security }}
+      qualify_security: ${{ steps.classify.outputs.security_required }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,28 +29,19 @@ jobs:
       # be required by repository rules. Only dependency-policy changes need
       # to repeat the underlying review and Cargo policy work.
       - name: Decide whether dependency qualification is needed
-        id: scope
+        id: classify
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          qualify=true
           if [ "${EVENT_NAME}" = "pull_request" ]; then
-            qualify=false
-            mapfile -t changed < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
-            for path in "${changed[@]}"; do
-              case "${path}" in
-                Cargo.toml|Cargo.lock|deny.toml|components/flash/Cargo.toml|components/flash/Cargo.lock|components/flash/deny.toml|components/flash/*/Cargo.toml|.github/dependabot.yml|.github/workflows/security.yml)
-                  qualify=true
-                  break
-                  ;;
-              esac
-            done
+            git diff --name-only --no-renames -z "${BASE_SHA}" "${HEAD_SHA}" |
+              python3 ci/classify_changes.py --null
+          else
+            python3 ci/classify_changes.py </dev/null
           fi
-          echo "qualify_security=${qualify}" >> "${GITHUB_OUTPUT}"
-          echo "Dependency qualification required: ${qualify}" >> "${GITHUB_STEP_SUMMARY}"
 
   dependency-review:
     name: dependency-review

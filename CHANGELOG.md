@@ -39,16 +39,17 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   every pull request now reports the gate, while dependency review and Cargo
   policy run only for relevant manifests, lockfiles, policy, Dependabot, or
   workflow changes and controlled skips remain inexpensive.
-- Focused hosted CI on one reliable product signal. Draft pull requests run
-  source feedback, while every ready candidate builds and boots the canonical
-  hard-drive image. Protected `main` receives a visible check by proving that
-  its merged tree exactly matches the candidate that passed product and
-  dependency qualification, without rerunning flaky host tests. Live-media
-  qualification, image SBOM generation, and provenance remain release gates;
-  coverage and recurring drift work no longer compete with the product badge.
-  The image container remains unprivileged, selected packages are cooked from
-  tracked sources, routine dependency updates remain grouped, and published
-  release assets cannot be overwritten by a rerun.
+- Focused hosted CI on one reliable, risk-routed product signal. Draft pull
+  requests run source feedback; ready documentation, policy, reporting, and
+  isolated host-tool changes can finish on the fast lane, while product,
+  target, image, mixed, and unknown paths build and boot the promoted image.
+  Protected `main` independently repeats classification and proves exact tree,
+  CI, and dependency-policy identity without rebuilding. Safe Cargo and
+  BuildKit caches reduce repeated work, with an explicit cold-cache diagnostic.
+  Release candidates now build disk and live bytes once, preserve first-attempt
+  QEMU evidence in a manifest-bound bundle, and publish only an exact selected
+  run whose commit and tree match the operator-created tag; publication cannot
+  rebuild, substitute, select an expired artifact, or overwrite a release.
 
 ### Added
 

@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+    inputs:
+      cold-cache:
+        description: Run without restoring or saving build caches.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,6 +18,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: change-classification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.classify.outputs.lane }}
+      image_required: ${{ steps.classify.outputs.image_required }}
+      target_required: ${{ steps.classify.outputs.target_required }}
+      classification: ${{ steps.classify.outputs.classification }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            git diff --name-only --no-renames -z "${BASE_SHA}" "${HEAD_SHA}" |
+              python3 ci/classify_changes.py --null
+          else
+            python3 ci/classify_changes.py </dev/null
+          fi
+
   quality:
     name: repository-quality
     runs-on: ubuntu-24.04
@@ -24,14 +59,22 @@ jobs:
           fetch-depth: 0
 
       - name: Cache Cargo downloads
+        if: inputs['cold-cache'] != true
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: root-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: root-cargo-${{ runner.os }}-
+          key: root-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: root-cargo-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Cache root Cargo build outputs
+        if: inputs['cold-cache'] != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target
+          key: root-target-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml') }}-test
 
       - name: Activate the pinned root toolchain
         run: |
@@ -98,14 +141,22 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Cache Flash Cargo downloads
+        if: inputs['cold-cache'] != true
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: flash-cargo-${{ runner.os }}-${{ hashFiles('components/flash/Cargo.lock') }}
-          restore-keys: flash-cargo-${{ runner.os }}-
+          key: flash-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('components/flash/rust-toolchain.toml', 'components/flash/Cargo.lock') }}
+          restore-keys: flash-cargo-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Cache Flash Cargo build outputs
+        if: inputs['cold-cache'] != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: components/flash/target
+          key: flash-target-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('components/flash/rust-toolchain.toml', 'components/flash/Cargo.lock', 'components/flash/Cargo.toml') }}-all-targets-test
 
       - name: Activate the pinned Flash toolchain
         run: |
@@ -142,62 +193,41 @@ jobs:
   image:
     name: image-and-runtime
     if: >-
+      needs.scope.outputs.image_required == 'true' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.draft == false)
-    needs: [quality, flash]
+    needs: [scope, quality, flash]
     uses: ./.github/workflows/_image.yml
     with:
       artifact-name: flashos-x86_64-ci-${{ github.event.pull_request.head.sha || github.sha }}
       retention-days: 7
       release-evidence: false
+      source-ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      cold-cache: ${{ inputs['cold-cache'] || false }}
     permissions:
       contents: read
 
   required:
     name: required
     if: always()
-    needs: [quality, flash, image]
+    needs: [scope, quality, flash, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
       - name: Summarize and enforce every gate
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_DRAFT: ${{ github.event.pull_request.draft || false }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          LANE: ${{ needs.scope.outputs.lane }}
+          IMAGE_REQUIRED: ${{ needs.scope.outputs.image_required }}
+          TARGET_REQUIRED: ${{ needs.scope.outputs.target_required }}
+          CLASSIFICATION: ${{ needs.scope.outputs.classification }}
           ROOT_RESULT: ${{ needs.quality.result }}
           SHELL_RESULT: ${{ needs.flash.result }}
           IMAGE_RESULT: ${{ needs.image.result }}
-        run: |
-          set -euo pipefail
-          {
-            echo "## FlashOS CI"
-            echo
-            echo "| gate | result |"
-            echo "|:--|:--|"
-            echo "| repository + product contract | ${ROOT_RESULT} |"
-            echo "| Flash | ${SHELL_RESULT} |"
-            echo "| Docker image + QEMU runtime | ${IMAGE_RESULT} |"
-          } >> "${GITHUB_STEP_SUMMARY}"
-
-          for result in \
-            "${ROOT_RESULT}" \
-            "${SHELL_RESULT}"
-          do
-            if [ "${result}" != "success" ]; then
-              echo "::error::one or more required CI gates failed"
-              exit 1
-            fi
-          done
-
-          if [ "${IMAGE_RESULT}" = "success" ]; then
-            exit 0
-          fi
-
-          if [ "${EVENT_NAME}" = "pull_request" ] &&
-             [ "${PR_DRAFT}" = "true" ] &&
-             [ "${IMAGE_RESULT}" = "skipped" ]; then
-            exit 0
-          fi
-
-          echo "::error::ready candidates require successful product qualification"
-          exit 1
+        run: python3 ci/aggregate_ci.py
