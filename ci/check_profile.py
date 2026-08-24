@@ -359,6 +359,24 @@ for forbidden in ("  push:\n", "  schedule:\n", "qualify_image"):
             f"{forbidden.strip()}"
         )
 
+required_marker = "\n  required:\n"
+if required_marker not in ci_workflow:
+    fail("standard CI is missing the required aggregate job")
+required_job = ci_workflow.split(required_marker, 1)[1]
+required_checkout = (
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+)
+required_runner = "run: python3 ci/aggregate_ci.py"
+for expected in (
+    required_checkout,
+    "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+    required_runner,
+):
+    if expected not in required_job:
+        fail(f"required aggregate execution contract is missing: {expected}")
+if required_job.index(required_checkout) > required_job.index(required_runner):
+    fail("required aggregate must check out its exact source before execution")
+
 aggregate_ci = (ROOT / "ci/aggregate_ci.py").read_text()
 for expected in (
     "classification requires successful product qualification",
