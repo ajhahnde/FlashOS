@@ -4,15 +4,15 @@
 
 This roadmap describes the intended public development direction for FlashOS, from the current pre-alpha system toward a more complete terminal-native operating environment. It communicates priorities and completion criteria rather than release dates, internal task tracking, or guarantees that every listed initiative will ship unchanged.
 
-> **Project status:** FlashOS as a complete operating system remains pre-alpha software. While Flash component documentation describes the intended stable Flash v1.0 contract, not every v1 feature is automatically available in every current FlashOS image or on every target platform, and successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
+> **Project status:** FlashOS as a complete operating system remains pre-alpha software. Flash 1.0.0 is released as the component contract, but its availability in a particular FlashOS image or on another target remains separately qualified. Successful execution on a Linux or macOS development host is not automatic proof of FlashOS target support.
 
 ## On this page
 
 - [How to read this roadmap](#how-to-read-this-roadmap)
 - [Current foundation](#current-foundation)
 - [Development sequence](#development-sequence)
-- [Now: Complete and qualify Flash v1](#now-complete-and-qualify-flash-v1)
-- [Next: Qualify the next release](#next-qualify-the-next-release)
+- [Completed foundation: Flash 1.0.0](#completed-foundation-flash-100)
+- [Now: Qualify the next release](#now-qualify-the-next-release)
 - [Next: Expand the terminal environment](#next-expand-the-terminal-environment)
 - [Later: Evolve inherited system dependencies](#later-evolve-inherited-system-dependencies)
 - [Later: Broaden hardware and platform evidence](#later-broaden-hardware-and-platform-evidence)
@@ -52,7 +52,9 @@ The roadmap begins from the following established product boundaries:
 - FlashOS targets x86_64.
 - The user environment is text-based and does not include a graphical desktop stack.
 - Flash is installed as `/usr/bin/fsh` and serves as the primary interactive and scripting interface.
-- The public Flash guides define the intended v1 language, runtime, tooling, and platform-capability contract; individual releases still require implementation and target-qualification evidence.
+- The public Flash guides define the released Flash 1.0.0 language, runtime,
+  tooling, and platform-capability contract; individual FlashOS releases still
+  require image and target-qualification evidence.
 - Development and live images are built through separate persistent-disk and removable-media paths.
 - Both image forms have automated x86_64 QEMU qualification contracts.
 - Physical hardware claims are limited to individually recorded evidence.
@@ -75,9 +77,9 @@ For the exact current state, consult:
 The intended high-level sequence is:
 
 ```text
-complete and qualify the documented Flash v1 contract
+release the qualified Flash 1.0.0 component contract
                 ↓
-qualify and publish an exact release candidate
+qualify and publish an exact FlashOS release candidate
                 ↓
 expand the FlashOS-owned terminal environment
                 ↓
@@ -88,15 +90,22 @@ broaden physical hardware and architecture evidence
 
 Some supporting work, such as documentation, dependency maintenance, security review, and hardware investigation, may occur throughout this sequence. The sequence indicates which product initiative should remain primary rather than requiring every supporting activity to stop.
 
-## Now: Complete and qualify Flash v1
+## Completed foundation: Flash 1.0.0
 
-Flash is the defining user-facing component of FlashOS. The current priority is to complete the implementation of the documented v1 contract, align its tests and tooling with that contract, and qualify the supported host and FlashOS target surfaces before beginning another major user-interface component in parallel.
+Flash is the defining user-facing component of FlashOS. Flash 1.0.0 closes the
+documented v1 language, runtime, tooling, and platform-capability contract. Its
+release inventory binds every user-reachable surface to assembled host evidence
+and an exact FlashOS owner while keeping host, image, and physical-hardware
+claims distinct.
 
-Existing functionality such as direct external execution, explicit argument expansion, byte-stream pipelines, structured values, target-side line editing, history, multiline input, status branching, and interactive job control forms the baseline for this work.
+Functionality such as direct external execution, explicit argument expansion,
+arbitrarily alternating byte and structured pipeline segments, structured
+values, target-side line editing, history, multiline input, status branching,
+and interactive job control forms the released baseline.
 
 ### Multi-file scripts and modules
 
-Planned work includes:
+The released contract includes:
 
 - canonical module loading without relying on import spelling;
 - explicit imports and exports;
@@ -129,16 +138,15 @@ The required v1 tooling surface includes:
 
 Interactive sessions, non-interactive evaluation, and `.fsh` scripts share the same language, parser, and evaluation rules wherever their session input models permit it.
 
-Work in this area includes:
+The released runtime includes:
 
 - preserving exact argument-vector semantics without host shell routing;
 - defining a stable built-in command namespace and compatibility policy while
   retaining internal-before-external resolution and `^name` as the explicit
   external-command escape;
 - preserving explicit structured-to-byte conversion boundaries;
-- removing the current one-internal-island executor restriction so a
-  carrier-compatible pipeline can alternate between external byte segments and
-  internal typed segments any number of times;
+- carrier-compatible pipelines that alternate between external byte segments
+  and internal typed segments any number of times;
 - aligning host and FlashOS behavior without hiding or emulating unsupported target capabilities;
 - keeping redirected, non-interactive, and terminal-attached sessions distinct where the operating system requires it;
 - validating configuration, history, cancellation, redirection, process lifetime, and terminal restoration on target systems;
@@ -149,7 +157,7 @@ Host behavior on Linux or macOS must not be presented as FlashOS behavior until 
 
 ### Hardening and release evidence
 
-While Flash component documentation defines the stable Flash v1.0 contract, before the project declares a completed v1 runtime release across all target platforms, it intends to:
+Flash 1.0.0 release qualification included:
 
 - expand lexer, parser, formatter, checker, and evaluator fuzzing;
 - stress pipelines, cancellation, jobs, and terminal transitions;
@@ -160,9 +168,9 @@ While Flash component documentation defines the stable Flash v1.0 contract, befo
 - enforce explicit analysis and execution boundaries;
 - ensure that the implementation, tests, tooling CLI behavior, and public documentation conform to the defined v1 grammar and runtime contracts.
 
-### Completion criteria
+### Release basis
 
-Flash moves from the primary implementation initiative when:
+Flash 1.0.0 was released after:
 
 - maintainable multi-file programs can be resolved, loaded, statically checked, canonically formatted, and documented;
 - explicit module imports, exports, and script arguments behave according to the v1 contract;
@@ -176,11 +184,13 @@ Flash moves from the primary implementation initiative when:
 - no known critical command-injection, descriptor-lifetime, terminal-corruption, process-lifetime, or data-loss defect remains open;
 - public language, scripting, architecture, and toolchain documentation matches executable behavior.
 
-This is the language and runtime completion boundary. Flash may continue to gain compatible capabilities, diagnostics, tooling, and optimizations after v1, but known foundational semantic or executor-topology gaps are not deferred past it. An incompatible language redesign would require an explicit future major-version decision.
+This is the language and runtime completion boundary. Flash may continue to gain compatible capabilities, diagnostics, tooling, and optimizations after v1, but no known foundational semantic or executor-topology gap was deferred past it. An incompatible language redesign requires an explicit future major-version decision.
 
-## Next: Qualify the next release
+## Now: Qualify the next release
 
-After the active Flash scope reaches a coherent release boundary, FlashOS should qualify one exact candidate rather than treating independently rebuilt artifacts as interchangeable.
+With Flash 1.0.0 released, FlashOS should qualify one exact operating-system
+candidate rather than treating independently rebuilt artifacts as
+interchangeable.
 
 ### Candidate definition
 

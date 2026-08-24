@@ -77,12 +77,17 @@ base = load(BASE_PATH)
 version = release_version()
 root_manifest = load(ROOT / "Cargo.toml")
 flash_manifest = load(ROOT / "components/flash/Cargo.toml")
+flash_release = load(ROOT / "components/flash/release/v1.toml")
 
 if root_manifest.get("package", {}).get("version") != version:
     fail("root Cargo package version drifted from versions.env")
 flash_version = flash_manifest.get("workspace", {}).get("package", {}).get("version")
-if flash_version != version:
-    fail("Flash workspace version drifted from versions.env")
+if not isinstance(flash_version, str) or re.fullmatch(
+    r"[0-9]+\.[0-9]+\.[0-9]+", flash_version
+) is None:
+    fail("Flash workspace version is not semantic")
+if flash_release.get("release_version") != flash_version:
+    fail("Flash workspace version drifted from its component release record")
 
 if profile.get("include") != ["../flashos-base.toml"]:
     fail("the x86_64 profile must include only ../flashos-base.toml")

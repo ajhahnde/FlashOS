@@ -32,6 +32,7 @@ Product-specific checks live under `ci/` so they can be used both locally and fr
 | [`ci/check_flashos_operation_map.py`](check_flashos_operation_map.py)                         | Flash operation mapping to Rust, relibc, and Redox interfaces                  |
 | [`ci/check_flashos_capability_classification.py`](check_flashos_capability_classification.py) | Native/shimmed/unsupported capability classification                           |
 | [`ci/check_flash_conformance.py`](check_flash_conformance.py)                                | Flash v1 executable host-conformance inventory and refusal-boundary audit       |
+| [`ci/check_flash_release.py`](check_flash_release.py)                                        | Flash 1.0.0 version, evidence, claim, and candidate-workflow contract            |
 | [`ci/check_coverage.py`](check_coverage.py)                                                   | LCOV report completeness                                                       |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                                           | x86_64 serial runtime smoke tests                                              |
 | [`ci/container/Dockerfile`](container/Dockerfile)                                             | Hosted image-build environment                                                 |
@@ -107,6 +108,23 @@ host-v1 conformance signal. It does not establish Redox target compilation,
 image integration, FlashOS runtime support, release readiness, or hardware
 behavior.
 
+### Flash 1.0.0 release contract
+
+Run the release-boundary check from the repository root:
+
+```bash
+python3 ci/check_flash_release.py
+```
+
+[`components/flash/release/v1.toml`](../components/flash/release/v1.toml)
+binds the component version to the frozen conformance and exhaustive exercise
+contracts, retained host evidence, FlashOS capability report and target matrix,
+public release claims, and the exact candidate-workflow commands. The checker
+requires zero recorded release findings and zero unexamined inventory items.
+The ready pull-request workflow then executes those owners and builds and boots
+the exact in-tree package candidate; the record does not release a FlashOS
+image or establish physical-hardware support.
+
 ### Product profile
 
 Run:
@@ -128,7 +146,10 @@ python3 ci/check_profile.py
 - branding patches and package-web source links;
 - QEMU NVMe/USB smoke-test wiring.
 
-`FLASHOS_RELEASE_VERSION` in [`versions.env`](../versions.env) is the central release version. The exact package lists, denied values, and source assertions are kept in the checker instead of being duplicated here.
+`FLASHOS_RELEASE_VERSION` in [`versions.env`](../versions.env) is the central
+FlashOS release version. Flash has an independent component version bound to
+its release record. The exact package lists, denied values, and source
+assertions are kept in the checker instead of being duplicated here.
 
 Failures start with:
 

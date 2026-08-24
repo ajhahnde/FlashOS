@@ -124,6 +124,9 @@ jobs:
       - name: Validate the exhaustive Flash v1 exercise contract
         run: python3 ../../ci/check_flash_v1_exercises.py
 
+      - name: Validate the Flash 1.0.0 release contract
+        run: python3 ../../ci/check_flash_release.py
+
       - name: Validate the Flash performance contract
         run: python3 ../../ci/flash_benchmarks.py
 
