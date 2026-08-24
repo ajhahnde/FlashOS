@@ -193,6 +193,7 @@ def validate(document: dict, root: Path = ROOT) -> None:
         {
             "schema_version",
             "language_major",
+            "contract_status",
             "workspace_test_command",
             "ci_workflow",
             "family",
@@ -205,6 +206,8 @@ def validate(document: dict, root: Path = ROOT) -> None:
         fail("schema_version must be 1")
     if document.get("language_major") != 1:
         fail("language_major must be 1")
+    if document.get("contract_status") != "frozen":
+        fail("contract_status must be 'frozen'")
     if document.get("workspace_test_command") != "cargo test --workspace --locked":
         fail("workspace_test_command must run the complete locked workspace suite")
     if document.get("ci_workflow") != ".github/workflows/ci.yml":

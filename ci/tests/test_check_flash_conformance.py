@@ -28,6 +28,12 @@ class FlashConformanceTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             conformance_check.validate(document)
 
+    def test_the_v1_contract_cannot_return_to_draft_status(self) -> None:
+        document = copy.deepcopy(conformance_check.load_inventory())
+        document["contract_status"] = "draft"
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            conformance_check.validate(document)
+
     def test_a_missing_or_ignored_test_cannot_own_conformance(self) -> None:
         document = copy.deepcopy(conformance_check.load_inventory())
         document["family"][0]["tests"][0] = (
