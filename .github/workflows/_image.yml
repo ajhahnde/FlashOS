@@ -285,6 +285,7 @@ jobs:
               --image dist/image/FlashOS-x86_64-harddrive.img \
               --disk-interface nvme \
               --log "dist/qemu-harddrive-smoke-attempt-${attempt}.log" \
+              --benchmark-output "dist/qemu-harddrive-performance-attempt-${attempt}.json" \
               --timeout 180 \
               "${smoke_flags[@]}"
             then
@@ -295,6 +296,15 @@ jobs:
             fi
           done
           exit 1
+
+      - name: Upload the target benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qemu-performance-${{ github.sha }}
+          path: dist/qemu-harddrive-performance-attempt-*.json
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Boot the exact live image over USB
         if: inputs.release-evidence
@@ -320,6 +330,7 @@ jobs:
           name: qemu-boot-failure-${{ github.sha }}
           path: |
             dist/qemu-harddrive-smoke-attempt-*.log
+            dist/qemu-harddrive-performance-attempt-*.json
             dist/qemu-live-usb-smoke.log
             dist/image/SHA256SUMS
           retention-days: 14

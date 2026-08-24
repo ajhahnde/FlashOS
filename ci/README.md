@@ -630,7 +630,8 @@ Keep third-party Actions pinned to full commit SHAs and external Git package sou
 
 - [Verification and Testing](../docs/verification.md) — Evidence layers and qualification boundaries.
 - [Development](../docs/development.md) — Repository setup, image builds, profiles, and local helper usage.
-- [Flash Development](../components/flash/docs/development.md) — Flash workspace checks, tests, scheduling stress, fuzzing, target compilation, and package integration.
+- [Flash Development](../components/flash/docs/development.md) — Flash workspace checks, tests, performance budgets, scheduling stress, fuzzing, target compilation, and package integration.
+- [Flash Performance Benchmarks](../components/flash/benchmarks/README.md) — Versioned measurements, retained evidence, environment-specific budget derivation, and regression evaluation.
 - [Flash Scheduling Stress](../components/flash/scheduling/README.md) — Seeded host pipeline-cancellation and job-control campaigns, retained results, and exact replay.
 - [Architecture](../docs/architecture.md) — System layers, profile composition, package boundaries, and image construction.
 - [Security Policy](../.github/SECURITY.md) — Private vulnerability-reporting instructions and supported security scope.

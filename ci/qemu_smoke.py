@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import selectors
@@ -12,6 +14,13 @@ import sys
 import time
 from pathlib import Path
 
+from flash_benchmarks import (
+    RESULT_SCHEMA,
+    contract_sha256,
+    evaluate_document,
+    load_contract,
+    summarize,
+)
 from flashos_runtime_fixtures import (
     FIXTURE_PATH,
     FixtureContractError,
@@ -76,6 +85,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Assert that the root account rejects a login attempt",
     )
+    parser.add_argument(
+        "--benchmark-output",
+        type=Path,
+        help="Retain bounded target performance observations as JSON",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +102,20 @@ def resolve_ovmf(explicit: Path | None) -> Path:
 
 
 args = parse_args()
+benchmark_contract = load_contract() if args.benchmark_output is not None else None
+benchmark_started_utc = (
+    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if benchmark_contract is not None
+    else None
+)
+benchmark_profile = (
+    benchmark_contract["profiles"]["qualification"]
+    if benchmark_contract is not None
+    else {}
+)
+benchmark_warmups = int(benchmark_profile.get("target_warmups", 0))
+benchmark_samples = int(benchmark_profile.get("target_samples", 0))
+benchmark_pipeline_bytes = int(benchmark_profile.get("target_pipeline_bytes", 0))
 version = release_version()
 try:
     runtime_suite = load_fixture_suite(args.fixtures)
@@ -279,6 +307,7 @@ def collect_matrix_expectations(step, start: int) -> None:
 
 
 failure: BaseException | None = None
+benchmark_measurements: list[dict[str, object]] = []
 try:
     collect_until(b"FlashOS Bootloader")
     collect_until(b"Arrow keys and enter select mode")
@@ -322,7 +351,9 @@ try:
     collect_until(b"password:", login_start)
     send(b"user\r")
     collect_until(b"Login successful!", login_start)
+    first_prompt_started = time.perf_counter_ns()
     collect_until(runtime_suite.prompt, login_start)
+    first_prompt_elapsed = time.perf_counter_ns() - first_prompt_started
 
     # The same ordered, versioned suite is suitable for the automated QEMU
     # consumer and for manually observed real systems. Keeping the commands and
@@ -376,6 +407,104 @@ try:
                     f"FlashOS target matrix case {case.identifier!r} "
                     f"observed rejected marker {rejected!r}"
                 )
+
+    if args.benchmark_output is not None:
+        benchmark_measurements.append(
+            {
+                "case_id": "flashos-first-prompt-cold",
+                "unit": "ns",
+                "warmup_samples": [],
+                "samples": [first_prompt_elapsed],
+                "summary": summarize([first_prompt_elapsed]),
+            }
+        )
+
+        def timed_line(payload: bytes, marker: bytes) -> int:
+            if len(payload + runtime_suite.terminator) > EDITOR_INTERACTION_LIMIT:
+                raise ValueError("timed command exceeds the UART interaction boundary")
+            time.sleep(EDITOR_INTERACTION_SETTLE)
+            start = len(captured)
+            started = time.perf_counter_ns()
+            send(payload + runtime_suite.terminator)
+            collect_until(marker, start, visible=True)
+            return time.perf_counter_ns() - started
+
+        command_probe = b"^printf '\\120'"
+        command_warmups = [
+            timed_line(command_probe, b"P") for _ in range(benchmark_warmups)
+        ]
+        command_samples = [
+            timed_line(command_probe, b"P") for _ in range(benchmark_samples)
+        ]
+        benchmark_measurements.append(
+            {
+                "case_id": "flashos-command-latency-warm",
+                "unit": "ns",
+                "warmup_samples": command_warmups,
+                "samples": command_samples,
+                "summary": summarize(command_samples),
+            }
+        )
+
+        pipeline = (
+            f"^yes|^head -c{benchmark_pipeline_bytes}|^wc -c|^tr 0-9 A-J".encode()
+        )
+        pipeline_marker = (
+            str(benchmark_pipeline_bytes)
+            .translate(str.maketrans("0123456789", "ABCDEFGHIJ"))
+            .encode()
+        )
+
+        def timed_pipeline() -> int:
+            for offset in range(0, len(pipeline), EDITOR_INTERACTION_LIMIT):
+                send_editor_input(
+                    pipeline[offset : offset + EDITOR_INTERACTION_LIMIT], b""
+                )
+            time.sleep(EDITOR_INTERACTION_SETTLE)
+            start = len(captured)
+            started = time.perf_counter_ns()
+            send(runtime_suite.terminator)
+            collect_until(pipeline_marker, start, visible=True)
+            elapsed = time.perf_counter_ns() - started
+            return benchmark_pipeline_bytes * 1_000_000_000 // elapsed
+
+        pipeline_warmups = [timed_pipeline() for _ in range(benchmark_warmups)]
+        pipeline_samples = [timed_pipeline() for _ in range(benchmark_samples)]
+        benchmark_measurements.append(
+            {
+                "case_id": "flashos-pipeline-throughput-warm",
+                "unit": "bytes/second",
+                "warmup_samples": pipeline_warmups,
+                "samples": pipeline_samples,
+                "summary": summarize(pipeline_samples),
+            }
+        )
+
+        def timed_completion() -> int:
+            row_start = len(captured)
+            send_editor_input(b"pw", b"")
+            collect_until(runtime_suite.prompt + b"pw", row_start, visible=True)
+            time.sleep(EDITOR_INTERACTION_SETTLE)
+            started = time.perf_counter_ns()
+            send(b"\t")
+            collect_until(runtime_suite.prompt + b"pwd ", row_start, visible=True)
+            elapsed = time.perf_counter_ns() - started
+            reset_start = len(captured)
+            send_editor_input(b"\x03", b"")
+            collect_until(runtime_suite.prompt, reset_start, visible=True)
+            return elapsed
+
+        completion_warmups = [timed_completion() for _ in range(benchmark_warmups)]
+        completion_samples = [timed_completion() for _ in range(benchmark_samples)]
+        benchmark_measurements.append(
+            {
+                "case_id": "flashos-completion-latency-warm",
+                "unit": "ns",
+                "warmup_samples": completion_warmups,
+                "samples": completion_samples,
+                "summary": summarize(completion_samples),
+            }
+        )
 except BaseException as error:
     failure = error
 finally:
@@ -395,6 +524,46 @@ finally:
 if failure is not None:
     print(f"\nqemu smoke: FAILED: {failure}", file=sys.stderr)
     raise SystemExit(1)
+
+if args.benchmark_output is not None:
+    args.benchmark_output.parent.mkdir(parents=True, exist_ok=True)
+    result = {
+        "schema": RESULT_SCHEMA,
+        "suite_version": benchmark_contract["suite_version"],
+        "profile": "qualification",
+        "started_utc": benchmark_started_utc,
+        "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "contract_sha256": contract_sha256(),
+        "image_sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
+        "environment": {
+            "kind": "flashos-qemu-tcg",
+            "qemu": subprocess.check_output(
+                [args.qemu, "--version"], text=True
+            ).splitlines()[0],
+            "machine": "q35",
+            "cpu": "core2duo",
+            "vcpus": QUALIFICATION_VCPUS,
+            "memory_mib": 1024,
+            "disk_interface": args.disk_interface,
+        },
+        "noise_controls": {
+            "acceleration": "tcg",
+            "fixed_vcpus": True,
+            "snapshot_disk": True,
+            "measurement_clock": "host monotonic",
+            "uart_settle_excluded": True,
+            "sample_order": "surface-grouped; warmup discarded",
+        },
+        "parameters": {
+            "warmups": benchmark_warmups,
+            "samples": benchmark_samples,
+            "pipeline_bytes": benchmark_pipeline_bytes,
+        },
+        "measurements": benchmark_measurements,
+    }
+    args.benchmark_output.write_text(json.dumps(result, indent=2) + "\n")
+    evaluate_document(result, "flashos-qemu-tcg-core2duo")
+    print(f"target benchmark result: {args.benchmark_output}")
 
 print("\nqemu smoke: ok")
 verified = [

@@ -511,7 +511,8 @@ The contract verifies those specific interactions. It does not currently establi
 - suspend, resume, reboot, or shutdown behavior;
 - long-duration stability;
 - package installation after boot;
-- performance characteristics;
+- general performance characteristics outside the bounded Flash benchmark
+  contract;
 - inputs outside the exact target-matrix cases or general Flash language conformance;
 - target signal delivery, stopped/continued/signaled child transitions, or stopped-job terminal-mode restoration;
 - physical hardware compatibility.
@@ -549,6 +550,15 @@ python3 ci/qemu_smoke.py \
 Increasing a timeout can help distinguish a slow machine from an immediate failure. It must not be used to hide a repeatable hang.
 
 The complete captured serial stream is written to the requested log even when an assertion fails.
+
+When `--benchmark-output` is supplied, the same exact-image consumer runs the
+bounded target-owned Flash performance cases after the runtime fixtures and
+capability matrix, retains raw JSON, and evaluates it against the matching
+one-vCPU TCG budget. This adds first-prompt, command, pipeline, and completion
+observations; it does not turn the functional timeout into a performance
+threshold or establish physical-hardware performance. See [Flash Performance
+Benchmarks](../components/flash/benchmarks/README.md) for the measurement and
+evidence boundary.
 
 ## Hosted CI and artifact promotion
 
