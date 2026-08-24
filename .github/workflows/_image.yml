@@ -336,7 +336,7 @@ jobs:
           smoke_flags=()
           case "$CONFIG_NAME" in
             flashos) ;;
-            flashos-release) smoke_flags+=(--expect-root-locked) ;;
+            flashos-release) smoke_flags+=(--expect-root-locked --expect-passwordless-user) ;;
             *) echo "::error::unknown image profile: $CONFIG_NAME"; exit 1 ;;
           esac
           python3 ci/qemu_smoke.py \
@@ -363,7 +363,7 @@ jobs:
           smoke_flags=()
           case "$CONFIG_NAME" in
             flashos) ;;
-            flashos-release) smoke_flags+=(--expect-root-locked) ;;
+            flashos-release) smoke_flags+=(--expect-root-locked --expect-passwordless-user) ;;
             *) echo "::error::unknown image profile: $CONFIG_NAME"; exit 1 ;;
           esac
           python3 ci/qemu_smoke.py \

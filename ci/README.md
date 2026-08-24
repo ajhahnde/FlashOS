@@ -579,13 +579,15 @@ python3 ci/qemu_smoke.py \
   --image build/x86_64/flashos-release/harddrive.img \
   --disk-interface nvme \
   --log build/x86_64/flashos-release/qemu-harddrive-smoke.log \
-  --expect-root-locked
+  --expect-root-locked \
+  --expect-passwordless-user
 
 python3 ci/qemu_smoke.py \
   --image build/x86_64/flashos-release/redox-live.iso \
   --disk-interface usb \
   --log build/x86_64/flashos-release/qemu-live-usb-smoke.log \
-  --expect-root-locked
+  --expect-root-locked \
+  --expect-passwordless-user
 ```
 
 Add `--ovmf` if the firmware is not found automatically.
