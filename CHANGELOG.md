@@ -10,6 +10,11 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Released Flash 1.0.0 as the frozen component language, runtime, tooling, and
+  platform-capability contract. Its exhaustive host inventory, exact-image
+  FlashOS matrix, public claims, package version, and retained evidence now
+  share one machine-validated release boundary; FlashOS image versions and
+  publication remain separate.
 - Flash now uses bounded nonblocking raw-terminal reads on Redox instead of
   lossy PTY readiness notifications, preventing independent console editor
   actions from remaining indefinitely unread.
