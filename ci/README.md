@@ -27,6 +27,7 @@ Product-specific checks live under `ci/` so they can be used both locally and fr
 | Path                                                                                          | Purpose                                                                        |
 | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | [`ci/check_profile.py`](check_profile.py)                                                     | Product profiles, release settings, branding, pinning, and workflow invariants |
+| [`ci/check_developer_interface.py`](check_developer_interface.py)                             | Host command help, aliases, completion, and shell syntax                       |
 | [`ci/check_flashos_platform.py`](check_flashos_platform.py)                                   | FlashOS target/toolchain baseline and built target artifacts                   |
 | [`ci/check_flashos_capabilities.py`](check_flashos_capabilities.py)                           | Capability evidence inventory                                                  |
 | [`ci/check_flashos_operation_map.py`](check_flashos_operation_map.py)                         | Flash operation mapping to Rust, relibc, and Redox interfaces                  |
@@ -535,11 +536,14 @@ source ./flashos.sh
 flashos check ci
 ```
 
-This runs the local source-quality collection: helper syntax checks, product/profile checks, whitespace validation, root formatting/tests, Flash formatting/Clippy/tests, Ruff, and the offline Python unit tests.
+This runs the local source-quality collection: helper interface checks,
+product/profile checks, whitespace validation, root formatting/tests, Flash
+formatting/Clippy/tests, Ruff, and the offline Python unit tests.
 
 ### Direct checks
 
 ```bash
+python3 ci/check_developer_interface.py
 python3 ci/check_profile.py
 python3 ci/check_flashos_platform.py
 python3 ci/check_flashos_capabilities.py
@@ -669,6 +673,7 @@ Keep third-party Actions pinned to full commit SHAs and external Git package sou
 | Verification model        | [Verification and Testing](../docs/verification.md)                                        |
 | Development workflow      | [Development](../docs/development.md)                                                      |
 | Local helpers             | [`flashos.sh`](../flashos.sh)                                                              |
+| Developer interface check | [`check_developer_interface.py`](check_developer_interface.py)                             |
 | Product/profile checks    | [`check_profile.py`](check_profile.py)                                                     |
 | Platform baseline         | [`check_flashos_platform.py`](check_flashos_platform.py)                                   |
 | Capability evidence       | [`check_flashos_capabilities.py`](check_flashos_capabilities.py)                           |

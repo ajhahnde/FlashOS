@@ -113,13 +113,12 @@ Detailed Flash test organization belongs in the [Flash Development Guide](../com
 
 ### FlashOS Python
 
-The product-profile scripts, QEMU harness, and host developer tools are
+The product-profile scripts, QEMU harness, and developer-interface contract are
 FlashOS-owned Python. Lint and test them with:
 
 ```bash
-ruff check ci/ tools/flashos/
+ruff check ci/
 python3 -m unittest discover -s ci/tests -p 'test_*.py'
-python3 -m unittest discover -s tools/flashos/tests -p 'test_*.py'
 ```
 
 The command requires Ruff to be available on the host. Hosted CI installs its configured version before running the check.
@@ -137,6 +136,12 @@ When Zsh is installed:
 ```bash
 zsh -n flashos.sh
 zsh -n flashos.zsh
+```
+
+Run the offline command, help, alias, and completion contract with:
+
+```bash
+python3 ci/check_developer_interface.py
 ```
 
 Check the working-tree diff for whitespace errors:

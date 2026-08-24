@@ -361,6 +361,10 @@ if "  pull_request:" in coverage_workflow or "  schedule:" in coverage_workflow:
 ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text()
 if "python3 -m unittest discover -s ci/tests -p 'test_*.py'" not in ci_workflow:
     fail("standard CI must run the coverage-contract unit tests")
+if "python3 ci/check_developer_interface.py" not in ci_workflow:
+    fail("standard CI must validate the developer command interface")
+if "tools/flashos/" in ci_workflow:
+    fail("standard CI still references the removed developer helpers")
 if "python3 ci/check_flashos_platform.py" not in ci_workflow:
     fail("standard CI must validate the FlashOS platform source baseline")
 for expected in (

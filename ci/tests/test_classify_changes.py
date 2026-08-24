@@ -25,7 +25,7 @@ class ClassificationTests(unittest.TestCase):
                 "CHANGELOG.md",
                 ".github/SECURITY.md",
                 ".github/dependabot.yml",
-                "tools/flashos/cli.py",
+                "flashos.sh",
                 "flashos.zsh",
                 "components/flash/docs/reference.md",
             ]

@@ -45,7 +45,6 @@ LOW_RISK_PREFIXES = (
 # These helpers execute only on a development host. Their own tests remain in
 # the fast lane; changing them does not alter assembled FlashOS bytes.
 HOST_TOOL_FILES = {"flashos.sh", "flashos.zsh"}
-HOST_TOOL_PREFIXES = ("tools/flashos/",)
 
 # Markdown beside implementation may explain that implementation without
 # changing it. Non-Markdown files under these trees remain product-affecting.
@@ -76,7 +75,7 @@ def _normalise(path: str) -> str:
 def _is_low_risk(path: str) -> bool:
     if path in LOW_RISK_FILES or path in HOST_TOOL_FILES:
         return True
-    if path.startswith(LOW_RISK_PREFIXES + HOST_TOOL_PREFIXES):
+    if path.startswith(LOW_RISK_PREFIXES):
         return True
     return path.endswith(".md") and path.startswith(SOURCE_ADJACENT_DOC_PREFIXES)
 

@@ -38,8 +38,6 @@ unset _flashos_source_path
 FLASHOS_ARCH="${FLASHOS_ARCH:-x86_64}"
 FLASHOS_CONFIG_NAME="${FLASHOS_CONFIG_NAME:-flashos}"
 
-_FLASHOS_TOOL_DIR="${_FLASHOS_DIR}/tools/flashos"
-
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   _FLASHOS_RED="$(printf '\033[0;31m')"
   _FLASHOS_GREEN="$(printf '\033[0;32m')"
@@ -96,10 +94,24 @@ _flashos_require_file() {
   fi
 }
 
+_flashos_no_arguments() {
+  local command_name=$1
+  shift
+  if [ "$#" -ne 0 ]; then
+    _flashos_error "flashos $command_name accepts no arguments"
+    return 1
+  fi
+}
+
 # -- Profile and image workflows -------------------------------------------
 
 flashos-profile() {
   local requested="${1:-}"
+
+  if [ "$#" -gt 1 ]; then
+    _flashos_error "flashos profile accepts at most one profile"
+    return 1
+  fi
 
   if [ -z "$requested" ]; then
     printf '%s\n' "$FLASHOS_CONFIG_NAME"
@@ -107,7 +119,7 @@ flashos-profile() {
   fi
 
   case "$requested" in
-    dev|development) requested=flashos ;;
+    dev)             requested=flashos ;;
     release)         requested=flashos-release ;;
     help|-h|--help)
       printf '%s\n' "usage: flashos profile [dev|release|CONFIG_NAME]"
@@ -129,6 +141,7 @@ flashos-profile() {
 flashos-version() {
   local version_file="$_FLASHOS_DIR/versions.env"
   local version
+  _flashos_no_arguments version "$@" || return 1
   _flashos_require_file "$version_file" || return 1
 
   version="$(sed -n 's/^FLASHOS_RELEASE_VERSION=//p' "$version_file" | head -1)"
@@ -146,7 +159,7 @@ flashos-env() {
 flashos-build() {
   local mode=disk
   case "${1:-}" in
-    disk|image|harddrive|live|iso|both|rebuild)
+    disk|live|both|rebuild)
       mode=$1
       shift
       ;;
@@ -163,17 +176,17 @@ flashos-build() {
   esac
 
   case "$mode" in
-    disk|image|harddrive) _flashos_make all "$@" ;;
-    live|iso)             _flashos_make live "$@" ;;
-    both)                 _flashos_make all "$@" && _flashos_make live "$@" ;;
-    rebuild)              _flashos_make rebuild "$@" ;;
+    disk)    _flashos_make all "$@" ;;
+    live)    _flashos_make live "$@" ;;
+    both)    _flashos_make all "$@" && _flashos_make live "$@" ;;
+    rebuild) _flashos_make rebuild "$@" ;;
   esac
 }
 
 flashos-run() {
   local mode=disk
   case "${1:-}" in
-    disk|harddrive|live|iso)
+    disk|live)
       mode=$1
       shift
       ;;
@@ -189,8 +202,8 @@ flashos-run() {
   esac
 
   case "$mode" in
-    disk|harddrive) _flashos_make qemu live=no "$@" ;;
-    live|iso)       _flashos_make qemu live=yes "$@" ;;
+    disk) _flashos_make qemu live=no "$@" ;;
+    live) _flashos_make qemu live=yes "$@" ;;
   esac
 }
 
@@ -243,9 +256,9 @@ flashos-smoke() {
   [ "$#" -eq 0 ] || shift
 
   case "$mode" in
-    disk|harddrive) _flashos_smoke_one disk "$@" ;;
-    live|iso)       _flashos_smoke_one live "$@" ;;
-    all)            _flashos_smoke_one disk "$@" && _flashos_smoke_one live "$@" ;;
+    disk) _flashos_smoke_one disk "$@" ;;
+    live) _flashos_smoke_one live "$@" ;;
+    all)  _flashos_smoke_one disk "$@" && _flashos_smoke_one live "$@" ;;
     help|-h|--help)
       printf '%s\n' "usage: flashos smoke [disk|live|all] [qemu_smoke.py arguments]"
       ;;
@@ -282,10 +295,8 @@ flash-check() {
   esac
 }
 
-flashshell-check() {
-  printf '%s\n' \
-    'warning: flashshell-check is deprecated; use flash-check' >&2
-  flash-check "$@"
+_flashos_check_shell_helpers() {
+  _flashos_root command python3 ci/check_developer_interface.py
 }
 
 _flashos_check_quick() {
@@ -295,11 +306,9 @@ _flashos_check_quick() {
 }
 
 _flashos_check_python() {
-  _flashos_root command ruff check tools/flashos/ ci/ "$@" &&
+  _flashos_root command ruff check ci/ "$@" &&
     _flashos_root command python3 -m unittest discover \
-      -s ci/tests -p 'test_*.py' &&
-    _flashos_root command python3 -m unittest discover \
-      -s tools/flashos/tests -p 'test_*.py'
+      -s ci/tests -p 'test_*.py'
 }
 
 _flashos_check_root() {
@@ -360,7 +369,7 @@ flashos-podman() {
   fi
 
   case "$action" in
-    status|list) command podman machine list "$@" ;;
+    status)      command podman machine list "$@" ;;
     start)       command podman machine start "$@" ;;
     stop)        command podman machine stop "$@" ;;
     info)        command podman info "$@" ;;
@@ -376,6 +385,7 @@ flashos-podman() {
 
 flashos-doctor() {
   local missing=0 tool label
+  _flashos_no_arguments doctor "$@" || return 1
 
   _flashos_heading "FlashOS development environment"
   for tool in git make python3 cargo podman qemu-system-x86_64; do
@@ -560,8 +570,8 @@ _flashos_artifact_path() {
   local build_dir
   build_dir="$(_flashos_build_dir)"
   case "$1" in
-    disk|harddrive) printf '%s\n' "$build_dir/harddrive.img" ;;
-    live|iso)       printf '%s\n' "$build_dir/redox-live.iso" ;;
+    disk) printf '%s\n' "$build_dir/harddrive.img" ;;
+    live) printf '%s\n' "$build_dir/redox-live.iso" ;;
     *)
       _flashos_error "unknown artifact: $1 (expected disk or live)"
       return 1
@@ -615,7 +625,7 @@ flashos-artifacts() {
             _flashos_hash_file "$path" || return 1
           done
           ;;
-        disk|harddrive|live|iso)
+        disk|live)
           path="$(_flashos_artifact_path "$artifact")" || return 1
           _flashos_require_file "$path" || return 1
           _flashos_hash_file "$path"
@@ -640,8 +650,8 @@ _flashos_log_path() {
   local build_dir
   build_dir="$(_flashos_build_dir)"
   case "$1" in
-    disk|harddrive) printf '%s\n' "$build_dir/qemu-harddrive-smoke.log" ;;
-    live|iso)       printf '%s\n' "$build_dir/qemu-live-usb-smoke.log" ;;
+    disk) printf '%s\n' "$build_dir/qemu-harddrive-smoke.log" ;;
+    live) printf '%s\n' "$build_dir/qemu-live-usb-smoke.log" ;;
     *)
       _flashos_error "unknown log: $1 (expected disk or live)"
       return 1
@@ -659,7 +669,7 @@ flashos-logs() {
     list)
       command find "$build_dir" -maxdepth 1 -type f -name '*.log' -print 2>/dev/null | command sort
       ;;
-    disk|harddrive|live|iso)
+    disk|live)
       path="$(_flashos_log_path "$action")" || return 1
       _flashos_require_file "$path" || return 1
       command tail -n "${FLASHOS_LOG_LINES:-80}" "$path"
@@ -699,40 +709,6 @@ flashos-changes() {
       return 1
       ;;
   esac
-}
-
-flashos-commit() {
-  local commit_script="${_FLASHOS_TOOL_DIR}/flashos-commit.py"
-
-  if [ ! -f "$commit_script" ]; then
-    _flashos_error "commit helper not found: $commit_script"
-    return 1
-  fi
-
-  if [ ! -x "$commit_script" ]; then
-    _flashos_error "commit helper is not executable: $commit_script"
-    _flashos_error "run: chmod +x \"$commit_script\""
-    return 1
-  fi
-
-  _flashos_root command "$commit_script" "$@"
-}
-
-flashos-ask() {
-  local ask_script="${_FLASHOS_TOOL_DIR}/flashos-ask.py"
-
-  if [ ! -f "$ask_script" ]; then
-    _flashos_error "ask helper not found: $ask_script"
-    return 1
-  fi
-
-  if [ ! -x "$ask_script" ]; then
-    _flashos_error "ask helper is not executable: $ask_script"
-    _flashos_error "run: chmod +x \"$ask_script\""
-    return 1
-  fi
-
-  _flashos_root command "$ask_script" "$@"
 }
 
 # -- Maintenance and end-to-end qualification ------------------------------
@@ -816,6 +792,7 @@ flashos-qualify() {
 
 flashos-status() {
   local build_dir version artifact size
+  _flashos_no_arguments status "$@" || return 1
   build_dir="$(_flashos_build_dir)"
   version="$(flashos-version)" || return 1
 
@@ -837,9 +814,10 @@ flashos-status() {
 }
 
 flashos-list() {
+  _flashos_no_arguments list "$@" || return 1
   _flashos_usage
   _flashos_heading "Direct helper functions"
-  command grep -E '^(flashos(-[[:alnum:]-]+)?|flash-check|flashshell-check|fos)\(\)' \
+  command grep -E '^(flashos(-[[:alnum:]-]+)?|flash-check|fos)\(\)' \
     "$_FLASHOS_DIR/flashos.sh" | command sed 's/().*//' | command sort -u
 }
 
@@ -853,7 +831,7 @@ _flashos_usage() {
     "  version                   print the product version" \
     "  versions [show|check]     show release and tag state or check drift" \
     "  profile [dev|release]     show or select the image profile" \
-    "  env                       print the selected Make environment" \
+    "  env [make arguments]      print the selected Make environment" \
     "" \
     "Build and runtime" \
     "  build [disk|live|both]    build one or both images" \
@@ -866,8 +844,6 @@ _flashos_usage() {
     "  artifacts [action]        list, locate, or hash image artifacts" \
     "  logs [action]             inspect or follow QEMU smoke logs" \
     "  changes [action]          inspect Git state without writing it" \
-    "  commit [arguments]        create a manual or generated Git commit" \
-    "  ask [options] QUESTION    ask a read-only repository question" \
     "  check [scope]             run repository checks" \
     "  shell [scope]             run Flash host/target checks" \
     "" \
@@ -878,7 +854,7 @@ _flashos_usage() {
     "  list                      show commands and direct helper functions" \
     "  help                      show this overview" \
     "" \
-    "Use 'flashos <command> help' for command-specific help."
+    "Commands with modes, actions, or scopes accept command-specific help."
 }
 
 flashos() {
@@ -887,7 +863,7 @@ flashos() {
 
   case "$command_name" in
     status)           flashos-status "$@" ;;
-    doctor|setup)     flashos-doctor "$@" ;;
+    doctor)           flashos-doctor "$@" ;;
     version)          flashos-version "$@" ;;
     versions)         flashos-versions "$@" ;;
     profile)          flashos-profile "$@" ;;
@@ -898,17 +874,21 @@ flashos() {
     qualify)          flashos-qualify "$@" ;;
     recipe)           flashos-recipe "$@" ;;
     artifacts)        flashos-artifacts "$@" ;;
-    logs|log)         flashos-logs "$@" ;;
-    changes|change)   flashos-changes "$@" ;;
-    commit)           flashos-commit "$@" ;;
-    ask)              flashos-ask "$@" ;;
+    logs)             flashos-logs "$@" ;;
+    changes)          flashos-changes "$@" ;;
     check)            flashos-check "$@" ;;
     shell)            flash-check "$@" ;;
     podman)           flashos-podman "$@" ;;
     clean)            flashos-clean "$@" ;;
-    root)             builtin cd -- "$_FLASHOS_DIR" || return 1 ;;
+    root)
+      _flashos_no_arguments root "$@" || return 1
+      builtin cd -- "$_FLASHOS_DIR" || return 1
+      ;;
     list)             flashos-list "$@" ;;
-    help|-h|--help)   _flashos_usage ;;
+    help|-h|--help)
+      _flashos_no_arguments help "$@" || return 1
+      _flashos_usage
+      ;;
     *)
       _flashos_error "unknown command: $command_name"
       _flashos_usage >&2
@@ -928,7 +908,8 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
     previous="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-    choices="status doctor version versions profile env build run smoke qualify recipe artifacts logs changes commit ask check shell podman clean root list help"e
+      choices="status doctor version versions profile env build run smoke qualify recipe artifacts logs changes check shell podman clean root list help"
+    else
       case "$previous" in
         profile) choices="dev release" ;;
         versions) choices="show check" ;;
@@ -940,8 +921,6 @@ if [ -n "${BASH_VERSION:-}" ] && command -v complete >/dev/null 2>&1; then
         artifacts) choices="list path hash" ;;
         logs) choices="list disk live follow" ;;
         changes) choices="status diff stat staged recent" ;;
-        commit)  choices="-a -g -p --add-all --generate --push help" ;;
-        ask)     choices="-n --help" ;;
         check)   choices="quick profile root shell target python docs ci all" ;;
         shell)   choices="fmt clippy test target all" ;;
         podman)  choices="status start stop info" ;;
