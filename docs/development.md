@@ -283,12 +283,15 @@ Use a progressive workflow so that inexpensive failures are found before a full 
 Use a draft pull request when incomplete work benefits from hosted source
 feedback. A complete, locally green change may open directly for review and
 run its candidate gates once. Every ready candidate builds the canonical
-hard-drive image and boots it over NVMe; later candidate updates requalify the
-new head. Protected `main` does not rerun the suite. Its dedicated status
-workflow verifies that the merged tree exactly matches the successfully
-qualified pull-request tree and transfers the candidate and dependency-policy
-evidence to the new commit. Coverage and broader release evidence are explicit
-manual or release operations rather than recurring merge gates.
+hard-drive image and boots it over NVMe unless every changed path belongs to
+the explicit isolated documentation, policy, reporting, or host-tool allowlist;
+unknown or mixed paths fail closed into product qualification. Later candidate
+updates requalify the new head. Protected `main` does not rerun the suite. Its
+dedicated status workflow verifies that the merged tree exactly matches the
+successfully qualified pull-request tree, independently repeats the path
+classification, and transfers the appropriate candidate and dependency-policy
+evidence to the new commit. Coverage and release-candidate production remain
+explicit manual operations.
 
 The helper interface provides a concise view of the working tree:
 

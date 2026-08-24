@@ -222,22 +222,46 @@ for expected in (
 
 release_workflow = (ROOT / ".github/workflows/release.yml").read_text()
 for expected in (
-    'expected="v${FLASHOS_RELEASE_VERSION}"',
-    "FlashOS-${VERSION}-x86_64-harddrive.img.zst",
-    "FlashOS-${VERSION}-x86_64-live.iso.zst",
-    # A release must never be built from the profile that carries the
-    # development logins.
-    "config-name: flashos-release",
-    "release-evidence: true",
-    # Both SBOMs must ship, and each must be named for what it describes. A
-    # single unqualified document previously covered only the source workspace.
-    "FlashOS-${{ steps.version.outputs.version }}-source.cdx.json",
-    "FlashOS-${{ steps.version.outputs.version }}-image.cdx.json",
-    "SYFT_SOURCE_NAME: FlashOS-source",
-    "SYFT_SOURCE_VERSION: ${{ steps.version.outputs.version }}",
+    "name: Publish release",
+    "candidate-run-id:",
+    "gh run download",
+    "python3 ci/release_candidate.py select",
+    "python3 ci/release_candidate.py validate",
+    "environment: production",
+    "inputs.publish == true",
+    "published assets are immutable",
+    "Publish without rebuilding or substituting assets",
 ):
     if expected not in release_workflow:
-        fail(f"release workflow contract is missing: {expected}")
+        fail(f"release publisher contract is missing: {expected}")
+for forbidden in (
+    "docker build",
+    "zstd --",
+    "attest-build-provenance",
+    "sbom-action",
+    "uses: ./.github/workflows/_image.yml",
+    'tags: ["v*"]',
+):
+    if forbidden in release_workflow:
+        fail(f"release publisher must not regenerate candidate bytes: {forbidden}")
+
+candidate_workflow = (ROOT / ".github/workflows/candidate.yml").read_text()
+for expected in (
+    "name: Release candidate",
+    "source-sha:",
+    "python3 ci/check_candidate_qualification.py",
+    "config-name: flashos-release",
+    "release-evidence: true",
+    "FlashOS-${{ inputs.version }}-source.cdx.json",
+    "FlashOS-${VERSION}-x86_64-harddrive.img.zst",
+    "FlashOS-${VERSION}-x86_64-live.iso.zst",
+    "python3 ci/release_candidate.py create",
+    "python3 ci/release_candidate.py validate",
+    "attest-build-provenance",
+    "flashos-release-candidate-${{ github.run_id }}-${{ github.run_attempt }}",
+):
+    if expected not in candidate_workflow:
+        fail(f"release candidate contract is missing: {expected}")
 
 image_workflow = (ROOT / ".github/workflows/_image.yml").read_text()
 for expected in (
@@ -259,6 +283,10 @@ for expected in (
     "python3 ci/check_flashos_platform.py --artifacts",
     "--disk-interface nvme",
     "--disk-interface usb",
+    "source-ref:",
+    "type=gha,scope=${CACHE_SCOPE}",
+    "ignore-error=true",
+    "qemu-results.json",
 ):
     if expected not in image_workflow:
         fail(f"image workflow contract is missing: {expected}")
@@ -278,8 +306,8 @@ if "pull_request:\n    paths:" in security_workflow:
     fail("security-required must report for every pull request")
 if "  push:\n    branches: [main]" in security_workflow:
     fail("security workflow must not repeat dependency policy after PR merge")
-if "  schedule:" in security_workflow:
-    fail("dependency drift is manual rather than a recurring main status")
+if 'cron: "17 4 * * 1"' not in security_workflow:
+    fail("security policy must include the weekly dependency-drift run")
 
 coverage_workflow = (ROOT / ".github/workflows/coverage.yml").read_text()
 for expected in (
@@ -311,10 +339,16 @@ if "python3 ci/check_flashos_platform.py" not in ci_workflow:
 for expected in (
     "types: [opened, synchronize, reopened, ready_for_review]",
     "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+    "name: change-classification",
+    "git diff --name-only --no-renames -z",
+    "python3 ci/classify_changes.py --null",
+    "python3 ci/aggregate_ci.py",
+    "needs.scope.outputs.image_required == 'true'",
+    "root-target-v1-",
+    "flash-target-v1-",
     "github.event.pull_request.draft == false",
     "release-evidence: false",
     "PR_DRAFT:",
-    "ready candidates require successful product qualification",
 ):
     if expected not in ci_workflow:
         fail(f"standard CI candidate-qualification contract is missing: {expected}")
@@ -324,6 +358,14 @@ for forbidden in ("  push:\n", "  schedule:\n", "qualify_image"):
             "standard CI must not retain redundant orchestration: "
             f"{forbidden.strip()}"
         )
+
+aggregate_ci = (ROOT / "ci/aggregate_ci.py").read_text()
+for expected in (
+    "classification requires successful product qualification",
+    "image qualification ran contrary to classification",
+):
+    if expected not in aggregate_ci:
+        fail(f"standard CI aggregate contract is missing: {expected}")
 
 main_workflow = (ROOT / ".github/workflows/main-qualification.yml").read_text()
 for expected in (
@@ -341,8 +383,11 @@ main_qualification = (ROOT / "ci/check_main_qualification.py").read_text()
 for expected in (
     'CANDIDATE_WORKFLOW = "ci.yml"',
     'SECURITY_WORKFLOW = "security.yml"',
+    '"change-classification"',
     '"image-and-runtime / qemu-artifact-consumer"',
     'SECURITY_JOBS = {"security-required"}',
+    'SECURITY_POLICY_JOBS = {"dependency-review", "cargo-policy"}',
+    "_pull_classification",
     'f"/repos/{repository}/commits/{main_sha}/pulls"',
 ):
     if expected not in main_qualification:

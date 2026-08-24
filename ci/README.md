@@ -34,13 +34,18 @@ Product-specific checks live under `ci/` so they can be used both locally and fr
 | [`ci/check_flash_conformance.py`](check_flash_conformance.py)                                | Flash v1 executable host-conformance inventory and refusal-boundary audit       |
 | [`ci/check_flash_release.py`](check_flash_release.py)                                        | Flash 1.0.0 version, evidence, claim, and candidate-workflow contract            |
 | [`ci/check_coverage.py`](check_coverage.py)                                                   | LCOV report completeness                                                       |
+| [`ci/classify_changes.py`](classify_changes.py)                                               | Fail-closed PR product and dependency-policy routing                            |
+| [`ci/aggregate_ci.py`](aggregate_ci.py)                                                       | Stable aggregate result and classifier/job agreement                            |
+| [`ci/check_candidate_qualification.py`](check_candidate_qualification.py)                     | Exact source-to-PR required/security evidence                                   |
+| [`ci/release_candidate.py`](release_candidate.py)                                             | Candidate manifest, inventory, checksum, tree, and QEMU-byte validation         |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                                           | x86_64 serial runtime smoke tests                                              |
 | [`ci/container/Dockerfile`](container/Dockerfile)                                             | Hosted image-build environment                                                 |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                                     | Main CI                                                                        |
 | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml)                         | Flash host coverage                                                            |
 | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)                             | Reusable image build and QEMU qualification                                    |
 | [`.github/workflows/security.yml`](../.github/workflows/security.yml)                         | Dependency and Cargo policy checks                                             |
-| [`.github/workflows/release.yml`](../.github/workflows/release.yml)                           | Release qualification and publication                                          |
+| [`.github/workflows/candidate.yml`](../.github/workflows/candidate.yml)                       | Non-publishing release-candidate production                                    |
+| [`.github/workflows/release.yml`](../.github/workflows/release.yml)                           | Exact candidate validation and publication                                     |
 | [`flashos.sh`](../flashos.sh)                                                                 | Local helper commands                                                          |
 
 If this document and an executable check disagree, the executable implementation wins.
@@ -52,19 +57,17 @@ The candidate and protected-main path is:
 ```text
 pull request
     │
+    ├── change-classification
+    │   └── fast or product lane; unknown paths fail closed
+    │
     ├── repository-quality
     │   └── root checks + Python/product checks
     │
     ├── flash-quality
     │   └── fmt + Clippy + Flash host tests
     │
-    └── image-and-runtime
-        └── _image.yml
-            ├── containerized image build
-            │   └── hard-drive image + SHA256SUMS
-            │
-            └── separate QEMU consumer
-                └── disk image over NVMe
+    └── image-and-runtime (product lane only)
+        └── containerized producer → checksum handoff → QEMU consumer
                         ↓
                     CI / required
                         ↓
@@ -73,14 +76,15 @@ pull request
                   Main verified / verified
 ```
 
-Draft pull requests stop after the source jobs. Every ready candidate receives
-the canonical image and QEMU qualification. The protected-main workflow does
-not rerun those tests: it verifies that the merged tree exactly equals the
-candidate tree and links the successful `required` and `security-required`
-evidence to the new `main` commit. Coverage is manual, while security reports
-on every pull request and can also be requested manually. Releases reuse
-`_image.yml` with the full release evidence path before packaging or publishing
-anything.
+Draft pull requests stop after the source jobs. Ready pull requests take the
+product lane unless every changed path belongs to the explicit documentation,
+policy, reporting, or isolated host-tool allowlist. Unknown and mixed paths
+fail closed into image and QEMU qualification. The `required` aggregate checks
+that the jobs agree with the classifier. Protected-main verification
+independently classifies the merged PR, proves exact tree identity, and checks
+the successful `required` and `security-required` evidence instead of rerunning
+the suite. Coverage is manual. Dependency policy runs when classified, weekly,
+and on manual request.
 
 Host tests, image construction, QEMU checks, and physical hardware testing are separate verification layers. See [Verification and Testing](../docs/verification.md) for their exact scope.
 
@@ -301,26 +305,37 @@ performance, or complete Flash language behavior.
 
 The candidate workflow is [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs for pull requests and manual dispatch.
 
-The two source-quality jobs are:
+The classifier and two source-quality jobs are:
 
-| Job                  | Checks                                                                            |
-| -------------------- | --------------------------------------------------------------------------------- |
-| `repository-quality` | Root formatting/tests, Ruff, Python tests, product checks, whitespace             |
-| `flash-quality`      | Flash formatting, Clippy, v1 conformance inventory, and locked host tests          |
+| Job                    | Checks                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `change-classification` | Changed paths, selected lane, image requirement, and dependency-policy scope  |
+| `repository-quality`   | Root formatting/tests, Ruff, Python tests, product checks, whitespace          |
+| `flash-quality`        | Flash formatting, Clippy, v1 conformance inventory, and locked host tests      |
 
-`image-and-runtime` calls `_image.yml` after both source-quality jobs pass.
+The source jobs remain required on every PR. Their Cargo downloads and build
+outputs use separate toolchain/lockfile/profile keys. A manual `cold-cache` run
+disables these caches so cached and clean results can be compared.
 
-Draft pull requests skip the image build. Every non-draft candidate builds and
-boots the canonical hard-drive image, so the final result does not depend on a
-path classifier.
+`image-and-runtime` calls `_image.yml` only when the classifier selects the
+product lane and the PR is ready. Documentation, policy, reporting, and
+isolated host-tool paths may select the fast lane. Product source, recipes,
+profiles, image/QEMU tooling, CI orchestration, mixed changes, and unknown paths
+select the product lane. Drafts defer the image even when it will be required
+at ready-for-review.
 
 The final `required` job combines these results into the stable status used by
 repository rules. [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml)
 then reports `verified` on the protected-main commit only after
 [`check_main_qualification.py`](check_main_qualification.py) verifies the
-associated pull request, exact Git-tree identity, complete candidate jobs, and
+associated pull request, exact Git-tree identity, independently recomputed path
+classification, the appropriate successful or skipped image jobs, and
 `security-required` evidence. This preserves a meaningful visible check on
 `main` without executing the suite twice.
+
+The aggregate decision table and selected-run/artifact rules are Python
+contracts with negative unit tests, rather than untested shell branches that
+exist only in workflow YAML.
 
 ### Coverage
 
@@ -340,17 +355,23 @@ The percentage is Flash host coverage; it does not include target-only Redox cod
 
 Inputs:
 
-| Input              | Purpose                                                |
-| ------------------ | ------------------------------------------------------ |
-| `artifact-name`    | Promoted artifact name                                 |
-| `retention-days`   | Artifact retention                                     |
-| `config-name`      | x86_64 profile; defaults to `flashos`                  |
-| `release-evidence` | Also build/boot live media and generate the image SBOM |
+| Input                   | Purpose                                                     |
+| ----------------------- | ----------------------------------------------------------- |
+| `artifact-name`         | Promoted image artifact name                                |
+| `runtime-evidence-name` | QEMU logs/results artifact name                             |
+| `retention-days`        | Artifact retention                                          |
+| `config-name`           | x86_64 profile; defaults to `flashos`                       |
+| `release-evidence`      | Also build/boot live media and generate the image SBOM      |
+| `source-ref`            | Exact source commit                                         |
+| `cold-cache`            | Disable BuildKit cache restore/save for a diagnostic run    |
 
-The candidate producer uses [`ci/container/Dockerfile`](container/Dockerfile)
-to build the hard-drive image, validates target artifacts, creates and verifies
-`SHA256SUMS`, and uploads the result. A separate runner verifies the checksums
-again and boots that exact image over NVMe.
+The producer uses [`ci/container/Dockerfile`](container/Dockerfile) to build the
+hard-drive image, validates target artifacts, creates and verifies
+`SHA256SUMS`, and uploads the result. BuildKit layers are keyed by the pinned
+container/toolchain inputs and Docker's actual layer input graph; cache export
+failure is ignored. A cold-cache run adds `--no-cache`. Product outputs, final
+images, candidate bundles, manifests, SBOMs, attestations, and QEMU results are
+never restored as authoritative cache entries.
 
 The candidate artifact contains:
 
@@ -359,16 +380,18 @@ FlashOS-x86_64-harddrive.img
 SHA256SUMS
 ```
 
-Release qualification sets `release-evidence: true`. It additionally builds
+Release-candidate qualification sets `release-evidence: true`. It additionally builds
 and boots the live image over USB mass storage, collects staged target payloads,
 and generates the image CycloneDX SBOM. The release profile also enables the
 root-lock assertion.
 
-Failed runtime jobs attempt to preserve:
+Runtime jobs preserve available evidence on both success and failure:
 
 ```text
-qemu-harddrive-smoke-attempt-*.log
+qemu-harddrive-smoke.log
+qemu-harddrive-performance.json
 qemu-live-usb-smoke.log
+qemu-results.json
 SHA256SUMS
 ```
 
@@ -393,38 +416,56 @@ licenses
 sources
 ```
 
-`security-required` is the stable aggregate used by repository rules. Security reports should follow the [Security Policy](../.github/SECURITY.md).
+`security-required` is the stable aggregate used by repository rules. The
+underlying gates run for classified dependency inputs, every Monday, and manual
+dispatch; other PRs receive a controlled skip. Security reports should follow
+the [Security Policy](../.github/SECURITY.md).
 
-### Releases
+### Release candidates and publication
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs for `v*` tags and manual dispatch.
+[`.github/workflows/candidate.yml`](../.github/workflows/candidate.yml) is a
+manual, non-publishing producer. It accepts a full source commit, the exact
+`versions.env` version, reviewed release notes, and an optional cold-cache
+diagnostic. Before building it verifies that the source is a reviewable PR head
+or an exact-tree merged PR result with successful `required` and
+`security-required` evidence.
 
-Release image qualification reuses `_image.yml` with:
+The candidate reuses `_image.yml` with:
 
 ```text
 config-name: flashos-release
 release-evidence: true
 ```
 
-For tagged runs, the tag must match the version in [`versions.env`](../versions.env):
-
-```text
-v<FLASHOS_RELEASE_VERSION>
-```
-
-After qualification, the workflow verifies the promoted images, compresses them with Zstandard, creates a source SBOM, carries forward the image SBOM, generates `SHA256SUMS`, requests provenance attestations, and uploads the release candidate.
+It builds the raw release-profile disk and live images once. Separate QEMU
+consumers boot those exact raw bytes on the NVMe and USB paths on their first
+attempt. Packaging verifies the handoff, compresses those same bytes, creates
+the source SBOM, promotes the image SBOM, carries the reviewed notes and QEMU
+evidence, writes `SHA256SUMS`, and creates `candidate-manifest.json`.
 
 ```text
 FlashOS-<version>-x86_64-harddrive.img.zst
 FlashOS-<version>-x86_64-live.iso.zst
 FlashOS-<version>-source.cdx.json
 FlashOS-<version>-image.cdx.json
+FlashOS-<version>-release-notes.md
+candidate-manifest.json
+qemu-results.json and logs
 SHA256SUMS
 ```
 
-The source SBOM describes the repository/source-dependency view. The image SBOM describes staged target payloads and recipe metadata associated with the built images.
+The manifest binds the repository, producer run and attempt, source commit and
+tree, version, release profile, required/security run IDs, pinned input graph,
+allowlisted inventory, every candidate digest, raw image digests, and both QEMU
+results. Re-running the producer creates a distinct artifact identity.
 
-Only tag-context runs can publish a GitHub Release. The publication job verifies the candidate checksums again and refuses to overwrite an existing release.
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) is a manual
+consumer of an exact existing tag and candidate run ID. Its default dry run
+validates the repository/workflow/run/attempt, artifact expiry, tag/version,
+tag-tree/candidate-tree equality, inventory, checksums, decompressed image
+digests, and release absence. Publication repeats validation in the protected
+`production` environment and uploads the candidate files without building,
+compressing, generating, attesting, or substituting anything.
 
 ## Artifacts and supply chain
 
@@ -448,34 +489,35 @@ checksum verification
 NVMe QEMU test
 ```
 
-Release packaging starts from a separately built and qualified release-profile artifact:
+Release packaging and publication preserve one candidate byte chain:
 
 ```text
-qualified release images
+exact source + successful required/security evidence
     ↓
-checksum verification
+once-built raw release images
     ↓
-compressed images + source SBOM + image SBOM
+separate NVMe/USB QEMU consumers
     ↓
-release SHA256SUMS
+compressed bytes + SBOMs + notes + QEMU evidence
     ↓
-provenance attestation
+checksums + manifest + provenance attestations
     ↓
-release candidate
+exact candidate run ID + exact tag/tree validation
     ↓
-optional tag publication
+publication without rebuild
 ```
 
-| Artifact               | Contents                                              |
-| ---------------------- | ----------------------------------------------------- |
-| Candidate image        | Raw hard-drive image and checksums                    |
-| Release image evidence | Raw disk, raw live image, image SBOM, and checksums   |
-| Release candidate      | Compressed images, source SBOM, image SBOM, checksums |
-| QEMU diagnostics       | Serial logs and image checksums                       |
+| Artifact               | Contents                                                                  |
+| ---------------------- | ------------------------------------------------------------------------- |
+| PR image               | Raw hard-drive image and checksums                                        |
+| Release image evidence | Raw disk, raw live image, image SBOM, and checksums                       |
+| QEMU evidence          | Both serial logs, target performance JSON, result record, raw digests     |
+| Release candidate      | Compressed images, SBOMs, notes, QEMU evidence, checksums, manifest        |
 
 The pipeline also uses pinned Rust toolchains, Cargo lockfiles/policies, immutable Git recipe revisions, full commit pins for third-party Actions, a digest-pinned CI base image, checksum verification of the Rust installer, and SHA-256 verification across artifact handoffs.
 
-Release candidate subjects receive GitHub provenance attestations.
+Every release-candidate file receives GitHub provenance attestation in the
+producer run. Publication creates no replacement attestation.
 
 The pipeline does not currently perform two independent builds and compare their output bytes, so it should not be described as a reproducible-build verifier.
 
@@ -629,8 +671,12 @@ Keep third-party Actions pinned to full commit SHAs and external Git package sou
 | Capability classification | [`check_flashos_capability_classification.py`](check_flashos_capability_classification.py) |
 | Capability report         | [`check_flashos_capability_report.py`](check_flashos_capability_report.py)                 |
 | Target capability matrix  | [`check_flashos_target_matrix.py`](check_flashos_target_matrix.py)                         |
+| Change classification     | [`classify_changes.py`](classify_changes.py)                                               |
+| Required aggregate        | [`aggregate_ci.py`](aggregate_ci.py)                                                       |
 | QEMU runtime checks       | [`qemu_smoke.py`](qemu_smoke.py)                                                           |
-| Main qualification        | [`check_main_qualification.py`](check_main_qualification.py)                              |
+| Main qualification        | [`check_main_qualification.py`](check_main_qualification.py)                               |
+| Candidate evidence        | [`check_candidate_qualification.py`](check_candidate_qualification.py)                     |
+| Candidate manifest        | [`release_candidate.py`](release_candidate.py)                                             |
 | Coverage validation       | [`check_coverage.py`](check_coverage.py)                                                   |
 | Hosted build environment  | [`container/Dockerfile`](container/Dockerfile)                                             |
 | Standard CI               | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                                  |
@@ -638,7 +684,8 @@ Keep third-party Actions pinned to full commit SHAs and external Git package sou
 | Coverage                  | [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml)                      |
 | Image build/runtime       | [`.github/workflows/_image.yml`](../.github/workflows/_image.yml)                          |
 | Security                  | [`.github/workflows/security.yml`](../.github/workflows/security.yml)                      |
-| Release                   | [`.github/workflows/release.yml`](../.github/workflows/release.yml)                        |
+| Candidate production      | [`.github/workflows/candidate.yml`](../.github/workflows/candidate.yml)                    |
+| Release publication       | [`.github/workflows/release.yml`](../.github/workflows/release.yml)                        |
 | Root Cargo policy         | [`deny.toml`](../deny.toml)                                                                |
 | Flash Cargo policy        | [`components/flash/deny.toml`](../components/flash/deny.toml)                              |
 | Product version           | [`versions.env`](../versions.env)                                                          |
