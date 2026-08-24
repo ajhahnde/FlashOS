@@ -69,7 +69,6 @@ def _input_identity(root: Path) -> dict[str, Any]:
         "config/flashos-base.toml",
         "config/x86_64/flashos-release.toml",
         "ci/container/Dockerfile",
-        "cookbook.lock",
         "rust-toolchain.toml",
     )
     files: dict[str, str] = {}
@@ -140,6 +139,7 @@ def _expected_payload(version: str) -> set[str]:
         f"FlashOS-{version}-source.cdx.json",
         f"FlashOS-{version}-image.cdx.json",
         f"FlashOS-{version}-release-notes.md",
+        "cookbook.lock",
         "qemu-harddrive-performance.json",
         "qemu-harddrive-smoke.log",
         "qemu-live-usb-smoke.log",

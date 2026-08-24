@@ -166,6 +166,7 @@ jobs:
           if [ "${RELEASE_EVIDENCE}" = "true" ]; then
             cp "build/x86_64/${CONFIG_NAME}/redox-live.iso" \
               dist/image/FlashOS-x86_64-live.iso
+            cp cookbook.lock dist/image/cookbook.lock
           fi
           # Bind the SBOM to the artifacts it describes and give it a component
           # list. Syft finds nothing in the staged payload on its own: these are
@@ -260,6 +261,7 @@ jobs:
               artifacts+=(
                 FlashOS-x86_64-live.iso
                 FlashOS-x86_64-image.cdx.json
+                cookbook.lock
               )
             fi
             sha256sum "${artifacts[@]}" > SHA256SUMS

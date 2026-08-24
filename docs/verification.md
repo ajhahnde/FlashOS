@@ -725,6 +725,7 @@ After runtime qualification, the same candidate run:
 
 - downloads the qualified disk, live image, image SBOM, and image checksums;
 - verifies the incoming checksums;
+- carries the generated `cookbook.lock` that resolved the qualified image build;
 - compresses the exact QEMU-qualified disk and live bytes and verifies that
   decompression retains their raw digests;
 - generates a source-oriented CycloneDX SBOM before promoted binaries enter
@@ -780,6 +781,7 @@ The published assets consist of:
 - image SBOM;
 - reviewed release notes;
 - QEMU logs, result, and target performance evidence;
+- generated cookbook resolution;
 - candidate manifest;
 - `SHA256SUMS`.
 

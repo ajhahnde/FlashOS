@@ -37,6 +37,7 @@ class CandidateTests(unittest.TestCase):
             f"FlashOS-{VERSION}-source.cdx.json": b"{}\n",
             f"FlashOS-{VERSION}-image.cdx.json": b"{}\n",
             f"FlashOS-{VERSION}-release-notes.md": b"notes\n",
+            "cookbook.lock": b"# generated build resolution\n",
             "qemu-harddrive-performance.json": b"{}\n",
             "qemu-harddrive-smoke.log": b"disk ok\n",
             "qemu-live-usb-smoke.log": b"live ok\n",
@@ -100,6 +101,20 @@ class CandidateTests(unittest.TestCase):
             manifest["raw_images"], {"harddrive": "a" * 64, "live": "b" * 64}
         )
         self.assertGreater(manifest["inputs"]["recipe_count"], 0)
+        self.assertIn("cookbook.lock", manifest["files"])
+
+    def test_generated_cookbook_lock_is_required_and_bound(self):
+        (self.bundle / "cookbook.lock").unlink()
+        with self.assertRaisesRegex(MODULE.CandidateError, "not regular"):
+            self.create()
+
+        (self.bundle / "cookbook.lock").write_bytes(
+            b"# generated build resolution\n"
+        )
+        self.create()
+        (self.bundle / "cookbook.lock").write_bytes(b"tampered\n")
+        with self.assertRaisesRegex(MODULE.CandidateError, "identity mismatch"):
+            MODULE.validate_bundle(self.bundle)
 
     def test_tampering_is_rejected(self):
         self.create()

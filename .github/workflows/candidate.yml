@@ -144,6 +144,7 @@ jobs:
             -o "dist/candidate/FlashOS-${VERSION}-x86_64-live.iso.zst"
           cp dist/input/FlashOS-x86_64-image.cdx.json \
             "dist/candidate/FlashOS-${VERSION}-image.cdx.json"
+          cp dist/input/cookbook.lock dist/candidate/cookbook.lock
           cp "${NOTES_PATH}" "dist/candidate/FlashOS-${VERSION}-release-notes.md"
           cp \
             dist/evidence/qemu-harddrive-performance.json \
@@ -159,6 +160,7 @@ jobs:
               "FlashOS-${VERSION}-source.cdx.json" \
               "FlashOS-${VERSION}-image.cdx.json" \
               "FlashOS-${VERSION}-release-notes.md" \
+              cookbook.lock \
               qemu-harddrive-performance.json \
               qemu-harddrive-smoke.log \
               qemu-live-usb-smoke.log \

@@ -382,8 +382,9 @@ SHA256SUMS
 
 Release-candidate qualification sets `release-evidence: true`. It additionally builds
 and boots the live image over USB mass storage, collects staged target payloads,
-and generates the image CycloneDX SBOM. The release profile also enables the
-root-lock assertion.
+generates the image CycloneDX SBOM, and carries the generated `cookbook.lock`
+that resolved the exact build. The release profile also enables the root-lock
+assertion.
 
 Runtime jobs preserve available evidence on both success and failure:
 
@@ -449,15 +450,17 @@ FlashOS-<version>-x86_64-live.iso.zst
 FlashOS-<version>-source.cdx.json
 FlashOS-<version>-image.cdx.json
 FlashOS-<version>-release-notes.md
+cookbook.lock
 candidate-manifest.json
 qemu-results.json and logs
 SHA256SUMS
 ```
 
 The manifest binds the repository, producer run and attempt, source commit and
-tree, version, release profile, required/security run IDs, pinned input graph,
-allowlisted inventory, every candidate digest, raw image digests, and both QEMU
-results. Re-running the producer creates a distinct artifact identity.
+tree, version, release profile, required/security run IDs, tracked input graph,
+generated cookbook resolution, allowlisted inventory, every candidate digest,
+raw image digests, and both QEMU results. Re-running the producer creates a
+distinct artifact identity.
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) is a manual
 consumer of an exact existing tag and candidate run ID. Its default dry run
