@@ -121,11 +121,17 @@ jobs:
       - name: Validate the Flash v1 conformance inventory
         run: python3 ../../ci/check_flash_conformance.py
 
+      - name: Validate the exhaustive Flash v1 exercise contract
+        run: python3 ../../ci/check_flash_v1_exercises.py
+
       - name: Validate the Flash performance contract
         run: python3 ../../ci/flash_benchmarks.py
 
       - name: Host v1 conformance and workspace tests
         run: cargo test --workspace --locked
+
+      - name: Execute the exhaustive Flash v1 host exercises
+        run: python3 exercises/run.py --profile ci --no-build
 
       - name: Run the bounded Flash benchmark smoke
         run: python3 benchmarks/run.py --profile smoke

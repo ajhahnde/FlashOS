@@ -45,6 +45,14 @@ REQUIRED_SURFACES = (
     "unicode-multiline-editing",
     "job-semantics",
     "clean-exit",
+    "language-values",
+    "language-control",
+    "functions-modules",
+    "intrinsics",
+    "launcher-frontends",
+    "language-server",
+    "documentation-examples",
+    "intentional-refusals",
 )
 
 
