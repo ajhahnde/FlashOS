@@ -29,11 +29,20 @@ jobs:
     name: validate-exact-candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
+
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
 
       - name: Download the selected candidate run
         env:
@@ -53,7 +62,7 @@ jobs:
           gh api \
             "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
             > dist/selection/artifacts.json
-          selection="$(python3 ci/release_candidate.py select \
+          selection="$(build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/release_candidate.fsh select \
             --run dist/selection/run.json \
             --artifacts dist/selection/artifacts.json \
             --repository "${GITHUB_REPOSITORY}" \
@@ -78,7 +87,7 @@ jobs:
           source_commit="$(git rev-parse "${TAG}^{commit}")"
           source_tree="$(git rev-parse "${TAG}^{tree}")"
           run_attempt="$(cat dist/candidate-run-attempt)"
-          python3 ci/release_candidate.py validate \
+          build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/release_candidate.fsh validate \
             --bundle dist/release \
             --repository "${GITHUB_REPOSITORY}" \
             --version "${FLASHOS_RELEASE_VERSION}" \
@@ -110,6 +119,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: production
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
     permissions:
       actions: read
       contents: write
@@ -118,6 +130,12 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
+
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
 
       - name: Download the exact candidate again
         env:
@@ -131,7 +149,7 @@ jobs:
           gh api \
             "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
             > dist/selection/artifacts.json
-          selection="$(python3 ci/release_candidate.py select \
+          selection="$(build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/release_candidate.fsh select \
             --run dist/selection/run.json \
             --artifacts dist/selection/artifacts.json \
             --repository "${GITHUB_REPOSITORY}" \
@@ -148,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           source versions.env
-          python3 ci/release_candidate.py validate \
+          build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/release_candidate.fsh validate \
             --bundle dist/release \
             --repository "${GITHUB_REPOSITORY}" \
             --version "${FLASHOS_RELEASE_VERSION}" \

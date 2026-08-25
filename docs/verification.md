@@ -980,7 +980,7 @@ Do not remove an assertion solely because a change fails it. First determine whe
 | Required CI aggregation                  | [`ci/aggregate_ci.fsh`](../ci/aggregate_ci.fsh)                       |
 | Protected-main evidence transfer         | [`ci/check_main_qualification.fsh`](../ci/check_main_qualification.fsh) |
 | Candidate evidence resolution            | [`ci/check_candidate_qualification.fsh`](../ci/check_candidate_qualification.fsh) |
-| Candidate manifest validation            | [`ci/release_candidate.py`](../ci/release_candidate.py)               |
+| Candidate manifest validation            | [`ci/release_candidate.fsh`](../ci/release_candidate.fsh)             |
 | Public local helper behavior             | [`flashos.sh`](../flashos.sh)                                         |
 | Standard hosted CI orchestration         | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)             |
 | Protected-main status workflow           | [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml) |

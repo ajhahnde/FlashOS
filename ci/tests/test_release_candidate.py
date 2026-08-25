@@ -9,13 +9,14 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location(
-    "release_candidate", ROOT / "ci/release_candidate.py"
-)
-MODULE = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = MODULE
-SPEC.loader.exec_module(MODULE)
+SCRIPT = ROOT / "ci/release_candidate.py"
+MODULE = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("release_candidate", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    MODULE = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = MODULE
+    SPEC.loader.exec_module(MODULE)
 
 COMMIT = "1" * 40
 TREE = "2" * 40
@@ -26,6 +27,10 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+@unittest.skipUnless(
+    MODULE is not None,
+    "the Python release-candidate validator has migrated to Flash",
+)
 class CandidateTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -183,6 +188,10 @@ class CandidateTests(unittest.TestCase):
             MODULE.validate_bundle(self.bundle)
 
 
+@unittest.skipUnless(
+    MODULE is not None,
+    "the Python release-candidate validator has migrated to Flash",
+)
 class CandidateSelectionTests(unittest.TestCase):
     def run_payload(self):
         return {

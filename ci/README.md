@@ -39,7 +39,7 @@ Product-specific checks live under `ci/` so they can be used both locally and fr
 | [`ci/classify_changes.fsh`](classify_changes.fsh)                                             | Fail-closed PR product and dependency-policy routing                            |
 | [`ci/aggregate_ci.fsh`](aggregate_ci.fsh)                                                     | Stable aggregate result and classifier/job agreement                            |
 | [`ci/check_candidate_qualification.fsh`](check_candidate_qualification.fsh)                   | Exact source-to-PR required/security evidence                                   |
-| [`ci/release_candidate.py`](release_candidate.py)                                             | Candidate manifest, inventory, checksum, tree, and QEMU-byte validation         |
+| [`ci/release_candidate.fsh`](release_candidate.fsh)                                           | Candidate manifest, inventory, checksum, tree, and QEMU-byte validation         |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                                           | x86_64 serial runtime smoke tests                                              |
 | [`ci/container/Dockerfile`](container/Dockerfile)                                             | Hosted image-build environment                                                 |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                                     | Main CI                                                                        |
@@ -503,6 +503,10 @@ consumers boot those exact raw bytes on the NVMe and USB paths on their first
 attempt. Packaging verifies the handoff, compresses those same bytes, creates
 the source SBOM, promotes the image SBOM, carries the reviewed notes and QEMU
 evidence, writes `SHA256SUMS`, and creates `candidate-manifest.json`.
+Candidate creation and both publication-validation jobs acquire the immutable
+Flash 1.0 runtime and pinned jq before invoking
+[`release_candidate.fsh`](release_candidate.fsh); Flash owns selection,
+identity, inventory, checksum, tree, QEMU-attempt, and decompressed-byte policy.
 
 ```text
 FlashOS-<version>-x86_64-harddrive.img.zst
@@ -749,7 +753,7 @@ Keep third-party Actions pinned to full commit SHAs and external Git package sou
 | QEMU runtime checks       | [`qemu_smoke.py`](qemu_smoke.py)                                                           |
 | Main qualification        | [`check_main_qualification.fsh`](check_main_qualification.fsh)                             |
 | Candidate evidence        | [`check_candidate_qualification.fsh`](check_candidate_qualification.fsh)                   |
-| Candidate manifest        | [`release_candidate.py`](release_candidate.py)                                             |
+| Candidate manifest        | [`release_candidate.fsh`](release_candidate.fsh)                                           |
 | Coverage validation       | [`check_coverage.fsh`](check_coverage.fsh)                                                 |
 | Hosted build environment  | [`container/Dockerfile`](container/Dockerfile)                                             |
 | Standard CI               | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                                  |

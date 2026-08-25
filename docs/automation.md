@@ -122,6 +122,10 @@ The bootstrap manifest binds the fixed source commit and tree, pinned Rust
 toolchain, exact `fsh 1.0.0` version, and binary SHA-256. The harness refuses a
 missing, non-executable, wrong-version, crashing, always-success,
 corrupt-output, or capture-overflow runtime before trusting migration results.
+For release-candidate policy it materializes the frozen Python predecessor and
+compares manifest semantics plus creation, validation, selection, tampering,
+symlink, inventory, identity, and compressed-image outcomes through each Flash
+runtime.
 
 Any new surface or changed disposition must update the implementation,
 inventory contract, tests, and this document together. Target package/image

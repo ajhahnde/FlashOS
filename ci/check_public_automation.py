@@ -231,7 +231,7 @@ EXPECTED_EMBEDDED = {
     "cookbook-shell-body": 164,
     "docker-command": 1,
     "make-target": 23,
-    "workflow-run-body": 78,
+    "workflow-run-body": 84,
 }
 
 EXPECTED_INSTALLED_NON_FLASH = {
@@ -617,6 +617,7 @@ def checked_runtime_process(
     cwd: Path = ROOT,
     environment: dict[str, str] | None = None,
     input_text: str | None = None,
+    timeout_seconds: int = 30,
 ) -> subprocess.CompletedProcess[str]:
     try:
         process = subprocess.run(
@@ -629,7 +630,7 @@ def checked_runtime_process(
             encoding="utf-8",
             errors="replace",
             check=False,
-            timeout=30,
+            timeout=timeout_seconds,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         fail(f"{label} could not be observed safely: {error}")
@@ -1931,6 +1932,26 @@ VALIDATOR_ORACLE_REWRITES = {
             "build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh "
             "ci/check_coverage.fsh coverage/flash.lcov",
         ),
+        (
+            "python3 ci/release_candidate.py select",
+            "build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh "
+            "ci/release_candidate.fsh select",
+        ),
+        (
+            "python3 ci/release_candidate.py validate",
+            "build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh "
+            "ci/release_candidate.fsh validate",
+        ),
+        (
+            "python3 ci/release_candidate.py create",
+            "build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh "
+            "ci/release_candidate.fsh create",
+        ),
+        (
+            "python3 ci/release_candidate.py validate",
+            "build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh "
+            "ci/release_candidate.fsh validate",
+        ),
     ),
     "ci/check_flash_conformance.py": (
         (
@@ -2599,6 +2620,419 @@ def check_ci_routing_parity(runtime: Path, root: Path) -> None:
 QUALIFICATION_MAIN_SHA = "1" * 40
 QUALIFICATION_HEAD_SHA = "2" * 40
 QUALIFICATION_TREE_SHA = "3" * 40
+RELEASE_CANDIDATE_VERSION = "0.2.0"
+RELEASE_CANDIDATE_COMMIT = "1" * 40
+RELEASE_CANDIDATE_TREE = "2" * 40
+
+
+def release_candidate_digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def write_release_candidate_checksums(bundle: Path) -> None:
+    names = sorted(
+        member.name
+        for member in bundle.iterdir()
+        if member.name not in {"SHA256SUMS", "candidate-manifest.json"}
+    )
+    lines = [
+        f"{sha256_file(bundle / name)}  {name}"
+        for name in names
+    ]
+    (bundle / "SHA256SUMS").write_text(
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
+
+
+def create_release_candidate_bundle(
+    bundle: Path,
+    *,
+    compressed: bool = False,
+    qualified_compression: bool = True,
+) -> None:
+    bundle.mkdir(parents=True)
+    version = RELEASE_CANDIDATE_VERSION
+    payloads = {
+        f"FlashOS-{version}-x86_64-harddrive.img.zst": b"disk",
+        f"FlashOS-{version}-x86_64-live.iso.zst": b"live",
+        f"FlashOS-{version}-source.cdx.json": b"{}\n",
+        f"FlashOS-{version}-image.cdx.json": b"{}\n",
+        f"FlashOS-{version}-release-notes.md": b"notes\n",
+        "cookbook.lock": b"# generated build resolution\n",
+        "qemu-harddrive-performance.json": b"{}\n",
+        "qemu-harddrive-smoke.log": b"disk ok\n",
+        "qemu-live-usb-smoke.log": b"live ok\n",
+    }
+    qemu = {
+        "schema": 1,
+        "source_commit": RELEASE_CANDIDATE_COMMIT,
+        "harddrive": {
+            "interface": "nvme",
+            "result": "success",
+            "attempt": 1,
+            "sha256": "a" * 64,
+            "log": "qemu-harddrive-smoke.log",
+        },
+        "live": {
+            "interface": "usb",
+            "result": "success",
+            "attempt": 1,
+            "sha256": "b" * 64,
+            "log": "qemu-live-usb-smoke.log",
+        },
+    }
+    payloads["qemu-results.json"] = (json.dumps(qemu) + "\n").encode()
+    for name, data in payloads.items():
+        (bundle / name).write_bytes(data)
+
+    if compressed:
+        for name, data in (("harddrive", b"disk"), ("live", b"live")):
+            raw = bundle / f"{name}.raw"
+            raw.write_bytes(data)
+            filename = (
+                f"FlashOS-{version}-x86_64-harddrive.img.zst"
+                if name == "harddrive"
+                else f"FlashOS-{version}-x86_64-live.iso.zst"
+            )
+            result = run_process(
+                ["zstd", "--quiet", "--force", raw, "-o", bundle / filename]
+            )
+            require_process(
+                result,
+                code=0,
+                stdout="",
+                stderr="",
+                label=f"release candidate {name} compression fixture",
+            )
+            raw.unlink()
+            if qualified_compression:
+                qemu[name]["sha256"] = release_candidate_digest(data)
+        (bundle / "qemu-results.json").write_text(
+            json.dumps(qemu) + "\n",
+            encoding="utf-8",
+        )
+    write_release_candidate_checksums(bundle)
+
+
+def release_candidate_command(
+    runtime: Path | None,
+    repository: Path,
+    action: str,
+    bundle: Path | None = None,
+    extra: list[str] | None = None,
+) -> list[str | Path]:
+    if runtime is None:
+        command: list[str | Path] = [
+            sys.executable,
+            repository / "ci/release_candidate.py",
+        ]
+    else:
+        command = [runtime, repository / "ci/release_candidate.fsh"]
+    command.append(action)
+    if bundle is not None:
+        command.extend(["--bundle", bundle, "--root", repository])
+    if action == "create":
+        command.extend(
+            [
+                "--version",
+                RELEASE_CANDIDATE_VERSION,
+                "--repository",
+                "example/FlashOS",
+                "--source-commit",
+                RELEASE_CANDIDATE_COMMIT,
+                "--source-tree",
+                RELEASE_CANDIDATE_TREE,
+                "--run-id",
+                "123",
+                "--run-attempt",
+                "2",
+                "--required-run-id",
+                "120",
+                "--security-run-id",
+                "121",
+            ]
+        )
+    elif action == "validate":
+        command.extend(
+            [
+                "--repository",
+                "example/FlashOS",
+                "--version",
+                RELEASE_CANDIDATE_VERSION,
+                "--source-commit",
+                RELEASE_CANDIDATE_COMMIT,
+                "--source-tree",
+                RELEASE_CANDIDATE_TREE,
+                "--run-id",
+                "123",
+                "--run-attempt",
+                "2",
+                "--tag",
+                "v0.2.0",
+            ]
+        )
+    command.extend(extra or [])
+    return command
+
+
+def release_candidate_result(
+    runtime: Path | None,
+    repository: Path,
+    action: str,
+    bundle: Path | None = None,
+    extra: list[str] | None = None,
+) -> tuple[int, str, str]:
+    process = checked_runtime_process(
+        release_candidate_command(runtime, repository, action, bundle, extra),
+        cwd=repository,
+        environment=resolved_automation_environment(runtime or Path(sys.executable)),
+        label=f"{'Python' if runtime is None else 'Flash'} release candidate {action}",
+        timeout_seconds=90,
+    )
+    return process.returncode, process.stdout, process.stderr
+
+
+def require_release_candidate_result(
+    runtime: Path,
+    repository: Path,
+    label: str,
+    action: str,
+    python_bundle: Path | None = None,
+    flash_bundle: Path | None = None,
+    extra: list[str] | None = None,
+) -> None:
+    observed = release_candidate_result(
+        runtime,
+        repository,
+        action,
+        flash_bundle,
+        extra,
+    )
+    expected = release_candidate_result(
+        None,
+        repository,
+        action,
+        python_bundle,
+        extra,
+    )
+    if observed != expected:
+        fail(
+            f"release candidate materialized-oracle parity differs for {label}: "
+            f"observed={observed!r}, expected={expected!r}"
+        )
+
+
+def check_release_candidate_parity(runtime: Path, root: Path) -> None:
+    flash_source = root / "ci/release_candidate.fsh"
+    if not flash_source.is_file():
+        return
+    runtime = runtime.resolve()
+    with tempfile.TemporaryDirectory(prefix="flash-release-candidate-parity-") as raw:
+        repository = Path(raw).resolve() / "repository"
+        repository.mkdir()
+        current_public_tree(repository, root)
+        materialize_baseline_source(
+            "ci/release_candidate.py",
+            repository / "ci/release_candidate.py",
+            root,
+        )
+
+        positive = repository / "positive"
+        source_bundle = repository / "source-bundle"
+        create_release_candidate_bundle(source_bundle)
+        python_bundle = positive / "python"
+        flash_bundle = positive / "flash"
+        shutil.copytree(source_bundle, python_bundle)
+        shutil.copytree(source_bundle, flash_bundle)
+        require_release_candidate_result(
+            runtime,
+            repository,
+            "manifest creation",
+            "create",
+            python_bundle,
+            flash_bundle,
+        )
+        python_manifest = json.loads(
+            (python_bundle / "candidate-manifest.json").read_text(encoding="utf-8")
+        )
+        flash_manifest = json.loads(
+            (flash_bundle / "candidate-manifest.json").read_text(encoding="utf-8")
+        )
+        if flash_manifest != python_manifest:
+            fail("release candidate created manifest semantics differ")
+        require_release_candidate_result(
+            runtime,
+            repository,
+            "manifest validation",
+            "validate",
+            python_bundle,
+            flash_bundle,
+        )
+
+        for label, mutation in (
+            ("missing required candidate member", "missing"),
+            ("checksum mismatch during creation", "checksum"),
+            ("second-attempt QEMU refusal", "attempt"),
+        ):
+            case = repository / f"create-failure-{mutation}"
+            python_case = case / "python"
+            flash_case = case / "flash"
+            create_release_candidate_bundle(python_case)
+            shutil.copytree(python_case, flash_case)
+            if mutation == "missing":
+                for bundle in (python_case, flash_case):
+                    (bundle / "cookbook.lock").unlink()
+            elif mutation == "checksum":
+                for bundle in (python_case, flash_case):
+                    sums = bundle / "SHA256SUMS"
+                    sums.write_text(
+                        sums.read_text(encoding="utf-8").replace(
+                            release_candidate_digest(b"disk"),
+                            "0" * 64,
+                        ),
+                        encoding="utf-8",
+                    )
+            else:
+                for bundle in (python_case, flash_case):
+                    qemu_path = bundle / "qemu-results.json"
+                    qemu = json.loads(qemu_path.read_text(encoding="utf-8"))
+                    qemu["harddrive"]["attempt"] = 2
+                    qemu_path.write_text(
+                        json.dumps(qemu) + "\n",
+                        encoding="utf-8",
+                    )
+                    write_release_candidate_checksums(bundle)
+            require_release_candidate_result(
+                runtime,
+                repository,
+                label,
+                "create",
+                python_case,
+                flash_case,
+            )
+
+        for label, mutation in (
+            ("tampered payload", "tamper"),
+            ("unexpected member", "unexpected"),
+            ("source tree mismatch", "tree"),
+            ("symlink substitution", "symlink"),
+        ):
+            case = repository / f"failure-{mutation}"
+            python_case = case / "python"
+            flash_case = case / "flash"
+            shutil.copytree(python_bundle, python_case)
+            shutil.copytree(flash_bundle, flash_case)
+            if mutation == "tamper":
+                for bundle in (python_case, flash_case):
+                    filename = (
+                        f"FlashOS-{RELEASE_CANDIDATE_VERSION}"
+                        "-x86_64-live.iso.zst"
+                    )
+                    (bundle / filename).write_bytes(b"substitute")
+            elif mutation == "unexpected":
+                for bundle in (python_case, flash_case):
+                    (bundle / "unexpected.txt").write_text("no", encoding="utf-8")
+            elif mutation == "symlink":
+                for bundle in (python_case, flash_case):
+                    filename = (
+                        f"FlashOS-{RELEASE_CANDIDATE_VERSION}-source.cdx.json"
+                    )
+                    member = bundle / filename
+                    copy = bundle.parent / f"{bundle.name}-source-copy"
+                    shutil.copyfile(member, copy)
+                    member.unlink()
+                    member.symlink_to(copy)
+            extra = ["--source-tree", "3" * 40] if mutation == "tree" else None
+            require_release_candidate_result(
+                runtime,
+                repository,
+                label,
+                "validate",
+                python_case,
+                flash_case,
+                extra,
+            )
+
+        for qualified in (True, False):
+            case = repository / f"compressed-{qualified}"
+            python_case = case / "python"
+            flash_case = case / "flash"
+            create_release_candidate_bundle(
+                python_case,
+                compressed=True,
+                qualified_compression=qualified,
+            )
+            shutil.copytree(python_case, flash_case)
+            require_release_candidate_result(
+                runtime,
+                repository,
+                f"compressed manifest creation ({qualified=})",
+                "create",
+                python_case,
+                flash_case,
+            )
+            require_release_candidate_result(
+                runtime,
+                repository,
+                f"compressed image verification ({qualified=})",
+                "validate",
+                python_case,
+                flash_case,
+                ["--verify-compressed"],
+            )
+
+        run_path = repository / "run.json"
+        artifacts_path = repository / "artifacts.json"
+        run_path.write_text(
+            json.dumps(
+                {
+                    "id": 123,
+                    "head_repository": {"full_name": "example/FlashOS"},
+                    "path": ".github/workflows/candidate.yml",
+                    "event": "workflow_dispatch",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "run_attempt": 2,
+                }
+            ),
+            encoding="utf-8",
+        )
+        artifacts = {
+            "artifacts": [
+                {
+                    "name": "flashos-release-candidate-123-2",
+                    "expired": False,
+                }
+            ]
+        }
+        artifacts_path.write_text(json.dumps(artifacts), encoding="utf-8")
+        selection = [
+            "--run",
+            str(run_path),
+            "--artifacts",
+            str(artifacts_path),
+            "--repository",
+            "example/FlashOS",
+            "--run-id",
+            "123",
+        ]
+        require_release_candidate_result(
+            runtime,
+            repository,
+            "artifact selection",
+            "select",
+            extra=selection,
+        )
+        artifacts["artifacts"][0]["expired"] = True
+        artifacts_path.write_text(json.dumps(artifacts), encoding="utf-8")
+        require_release_candidate_result(
+            runtime,
+            repository,
+            "expired artifact refusal",
+            "select",
+            extra=selection,
+        )
 
 
 def qualification_fixture_payload(
@@ -3143,6 +3577,7 @@ def check_runtime_parity(
     check_ci_validator_parity(runtime, root)
     check_ci_routing_parity(runtime, root)
     check_ci_qualification_parity(runtime, root)
+    check_release_candidate_parity(runtime, root)
     check_activated_exercise_validator(runtime, bootstrap_runtime, root)
 
 
