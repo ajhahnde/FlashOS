@@ -3410,6 +3410,225 @@ def check_activated_exercise_validator(
         )
 
 
+RECIPE_INSPECTION_MIGRATIONS = (
+    "category",
+    "find-recipe",
+    "include-recipes",
+    "print-recipe",
+    "recipe-match",
+    "recipe-path",
+    "show-package",
+)
+
+
+def write_recipe_inspection_probe(path: Path, runtime: Path) -> None:
+    source = f"""#!{sys.executable}
+import json
+import os
+import pathlib
+import sys
+
+name = pathlib.Path(sys.argv[0]).name
+scenario = json.loads(os.environ.get("PUBLIC_AUTOMATION_SCENARIO", "{{}}"))
+report = pathlib.Path(os.environ["PUBLIC_AUTOMATION_REPORT"])
+with report.open("a", encoding="utf-8") as output:
+    output.write(json.dumps({{
+        "arch": os.environ.get("ARCH"),
+        "argv": sys.argv[1:],
+        "config_name": os.environ.get("CONFIG_NAME"),
+        "name": name,
+    }}, sort_keys=True) + "\\n")
+
+if name == "fsh":
+    os.execv({str(runtime)!r}, [{str(runtime)!r}, *sys.argv[1:]])
+if name == "uname":
+    print("x86_64")
+    raise SystemExit(0)
+if name == "repo":
+    if sys.argv[1:] == ["find", "kernel"]:
+        print("recipes/core/kernel")
+        raise SystemExit(0)
+    raise SystemExit(1)
+if name == "find_recipe":
+    if sys.argv[1:] == ["kernel"]:
+        print("recipes/core/kernel")
+        raise SystemExit(0)
+    raise SystemExit(1)
+if name == "bat":
+    print("bat:" + "|".join(sys.argv[1:]))
+    raise SystemExit(scenario.get("bat_code", 0))
+if name == "make":
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    sys.stdout.write(f"stdout:make:{{command}}\\n")
+    sys.stderr.write(f"stderr:make:{{command}}\\n")
+    raise SystemExit(scenario.get("make_codes", {{}}).get(command, 0))
+raise SystemExit(97)
+"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def prepare_recipe_inspection_tree(
+    destination: Path,
+    name: str,
+    runtime: Path,
+    root: Path,
+    *,
+    baseline: bool,
+    find_recipe_present: bool = True,
+) -> Path:
+    script = destination / "scripts" / f"{name}.fsh"
+    if baseline:
+        materialize_baseline_source(f"scripts/{name}.sh", script, root)
+    else:
+        script.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / "scripts" / f"{name}.fsh", script)
+
+    (destination / "recipes/core/kernel/target/x86_64/stage/bin").mkdir(
+        parents=True
+    )
+    (destination / "recipes/core/kernel/target/x86_64/sysroot/lib").mkdir(
+        parents=True
+    )
+    (destination / "recipes/core/kernel/recipe.toml").write_text(
+        "TODO fatal error\\n[build]\\ntemplate = 'custom'\\n", encoding="utf-8"
+    )
+    (destination / "recipes/core/kernel/redox.patch").write_text(
+        "TODO patch\\n", encoding="utf-8"
+    )
+    (destination / "recipes/core/kernel/target/x86_64/stage/bin/kernel").write_text(
+        "kernel\\n", encoding="utf-8"
+    )
+    (destination / "recipes/core/kernel/target/x86_64/sysroot/lib/kernel").write_text(
+        "kernel\\n", encoding="utf-8"
+    )
+    (destination / "recipes/dev/demo").mkdir(parents=True)
+    (destination / "recipes/dev/demo/recipe.toml").write_text(
+        "TODO minor error\\n", encoding="utf-8"
+    )
+    (destination / "recipes/core/target/x86_64-unknown-redox/stage/bin").mkdir(
+        parents=True
+    )
+    (destination / "recipes/core/target/x86_64-unknown-redox/stage/bin/app").write_text(
+        "provider\\n", encoding="utf-8"
+    )
+    (destination / "build/x86_64/flashos/root/bin").mkdir(parents=True)
+    (destination / "build/x86_64/flashos/root/bin/app").write_text(
+        "image\\n", encoding="utf-8"
+    )
+
+    probe_directory = destination / "probe-bin"
+    for command in ("bat", "fsh", "make", "uname"):
+        write_recipe_inspection_probe(probe_directory / command, runtime)
+    write_recipe_inspection_probe(destination / "target/release/repo", runtime)
+    if find_recipe_present:
+        write_recipe_inspection_probe(
+            destination / "target/release/find_recipe", runtime
+        )
+    return script
+
+
+def recipe_inspection_result(
+    runtime: Path,
+    root: Path,
+    name: str,
+    arguments: list[str],
+    scenario: dict[str, object],
+    *,
+    find_recipe_present: bool = True,
+) -> tuple[object, ...]:
+    observed: list[tuple[object, ...]] = []
+    for baseline in (True, False):
+        with tempfile.TemporaryDirectory(prefix=f"flash-{name}-parity-") as raw:
+            directory = Path(raw)
+            report = directory / "report.jsonl"
+            report.write_text("", encoding="utf-8")
+            script = prepare_recipe_inspection_tree(
+                directory,
+                name,
+                runtime,
+                root,
+                baseline=baseline,
+                find_recipe_present=find_recipe_present,
+            )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": os.pathsep.join(
+                        [str(directory / "probe-bin"), environment.get("PATH", "")]
+                    ),
+                    "PUBLIC_AUTOMATION_REPORT": str(report),
+                    "PUBLIC_AUTOMATION_SCENARIO": json.dumps(
+                        scenario, sort_keys=True
+                    ),
+                }
+            )
+            command: list[str | Path] = ["/bin/bash" if baseline else runtime]
+            command.extend([script.relative_to(directory), *arguments])
+            process = checked_runtime_process(
+                command,
+                cwd=directory,
+                environment=environment,
+                label=f"{'baseline' if baseline else 'migrated'} {name}",
+            )
+            observed.append(
+                (
+                    process.returncode,
+                    process.stdout,
+                    process.stderr,
+                    [
+                        record
+                        for record in read_report(report)
+                        if record["name"] != "fsh"
+                    ],
+                )
+            )
+    if observed[0] != observed[1]:
+        fail(
+            f"recipe inspection baseline parity differs for {name} {arguments!r}: "
+            f"baseline={observed[0]!r}, migrated={observed[1]!r}"
+        )
+    return observed[0]
+
+
+def check_recipe_inspection_parity(runtime: Path, root: Path) -> None:
+    if not all(
+        (root / "scripts" / f"{name}.fsh").is_file()
+        for name in RECIPE_INSPECTION_MIGRATIONS
+    ):
+        return
+
+    cases: tuple[tuple[str, list[str], dict[str, object], bool], ...] = (
+        ("category", [], {}, True),
+        (
+            "category",
+            ["-f", "wip/dev"],
+            {"make_codes": {"f.--category-wip.dev": 7}},
+            True,
+        ),
+        ("find-recipe", [], {"make_codes": {"mount": 4, "unmount": 7}}, True),
+        ("include-recipes", [], {}, True),
+        ("include-recipes", ["TODO.*error"], {}, True),
+        ("print-recipe", ["kernel"], {}, True),
+        ("recipe-match", ["TODO"], {}, True),
+        ("recipe-match", ["not-present"], {}, True),
+        ("recipe-path", ["recipe.toml", "redox.patch"], {}, True),
+        ("show-package", [], {}, True),
+        ("show-package", ["kernel"], {}, False),
+        ("show-package", ["kernel"], {}, True),
+    )
+    for name, arguments, scenario, find_recipe_present in cases:
+        recipe_inspection_result(
+            runtime,
+            root,
+            name,
+            arguments,
+            scenario,
+            find_recipe_present=find_recipe_present,
+        )
+
+
 def check_runtime_parity(
     runtime: Path,
     root: Path = ROOT,
@@ -3448,6 +3667,7 @@ def check_runtime_parity(
 
     if (root / "build.fsh").is_file():
         check_build_interface_parity(runtime, root)
+    check_recipe_inspection_parity(runtime, root)
 
     with tempfile.TemporaryDirectory(prefix="flashos-public-automation-") as raw:
         directory = Path(raw)
