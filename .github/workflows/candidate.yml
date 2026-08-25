@@ -32,6 +32,9 @@ jobs:
     name: validate-source-and-evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
     permissions:
       actions: read
       contents: read
@@ -45,6 +48,12 @@ jobs:
         with:
           ref: ${{ inputs['source-sha'] }}
           fetch-depth: 0
+
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
 
       - name: Validate exact source and version
         env:
@@ -74,7 +83,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs['source-sha'] }}
-        run: python3 ci/check_candidate_qualification.py
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_candidate_qualification.fsh
 
   image:
     name: release-image-and-runtime

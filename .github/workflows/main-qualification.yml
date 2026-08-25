@@ -18,12 +18,21 @@ jobs:
     name: verified
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
 
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
+
       - name: Transfer exact candidate evidence to main
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 ci/check_main_qualification.py
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_main_qualification.fsh

@@ -50,6 +50,7 @@ Install or provide the following host tools:
 - GNU Make
 - Python 3
 - Rust and Cargo, preferably managed through Rustup
+- Flash `fsh` with 1.0-compatible script behavior
 - Podman
 - QEMU with `qemu-system-x86_64`
 - x86_64 OVMF or edk2 firmware
@@ -86,6 +87,29 @@ Review the script before running it. Depending on the host, it may:
 - install Podman, QEMU, FUSE-related tools, and build utilities.
 
 You may instead install the requirements manually through your operating system's package manager.
+
+### Install the Flash build runtime
+
+The primary source-build interface is `build.fsh`, so the host must provide a
+compatible `fsh`. Check the selected runtime:
+
+```bash
+fsh --version
+```
+
+If Flash is not installed yet, acquire it from the checked-out, locked Flash
+workspace after Rust and Cargo are available:
+
+```bash
+./install-flash.sh
+```
+
+The adapter builds the selected runtime in a temporary Cargo root, verifies
+that it reports `fsh 1.0.0`, and only then installs it to
+`$HOME/.local/bin/fsh`. Set `FLASH_INSTALL_PREFIX` before running the adapter
+to select a different installation prefix. Add the selected `bin` directory to
+`PATH` before invoking `./build.fsh`. The adapter does not build FlashOS or
+forward build options.
 
 ### Start Podman on macOS
 
@@ -152,7 +176,7 @@ Avoid adding unrelated build variables until the default configuration works. De
 Inspect the selected Make environment:
 
 ```bash
-make CONFIG_NAME=flashos setenv
+./build.fsh -c flashos setenv
 ```
 
 The output should include values equivalent to:
@@ -179,7 +203,7 @@ A missing optional `redoxer` installation does not prevent the normal image buil
 Build the standard development disk:
 
 ```bash
-make CONFIG_NAME=flashos all
+./build.fsh -c flashos all
 ```
 
 The first build may download source repositories, create the Podman build environment, obtain or compile the cross toolchain, prepare packages, and build the filesystem tools before assembling the image.
@@ -199,7 +223,7 @@ Build outputs are generated locally and must not be committed to the repository.
 Start the development image:
 
 ```bash
-make CONFIG_NAME=flashos qemu
+./build.fsh -c flashos qemu
 ```
 
 For the x86_64 profile, the Make configuration selects a QEMU `q35` machine with UEFI firmware. The default virtual machine configuration includes a display, keyboard input, emulated storage, networking, and serial diagnostic output.
@@ -281,7 +305,7 @@ The development disk and live image serve different workflows:
 Build the live image:
 
 ```bash
-make CONFIG_NAME=flashos live
+./build.fsh -c flashos live
 ```
 
 The resulting artifact is:
@@ -293,7 +317,7 @@ build/x86_64/flashos/redox-live.iso
 To expose the live image to QEMU as USB mass storage, run:
 
 ```bash
-make CONFIG_NAME=flashos qemu live=yes disk=usb
+./build.fsh -c flashos qemu live=yes disk=usb
 ```
 
 The live image is assembled with the live bootloader path and loads its root filesystem for an ephemeral session. Changes made during that session should not be treated as persistent development state.
@@ -408,7 +432,7 @@ If `podman info` fails, resolve the container runtime problem before retrying th
 Inspect the effective environment:
 
 ```bash
-make CONFIG_NAME=flashos setenv
+./build.fsh -c flashos setenv
 ```
 
 For this guide, it must report:
@@ -442,19 +466,19 @@ FlashOS expects an OVMF or edk2 x86_64 firmware file in one of the host paths re
 Check the selected output directory:
 
 ```bash
-make CONFIG_NAME=flashos setenv
+./build.fsh -c flashos setenv
 ```
 
 Build the development disk again:
 
 ```bash
-make CONFIG_NAME=flashos all
+./build.fsh -c flashos all
 ```
 
 Build the live image again:
 
 ```bash
-make CONFIG_NAME=flashos live
+./build.fsh -c flashos live
 ```
 
 The expected files are:
@@ -469,7 +493,7 @@ build/x86_64/flashos/redox-live.iso
 Rebuild the development image and its generated repository state:
 
 ```bash
-make CONFIG_NAME=flashos rebuild
+./build.fsh -c flashos rebuild
 ```
 
 This is broader than a normal incremental build. Use the narrower `all` or `live` target for routine iteration.

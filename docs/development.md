@@ -55,7 +55,7 @@ Store these values in the repository-root `.config` file. The file is ignored by
 Inspect the effective configuration with:
 
 ```bash
-make CONFIG_NAME=flashos setenv
+./build.fsh -c flashos setenv
 ```
 
 The active product path should resolve to:
@@ -290,7 +290,7 @@ Equivalent Git commands may be used directly.
 Build the standard development disk:
 
 ```bash
-make CONFIG_NAME=flashos all
+./build.fsh -c flashos all
 ```
 
 Or use the helper:
@@ -308,7 +308,7 @@ build/x86_64/flashos/harddrive.img
 Run it interactively:
 
 ```bash
-make CONFIG_NAME=flashos qemu
+./build.fsh -c flashos qemu
 ```
 
 Or:
@@ -322,7 +322,7 @@ flashos run disk
 Build the live image:
 
 ```bash
-make CONFIG_NAME=flashos live
+./build.fsh -c flashos live
 ```
 
 Or:
@@ -531,7 +531,8 @@ Their intentional difference is the credential model.
 When changing either profile, run:
 
 ```bash
-python3 ci/check_profile.py
+source ./flashos.sh
+flashos check profile
 ```
 
 The check validates repository-level invariants including profile alignment, package policy, credentials, shell paths, version identity, selected permissions, branding patches, and pinned shipped recipe sources.
@@ -594,7 +595,7 @@ Keep variable ownership clear. A new option should have:
 Inspect the effective values after changing configuration logic:
 
 ```bash
-make CONFIG_NAME=flashos setenv
+./build.fsh -c flashos setenv
 ```
 
 ### Root Rust package
@@ -797,7 +798,8 @@ The same value is reflected in system identity files, public project metadata, a
 Do not update only one visible version string. After a version change, run:
 
 ```bash
-python3 ci/check_profile.py
+source ./flashos.sh
+flashos versions check
 ```
 
 The check detects drift between the central value and the repository locations that must remain aligned.
@@ -930,7 +932,8 @@ flashos shell target
 ### Product-profile, package-policy, version, or recipe-source changes
 
 ```bash
-python3 ci/check_profile.py
+source ./flashos.sh
+flashos check profile
 ```
 
 ### Image-affecting changes

@@ -13,25 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-
-from flash_benchmarks import (
-    RESULT_SCHEMA,
-    contract_sha256,
-    evaluate_document,
-    load_contract,
-    summarize,
-)
-from flashos_runtime_fixtures import (
-    FIXTURE_PATH,
-    FixtureContractError,
-    load_fixture_suite,
-)
-from flashos_target_matrix import (
-    MATRIX_PATH,
-    TargetMatrixContractError,
-    load_target_matrix,
-    script_transport_chunks,
-)
+from types import SimpleNamespace
 
 DEFAULT_OVMF_PATHS = (
     "/usr/share/OVMF/OVMF_CODE.fd",
@@ -41,6 +23,20 @@ DEFAULT_OVMF_PATHS = (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_PATH = (
+    REPOSITORY_ROOT
+    / "components/flash/platforms/flashos-x86_64-runtime-fixtures-v1.toml"
+)
+MATRIX_PATH = (
+    REPOSITORY_ROOT / "components/flash/platforms/flashos-x86_64-target-matrix-v1.toml"
+)
+DEFAULT_AUTOMATION_RUNTIME = REPOSITORY_ROOT / "components/flash/target/debug/fsh"
+PUBLIC_AUTOMATION_ROOTS = (
+    REPOSITORY_ROOT / "recipes/groups/auto-test/auto-test.fsh",
+    REPOSITORY_ROOT / "recipes/tests/acid/acid-runner.fsh",
+    REPOSITORY_ROOT / "recipes/tests/relibc-tests-bins/relibc-tests-runner.fsh",
+    REPOSITORY_ROOT / "recipes/tests/os-test-bins/os-test-runner.fsh",
+)
 
 # This gate qualifies deterministic product behavior, not SMP scheduling.
 # Keeping TCG to one virtual CPU prevents scheduler timing from becoming an
@@ -62,6 +58,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ovmf", type=Path)
     parser.add_argument("--log", type=Path, default=Path("qemu-smoke.log"))
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument(
+        "--automation-runtime",
+        type=Path,
+        default=DEFAULT_AUTOMATION_RUNTIME,
+        help="Flash 1.0 runtime for versioned automation JSON boundaries",
+    )
     parser.add_argument(
         "--fixtures",
         type=Path,
@@ -106,15 +108,211 @@ def resolve_ovmf(explicit: Path | None) -> Path:
     raise SystemExit("qemu smoke: no OVMF/edk2 x86_64 firmware found")
 
 
+def load_flash_boundary(
+    runtime: Path,
+    script: str,
+    arguments: list[str],
+    *,
+    kind: str,
+) -> dict[str, object]:
+    process = subprocess.run(
+        [str(runtime), str(REPOSITORY_ROOT / script), *arguments],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if process.returncode != 0:
+        details = process.stderr.strip() or process.stdout.strip()
+        raise SystemExit(f"qemu smoke: invalid {kind}: {details}")
+    try:
+        document = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        message = f"qemu smoke: invalid {kind} JSON boundary: {error}"
+        raise SystemExit(message) from error
+    if (
+        not isinstance(document, dict)
+        or document.get("boundary_schema") != 1
+        or document.get("kind") != kind
+    ):
+        raise SystemExit(f"qemu smoke: invalid {kind} identity")
+    return document
+
+
+def boundary_bytes(payload: object) -> bytes:
+    if not isinstance(payload, dict):
+        raise SystemExit("qemu smoke: invalid encoded byte boundary")
+    if payload.get("encoding") == "utf8" and isinstance(payload.get("text"), str):
+        return payload["text"].encode()
+    if payload.get("encoding") == "hex" and isinstance(payload.get("data"), str):
+        try:
+            return bytes.fromhex(payload["data"])
+        except ValueError as error:
+            raise SystemExit("qemu smoke: invalid hexadecimal byte boundary") from error
+    raise SystemExit("qemu smoke: invalid encoded byte boundary")
+
+
+def load_fixture_suite(path: Path) -> SimpleNamespace:
+    runtime = args.automation_runtime.resolve()
+    document = load_flash_boundary(
+        runtime,
+        "ci/flashos_runtime_fixtures.fsh",
+        ["--fixtures", str(path), "--output", "json-v1"],
+        kind="flashos-runtime-fixtures",
+    )
+    fixtures = []
+    for fixture in document["fixtures"]:
+        steps = []
+        for step in fixture["steps"]:
+            expected = step["expected"]
+            steps.append(
+                SimpleNamespace(
+                    payload=boundary_bytes(step["payload"]),
+                    rendered=boundary_bytes(step["rendered"]),
+                    expected=None if expected is None else boundary_bytes(expected),
+                    manual=step["manual"],
+                )
+            )
+        fixtures.append(
+            SimpleNamespace(
+                identifier=fixture["id"],
+                capabilities=tuple(fixture["capabilities"]),
+                steps=tuple(steps),
+                rejected=tuple(boundary_bytes(item) for item in fixture["rejected"]),
+            )
+        )
+    return SimpleNamespace(
+        suite_version=document["suite_version"],
+        prompt=boundary_bytes(document["prompt"]),
+        terminator=boundary_bytes(document["terminator"]),
+        max_interaction_bytes=document["max_interaction_bytes"],
+        fixtures=tuple(fixtures),
+    )
+
+
+def load_target_matrix(path: Path) -> SimpleNamespace:
+    runtime = args.automation_runtime.resolve()
+    document = load_flash_boundary(
+        runtime,
+        "ci/flashos_target_matrix.fsh",
+        ["--matrix", str(path), "--output", "json-v1"],
+        kind="flashos-target-matrix",
+    )
+    cases = []
+    for selected_case in document["cases"]:
+        steps = []
+        for step in selected_case["steps"]:
+            rendered = step["rendered"]
+            steps.append(
+                SimpleNamespace(
+                    payload=boundary_bytes(step["payload"]),
+                    send=step["send"],
+                    rendered=None if rendered is None else boundary_bytes(rendered),
+                    expected=tuple(boundary_bytes(item) for item in step["expected"]),
+                    manual=step["manual"],
+                )
+            )
+        cases.append(
+            SimpleNamespace(
+                identifier=selected_case["id"],
+                surfaces=tuple(selected_case["surfaces"]),
+                capabilities=tuple(selected_case["capabilities"]),
+                operation_ids=tuple(selected_case["operation_ids"]),
+                steps=tuple(steps),
+                rejected=tuple(
+                    boundary_bytes(item) for item in selected_case["rejected"]
+                ),
+            )
+        )
+    prompts = document["prompts"]
+    return SimpleNamespace(
+        matrix_version=document["matrix_version"],
+        primary_prompt=boundary_bytes(prompts["primary"]),
+        continuation_prompt=boundary_bytes(prompts["continuation"]),
+        configured_prompt=boundary_bytes(prompts["configured"]),
+        terminator=boundary_bytes(document["terminator"]),
+        max_interaction_bytes=document["max_interaction_bytes"],
+        script_transport_chunk_bytes=document["script_transport_chunk_bytes"],
+        cases=tuple(cases),
+    )
+
+
+def script_transport_chunks(source: bytes, limit: int) -> tuple[bytes, ...]:
+    if limit < 1:
+        raise SystemExit("qemu smoke: target matrix has an invalid chunk boundary")
+    return tuple(
+        source[offset : offset + limit] for offset in range(0, len(source), limit)
+    )
+
+
+def summarize_samples(values: list[int]) -> dict[str, int]:
+    if not values or any(not isinstance(value, int) or value <= 0 for value in values):
+        raise RuntimeError("benchmark samples must be positive integers")
+    ordered = sorted(values)
+    length = len(ordered)
+    median = (
+        ordered[length // 2]
+        if length % 2
+        else (ordered[length // 2 - 1] + ordered[length // 2]) // 2
+    )
+    p95_index = max(1, (length * 95 + 99) // 100) - 1
+    return {
+        "minimum": ordered[0],
+        "median": median,
+        "p95": ordered[min(p95_index, length - 1)],
+        "maximum": ordered[-1],
+    }
+
+
+def validate_benchmark_result(runtime: Path, path: Path) -> None:
+    process = subprocess.run(
+        [
+            str(runtime),
+            str(REPOSITORY_ROOT / "ci/flash_benchmarks.fsh"),
+            "--result",
+            str(path),
+            "--evaluate",
+            str(path),
+            "--environment",
+            "flashos-qemu-tcg-core2duo",
+        ],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if process.returncode != 0:
+        details = process.stderr.strip() or process.stdout.strip()
+        raise SystemExit(f"qemu smoke: invalid target benchmark result: {details}")
+
+
 args = parse_args()
-benchmark_contract = load_contract() if args.benchmark_output is not None else None
+automation_runtime = args.automation_runtime.resolve()
+if not automation_runtime.is_file():
+    raise SystemExit(f"qemu smoke: automation runtime not found: {automation_runtime}")
+runtime_suite = load_fixture_suite(args.fixtures)
+target_matrix = load_target_matrix(args.target_matrix)
+benchmark_contract = (
+    load_flash_boundary(
+        automation_runtime,
+        "ci/flash_benchmarks.fsh",
+        ["--contract-json-v1"],
+        kind="flash-benchmark-contract",
+    )
+    if args.benchmark_output is not None
+    else None
+)
 benchmark_started_utc = (
     time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     if benchmark_contract is not None
     else None
 )
 benchmark_profile = (
-    benchmark_contract["profiles"]["qualification"]
+    benchmark_contract["qualification_profile"]
     if benchmark_contract is not None
     else {}
 )
@@ -122,14 +320,6 @@ benchmark_warmups = int(benchmark_profile.get("target_warmups", 0))
 benchmark_samples = int(benchmark_profile.get("target_samples", 0))
 benchmark_pipeline_bytes = int(benchmark_profile.get("target_pipeline_bytes", 0))
 version = release_version()
-try:
-    runtime_suite = load_fixture_suite(args.fixtures)
-except FixtureContractError as error:
-    raise SystemExit(f"qemu smoke: invalid runtime fixtures: {error}") from error
-try:
-    target_matrix = load_target_matrix(args.target_matrix)
-except TargetMatrixContractError as error:
-    raise SystemExit(f"qemu smoke: invalid target matrix: {error}") from error
 image = args.image.resolve()
 if not image.is_file():
     raise SystemExit(f"qemu smoke: image not found: {image}")
@@ -319,6 +509,90 @@ def collect_matrix_expectations(step, start: int) -> None:
         collect_until(expected, start, visible=True)
 
 
+def confirm_preceding_command() -> None:
+    """Prove the previously submitted guest command has completed."""
+    # The printable confirmation is encoded in the command, so observing Q
+    # cannot be satisfied by the editor's echoed input.
+    confirmation = b"^printf '\\121'"
+    observation_start = submit_line(
+        confirmation, target_matrix.primary_prompt + confirmation
+    )
+    collect_until(b"Q", observation_start, visible=True)
+
+
+def materialize_named_script(source: bytes, short_name: bytes) -> None:
+    """Create one short-lived executable source fixture in the guest home."""
+    materialize_matrix_script(source)
+    time.sleep(SCRIPT_TRANSPORT_SETTLE)
+    command = b"^cp m " + short_name
+    submit_line(command, target_matrix.primary_prompt + command)
+    confirm_preceding_command()
+
+
+def exercise_public_automation() -> None:
+    """Run the exact migrated sources through the target fsh and fake tools."""
+    auto_test, acid_runner, relibc_runner, os_runner = (
+        path.read_bytes() for path in PUBLIC_AUTOMATION_ROOTS
+    )
+    cargo_probe = b"""#!/usr/bin/fsh
+echo AUTOMATION-CARGO
+exit 7
+"""
+    make_probe = b"""#!/usr/bin/fsh
+if $args[0] == "run" {
+    echo AUTOMATION-RELIBC
+} else {
+    echo AUTOMATION-OS
+}
+exit 9
+"""
+    materialize_named_script(acid_runner, b"a")
+    materialize_named_script(relibc_runner, b"r")
+    materialize_named_script(os_runner, b"o")
+    materialize_named_script(cargo_probe, b"c")
+    materialize_named_script(make_probe, b"k")
+
+    setup = b"""#!/usr/bin/fsh
+^mkdir -p /home/user/acid /home/user/relibc-tests /home/user/os-test | check
+^cp a acid-runner | check
+^cp r relibc-tests-runner | check
+^cp o os-test-runner | check
+^cp c cargo | check
+^cp k make | check
+^chmod +x acid-runner relibc-tests-runner os-test-runner cargo make | check
+echo AUTOMATION-READY
+"""
+    materialize_matrix_script(setup)
+    command = b"^fsh m"
+    setup_start = submit_line(command, target_matrix.primary_prompt + command)
+    collect_until(b"AUTOMATION-READY", setup_start, visible=True)
+
+    materialize_named_script(auto_test, b"t")
+    wrapper = b"""#!/usr/bin/fsh
+export PATH = "/home/user:/usr/bin"
+^fsh t || echo AUTOMATION-DONE
+"""
+    materialize_matrix_script(wrapper)
+    time.sleep(SCRIPT_TRANSPORT_SETTLE)
+    confirm_preceding_command()
+    command = b"^fsh m"
+    run_start = submit_line(command, target_matrix.primary_prompt + command)
+    markers = (
+        b"AUTOMATION-CARGO",
+        b"AUTOMATION-RELIBC",
+        b"AUTOMATION-OS",
+        b"AUTOMATION-DONE",
+    )
+    for marker in markers:
+        collect_until(marker, run_start, visible=True)
+    transcript = CSI_SEQUENCE.sub(b"", bytes(captured[run_start:]))
+    offsets = [transcript.find(b"\n" + marker + b"\r") for marker in markers]
+    if offsets != sorted(offsets) or any(offset < 0 for offset in offsets):
+        raise RuntimeError(
+            "FlashOS public automation did not preserve target execution order"
+        )
+
+
 failure: BaseException | None = None
 benchmark_measurements: list[dict[str, object]] = []
 try:
@@ -426,6 +700,8 @@ try:
                     f"observed rejected marker {rejected!r}"
                 )
 
+    exercise_public_automation()
+
     if args.benchmark_output is not None:
         benchmark_measurements.append(
             {
@@ -433,7 +709,7 @@ try:
                 "unit": "ns",
                 "warmup_samples": [],
                 "samples": [first_prompt_elapsed],
-                "summary": summarize([first_prompt_elapsed]),
+                "summary": summarize_samples([first_prompt_elapsed]),
             }
         )
 
@@ -460,7 +736,7 @@ try:
                 "unit": "ns",
                 "warmup_samples": command_warmups,
                 "samples": command_samples,
-                "summary": summarize(command_samples),
+                "summary": summarize_samples(command_samples),
             }
         )
 
@@ -494,7 +770,7 @@ try:
                 "unit": "bytes/second",
                 "warmup_samples": pipeline_warmups,
                 "samples": pipeline_samples,
-                "summary": summarize(pipeline_samples),
+                "summary": summarize_samples(pipeline_samples),
             }
         )
 
@@ -520,7 +796,7 @@ try:
                 "unit": "ns",
                 "warmup_samples": completion_warmups,
                 "samples": completion_samples,
-                "summary": summarize(completion_samples),
+                "summary": summarize_samples(completion_samples),
             }
         )
 except BaseException as error:
@@ -546,12 +822,12 @@ if failure is not None:
 if args.benchmark_output is not None:
     args.benchmark_output.parent.mkdir(parents=True, exist_ok=True)
     result = {
-        "schema": RESULT_SCHEMA,
+        "schema": benchmark_contract["result_schema"],
         "suite_version": benchmark_contract["suite_version"],
         "profile": "qualification",
         "started_utc": benchmark_started_utc,
         "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "contract_sha256": contract_sha256(),
+        "contract_sha256": benchmark_contract["contract_sha256"],
         "image_sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
         "environment": {
             "kind": "flashos-qemu-tcg",
@@ -580,7 +856,7 @@ if args.benchmark_output is not None:
         "measurements": benchmark_measurements,
     }
     args.benchmark_output.write_text(json.dumps(result, indent=2) + "\n")
-    evaluate_document(result, "flashos-qemu-tcg-core2duo")
+    validate_benchmark_result(automation_runtime, args.benchmark_output)
     print(f"target benchmark result: {args.benchmark_output}")
 
 print("\nqemu smoke: ok")

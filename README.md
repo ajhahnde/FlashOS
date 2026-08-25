@@ -56,13 +56,13 @@ Complete the prerequisites and local configuration described in [Getting Started
 Build the development image with:
 
 ```bash
-make CONFIG_NAME=flashos all
+./build.fsh -c flashos all
 ```
 
 Start FlashOS in QEMU with:
 
 ```bash
-make CONFIG_NAME=flashos qemu
+./build.fsh -c flashos qemu
 ```
 
 Instructions for live images, local configuration, login details, troubleshooting, and physical media are kept in the [Getting Started Guide](docs/getting-started.md).
@@ -78,6 +78,7 @@ The following tree shows the canonical navigation paths between the central publ
     - [`docs/getting-started.md`](docs/getting-started.md) — Build, boot, and first-use instructions
     - [`docs/architecture.md`](docs/architecture.md) — System layers, image configuration, and component boundaries
     - [`docs/development.md`](docs/development.md) — Repository development workflow
+    - [`docs/automation.md`](docs/automation.md) — Flash-native public automation and reviewed interpreter exceptions
     - [`docs/verification.md`](docs/verification.md) — Testing and verification model
     - [`docs/hardware.md`](docs/hardware.md) — Published FlashOS hardware evidence
     - [`docs/roadmap.md`](docs/roadmap.md) — Public development direction

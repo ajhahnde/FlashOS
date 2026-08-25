@@ -37,6 +37,7 @@ unset _flashos_source_path
 
 FLASHOS_ARCH="${FLASHOS_ARCH:-x86_64}"
 FLASHOS_CONFIG_NAME="${FLASHOS_CONFIG_NAME:-flashos}"
+_FLASHOS_AUTOMATION_BASELINE=134635a5e1282b5d8455a4b2aeb754be5a3a77c1
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   _FLASHOS_RED="$(printf '\033[0;31m')"
@@ -81,6 +82,35 @@ _flashos_make() {
     "ARCH=$FLASHOS_ARCH" \
     "CONFIG_NAME=$FLASHOS_CONFIG_NAME" \
     "$@"
+}
+
+_flashos_acquire_automation() {
+  local platform
+
+  case "$(command uname -s)-$(command uname -m)" in
+    Darwin-arm64) platform=darwin-aarch64 ;;
+    Linux-x86_64) platform=linux-x86_64 ;;
+    *)
+      _flashos_error "public automation is unsupported on this host"
+      return 1
+      ;;
+  esac
+
+  _flashos_root command make flash-bootstrap flash-automation-tools || return 1
+  _FLASHOS_AUTOMATION_RUNTIME="$_FLASHOS_DIR/build/flash-bootstrap/$_FLASHOS_AUTOMATION_BASELINE/fsh"
+  _FLASHOS_AUTOMATION_TOOLS="$_FLASHOS_DIR/build/flash-automation-tools/$platform/bin"
+}
+
+_flashos_run_automation() {
+  local script=$1
+  shift
+
+  _flashos_root command env \
+    "FLASH_AUTOMATION_RUNTIME=$_FLASHOS_AUTOMATION_RUNTIME" \
+    "FLASH_AUTOMATION_TAPLO=$_FLASHOS_AUTOMATION_TOOLS/taplo" \
+    "FLASH_AUTOMATION_JQ=$_FLASHOS_AUTOMATION_TOOLS/jq" \
+    "FLASH_AUTOMATION_RG=$_FLASHOS_AUTOMATION_TOOLS/rg" \
+    "$_FLASHOS_AUTOMATION_RUNTIME" "$script" "$@"
 }
 
 _flashos_build_dir() {
@@ -296,12 +326,14 @@ flash-check() {
 }
 
 _flashos_check_shell_helpers() {
-  _flashos_root command python3 ci/check_developer_interface.py
+  _flashos_acquire_automation &&
+    _flashos_run_automation ci/check_developer_interface.fsh &&
+    _flashos_root command python3 ci/check_public_automation.py
 }
 
 _flashos_check_quick() {
   _flashos_check_shell_helpers &&
-    _flashos_root command python3 ci/check_profile.py &&
+    _flashos_run_automation ci/check_profile.fsh &&
     _flashos_root command git diff --check
 }
 
@@ -322,7 +354,10 @@ flashos-check() {
 
   case "$scope" in
     quick)   _flashos_check_quick ;;
-    profile) _flashos_root command python3 ci/check_profile.py "$@" ;;
+    profile)
+      _flashos_acquire_automation &&
+        _flashos_run_automation ci/check_profile.fsh "$@"
+      ;;
     root)    _flashos_check_root ;;
     shell)   flash-check all "$@" ;;
     python)  _flashos_check_python "$@" ;;
@@ -469,7 +504,8 @@ flashos-versions() {
         _flashos_error "flashos versions check accepts no arguments"
         return 1
       }
-      _flashos_root command python3 ci/check_profile.py
+      _flashos_acquire_automation &&
+        _flashos_run_automation ci/check_profile.fsh
       ;;
     help|-h|--help)
       printf '%s\n' "usage: flashos versions [show|check]"
