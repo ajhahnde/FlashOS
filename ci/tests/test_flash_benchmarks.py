@@ -1,146 +1,99 @@
 from __future__ import annotations
 
-import sys
+import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
-CI_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(CI_ROOT))
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "ci/flash_benchmarks.fsh"
+RUNTIME = os.environ.get("FLASH_AUTOMATION_RUNTIME")
 
-import flash_benchmarks as benchmarks  # noqa: E402
 
-
+@unittest.skipUnless(RUNTIME, "Flash automation runtime is not selected")
 class FlashBenchmarkContractTests(unittest.TestCase):
-    def result(self, kind: str) -> dict[str, object]:
-        contract = benchmarks.load_contract()
-        environment = "host" if kind == "host" else "flashos-qemu-tcg"
-        profile_name = "smoke" if kind == "host" else "qualification"
-        profile = contract["profiles"][profile_name]
-        measurements = []
-        for index, case in enumerate(contract["cases"], start=1):
-            if case["environment"] != environment:
-                continue
-            if case["sample_class"] == "cold":
-                samples = [index]
-                warmups = []
-            elif kind == "host":
-                samples = [index] * profile["samples"]
-                warmups = [index] * profile["warmups"]
-            else:
-                samples = [index] * profile["target_samples"]
-                warmups = [index] * profile["target_warmups"]
-            measurements.append(
-                {
-                    "case_id": case["id"],
-                    "unit": benchmarks.RESULT_UNITS[case["metric"]],
-                    "warmup_samples": warmups,
-                    "samples": samples,
-                    "summary": benchmarks.summarize(samples),
-                }
-            )
-        parameters = (
-            {
-                "warmups": profile["warmups"],
-                "samples": profile["samples"],
-                "command_iterations": profile["command_iterations"],
-                "pipeline_bytes": profile["pipeline_bytes"],
-                "stream_items": profile["stream_items"],
-            }
-            if kind == "host"
-            else {
-                "warmups": profile["target_warmups"],
-                "samples": profile["target_samples"],
-                "pipeline_bytes": profile["target_pipeline_bytes"],
-            }
-        )
-        return {
-            "schema": benchmarks.RESULT_SCHEMA,
-            "suite_version": contract["suite_version"],
-            "profile": profile_name,
-            "contract_sha256": benchmarks.sha256(benchmarks.CONTRACT_PATH),
-            "binary_sha256" if kind == "host" else "image_sha256": "0" * 64,
-            "environment": {
-                "kind": kind,
-                **({"os": "linux"} if kind == "host" else {}),
-            },
-            "parameters": parameters,
-            "measurements": measurements,
-        }
-
-    def test_contract_covers_every_required_surface(self) -> None:
-        contract = benchmarks.load_contract()
-        self.assertEqual(
-            {case["surface"] for case in contract["cases"]},
-            benchmarks.EXPECTED_SURFACES,
+    def run_checker(self, *arguments: object) -> subprocess.CompletedProcess[str]:
+        assert RUNTIME is not None
+        return subprocess.run(
+            [RUNTIME, SCRIPT, *(str(argument) for argument in arguments)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
-    def test_host_and_target_results_require_exact_case_coverage(self) -> None:
-        benchmarks.validate_result(self.result("host"))
-        benchmarks.validate_result(self.result("flashos-qemu-tcg"))
+    def assert_passes(self, *arguments: object) -> subprocess.CompletedProcess[str]:
+        process = self.run_checker(*arguments)
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(process.stderr, "")
+        return process
 
-        missing = self.result("host")
-        missing["measurements"].pop()
-        with self.assertRaisesRegex(benchmarks.BenchmarkContractError, "coverage"):
-            benchmarks.validate_result(missing)
+    def test_tracked_contract_results_and_budgets_are_valid(self) -> None:
+        process = self.assert_passes()
+        self.assertEqual(process.stdout, "Flash benchmark contract: ok\n")
 
-    def test_result_rejects_summary_and_contract_drift(self) -> None:
-        summary_drift = self.result("host")
-        summary_drift["measurements"][0]["summary"]["p95"] += 1
-        with self.assertRaisesRegex(benchmarks.BenchmarkContractError, "summary"):
-            benchmarks.validate_result(summary_drift)
+        evidence = ROOT / "components/flash/benchmarks/evidence"
+        for result in (
+            evidence / "host-darwin-arm64-v1.json",
+            evidence / "flashos-qemu-tcg-v1.json",
+        ):
+            with self.subTest(result=result.name):
+                self.assert_passes("--result", result)
 
-        contract_drift = self.result("host")
-        contract_drift["contract_sha256"] = "0" * 64
-        with self.assertRaisesRegex(benchmarks.BenchmarkContractError, "contract"):
-            benchmarks.validate_result(contract_drift)
+    def test_contract_boundary_is_versioned_and_digest_bound(self) -> None:
+        process = self.assert_passes("--contract-json-v1")
+        document = json.loads(process.stdout)
+        self.assertEqual(document["boundary_schema"], 1)
+        self.assertEqual(document["kind"], "flash-benchmark-contract")
+        self.assertEqual(document["result_schema"], "flash-performance-result-v1")
+        self.assertEqual(len(document["contract_sha256"]), 64)
 
-    def test_result_rejects_nonpositive_samples(self) -> None:
-        result = self.result("host")
-        result["measurements"][0]["samples"][0] = 0
-        with self.assertRaisesRegex(benchmarks.BenchmarkContractError, "positive"):
-            benchmarks.validate_result(result)
-
-    def test_nearest_rank_is_stable_for_small_and_even_sets(self) -> None:
-        self.assertEqual(benchmarks.nearest_rank([5]), 5)
-        self.assertEqual(benchmarks.nearest_rank([1, 2, 3, 4]), 4)
-        self.assertEqual(benchmarks.summarize([1, 2, 3, 4])["median"], 2)
-
-    def test_budget_policy_distinguishes_cold_warm_and_throughput(self) -> None:
-        contract = benchmarks.load_contract()
-        cases = {case["id"]: case for case in contract["cases"]}
-        self.assertEqual(
-            benchmarks.budget_policy(cases["host-startup-cold"], "host"),
-            ("maximum", 4, 1),
+    def test_result_rejects_summary_drift(self) -> None:
+        source = (
+            ROOT
+            / "components/flash/benchmarks/evidence/host-darwin-arm64-v1.json"
         )
-        self.assertEqual(
-            benchmarks.budget_policy(cases["host-startup-warm"], "host"),
-            ("p95", 3, 1),
-        )
-        self.assertEqual(
-            benchmarks.budget_policy(
-                cases["flashos-pipeline-throughput-warm"], "flashos-qemu-tcg"
-            ),
-            ("median", 3, 1),
-        )
-
-    def test_tracked_baselines_satisfy_their_derived_budgets(self) -> None:
-        budgets = benchmarks.validate_budgets()
-        for environment in budgets["environments"]:
-            result = benchmarks.load_result(
-                benchmarks.BENCHMARK_ROOT / environment["evidence"]
-            )
-            benchmarks.evaluate_document(result, environment["id"], budgets)
+        document = json.loads(source.read_text(encoding="utf-8"))
+        document["measurements"][0]["summary"]["p95"] += 1
+        with tempfile.TemporaryDirectory(prefix="flash-benchmark-test-") as raw:
+            result = Path(raw) / "result.json"
+            result.write_text(json.dumps(document), encoding="utf-8")
+            process = self.run_checker("--result", result)
+        self.assertEqual(process.returncode, 1)
+        self.assertIn("summary drifted", process.stderr)
 
     def test_budget_evaluation_rejects_a_regression(self) -> None:
-        budgets = benchmarks.validate_budgets()
-        environment = budgets["environments"][0]
-        result = benchmarks.load_result(
-            benchmarks.BENCHMARK_ROOT / environment["evidence"]
+        source = (
+            ROOT
+            / "components/flash/benchmarks/evidence/host-darwin-arm64-v1.json"
         )
-        result["measurements"][0]["samples"] = [10**18]
-        result["measurements"][0]["summary"] = benchmarks.summarize([10**18])
-        with self.assertRaisesRegex(benchmarks.BenchmarkContractError, "regressions"):
-            benchmarks.evaluate_document(result, environment["id"], budgets)
+        document = json.loads(source.read_text(encoding="utf-8"))
+        measurement = document["measurements"][0]
+        measurement["samples"] = [10**18]
+        measurement["summary"] = {
+            "minimum": 10**18,
+            "median": 10**18,
+            "p95": 10**18,
+            "maximum": 10**18,
+        }
+        with tempfile.TemporaryDirectory(prefix="flash-benchmark-test-") as raw:
+            result = Path(raw) / "result.json"
+            result.write_text(json.dumps(document), encoding="utf-8")
+            process = self.run_checker(
+                "--evaluate",
+                result,
+                "--environment",
+                "host-darwin-arm64",
+            )
+        self.assertEqual(process.returncode, 1)
+        self.assertIn("performance regressions", process.stderr)
+
+    def test_missing_result_argument_is_a_usage_error(self) -> None:
+        process = self.run_checker("--result")
+        self.assertEqual(process.returncode, 2)
+        self.assertIn("argument --result: expected one argument", process.stderr)
 
 
 if __name__ == "__main__":

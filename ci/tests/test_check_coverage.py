@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
 import sys
 import tempfile
@@ -8,11 +9,20 @@ import unittest
 from pathlib import Path
 
 CI_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(CI_ROOT))
+SCRIPT = CI_ROOT / "check_coverage.py"
+check_coverage = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("check_coverage", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    check_coverage = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = check_coverage
+    SPEC.loader.exec_module(check_coverage)
 
-import check_coverage  # noqa: E402
 
-
+@unittest.skipUnless(
+    check_coverage is not None,
+    "the Python coverage validator has migrated to Flash",
+)
 class CoverageContractTests(unittest.TestCase):
     def validate(self, source_files: list[Path], count: int = 1) -> str:
         records = []

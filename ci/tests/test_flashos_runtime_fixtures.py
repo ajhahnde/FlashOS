@@ -9,13 +9,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "ci/flashos_runtime_fixtures.py"
-SPEC = importlib.util.spec_from_file_location("flashos_runtime_fixtures", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
-runtime_fixtures = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = runtime_fixtures
-SPEC.loader.exec_module(runtime_fixtures)
+runtime_fixtures = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("flashos_runtime_fixtures", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    runtime_fixtures = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = runtime_fixtures
+    SPEC.loader.exec_module(runtime_fixtures)
 
 
+@unittest.skipUnless(
+    runtime_fixtures is not None,
+    "the Python fixture renderer has migrated to Flash",
+)
 class FlashOSRuntimeFixtureTests(unittest.TestCase):
     def test_tracked_suite_is_valid_and_renderable_for_real_systems(self) -> None:
         suite = runtime_fixtures.load_fixture_suite()
