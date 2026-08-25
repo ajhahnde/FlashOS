@@ -10,15 +10,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "ci/check_flashos_capability_classification.py"
-SPEC = importlib.util.spec_from_file_location(
-    "check_flashos_capability_classification", SCRIPT
+classification_check = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location(
+        "check_flashos_capability_classification", SCRIPT
+    )
+    assert SPEC is not None and SPEC.loader is not None
+    classification_check = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = classification_check
+    SPEC.loader.exec_module(classification_check)
+
+
+@unittest.skipUnless(
+    classification_check is not None,
+    "the Python capability-classification validator has migrated to Flash",
 )
-assert SPEC is not None and SPEC.loader is not None
-classification_check = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = classification_check
-SPEC.loader.exec_module(classification_check)
-
-
 class FlashOSCapabilityClassificationTests(unittest.TestCase):
     def test_tracked_sources_match_the_classification(self) -> None:
         document = classification_check.load_toml(

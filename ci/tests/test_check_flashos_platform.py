@@ -9,13 +9,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "ci/check_flashos_platform.py"
-SPEC = importlib.util.spec_from_file_location("check_flashos_platform", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
-platform_check = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = platform_check
-SPEC.loader.exec_module(platform_check)
+platform_check = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("check_flashos_platform", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    platform_check = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = platform_check
+    SPEC.loader.exec_module(platform_check)
 
 
+@unittest.skipUnless(
+    platform_check is not None,
+    "the Python platform validator has migrated to Flash",
+)
 class FlashOSPlatformContractTests(unittest.TestCase):
     def test_tracked_sources_match_the_platform_baseline(self) -> None:
         baseline = platform_check.load_toml(platform_check.BASELINE_PATH)

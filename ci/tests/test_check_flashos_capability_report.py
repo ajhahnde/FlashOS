@@ -11,13 +11,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ci"))
 SCRIPT = ROOT / "ci/check_flashos_capability_report.py"
-SPEC = importlib.util.spec_from_file_location("check_flashos_capability_report", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
-report_check = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = report_check
-SPEC.loader.exec_module(report_check)
+report_check = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location(
+        "check_flashos_capability_report",
+        SCRIPT,
+    )
+    assert SPEC is not None and SPEC.loader is not None
+    report_check = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = report_check
+    SPEC.loader.exec_module(report_check)
 
 
+@unittest.skipUnless(
+    report_check is not None,
+    "the Python capability-report validator has migrated to Flash",
+)
 class FlashOSCapabilityReportTests(unittest.TestCase):
     def test_tracked_sources_match_the_versioned_report(self) -> None:
         document = report_check.load_toml(report_check.REPORT_PATH)

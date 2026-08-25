@@ -10,13 +10,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "ci/check_flash_release.py"
-SPEC = importlib.util.spec_from_file_location("check_flash_release", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
-release_check = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = release_check
-SPEC.loader.exec_module(release_check)
+release_check = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("check_flash_release", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    release_check = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = release_check
+    SPEC.loader.exec_module(release_check)
 
 
+@unittest.skipUnless(
+    release_check is not None,
+    "the Python release validator has migrated to Flash",
+)
 class FlashReleaseTests(unittest.TestCase):
     def test_release_record_matches_versions_contracts_claims_and_ci(self) -> None:
         release_check.validate(release_check.load_release())

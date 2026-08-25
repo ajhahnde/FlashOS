@@ -10,13 +10,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "ci/check_flash_v1_exercises.py"
-SPEC = importlib.util.spec_from_file_location("check_flash_v1_exercises", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
-exercise_check = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = exercise_check
-SPEC.loader.exec_module(exercise_check)
+exercise_check = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("check_flash_v1_exercises", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    exercise_check = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = exercise_check
+    SPEC.loader.exec_module(exercise_check)
 
 
+@unittest.skipUnless(
+    exercise_check is not None,
+    "the Python exercise validator has migrated to Flash",
+)
 class FlashV1ExerciseContractTests(unittest.TestCase):
     def test_complete_contract_matches_live_sources(self) -> None:
         exercise_check.validate(exercise_check.load_contract())

@@ -11,13 +11,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "ci/check_flash_conformance.py"
-SPEC = importlib.util.spec_from_file_location("check_flash_conformance", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
-conformance_check = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = conformance_check
-SPEC.loader.exec_module(conformance_check)
+conformance_check = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("check_flash_conformance", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    conformance_check = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = conformance_check
+    SPEC.loader.exec_module(conformance_check)
 
 
+@unittest.skipUnless(
+    conformance_check is not None,
+    "the Python conformance validator has migrated to Flash",
+)
 class FlashConformanceTests(unittest.TestCase):
     def test_tracked_inventory_matches_executable_owners_and_ci(self) -> None:
         conformance_check.validate(conformance_check.load_inventory())
