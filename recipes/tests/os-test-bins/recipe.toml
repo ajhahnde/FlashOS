@@ -60,20 +60,15 @@ done
 
 cp -t out -R out.known/redox
 
-# Create runner script
+# Install the Flash-native runner.
 mkdir -p "${COOKBOOK_STAGE}/usr/bin"
-cat > "${COOKBOOK_STAGE}/usr/bin/os-test-runner" <<EOF
-#!/usr/bin/env bash
-set -e
-cd /home/user/os-test
-
-make test html json
-EOF
+cp "${COOKBOOK_RECIPE}/os-test-runner.fsh" "${COOKBOOK_STAGE}/usr/bin/os-test-runner"
 chmod +x "${COOKBOOK_STAGE}/usr/bin/os-test-runner"
 """
 
 [package]
 dependencies = [
+    "flash",
     "gnu-grep",
     "gnu-make",
     "libarchive",

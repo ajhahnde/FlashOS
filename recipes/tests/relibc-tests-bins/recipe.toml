@@ -12,18 +12,12 @@ if [ -n "$TESTBIN" ]; then
 "${COOKBOOK_REDOXER}" write-exec sh -c "cd /home/user/relibc-tests; make run-once TESTBIN=bins_dynamic/$TESTBIN"
 fi
 
-# Create runner script
+# Install the Flash-native runner.
 mkdir -p "${COOKBOOK_STAGE}/usr/bin"
-cat > "${COOKBOOK_STAGE}/usr/bin/relibc-tests-runner" <<EOF
-#!/usr/bin/env bash
-set -e
-cd /home/user/relibc-tests
-make run IS_REDOX=1
-EOF
-
+cp "${COOKBOOK_RECIPE}/relibc-tests-runner.fsh" "${COOKBOOK_STAGE}/usr/bin/relibc-tests-runner"
 chmod +x "${COOKBOOK_STAGE}/usr/bin/relibc-tests-runner"
 
 """
 
 [package]
-dependencies = ["gnu-make"]
+dependencies = ["flash", "gnu-make"]
