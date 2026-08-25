@@ -90,10 +90,9 @@ flashos help
 ```
 
 The helpers delegate to the repository's Make, Cargo, Python, Git, and QEMU
-interfaces. Normal build, inspection, and qualification commands do not commit
-changes, push branches, create tags, or write physical media. The explicit
-`flashos commit` command is a maintainer-facing exception: it can create a Git
-commit and can push only when `--push` is requested and separately confirmed.
+interfaces. They do not commit changes, push branches, create tags, call
+external AI services, or write physical media. The shorter `fos` alias exposes
+the same command surface.
 
 The helper maintains its selected architecture and profile in the current shell session:
 
@@ -102,27 +101,11 @@ flashos profile
 flashos profile dev
 ```
 
-### Repository question and commit helpers
+### Commit subjects
 
-Two optional commands use the Gemini Interactions API:
-
-```bash
-flashos ask "Where is external process execution handled?"
-flashos ask --line-numbers "Where is the Flash image source selected?"
-flashos commit "docs: clarify the host workflow"
-flashos commit --generate
-```
-
-Set `GEMINI_API_KEY` or store it in the macOS Keychain under the service name
-`GEMINI_API_KEY`. `flashos ask` sends the question, the tracked searchable-path
-inventory, bounded repository excerpts, and the public project context to
-Gemini. It excludes untracked and ignored files. `flashos commit --generate`
-sends staged filenames, the staged diff, and the public commit context. Inspect
-the relevant repository state before using either command.
-
-`flashos commit` accepts only the repository house style: one English
-Conventional Commit subject, at most 72 characters, and no trailing period.
-Scope selection is deterministic rather than decorative:
+Commit subjects use one English Conventional Commit subject, at most 72
+characters, with no trailing period. Scope selection is deterministic rather
+than decorative:
 
 - use `type(flash):` when Flash owns the primary effect;
 - use `type(tools):` when the host developer tools own the primary effect;
@@ -130,12 +113,9 @@ Scope selection is deterministic rather than decorative:
   repository-wide, or mixed-area effects;
 - never repeat a type as a scope: use `ci:`, not `ci(ci):`.
 
-`flash` and `tools` are the only accepted scopes. Thus
+`flash` and `tools` are the established scopes. Thus
 `build(flash): use the in-tree workspace source` and
 `ci: trust the mounted workspace in image builds` follow the same rule.
-Generated subjects are validated locally, require confirmation, and are
-abandoned if the staged index changes before commit creation. A requested push
-requires a second confirmation.
 
 The normal development profile is `flashos`. The `flashos-release` profile exists for release-image qualification and should not replace the development profile during routine interactive work.
 

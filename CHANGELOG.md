@@ -242,10 +242,6 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   and pull-request comments remain disabled while a new Rust baseline is
   established; the README badge explicitly represents Flash host coverage and
   does not claim Redox, QEMU, or hardware-path coverage.
-- Added optional Gemini-backed host helpers for evidence-bounded repository
-  location questions and locally validated commit subjects. Their public
-  contexts define FlashOS terminology, evidence limits, privacy boundaries, and
-  the one-line Conventional Commit house style.
 - Added an optional sourceable Bash and Zsh helper layer for common image build,
   interactive QEMU, exact-artifact smoke, profile, Flash, Podman, and local
   quality commands. The wrappers keep the x86_64 FlashOS profile and artifact
@@ -287,11 +283,6 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
-- Clarified and tightened the commit-subject scope rule. `flash` and `tools`
-  are now the only accepted scopes and are required when that named subproject
-  owns the primary effect; pure CI, root build-system, release,
-  repository-wide, and mixed-area subjects remain unscoped. The commit helper
-  rejects invented scopes and redundant forms such as `ci(ci):`.
 - Changed the Flash image recipe to snapshot the current in-tree
   `components/flash/` workspace instead of pinning the repository to its own
   commit SHA. Clean builds remain bound to the exact outer FlashOS checkout,
@@ -306,7 +297,6 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   - Configuration paths: `<config_dir>/flash/config.fsh` and `<config_dir>/flashshell/config.fsh`.
   - History paths: `<state_dir>/flash/history` and `<state_dir>/flashshell/history`.
   - Fallback rules: if the new canonical path exists, it has exclusive priority; if only the legacy path exists, it continues to be used; if neither path exists, only the new canonical path is created or expected; invalid, incomplete, or unsafe files at the canonical path always fail as an error, with no fallback and no creation of replacement paths.
-  - The shell helper `flashshell-check` is a deprecated compatibility alias for `flash-check`.
 - Flash now observes jobs continued by an external process, reports their
   live running state, and removes the stale stopped notice at the next command
   boundary.
@@ -330,6 +320,8 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Fixed
 
+- Restored `flashos check quick` validation of the Bash/Zsh helper surface and
+  corrected top-level Bash completion so it offers the documented commands.
 - Corrected the final login banner so FlashOS no longer presents itself as an
   unofficial Redox OS distribution. Product identity files are now installed
   after packages, and the static and QEMU contracts reject inherited product
@@ -338,12 +330,15 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   commits to FlashOS by default, with an explicit source-URL override for
   alternate deployments.
 - Replaced inherited Redox product wording in the Nix and bootstrap developer
-  interfaces, updated maintenance scripts to refer to the FlashOS repository
-  root and `main` branch, and restored the documented deprecated
-  `flashshell-check` compatibility alias.
+  interfaces and updated maintenance scripts to refer to the FlashOS
+  repository root and `main` branch.
 
 ### Removed
 
+- Removed the unused repository-question and commit helpers, their external AI
+  integration, and undocumented legacy shell aliases. The sourceable host
+  `flashos` and `fos` dispatchers now accept only the commands listed by
+  `flashos help`.
 - Removed every inherited image configuration that the product does not build:
   the desktop, Wayland, X11, server, minimal, development, and test profiles,
   the inherited base configuration they were layered on, and the configuration
