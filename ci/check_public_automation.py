@@ -3629,6 +3629,239 @@ def check_recipe_inspection_parity(runtime: Path, root: Path) -> None:
         )
 
 
+RECIPE_SOURCE_GIT_MIGRATIONS = (
+    "cargo-update",
+    "commit-hash",
+    "fetch-changed",
+)
+
+
+def write_recipe_source_git_probe(path: Path, runtime: Path) -> None:
+    source = f"""#!{sys.executable}
+import json
+import os
+import pathlib
+import sys
+
+name = pathlib.Path(sys.argv[0]).name
+scenario = json.loads(os.environ.get("PUBLIC_AUTOMATION_SCENARIO", "{{}}"))
+root = pathlib.Path(os.environ["PUBLIC_AUTOMATION_ROOT"])
+report = pathlib.Path(os.environ["PUBLIC_AUTOMATION_REPORT"])
+try:
+    cwd = pathlib.Path.cwd().relative_to(root).as_posix() or "."
+except ValueError:
+    cwd = pathlib.Path.cwd().as_posix()
+with report.open("a", encoding="utf-8") as output:
+    output.write(json.dumps({{
+        "argv": sys.argv[1:],
+        "cwd": cwd,
+        "name": name,
+    }}, sort_keys=True) + "\\n")
+
+if name == "fsh":
+    os.execv({str(runtime)!r}, [{str(runtime)!r}, *sys.argv[1:]])
+if name == "repo":
+    if sys.argv[1:] == ["find", scenario.get("recipe_name", "kernel")]:
+        print(scenario.get("recipe_path", "recipes/core/kernel"))
+        raise SystemExit(scenario.get("repo_code", 0))
+    raise SystemExit(1)
+if name == "make":
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    sys.stdout.write(f"stdout:make:{{command}}\\n")
+    sys.stderr.write(f"stderr:make:{{command}}\\n")
+    raise SystemExit(scenario.get("make_codes", {{}}).get(command, 0))
+if name == "cargo":
+    sys.stdout.write("stdout:cargo:" + "|".join(sys.argv[1:]) + "\\n")
+    sys.stderr.write("stderr:cargo:" + "|".join(sys.argv[1:]) + "\\n")
+    raise SystemExit(scenario.get("cargo_code", 0))
+if name == "git":
+    arguments = sys.argv[1:]
+    if arguments == ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]:
+        code = scenario.get("symbolic_ref_code", 0)
+        if code == 0:
+            print(scenario.get("symbolic_ref", "origin/main"))
+        raise SystemExit(code)
+    if len(arguments) == 3 and arguments[:2] == ["fetch", "origin"]:
+        sys.stdout.write("stdout:git:fetch\\n")
+        sys.stderr.write("stderr:git:fetch\\n")
+        raise SystemExit(scenario.get("fetch_code", 0))
+    if len(arguments) == 3 and arguments[:2] == ["diff", "--name-only"]:
+        paths = scenario.get("diff_paths", [])
+        if paths:
+            sys.stdout.write("\\n".join(paths) + "\\n")
+        raise SystemExit(scenario.get("diff_code", 0))
+    if arguments == ["rev-parse", "HEAD"]:
+        recipe = pathlib.Path.cwd().parent.name
+        code = scenario.get("rev_parse_codes", {{}}).get(recipe, 0)
+        if code == 0:
+            print(f"{{recipe}}-commit")
+        else:
+            sys.stderr.write(f"git rev-parse failed for {{recipe}}\\n")
+        raise SystemExit(code)
+raise SystemExit(97)
+"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def prepare_recipe_source_git_tree(
+    destination: Path,
+    name: str,
+    runtime: Path,
+    root: Path,
+    *,
+    baseline: bool,
+    core_present: bool,
+) -> Path:
+    script = destination / "scripts" / f"{name}.fsh"
+    if baseline:
+        materialize_baseline_source(f"scripts/{name}.sh", script, root)
+    else:
+        script.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / "scripts" / f"{name}.fsh", script)
+
+    if core_present:
+        for recipe in ("alpha", "kernel", "without-source"):
+            (destination / "recipes/core" / recipe).mkdir(parents=True)
+        for recipe in ("alpha", "kernel"):
+            (destination / "recipes/core" / recipe / "source/.git").mkdir(
+                parents=True
+            )
+
+    probe_directory = destination / "probe-bin"
+    for command in ("cargo", "fsh", "git", "make"):
+        write_recipe_source_git_probe(probe_directory / command, runtime)
+    write_recipe_source_git_probe(destination / "target/release/repo", runtime)
+    return script
+
+
+def recipe_source_git_result(
+    runtime: Path,
+    root: Path,
+    name: str,
+    arguments: list[str],
+    scenario: dict[str, object],
+    *,
+    core_present: bool = True,
+) -> tuple[object, ...]:
+    observed: list[tuple[object, ...]] = []
+    for baseline in (True, False):
+        with tempfile.TemporaryDirectory(prefix=f"flash-{name}-parity-") as raw:
+            directory = Path(raw)
+            report = directory / "report.jsonl"
+            report.write_text("", encoding="utf-8")
+            script = prepare_recipe_source_git_tree(
+                directory,
+                name,
+                runtime,
+                root,
+                baseline=baseline,
+                core_present=core_present,
+            )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": os.pathsep.join(
+                        [str(directory / "probe-bin"), environment.get("PATH", "")]
+                    ),
+                    "PUBLIC_AUTOMATION_REPORT": str(report),
+                    "PUBLIC_AUTOMATION_ROOT": str(directory.resolve()),
+                    "PUBLIC_AUTOMATION_SCENARIO": json.dumps(
+                        scenario, sort_keys=True
+                    ),
+                }
+            )
+            command: list[str | Path] = ["/bin/bash" if baseline else runtime]
+            command.extend([script.relative_to(directory), *arguments])
+            process = checked_runtime_process(
+                command,
+                cwd=directory,
+                environment=environment,
+                label=f"{'baseline' if baseline else 'migrated'} {name}",
+            )
+            observed.append(
+                (
+                    process.returncode,
+                    process.stdout,
+                    process.stderr,
+                    [
+                        record
+                        for record in read_report(report)
+                        if record["name"] != "fsh"
+                    ],
+                )
+            )
+    if observed[0] != observed[1]:
+        fail(
+            f"recipe source Git baseline parity differs for {name} "
+            f"{arguments!r}: baseline={observed[0]!r}, migrated={observed[1]!r}"
+        )
+    return observed[0]
+
+
+def check_recipe_source_git_parity(runtime: Path, root: Path) -> None:
+    if not all(
+        (root / "scripts" / f"{name}.fsh").is_file()
+        for name in RECIPE_SOURCE_GIT_MIGRATIONS
+    ):
+        return
+
+    cases: tuple[
+        tuple[str, list[str], dict[str, object], bool], ...
+    ] = (
+        ("cargo-update", ["kernel"], {}, True),
+        ("cargo-update", ["kernel"], {"cargo_code": 9}, True),
+        (
+            "cargo-update",
+            ["kernel"],
+            {"make_codes": {"f.kernel": 7}},
+            True,
+        ),
+        ("commit-hash", [], {}, True),
+        ("commit-hash", [], {}, False),
+        ("commit-hash", [], {"rev_parse_codes": {"alpha": 8}}, True),
+        (
+            "fetch-changed",
+            [],
+            {
+                "diff_paths": [
+                    "README.md",
+                    "recipes/core/kernel/recipe.toml",
+                    "recipes/net/host/recipe.toml",
+                ],
+                "symbolic_ref": "origin/trunk",
+            },
+            True,
+        ),
+        (
+            "fetch-changed",
+            [],
+            {"diff_paths": [], "symbolic_ref_code": 1},
+            True,
+        ),
+        ("fetch-changed", [], {"fetch_code": 7}, True),
+        (
+            "fetch-changed",
+            [],
+            {
+                "diff_paths": ["recipes/core/kernel/recipe.toml"],
+                "make_codes": {"f.kernel": 6},
+            },
+            True,
+        ),
+    )
+    for name, arguments, scenario, core_present in cases:
+        recipe_source_git_result(
+            runtime,
+            root,
+            name,
+            arguments,
+            scenario,
+            core_present=core_present,
+        )
+
+
 def check_runtime_parity(
     runtime: Path,
     root: Path = ROOT,
@@ -3668,6 +3901,7 @@ def check_runtime_parity(
     if (root / "build.fsh").is_file():
         check_build_interface_parity(runtime, root)
     check_recipe_inspection_parity(runtime, root)
+    check_recipe_source_git_parity(runtime, root)
 
     with tempfile.TemporaryDirectory(prefix="flashos-public-automation-") as raw:
         directory = Path(raw)
