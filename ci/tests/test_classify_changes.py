@@ -8,15 +8,20 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location(
-    "classify_changes", ROOT / "ci/classify_changes.py"
+SCRIPT = ROOT / "ci/classify_changes.py"
+MODULE = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("classify_changes", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    MODULE = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = MODULE
+    SPEC.loader.exec_module(MODULE)
+
+
+@unittest.skipUnless(
+    MODULE is not None,
+    "the Python change classifier has migrated to Flash",
 )
-MODULE = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = MODULE
-SPEC.loader.exec_module(MODULE)
-
-
 class ClassificationTests(unittest.TestCase):
     def test_documentation_policy_and_host_tools_use_the_fast_lane(self):
         result = MODULE.classify(
@@ -41,10 +46,15 @@ class ClassificationTests(unittest.TestCase):
         self.assertTrue(result.image_required)
 
     def test_target_source_is_called_out_inside_the_product_lane(self):
-        result = MODULE.classify(["components/flash/crates/flash-cli/src/main.rs"])
-        self.assertEqual(result.lane, "product")
-        self.assertTrue(result.image_required)
-        self.assertTrue(result.target_required)
+        for path in (
+            "components/flash/crates/flash-cli/src/main.rs",
+            "recipes/groups/auto-test/auto-test.fsh",
+        ):
+            with self.subTest(path=path):
+                result = MODULE.classify([path])
+                self.assertEqual(result.lane, "product")
+                self.assertTrue(result.image_required)
+                self.assertTrue(result.target_required)
 
     def test_ci_and_unknown_paths_fail_closed(self):
         for path in (

@@ -8,10 +8,12 @@ sys.path.insert(0, str(ROOT / "ci"))
 SPEC = importlib.util.spec_from_file_location(
     "check_main_qualification", ROOT / "ci/check_main_qualification.py"
 )
-MODULE = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = MODULE
-SPEC.loader.exec_module(MODULE)
+MODULE = None
+if (ROOT / "ci/check_main_qualification.py").is_file():
+    MODULE = importlib.util.module_from_spec(SPEC)
+    assert SPEC.loader is not None
+    sys.modules[SPEC.name] = MODULE
+    SPEC.loader.exec_module(MODULE)
 
 
 MAIN_SHA = "1" * 40
@@ -107,6 +109,10 @@ def responses(
     }
 
 
+@unittest.skipUnless(
+    MODULE is not None,
+    "the Python hosted qualification pair has migrated to Flash",
+)
 class QualificationTests(unittest.TestCase):
     def test_accepts_the_exact_tree_with_complete_candidate_evidence(self):
         evidence = MODULE.qualify_main(

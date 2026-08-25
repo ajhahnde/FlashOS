@@ -5,13 +5,14 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location(
-    "aggregate_ci", ROOT / "ci/aggregate_ci.py"
-)
-MODULE = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules[SPEC.name] = MODULE
-SPEC.loader.exec_module(MODULE)
+SCRIPT = ROOT / "ci/aggregate_ci.py"
+MODULE = None
+if SCRIPT.is_file():
+    SPEC = importlib.util.spec_from_file_location("aggregate_ci", SCRIPT)
+    assert SPEC is not None and SPEC.loader is not None
+    MODULE = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = MODULE
+    SPEC.loader.exec_module(MODULE)
 
 
 def environment(*, lane="product", image_required=True, image="success", draft=False):
@@ -37,6 +38,10 @@ def environment(*, lane="product", image_required=True, image="success", draft=F
     }
 
 
+@unittest.skipUnless(
+    MODULE is not None,
+    "the Python CI aggregate has migrated to Flash",
+)
 class AggregateTests(unittest.TestCase):
     def test_product_lane_requires_successful_image_work(self):
         result = MODULE.parse(environment())
