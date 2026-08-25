@@ -3862,6 +3862,243 @@ def check_recipe_source_git_parity(runtime: Path, root: Path) -> None:
         )
 
 
+HOST_REPORTING_MIGRATIONS = (
+    "backtrace",
+    "changelog",
+    "executables",
+    "pkg-size",
+    "relibc-doc",
+)
+
+
+def write_host_reporting_probe(path: Path, runtime: Path) -> None:
+    source = f"""#!{sys.executable}
+import json
+import os
+import pathlib
+import sys
+
+name = pathlib.Path(sys.argv[0]).name
+scenario = json.loads(os.environ.get("PUBLIC_AUTOMATION_SCENARIO", "{{}}"))
+root = pathlib.Path(os.environ["PUBLIC_AUTOMATION_ROOT"])
+report = pathlib.Path(os.environ["PUBLIC_AUTOMATION_REPORT"])
+try:
+    cwd = pathlib.Path.cwd().relative_to(root).as_posix() or "."
+except ValueError:
+    cwd = pathlib.Path.cwd().as_posix()
+with report.open("a", encoding="utf-8") as output:
+    output.write(
+        json.dumps(
+            {{"argv": sys.argv[1:], "cwd": cwd, "name": name}},
+            sort_keys=True,
+        )
+        + "\\n"
+    )
+
+if name == "fsh":
+    os.execv({str(runtime)!r}, [{str(runtime)!r}, *sys.argv[1:]])
+if name == "repo":
+    package = sys.argv[-1]
+    print(f"recipes/core/{{package}}")
+    raise SystemExit(scenario.get("repo_code", 0))
+if name == "addr2line":
+    payload = sys.stdin.read()
+    print("addr2line:" + "|".join(sys.argv[1:]) + ":" + payload.replace("\\n", ","))
+    raise SystemExit(scenario.get("addr2line_code", 0))
+if name == "git":
+    arguments = sys.argv[1:]
+    if arguments == ["describe", "--tags", "--abbrev=0"]:
+        print("v0.1.0")
+    elif arguments == ["log", "--format=%ct", "-1", "v0.1.0"]:
+        print("1700000000")
+    elif "remote" in arguments:
+        repository = arguments[1]
+        print(
+            f"https://example.test/"
+            f"{{pathlib.Path(repository).name or 'flashos'}}.git"
+        )
+    elif any(argument.startswith("--until=") for argument in arguments):
+        print("before")
+    elif any(argument.startswith("--since=") for argument in arguments):
+        print("after")
+    elif "--oneline" in arguments:
+        print("after change")
+    raise SystemExit(scenario.get("git_code", 0))
+if name == "uname":
+    print("x86_64")
+    raise SystemExit(0)
+if name == "redox_installer":
+    print("kernel")
+    raise SystemExit(scenario.get("installer_code", 0))
+if name == "list_recipes":
+    print("kernel")
+    print("dev/demo")
+    raise SystemExit(0)
+if name == "make":
+    destination = root / "build/relibc-doc/usr/share/doc/relibc"
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / "index.html").write_text("docs\\n", encoding="utf-8")
+    print("make:" + "|".join(sys.argv[1:]))
+    raise SystemExit(scenario.get("make_code", 0))
+if name == "tar":
+    destination = root / sys.argv[2]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"archive\\n")
+    print("tar:" + "|".join(sys.argv[1:]))
+    raise SystemExit(scenario.get("tar_code", 0))
+raise SystemExit(97)
+"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def prepare_host_reporting_tree(
+    destination: Path,
+    name: str,
+    runtime: Path,
+    root: Path,
+    *,
+    baseline: bool,
+) -> Path:
+    script = destination / "scripts" / f"{name}.fsh"
+    if baseline:
+        materialize_baseline_source(f"scripts/{name}.sh", script, root)
+    else:
+        script.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / "scripts" / f"{name}.fsh", script)
+
+    for repository in (".", "cookbook", "rust"):
+        (destination / repository / ".git").mkdir(parents=True, exist_ok=True)
+    for package in ("kernel", "init", "logd", "ramfs", "randd", "zerod"):
+        recipe = destination / "recipes/core" / package
+        (recipe / "source/.git").mkdir(parents=True, exist_ok=True)
+        (recipe / "recipe.toml").write_text("[build]\\n", encoding="utf-8")
+    (destination / "recipes/dev/demo/recipe.toml").parent.mkdir(parents=True)
+    (destination / "recipes/dev/demo/recipe.toml").write_text(
+        "[build]\\n", encoding="utf-8"
+    )
+    for architecture in ("x86_64-unknown-redox", "aarch64-unknown-redox"):
+        for recipe, executable in (("core/kernel", "shared"), ("dev/demo", "shared")):
+            staged = (
+                destination
+                / "recipes"
+                / recipe
+                / "target"
+                / architecture
+                / "stage/usr/bin"
+            )
+            staged.mkdir(parents=True, exist_ok=True)
+            (staged / executable).write_text("binary\\n", encoding="utf-8")
+    package = destination / "recipes/core/kernel/target/x86_64/stage.pkgar"
+    package.parent.mkdir(parents=True, exist_ok=True)
+    package.write_bytes(b"package\\n")
+    executable = destination / (
+        "recipes/core/kernel/target/x86_64-unknown-redox/build/target/"
+        "x86_64-unknown-redox/debug/kernel"
+    )
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.write_text("debug\\n", encoding="utf-8")
+    (destination / "trace.txt").write_text(
+        "frame 0xabc\\n\\nframe 0xdef\\n", encoding="utf-8"
+    )
+
+    probe_directory = destination / "probe-bin"
+    for command in ("addr2line", "fsh", "git", "make", "tar", "uname"):
+        write_host_reporting_probe(probe_directory / command, runtime)
+    write_host_reporting_probe(destination / "target/release/repo", runtime)
+    write_host_reporting_probe(destination / "target/release/list_recipes", runtime)
+    write_host_reporting_probe(
+        destination / "installer/target/release/redox_installer", runtime
+    )
+    return script
+
+
+def host_reporting_result(
+    runtime: Path,
+    root: Path,
+    name: str,
+    arguments: list[str],
+    scenario: dict[str, object],
+) -> None:
+    observed: list[tuple[object, ...]] = []
+    for baseline in (True, False):
+        with tempfile.TemporaryDirectory(prefix=f"flash-{name}-parity-") as raw:
+            directory = Path(raw).resolve()
+            report = directory / "report.jsonl"
+            report.write_text("", encoding="utf-8")
+            script = prepare_host_reporting_tree(
+                directory, name, runtime, root, baseline=baseline
+            )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": os.pathsep.join(
+                        [str(directory / "probe-bin"), environment.get("PATH", "")]
+                    ),
+                    "PUBLIC_AUTOMATION_REPORT": str(report),
+                    "PUBLIC_AUTOMATION_ROOT": str(directory),
+                    "PUBLIC_AUTOMATION_SCENARIO": json.dumps(
+                        scenario, sort_keys=True
+                    ),
+                }
+            )
+            command: list[str | Path] = ["/bin/bash" if baseline else runtime]
+            command.extend([script.relative_to(directory), *arguments])
+            process = checked_runtime_process(
+                command,
+                cwd=directory,
+                environment=environment,
+                label=f"{'baseline' if baseline else 'migrated'} {name}",
+            )
+            records = [
+                record for record in read_report(report) if record["name"] != "fsh"
+            ]
+            observed.append(
+                (
+                    process.returncode,
+                    process.stdout,
+                    process.stderr,
+                    records,
+                    filesystem_snapshot(directory / "build")
+                    if (directory / "build").is_dir()
+                    else [],
+                )
+            )
+    if observed[0] != observed[1]:
+        fail(
+            f"host reporting baseline parity differs for {name} {arguments!r}: "
+            f"baseline={observed[0]!r}, migrated={observed[1]!r}"
+        )
+
+
+def check_host_reporting_parity(runtime: Path, root: Path) -> None:
+    if not all(
+        (root / "scripts" / f"{name}.fsh").is_file()
+        for name in HOST_REPORTING_MIGRATIONS
+    ):
+        return
+    cases = (
+        ("backtrace", [], {}),
+        ("backtrace", ["-r", "kernel", "0xabc", "0xdef"], {}),
+        ("backtrace", ["-R", "-r", "kernel", "-b", "trace.txt"], {}),
+        ("changelog", [], {}),
+        ("changelog", ["--summary"], {}),
+        ("changelog", ["--mdlinks"], {}),
+        ("executables", [], {}),
+        ("executables", ["-a"], {}),
+        ("executables", ["-arm64", "dev/demo"], {}),
+        ("pkg-size", [], {}),
+        ("pkg-size", ["kernel"], {}),
+        ("pkg-size", ["--help"], {}),
+        ("relibc-doc", [], {}),
+        ("relibc-doc", [], {"make_code": 7}),
+        ("relibc-doc", [], {"tar_code": 9}),
+    )
+    for name, arguments, scenario in cases:
+        host_reporting_result(runtime, root, name, arguments, scenario)
+
+
 def check_runtime_parity(
     runtime: Path,
     root: Path = ROOT,
@@ -4033,6 +4270,7 @@ def check_runtime_parity(
     check_ci_qualification_parity(runtime, root)
     check_release_candidate_parity(runtime, root)
     check_activated_exercise_validator(runtime, bootstrap_runtime, root)
+    check_host_reporting_parity(runtime, root)
 
 
 def main(argv: list[str] | None = None) -> int:
