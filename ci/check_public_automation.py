@@ -502,6 +502,67 @@ def validate_expanded_contract(root: Path = ROOT) -> tuple[int, tuple[str, ...]]
     return len(migrated), tuple(pending)
 
 
+def check_bootstrap_workflow_checkouts(root: Path = ROOT) -> None:
+    workflow_directory = root / ".github/workflows"
+    workflows = sorted(
+        (*workflow_directory.glob("*.yml"), *workflow_directory.glob("*.yaml"))
+    )
+    for workflow in workflows:
+        lines = workflow.read_text(encoding="utf-8").splitlines()
+        jobs_started = False
+        jobs: list[tuple[str, list[str]]] = []
+        job_name: str | None = None
+        job_lines: list[str] = []
+        for line in lines:
+            if line == "jobs:":
+                jobs_started = True
+                continue
+            if not jobs_started:
+                continue
+            match = re.fullmatch(r"  ([A-Za-z0-9_-]+):", line)
+            if match:
+                if job_name is not None:
+                    jobs.append((job_name, job_lines))
+                job_name = match.group(1)
+                job_lines = []
+                continue
+            if job_name is not None:
+                job_lines.append(line)
+        if job_name is not None:
+            jobs.append((job_name, job_lines))
+
+        for job_name, job_lines in jobs:
+            bootstraps = (
+                line.strip().removeprefix("- ") == "run: make flash-bootstrap"
+                for line in job_lines
+            )
+            if not any(bootstraps):
+                continue
+            checkout_steps: list[list[str]] = []
+            for index, line in enumerate(job_lines):
+                if not re.match(r"^      - uses: actions/checkout@", line):
+                    continue
+                end = index + 1
+                while end < len(job_lines) and not job_lines[end].startswith(
+                    "      - "
+                ):
+                    end += 1
+                checkout_steps.append(job_lines[index:end])
+            relative = workflow.relative_to(root)
+            if len(checkout_steps) != 1:
+                fail(
+                    f"{relative} job {job_name} must have one checkout before "
+                    "Flash bootstrap"
+                )
+            if not any(
+                line.strip() == "fetch-depth: 0" for line in checkout_steps[0]
+            ):
+                fail(
+                    f"{relative} job {job_name} must fetch full history for "
+                    "Flash bootstrap"
+                )
+
+
 def validate(inventory: Inventory, root: Path = ROOT) -> None:
     expanded_total = sum(
         inventory.dispositions[name]
@@ -534,6 +595,7 @@ def validate(inventory: Inventory, root: Path = ROOT) -> None:
             f"observed={inventory.dispositions['independent-validation']}, expected=2"
         )
     validate_expanded_contract(root)
+    check_bootstrap_workflow_checkouts(root)
     if inventory.embedded != EXPECTED_EMBEDDED:
         fail(
             f"embedded surface counts drifted: observed={inventory.embedded!r}, "

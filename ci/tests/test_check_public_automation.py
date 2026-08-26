@@ -107,6 +107,26 @@ class PublicAutomationTests(unittest.TestCase):
         self.assertNotIn("make ", installer)
         automation.check_install_flash_adapter()
 
+    def test_bootstrap_workflow_checkouts_fetch_full_history(self) -> None:
+        automation.check_bootstrap_workflow_checkouts()
+        with tempfile.TemporaryDirectory(prefix="flash-workflow-history-") as raw:
+            root = Path(raw)
+            workflows = root / ".github/workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "probe.yml").write_text(
+                "jobs:\n"
+                "  probe:\n"
+                "    steps:\n"
+                "      - uses: actions/checkout@pinned\n"
+                "      - name: Bootstrap\n"
+                "        run: make flash-bootstrap\n",
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit):
+                automation.check_bootstrap_workflow_checkouts(root)
+            self.assertIn("must fetch full history", stderr.getvalue())
+
     def test_canonical_setup_entrypoint_is_complete_and_idempotent(self) -> None:
         self.assertEqual(
             automation.disposition("setup.sh"), "bootstrap-entrypoint"
