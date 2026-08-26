@@ -156,10 +156,10 @@ flash-bootstrap:
 	test "$$(git -C "$$work/source" rev-parse 'HEAD^{tree}')" = "$(FLASH_AUTOMATION_BASELINE_TREE)"; \
 	test -z "$$(git -C "$$work/source" status --porcelain --untracked-files=all)"; \
 	test "$$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$$work/source/components/flash/rust-toolchain.toml")" = "$(FLASH_AUTOMATION_RUST_TOOLCHAIN)"; \
-	host_cargo="$$(rustup which --toolchain "$(FLASH_AUTOMATION_RUST_TOOLCHAIN)" cargo)"; \
-	host_rustc="$$(rustup which --toolchain "$(FLASH_AUTOMATION_RUST_TOOLCHAIN)" rustc)"; \
+	host_cargo="$$(env -u RUSTUP_TOOLCHAIN rustup which --toolchain "$(FLASH_AUTOMATION_RUST_TOOLCHAIN)" cargo)"; \
+	host_rustc="$$(env -u RUSTUP_TOOLCHAIN rustup which --toolchain "$(FLASH_AUTOMATION_RUST_TOOLCHAIN)" rustc)"; \
 	( \
-		unset CARGO_BUILD_RUSTC_WRAPPER CARGO_TARGET_DIR RUSTC_WRAPPER RUSTFLAGS; \
+		unset CARGO_BUILD_RUSTC_WRAPPER CARGO_TARGET_DIR RUSTC_WRAPPER RUSTFLAGS RUSTUP_TOOLCHAIN; \
 		cd "$$work/source/components/flash"; \
 		CARGO_INCREMENTAL=0 \
 		RUSTC="$$host_rustc" \
