@@ -178,7 +178,7 @@ let static_commands = "$(^env $rg --only-matching --replace '$1' '^\s+\u0027([a-
 if $static_commands != $command_lines {
     interface_error('Zsh completion command inventory drifted')
 }
-^zsh --version >/dev/null 2> $errors
+^env zsh --version >/dev/null 2> $errors
 if !$status.ok {
     ^printf 'developer interface contract: zsh unavailable; runtime Zsh checks skipped\n' 1>&2
 } else {
