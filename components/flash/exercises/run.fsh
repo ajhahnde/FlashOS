@@ -60,6 +60,10 @@ mut rg = env('FLASH_AUTOMATION_RG')
 if $rg == null || $rg == '' {
     $rg = 'rg'
 }
+mut jq = env('FLASH_AUTOMATION_JQ')
+if $jq == null || $jq == '' {
+    $jq = 'jq'
+}
 
 def assembled_exercises(binary, status_fixture, stream_fixture) {
     let stream_name = 'flash-e2e-stream-fixture'
@@ -323,15 +327,15 @@ def stabilize(source, destination, repository_root, temporary) {
     ^sed -e "s|$resolved_repository|<repository>|g" -e "s|$repository_root|<repository>|g" -e "s|$resolved_temporary|<temporary>|g" -e "s|$temporary|<temporary>|g" $source > $destination || exit 1
 }
 
-def write_json_strings(values, destination) {
+def write_json_strings(values, destination, jq) {
     if $values == [] {
         ^printf '%s\n' '[]' > $destination || exit 1
     } else {
-        ^printf '%s\n' ...$values | ^jq --raw-input --slurp 'split("\n")[:-1]' > $destination || exit 1
+        ^printf '%s\n' ...$values | ^env $jq --raw-input --slurp 'split("\n")[:-1]' > $destination || exit 1
     }
 }
 
-def execute_case(exercise, flash_root, repository_root, suite_temporary, result_path, rg) {
+def execute_case(exercise, flash_root, repository_root, suite_temporary, result_path, rg, jq) {
     let identifier = $exercise.id
     let summary = $exercise.summary
     let program = $exercise.program
@@ -401,15 +405,15 @@ def execute_case(exercise, flash_root, repository_root, suite_temporary, result_
     stabilize($input_path, $stable_input_path, $repository_root, $directory)
     ^printf '%s\n' $program ...$arguments \
     | ^sed -e "s|$repository_root|<repository>|g" -e "s|$directory|<temporary>|g" \
-    | ^jq --raw-input --slurp 'split("\n")[:-1]' > $action_path || exit 1
-    write_json_strings($stdout_contains, $expected_stdout_path)
-    write_json_strings($stderr_contains, $expected_stderr_path)
+    | ^env $jq --raw-input --slurp 'split("\n")[:-1]' > $action_path || exit 1
+    write_json_strings($stdout_contains, $expected_stdout_path, $jq)
+    write_json_strings($stderr_contains, $expected_stderr_path, $jq)
 
     mut result = 'fail'
     if $passed {
         $result = 'pass'
     }
-    ^jq --null-input \
+    ^env $jq --null-input \
     --arg id $identifier \
     --arg summary $summary \
     --slurpfile action $action_path \
@@ -550,10 +554,10 @@ let assembled = assembled_exercises($binary, $status_fixture, $stream_fixture)
 for exercise in $assembled {
     let identifier = $exercise.id
     ^printf 'Flash v1 exercise: %s\n' $identifier || exit 1
-    let passed = execute_case($exercise, $flash_root, $repository_root, $suite_temporary, $results_path, $rg)
+    let passed = execute_case($exercise, $flash_root, $repository_root, $suite_temporary, $results_path, $rg, $jq)
     $count = $count + 1
     if !$passed {
-        ^jq --slurp '.[-1]' $results_path
+        ^env $jq --slurp '.[-1]' $results_path
         ^rm -rf $suite_temporary
         exercise_error("Flash v1 exercise failed: $identifier")
     }
@@ -563,10 +567,10 @@ if $profile != 'smoke' {
     for exercise in $commands {
         let identifier = $exercise.id
         ^printf 'Flash v1 exercise: %s\n' $identifier || exit 1
-        let passed = execute_case($exercise, $flash_root, $repository_root, $suite_temporary, $results_path, $rg)
+        let passed = execute_case($exercise, $flash_root, $repository_root, $suite_temporary, $results_path, $rg, $jq)
         $count = $count + 1
         if !$passed {
-            ^jq --slurp '.[-1]' $results_path
+            ^env $jq --slurp '.[-1]' $results_path
             ^rm -rf $suite_temporary
             exercise_error("Flash v1 exercise failed: $identifier")
         }
@@ -658,10 +662,10 @@ let cargo_version = tool_version($cargo, ['--version'], "$suite_temporary/cargo-
 cd $repository_root
 let flash_version = $digest_runner_version
 let contract_cases_path = "$suite_temporary/contract-cases.json"
-^jq '.owners' $host_cases_path > $contract_cases_path || exit 1
+^env $jq '.owners' $host_cases_path > $contract_cases_path || exit 1
 
 let report_path = "$suite_temporary/report.json"
-^jq --slurp \
+^env $jq --slurp \
 --argjson schema_version 1 \
 --argjson suite_version $suite_version \
 --arg commit $commit \
@@ -676,7 +680,7 @@ let report_path = "$suite_temporary/report.json"
 --arg profile $profile \
 --slurpfile contract_cases $contract_cases_path \
 '{schema_version: $schema_version, suite_version: $suite_version, candidate: {commit: $commit, tree: $tree, source_sha256: $source_sha256, worktree: $worktree}, environment: {id: "host-posix", system: $system, architecture: $architecture, flash: $flash, rustc: $rustc, cargo: $cargo}, profile: $profile, contract_cases: $contract_cases[0], results: ., limitations: ["Host results do not establish FlashOS target behavior.", "Physical-device execution remains identification- and approval-gated.", "Flash v1 has no guaranteed scope-exit cleanup; interruption or a runtime adapter failure can leave the owned temporary directory for inspection."]}' \
-$results_path | ^jq --sort-keys '.' > $report_path
+$results_path | ^env $jq --sort-keys '.' > $report_path
 if !$status.ok {
     ^rm -rf $suite_temporary
     exercise_error('cannot render exercise evidence')

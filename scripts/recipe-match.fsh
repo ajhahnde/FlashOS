@@ -5,7 +5,11 @@ if $args != [] {
     $pattern = $args[0]
 }
 
-let recipe_files = "$(^rg $pattern -li --sort=path recipes)"
+mut rg = env('FLASH_AUTOMATION_RG')
+if $rg == null || $rg == '' {
+    $rg = 'rg'
+}
+let recipe_files = "$(^env $rg $pattern -li --sort=path recipes)"
 if $recipe_files == '' {
     ^bat --decorations=always
 } else {

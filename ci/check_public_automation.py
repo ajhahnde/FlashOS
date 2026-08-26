@@ -2196,17 +2196,28 @@ def check_exercise_runner_parity(
         record = directory / "record.json"
         environment = os.environ.copy()
         environment["FLASH_V1_BOOTSTRAP_FSH"] = str(bootstrap_runtime)
-        selected_rg = environment.get("FLASH_AUTOMATION_RG")
-        if not selected_rg:
-            fail("Flash v1 native exercise parity requires FLASH_AUTOMATION_RG")
+        selected_tools = {
+            "jq": environment.get("FLASH_AUTOMATION_JQ"),
+            "rg": environment.get("FLASH_AUTOMATION_RG"),
+        }
+        missing_tools = [
+            name for name, selected in selected_tools.items() if not selected
+        ]
+        if missing_tools:
+            fail(
+                "Flash v1 native exercise parity requires selected tools: "
+                + ", ".join(missing_tools)
+            )
         rejected_tools = directory / "rejected-tools"
         rejected_tools.mkdir()
-        rejected_rg = rejected_tools / "rg"
-        rejected_rg.write_text(
-            "#!/bin/sh\nprintf '%s\\n' 'ambient rg must not execute' >&2\nexit 127\n",
-            encoding="utf-8",
-        )
-        rejected_rg.chmod(0o755)
+        for name in selected_tools:
+            rejected = rejected_tools / name
+            rejected.write_text(
+                f"#!/bin/sh\nprintf '%s\\n' 'ambient {name} must not execute' >&2\n"
+                "exit 127\n",
+                encoding="utf-8",
+            )
+            rejected.chmod(0o755)
         environment["PATH"] = os.pathsep.join(
             [str(rejected_tools), environment.get("PATH", "")]
         )
@@ -4011,10 +4022,17 @@ def recipe_inspection_result(
                 find_recipe_present=find_recipe_present,
             )
             environment = os.environ.copy()
+            selected_rg = environment.get("FLASH_AUTOMATION_RG")
+            if not selected_rg:
+                fail("recipe inspection parity requires FLASH_AUTOMATION_RG")
             environment.update(
                 {
                     "PATH": os.pathsep.join(
-                        [str(directory / "probe-bin"), environment.get("PATH", "")]
+                        [
+                            str(directory / "probe-bin"),
+                            str(Path(selected_rg).resolve().parent),
+                            environment.get("PATH", ""),
+                        ]
                     ),
                     "PUBLIC_AUTOMATION_REPORT": str(report),
                     "PUBLIC_AUTOMATION_SCENARIO": json.dumps(
