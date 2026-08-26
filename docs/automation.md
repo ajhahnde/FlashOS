@@ -61,6 +61,15 @@ Flash 1.0 has no list-slice expression, one fixed `sh` command removes the
 already parsed option prefix and immediately `exec`s Make with the untouched
 target argv; it contains no build default, policy, or fallback implementation.
 
+The device helpers are also native Flash programs:
+`scripts/dual-boot.fsh` refuses anything that is not a block device before it
+builds or invokes `sudo`; `scripts/mount-redoxfs.fsh` accepts only a block
+device or regular image and preserves explicit mount/unmount ordering; and
+`scripts/ventoy.fsh` refuses an absent Ventoy mount before building or copying.
+These checks do not replace operator identification and approval for a real
+device write. Their automated parity suite uses temporary files and command
+probes only.
+
 Embedded Cookbook, workflow, Make, Docker, and iPXE bodies remain inventoried
 outside the percentage because their owning tools impose the interpreter.
 Bash startup files and Zsh integration remain their own external interfaces;

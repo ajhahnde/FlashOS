@@ -3870,6 +3870,8 @@ HOST_REPORTING_MIGRATIONS = (
     "relibc-doc",
 )
 
+DEVICE_TOOL_MIGRATIONS = ("dual-boot", "mount-redoxfs", "ventoy")
+
 
 def write_host_reporting_probe(path: Path, runtime: Path) -> None:
     source = f"""#!{sys.executable}
@@ -4099,6 +4101,299 @@ def check_host_reporting_parity(runtime: Path, root: Path) -> None:
         host_reporting_result(runtime, root, name, arguments, scenario)
 
 
+def write_device_tool_probe(path: Path, runtime: Path) -> None:
+    source = f"""#!{sys.executable}
+import json
+import os
+import pathlib
+import shutil
+import sys
+
+name = pathlib.Path(sys.argv[0]).name
+arguments = sys.argv[1:]
+scenario = json.loads(os.environ.get("PUBLIC_AUTOMATION_SCENARIO", "{{}}"))
+root = pathlib.Path(os.environ["PUBLIC_AUTOMATION_ROOT"])
+report = pathlib.Path(os.environ["PUBLIC_AUTOMATION_REPORT"])
+stdin = sys.stdin.read() if name == "sudo" and arguments[:1] == ["tee"] else ""
+with report.open("a", encoding="utf-8") as output:
+    output.write(
+        json.dumps(
+            {{
+                "argv": arguments,
+                "cwd": pathlib.Path.cwd().relative_to(root).as_posix() or ".",
+                "name": name,
+                "stdin": stdin,
+            }},
+            sort_keys=True,
+        )
+        + "\\n"
+    )
+
+if name == "fsh":
+    os.execv({str(runtime)!r}, [{str(runtime)!r}, *arguments])
+if name == "test":
+    flag, selected = arguments
+    candidate = root / selected
+    if flag == "-b":
+        ok = selected in scenario.get("block_paths", [])
+    elif flag == "-f":
+        ok = candidate.is_file()
+    elif flag == "-x":
+        ok = candidate.is_file() and os.access(candidate, os.X_OK)
+    elif flag == "-d":
+        ok = candidate.is_dir()
+    else:
+        ok = False
+    raise SystemExit(0 if ok else 1)
+if name == "make":
+    if arguments == ["setenv"]:
+        print("export ARCH='x86_64'")
+        print("export BOARD=''")
+        print("export CONFIG_NAME='flashos'")
+        print("BUILD='build/x86_64/flashos'")
+        raise SystemExit(scenario.get("setenv_code", 0))
+    else:
+        target = next((value for value in reversed(arguments) if "/" in value), "")
+        if target:
+            destination = root / target
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"image\\n")
+    raise SystemExit(scenario.get("make_code", 0))
+if name == "rm":
+    for selected in arguments:
+        if selected != "-f":
+            (root / selected).unlink(missing_ok=True)
+    raise SystemExit(scenario.get("rm_code", 0))
+if name == "bootctl":
+    value = scenario.get("esp", "esp")
+    if value:
+        print(value)
+    raise SystemExit(scenario.get("bootctl_code", 0))
+if name == "sudo":
+    command = arguments[0]
+    selected = arguments[1:]
+    if command == "popsicle":
+        destination = root / "effects/popsicle.txt"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("|".join(selected) + "\\n", encoding="utf-8")
+    elif command == "mkdir":
+        for value in selected:
+            if value != "-pv":
+                (root / value).mkdir(parents=True, exist_ok=True)
+                print(f"mkdir: created directory '{{value}}'")
+    elif command == "cp":
+        values = [value for value in selected if value != "-v"]
+        destination = root / values[1]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(root / values[0], destination)
+        print(f"'{{values[0]}}' -> '{{values[1]}}'")
+    elif command == "tee":
+        destination = root / selected[0]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(stdin, encoding="utf-8")
+        sys.stdout.write(stdin)
+    raise SystemExit(scenario.get(f"sudo_{{command}}_code", 0))
+if name == "mountpoint":
+    raise SystemExit(0 if scenario.get("mounted", False) else 1)
+if name == "fusermount":
+    raise SystemExit(scenario.get("fusermount_code", 0))
+if name == "fusermount3":
+    raise SystemExit(scenario.get("fusermount3_code", 0))
+if name == "ldconfig":
+    if scenario.get("libfuse", True):
+        print("libfuse3.so")
+    raise SystemExit(scenario.get("ldconfig_code", 0))
+if name == "redoxfs":
+    destination = root / "effects/redoxfs.txt"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("|".join(arguments) + "\\n", encoding="utf-8")
+    raise SystemExit(scenario.get("redoxfs_code", 0))
+if name == "cp":
+    values = [value for value in arguments if value != "-v"]
+    destination = root / values[1]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(root / values[0], destination)
+    print(f"'{{values[0]}}' -> '{{values[1]}}'")
+    raise SystemExit(scenario.get("cp_code", 0))
+if name == "sync":
+    raise SystemExit(scenario.get("sync_code", 0))
+raise SystemExit(97)
+"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def prepare_device_tool_tree(
+    destination: Path,
+    name: str,
+    runtime: Path,
+    root: Path,
+    *,
+    baseline: bool,
+) -> Path:
+    script = destination / "scripts" / f"{name}.fsh"
+    if baseline:
+        materialize_baseline_source(f"scripts/{name}.sh", script, root)
+    else:
+        script.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / "scripts" / f"{name}.fsh", script)
+
+    source = script.read_text(encoding="utf-8")
+    if baseline and name == "dual-boot":
+        source = source.replace(
+            'if [ ! -b "${DISK}" ]', 'if [ ! -f "${DISK}" ]', 1
+        ).replace("./scripts/mount-redoxfs.sh", "./scripts/mount-redoxfs.fsh", 1)
+    if name == "ventoy":
+        if baseline:
+            source = source.replace(
+                'VENTOY="/media/${USER}/Ventoy"', 'VENTOY="ventoy"', 1
+            )
+        else:
+            source = source.replace(
+                'let ventoy = "/media/$user/Ventoy"', "let ventoy = 'ventoy'", 1
+            )
+    script.write_text(source, encoding="utf-8")
+    script.chmod(0o755)
+
+    (destination / "device.img").write_bytes(b"device\\n")
+    (destination / "ventoy").mkdir()
+    bootloader = destination / (
+        "recipes/core/bootloader/target/x86_64-unknown-redox/"
+        "stage/usr/lib/boot/bootloader.efi"
+    )
+    bootloader.parent.mkdir(parents=True)
+    bootloader.write_bytes(b"bootloader\\n")
+
+    probe_directory = destination / "probe-bin"
+    for command in (
+        "bootctl",
+        "cp",
+        "fusermount",
+        "fusermount3",
+        "ldconfig",
+        "make",
+        "mountpoint",
+        "rm",
+        "sudo",
+        "sync",
+        "test",
+    ):
+        write_device_tool_probe(probe_directory / command, runtime)
+    write_device_tool_probe(destination / "build/fstools/bin/redoxfs", runtime)
+    return script
+
+
+def device_tool_result(
+    runtime: Path,
+    root: Path,
+    name: str,
+    arguments: list[str],
+    scenario: dict[str, object],
+    *,
+    remove_device: bool = False,
+    remove_ventoy: bool = False,
+) -> None:
+    observed: list[tuple[object, ...]] = []
+    for baseline in (True, False):
+        with tempfile.TemporaryDirectory(prefix=f"flash-{name}-parity-") as raw:
+            directory = Path(raw).resolve()
+            report = directory / "report.jsonl"
+            report.write_text("", encoding="utf-8")
+            script = prepare_device_tool_tree(
+                directory, name, runtime, root, baseline=baseline
+            )
+            if remove_device:
+                (directory / "device.img").unlink()
+            if remove_ventoy:
+                (directory / "ventoy").rmdir()
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": os.pathsep.join(
+                        [str(directory / "probe-bin"), environment.get("PATH", "")]
+                    ),
+                    "PUBLIC_AUTOMATION_REPORT": str(report),
+                    "PUBLIC_AUTOMATION_ROOT": str(directory),
+                    "PUBLIC_AUTOMATION_SCENARIO": json.dumps(
+                        scenario, sort_keys=True
+                    ),
+                    "USER": "flash-test",
+                }
+            )
+            command: list[str | Path] = ["/bin/bash" if baseline else runtime]
+            command.extend([script.relative_to(directory), *arguments])
+            process = checked_runtime_process(
+                command,
+                cwd=directory,
+                environment=environment,
+                label=f"{'baseline' if baseline else 'migrated'} {name}",
+            )
+            records = [
+                record for record in read_report(report) if record["name"] != "test"
+            ]
+            observed.append(
+                (
+                    process.returncode,
+                    process.stdout,
+                    process.stderr,
+                    records,
+                    filesystem_snapshot(directory / "build"),
+                    filesystem_snapshot(directory / "effects"),
+                    filesystem_snapshot(directory / "esp"),
+                    filesystem_snapshot(directory / "ventoy"),
+                )
+            )
+    if observed[0] != observed[1]:
+        fail(
+            f"device tool baseline parity differs for {name} {arguments!r}: "
+            f"baseline={observed[0]!r}, migrated={observed[1]!r}"
+        )
+
+
+def check_device_tool_parity(runtime: Path, root: Path) -> None:
+    if not all(
+        (root / "scripts" / f"{name}.fsh").is_file()
+        for name in DEVICE_TOOL_MIGRATIONS
+    ):
+        return
+    cases = (
+        ("dual-boot", ["missing.img"], {}, True, False),
+        ("dual-boot", ["device.img"], {"block_paths": ["device.img"]}, False, False),
+        (
+            "dual-boot",
+            ["device.img"],
+            {"block_paths": ["device.img"], "make_code": 7},
+            False,
+            False,
+        ),
+        ("mount-redoxfs", ["--help"], {}, False, False),
+        ("mount-redoxfs", ["missing.img"], {}, True, False),
+        ("mount-redoxfs", ["-m", "mnt", "device.img"], {}, False, False),
+        ("mount-redoxfs", ["-u", "-m", "mnt"], {"mounted": False}, False, False),
+        (
+            "mount-redoxfs",
+            ["-u", "-m", "mnt"],
+            {"mounted": True, "fusermount_code": 7},
+            False,
+            False,
+        ),
+        ("ventoy", [], {}, False, True),
+        ("ventoy", [], {}, False, False),
+        ("ventoy", [], {"make_code": 9}, False, False),
+    )
+    for name, arguments, scenario, remove_device, remove_ventoy in cases:
+        device_tool_result(
+            runtime,
+            root,
+            name,
+            arguments,
+            scenario,
+            remove_device=remove_device,
+            remove_ventoy=remove_ventoy,
+        )
+
+
 def check_runtime_parity(
     runtime: Path,
     root: Path = ROOT,
@@ -4271,6 +4566,7 @@ def check_runtime_parity(
     check_release_candidate_parity(runtime, root)
     check_activated_exercise_validator(runtime, bootstrap_runtime, root)
     check_host_reporting_parity(runtime, root)
+    check_device_tool_parity(runtime, root)
 
 
 def main(argv: list[str] | None = None) -> int:
