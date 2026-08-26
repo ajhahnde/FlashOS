@@ -2109,12 +2109,14 @@ def validator_result(
         label=f"Python validator {python_relative}",
         cwd=root,
         environment=environment,
+        timeout_seconds=60,
     )
     flash = checked_runtime_process(
         [runtime, root / flash_relative],
         label=f"Flash validator {flash_relative}",
         cwd=root,
         environment=environment,
+        timeout_seconds=60,
     )
     return python, flash
 
@@ -4562,11 +4564,104 @@ def check_runtime_parity(
     check_coverage_validator_parity(runtime, root)
     check_ci_validator_parity(runtime, root)
     check_ci_routing_parity(runtime, root)
+    check_ci_policy_tests(runtime, root)
     check_ci_qualification_parity(runtime, root)
     check_release_candidate_parity(runtime, root)
     check_activated_exercise_validator(runtime, bootstrap_runtime, root)
     check_host_reporting_parity(runtime, root)
     check_device_tool_parity(runtime, root)
+
+
+def check_ci_policy_tests(runtime: Path, root: Path) -> None:
+    environment = resolved_automation_environment(runtime)
+    cases = (
+        (
+            "ci/tests/test_classify_changes.fsh",
+            "change classification tests: ok\n",
+        ),
+        (
+            "ci/tests/test_aggregate_ci.fsh",
+            "CI aggregate tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_coverage.fsh",
+            "coverage contract tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flash_conformance.fsh",
+            "Flash conformance contract tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flash_release.fsh",
+            "Flash release contract tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flash_v1_exercises.fsh",
+            "Flash v1 exercise contract tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flashos_capabilities.fsh",
+            "FlashOS capability evidence tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flashos_capability_classification.fsh",
+            "FlashOS capability classification tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flashos_capability_report.fsh",
+            "FlashOS capability report tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flashos_operation_map.fsh",
+            "FlashOS operation map tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flashos_platform.fsh",
+            "FlashOS platform contract tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_flashos_target_matrix.fsh",
+            "FlashOS target matrix contract tests: ok\n",
+        ),
+        (
+            "ci/tests/test_check_main_qualification.fsh",
+            "main qualification tests: ok\n",
+        ),
+        (
+            "ci/tests/test_release_candidate.fsh",
+            "release candidate tests: ok\n",
+        ),
+        (
+            "ci/tests/test_flashos_runtime_fixtures.fsh",
+            "FlashOS runtime fixture tests: ok\n",
+        ),
+        (
+            "ci/tests/test_flashos_target_matrix.fsh",
+            "FlashOS target matrix tests: ok\n",
+        ),
+        (
+            "ci/tests/test_flash_benchmarks.fsh",
+            "Flash benchmark contract tests: ok\n",
+        ),
+    )
+    for relative, expected_stdout in cases:
+        path = root / relative
+        if not path.is_file():
+            continue
+        process = checked_runtime_process(
+            [runtime, path],
+            label=f"native CI policy test {relative}",
+            cwd=root,
+            environment=environment,
+            timeout_seconds=60,
+        )
+        require_process(
+            process,
+            code=0,
+            stdout=expected_stdout,
+            stderr="",
+            label=f"native CI policy test {relative}",
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -621,6 +621,19 @@ ruff check ci/
 python3 -m unittest discover -s ci/tests -p 'test_*.py'
 ```
 
+The public-automation gate below runs each migrated `ci/tests/*.fsh` root with
+both the immutable bootstrap and the workspace candidate runtime. The current
+native CI roots are `test_classify_changes.fsh`, `test_aggregate_ci.fsh`,
+`test_check_coverage.fsh`, `test_flash_benchmarks.fsh`,
+`test_check_flash_conformance.fsh`, `test_check_flash_release.fsh`,
+`test_check_flash_v1_exercises.fsh`, `test_check_flashos_capabilities.fsh`,
+`test_check_flashos_capability_classification.fsh`,
+`test_check_flashos_capability_report.fsh`,
+`test_check_flashos_operation_map.fsh`, `test_check_flashos_platform.fsh`,
+`test_check_flashos_target_matrix.fsh`, `test_check_main_qualification.fsh`,
+`test_flashos_runtime_fixtures.fsh`, `test_flashos_target_matrix.fsh`, and
+`test_release_candidate.fsh`.
+
 Validate an existing LCOV report with:
 
 ```bash

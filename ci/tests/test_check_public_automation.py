@@ -38,7 +38,7 @@ class PublicAutomationTests(unittest.TestCase):
         inventory = automation.scan()
         automation.validate(inventory, allow_incomplete=True)
         migrated, pending = automation.validate_expanded_contract(allow_incomplete=True)
-        self.assertEqual(migrated, 43)
+        self.assertEqual(migrated, 60)
         self.assertEqual(migrated + len(pending), 60)
         self.assertEqual(inventory.dispositions["reviewed-exception"], 8)
         self.assertEqual(inventory.dispositions["bootstrap-adapter"], 1)

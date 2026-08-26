@@ -115,8 +115,8 @@ Detailed Flash test organization belongs in the [Flash Development Guide](../com
 
 ### FlashOS Python
 
-The product-profile scripts, QEMU harness, and developer-interface contract are
-FlashOS-owned Python. Lint and test them with:
+The retained independent Python observers and the transitional public-
+automation contract are linted and tested with:
 
 ```bash
 ruff check ci/
@@ -124,6 +124,26 @@ python3 -m unittest discover -s ci/tests -p 'test_*.py'
 ```
 
 The command requires Ruff to be available on the host. Hosted CI installs its configured version before running the check.
+
+The migrated CI tests run through the public-automation qualification below.
+That gate executes `ci/tests/test_classify_changes.fsh`,
+`ci/tests/test_aggregate_ci.fsh`,
+`ci/tests/test_check_coverage.fsh`,
+`ci/tests/test_flash_benchmarks.fsh`,
+`ci/tests/test_check_flash_conformance.fsh`,
+`ci/tests/test_check_flash_release.fsh`,
+`ci/tests/test_check_flash_v1_exercises.fsh`,
+`ci/tests/test_check_flashos_capabilities.fsh`,
+`ci/tests/test_check_flashos_capability_classification.fsh`,
+`ci/tests/test_check_flashos_capability_report.fsh`,
+`ci/tests/test_check_flashos_operation_map.fsh`,
+`ci/tests/test_check_flashos_platform.fsh`,
+`ci/tests/test_check_flashos_target_matrix.fsh`,
+`ci/tests/test_check_main_qualification.fsh`,
+`ci/tests/test_flashos_runtime_fixtures.fsh`,
+`ci/tests/test_flashos_target_matrix.fsh`, and
+`ci/tests/test_release_candidate.fsh` with both the immutable bootstrap and the
+workspace candidate runtimes.
 
 ### Public automation
 
