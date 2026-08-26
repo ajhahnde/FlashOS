@@ -297,7 +297,7 @@ if !$status.ok {
     ^rm -rf $temporary
     usage_error('cannot decode changed paths')
 }
-^env $jq '[.[] as $selected | {all:., selected:$selected}]' $decoded > $expanded || exit 1
+^env $jq '[group_by(.normalized)[] | {all:., selected:min_by(.position)}]' $decoded > $expanded || exit 1
 try {
     open $expanded \
     | from json array \

@@ -108,6 +108,23 @@ expect_projection($jq, $documentation, '.security_required', 'false', 'documenta
 
 let normalized = run_success($runtime, $script, $jq, $temporary, 'normalized', ['./docs/z.md', 'docs/a.md', 'docs/a.md'])
 expect_projection($jq, $normalized, '.paths', '["docs/a.md","docs/z.md"]', 'normalized paths')
+
+let large_input = "$temporary/large.input"
+let large_stdout = "$temporary/large.stdout"
+let large_stderr = "$temporary/large.stderr"
+mut large_index = 0
+while $large_index < 192 {
+    ^printf 'future/generated-%03d.bin\0' $large_index >> $large_input
+    $large_index = $large_index + 1
+}
+^env "FLASH_AUTOMATION_JQ=$jq" $runtime $script --json --null < $large_input > $large_stdout 2> $large_stderr
+let large_status = $status
+if $large_status.code != 0 || "$(^cat $large_stderr)" != '' {
+    test_error("large path set exceeded bounded classification: status ${$large_status.code}, stderr '$(^cat $large_stderr)'")
+}
+expect_projection($jq, $large_stdout, '.paths | length', '192', 'large path count')
+expect_projection($jq, $large_stdout, '.lane', 'product', 'large path lane')
+
 expect_failure($runtime, $script, $jq, $temporary, 'parent', '../outside')
 expect_failure($runtime, $script, $jq, $temporary, 'absolute', '/absolute')
 

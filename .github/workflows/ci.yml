@@ -179,69 +179,69 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Acquire the immutable Flash 1.0 automation runtime
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: make flash-bootstrap
 
       - name: Acquire the pinned public automation tools
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: make flash-automation-tools
 
       - name: Validate the developer command interface
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_developer_interface.fsh
 
       - name: Validate package, TUI, shell, identity, and audio policy
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_profile.fsh
 
       - name: Validate the FlashOS platform source baseline
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh
 
       - name: Validate the FlashOS capability evidence inventory
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capabilities.fsh
 
       - name: Validate the FlashOS platform operation map
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_operation_map.fsh
 
       - name: Validate the FlashOS platform capability classification
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capability_classification.fsh
 
       - name: Validate the Flash v1 conformance inventory
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flash_conformance.fsh
 
       - name: Validate the Flash 1.0.0 release contract
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flash_release.fsh
 
       - name: Validate the versioned FlashOS capability report
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capability_report.fsh
 
       - name: Validate the FlashOS target capability matrix
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_target_matrix.fsh
 
       - name: Validate the exhaustive Flash v1 exercise contract
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flash_v1_exercises.fsh
 
       - name: Validate the Flash performance contract
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: >-
           build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
           ci/flash_benchmarks.fsh
 
       - name: Test the Flash performance contract
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: python3 -m unittest discover -s ci/tests -p 'test_flash_benchmarks.py'
 
       - name: Exercise FlashOS public automation through Flash
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: >-
           python3 ci/check_public_automation.py
           --bootstrap-runtime
@@ -249,7 +249,7 @@ jobs:
           --runtime components/flash/target/debug/fsh
 
       - name: Execute the exhaustive Flash v1 host exercises
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         run: components/flash/target/debug/fsh components/flash/exercises/run.fsh --profile ci --no-build
 
       - name: Run the bounded Flash benchmark smoke

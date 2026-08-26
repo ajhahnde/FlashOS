@@ -1245,10 +1245,17 @@ def prepare_setup_tree(directory: Path, root: Path) -> Path:
 def setup_environment(directory: Path, bin_directory: Path) -> dict[str, str]:
     home = directory / "home"
     home.mkdir(exist_ok=True)
+    support_directory = directory / "support-bin"
+    support_directory.mkdir(exist_ok=True)
+    for command_name in ("bash", "cmp", "dirname", "grep", "sed"):
+        command = shutil.which(command_name)
+        if command is None:
+            fail(f"setup test support command is unavailable: {command_name}")
+        (support_directory / command_name).symlink_to(command)
     return {
         "HOME": str(home),
         "FLASH_INSTALL_PREFIX": str(directory / "flash-prefix"),
-        "PATH": os.pathsep.join((str(bin_directory), "/usr/bin", "/bin")),
+        "PATH": os.pathsep.join((str(bin_directory), str(support_directory))),
         "SETUP_PROBE_REPORT": str(directory / "report"),
     }
 
