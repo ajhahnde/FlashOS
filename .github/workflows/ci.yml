@@ -239,7 +239,7 @@ jobs:
 
       - name: Test the Flash performance contract
         working-directory: ${{ github.workspace }}
-        run: python3 -m unittest discover -s ci/tests -p 'test_flash_benchmarks.py'
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/tests/test_flash_benchmarks.fsh
 
       - name: Exercise FlashOS public automation through Flash
         working-directory: ${{ github.workspace }}
