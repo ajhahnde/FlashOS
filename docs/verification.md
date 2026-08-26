@@ -154,6 +154,11 @@ Flash or has one reviewed exception:
 python3 ci/check_public_automation.py
 ```
 
+This independent Python oracle also exercises the canonical `setup.sh`
+clean-host plans for supported macOS and Linux package mappings, read-only
+environment verification, idempotent reruns, separate pinned Rust toolchains,
+the narrow Flash installer boundary, and pinned automation-tool selection.
+
 After building the Flash workspace, acquire the immutable baseline runtime and
 run the same contract through the trusted bootstrap before the workspace
 candidate. This checks every native root plus ordered success and failure

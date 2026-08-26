@@ -56,7 +56,10 @@ Install or provide the following host tools:
 - x86_64 OVMF or edk2 firmware
 - sufficient storage for downloaded sources, toolchains, package caches, and generated images
 
-The exact package names vary between host operating systems and distributions. The repository provides a bootstrap script for several Unix-like host environments.
+The canonical bootstrap supports macOS arm64 with Homebrew and Linux x86_64
+with APT, DNF, or Pacman. It maps the exact packages for the detected host,
+installs both repository-pinned Rust toolchains, installs Flash, acquires the
+pinned automation tools, and verifies the resulting environment.
 
 On macOS, Podman normally runs through a Podman-managed virtual machine. On Linux, Podman commonly runs directly through the host container runtime.
 
@@ -73,20 +76,40 @@ All commands in this guide are run from the repository root unless stated otherw
 
 ## Install the build dependencies
 
-The repository bootstrap script can install the detected platform dependencies without cloning another copy of the repository:
+First review every change the bootstrap would make:
 
 ```bash
-./podman_bootstrap.sh -d -e qemu
+./setup.sh --plan
 ```
 
-Review the script before running it. Depending on the host, it may:
+The plan reports package-manager and privileged operations before any request
+for elevation. It does not change the host. Apply the plan with:
+
+```bash
+./setup.sh
+```
+
+Pass `--yes` only when the detected package manager should use its
+non-interactive confirmation mode. The bootstrap may:
 
 - invoke the system package manager;
 - request elevated privileges;
-- install Rustup when Rust is unavailable;
-- install Podman, QEMU, FUSE-related tools, and build utilities.
+- install Rustup without editing shell startup files;
+- install the distinct Rust toolchains pinned by `rust-toolchain.toml` and
+  `components/flash/rust-toolchain.toml`;
+- install Podman, QEMU, FUSE-related tools, and build utilities;
+- invoke the narrow `install-flash.sh` adapter; and
+- acquire the exact Taplo, jq, and ripgrep versions used by Flash automation.
 
-You may instead install the requirements manually through your operating system's package manager.
+Rerunning the bootstrap is safe. To verify an already prepared host without
+installing or changing anything, run:
+
+```bash
+./setup.sh --check
+```
+
+The bootstrap operates only on the existing clone. It does not clone or update
+Git state, edit shell startup files, start QEMU, or access a physical device.
 
 ### Install the Flash build runtime
 
@@ -97,19 +120,23 @@ compatible `fsh`. Check the selected runtime:
 fsh --version
 ```
 
-If Flash is not installed yet, acquire it from the checked-out, locked Flash
-workspace after Rust and Cargo are available:
+`setup.sh` accepts a compatible `fsh` already on `PATH`; otherwise it invokes
+the following narrow adapter when its selected Flash runtime is absent or
+incompatible:
 
 ```bash
 ./install-flash.sh
 ```
 
-The adapter builds the selected runtime in a temporary Cargo root, verifies
+The adapter is useful for Flash-only bootstrap or recovery after the host
+packages and pinned Flash Rust toolchain already exist. It builds the selected
+runtime in a temporary Cargo root, verifies
 that it reports `fsh 1.0.0`, and only then installs it to
 `$HOME/.local/bin/fsh`. Set `FLASH_INSTALL_PREFIX` before running the adapter
 to select a different installation prefix. Add the selected `bin` directory to
-`PATH` before invoking `./build.fsh`. The adapter does not build FlashOS or
-forward build options.
+`PATH` before invoking `./build.fsh`. The adapter is not an alternative full
+setup path: it does not install host packages or toolchains, acquire automation
+tools, build FlashOS, or forward build options.
 
 ### Start Podman on macOS
 

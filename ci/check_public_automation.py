@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -146,12 +147,13 @@ BANNED_EXTERNAL_POLICY_MARKERS = (
     " or fail(",
 )
 
-TRANSITIONAL_NON_FLASH = {
-    "ci/check_public_automation.py",
-    "ci/tests/test_check_public_automation.py",
+INDEPENDENT_VALIDATION = {
+    "ci/check_public_automation.py": "independent-runtime-and-inventory-oracle",
+    "ci/tests/test_check_public_automation.py": "independent-oracle-tests",
 }
 
 BOOTSTRAP_ADAPTER = {"install-flash.sh"}
+BOOTSTRAP_ENTRYPOINT = {"setup.sh"}
 
 NATIVE_FLASH = {
     "recipes/groups/auto-test/auto-test.fsh",
@@ -304,10 +306,12 @@ def disposition(path: str) -> str | None:
         return "migrated-flash"
     if path in RETAINED_BASELINE:
         return "reviewed-exception"
-    if path in TRANSITIONAL_NON_FLASH:
-        return "transitional-non-flash"
+    if path in INDEPENDENT_VALIDATION:
+        return "independent-validation"
     if path in BOOTSTRAP_ADAPTER:
         return "bootstrap-adapter"
+    if path in BOOTSTRAP_ENTRYPOINT:
+        return "bootstrap-entrypoint"
     if path in NATIVE_FLASH:
         return "native-flash"
     if path in SHARED_FLASH_MODULES:
@@ -404,9 +408,7 @@ def baseline_sources(root: Path = ROOT) -> frozenset[str]:
     )
 
 
-def validate_expanded_contract(
-    root: Path = ROOT, *, allow_incomplete: bool = False
-) -> tuple[int, tuple[str, ...]]:
+def validate_expanded_contract(root: Path = ROOT) -> tuple[int, tuple[str, ...]]:
     schema = EXPANDED_CONTRACT["schema"]
     denominator = EXPANDED_CONTRACT["denominator"]
     minimum = EXPANDED_CONTRACT["minimum_migrations"]
@@ -475,9 +477,6 @@ def validate_expanded_contract(
         source_exists = (root / source).is_file()
         target_exists = (root / target).is_file()
         if source_exists and target_exists:
-            if allow_incomplete:
-                pending.append(source)
-                continue
             fail(
                 f"migration keeps both original and Flash target: {source} -> {target}"
             )
@@ -494,34 +493,21 @@ def validate_expanded_contract(
         if not (root / source).is_file():
             fail(f"reviewed exception is no longer present: {source}")
 
-    transitional = sorted(
-        path for path in TRANSITIONAL_NON_FLASH if (root / path).is_file()
-    )
-    incomplete = len(migrated) < int(minimum) or bool(pending) or bool(transitional)
-    if incomplete and not allow_incomplete:
+    incomplete = len(migrated) < int(minimum) or bool(pending)
+    if incomplete:
         fail(
             "expanded migration is incomplete: "
-            f"migrated={len(migrated)}/60, pending={len(pending)}, "
-            f"transitional_non_flash={transitional!r}"
+            f"migrated={len(migrated)}/60, pending={len(pending)}"
         )
     return len(migrated), tuple(pending)
 
 
-def validate(
-    inventory: Inventory,
-    root: Path = ROOT,
-    *,
-    allow_incomplete: bool = False,
-) -> None:
+def validate(inventory: Inventory, root: Path = ROOT) -> None:
     expanded_total = sum(
         inventory.dispositions[name]
         for name in ("migration-pending", "migrated-flash", "reviewed-exception")
     )
-    coexistence = sum(
-        (root / source).is_file() and (root / target).is_file()
-        for source, target in MIGRATION_TARGETS.items()
-    )
-    expected_total = 68 + (coexistence if allow_incomplete else 0)
+    expected_total = 68
     if expanded_total != expected_total:
         fail(
             "expanded standalone inventory drifted: "
@@ -537,7 +523,17 @@ def validate(
             "bootstrap adapter count drifted: "
             f"observed={inventory.dispositions['bootstrap-adapter']}, expected=1"
         )
-    validate_expanded_contract(root, allow_incomplete=allow_incomplete)
+    if inventory.dispositions["bootstrap-entrypoint"] != 1:
+        fail(
+            "bootstrap entrypoint count drifted: "
+            f"observed={inventory.dispositions['bootstrap-entrypoint']}, expected=1"
+        )
+    if inventory.dispositions["independent-validation"] != 2:
+        fail(
+            "independent validation count drifted: "
+            f"observed={inventory.dispositions['independent-validation']}, expected=2"
+        )
+    validate_expanded_contract(root)
     if inventory.embedded != EXPECTED_EMBEDDED:
         fail(
             f"embedded surface counts drifted: observed={inventory.embedded!r}, "
@@ -583,6 +579,66 @@ def validate(
         if forbidden in installer_source:
             fail(f"install-flash.sh owns forbidden build policy {forbidden!r}")
 
+    setup = root / "setup.sh"
+    setup_source = setup.read_text(encoding="utf-8")
+    if not os.access(setup, os.X_OK) or not setup_source.startswith(
+        "#!/usr/bin/env bash\n"
+    ):
+        fail("setup.sh must be the executable Bash bootstrap entrypoint")
+    for marker in (
+        "--plan",
+        "--check",
+        "--yes",
+        "Darwin-arm64",
+        "Linux-x86_64",
+        'root_toolchain_file="$repository/rust-toolchain.toml"',
+        'flash_toolchain_file="$repository/components/flash/rust-toolchain.toml"',
+        "rustup toolchain install",
+        "--no-modify-path",
+        '"$repository/install-flash.sh"',
+        "flash-automation-tools",
+        "setup: environment verified",
+    ):
+        if marker not in setup_source:
+            fail(f"setup.sh lacks bootstrap contract {marker!r}")
+    for forbidden in (
+        "git clone",
+        "git pull",
+        "git switch",
+        "git checkout",
+        ".bashrc",
+        ".zshrc",
+        "podman machine start",
+        " qemu-system-x86_64 ",
+        " dd ",
+    ):
+        if forbidden in setup_source:
+            fail(f"setup.sh owns forbidden effect {forbidden!r}")
+
+    for legacy in ("native_bootstrap.sh", "podman_bootstrap.sh"):
+        legacy_path = root / legacy
+        legacy_source = legacy_path.read_text(encoding="utf-8")
+        if not os.access(legacy_path, os.X_OK) or not legacy_source.startswith(
+            "#!/usr/bin/env bash\n"
+        ):
+            fail(f"{legacy} must remain an executable pre-Flash adapter")
+        for marker in (
+            "is retained for compatibility; use ./setup.sh",
+            'exec "$repository/setup.sh" "$@"',
+        ):
+            if marker not in legacy_source:
+                fail(f"{legacy} is an alternative setup implementation")
+        for forbidden in (
+            "git clone",
+            "git pull",
+            "rustup toolchain",
+            "sudo ",
+            "podman machine",
+            "qemu-system",
+        ):
+            if forbidden in legacy_source:
+                fail(f"{legacy} owns forbidden setup behavior {forbidden!r}")
+
     qemu_source = (root / "ci/qemu_smoke.py").read_text(encoding="utf-8")
     for relative in NATIVE_FLASH:
         if relative not in qemu_source:
@@ -620,27 +676,49 @@ def checked_runtime_process(
     timeout_seconds: int = 30,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        process = subprocess.run(
+        process = subprocess.Popen(
             [str(item) for item in command],
             cwd=cwd,
             env=environment,
-            input=input_text,
-            capture_output=True,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            check=False,
-            timeout=timeout_seconds,
+            start_new_session=True,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except OSError as error:
         fail(f"{label} could not be observed safely: {error}")
-    captured = len(process.stdout.encode()) + len(process.stderr.encode())
+    try:
+        stdout, stderr = process.communicate(input_text, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as error:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.communicate()
+        fail(f"{label} could not be observed safely: {error}")
+    result = subprocess.CompletedProcess(
+        args=[str(item) for item in command],
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    captured = len(result.stdout.encode()) + len(result.stderr.encode())
     if captured > MAX_RUNTIME_CAPTURE:
         fail(
             f"{label} exceeded the {MAX_RUNTIME_CAPTURE}-byte capture limit: "
             f"observed={captured}"
         )
-    return process
+    return result
 
 
 def sha256_file(path: Path) -> str:
@@ -1143,6 +1221,300 @@ def check_install_flash_adapter(root: Path = ROOT) -> None:
                 expected_cwd = (root / "components/flash").resolve()
                 if Path(str(records[0]["cwd"])).resolve() != expected_cwd:
                     fail(f"install-flash {label} Cargo cwd differs: {records!r}")
+
+
+def write_setup_probe(path: Path, body: str = "exit 0\n") -> None:
+    path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def prepare_setup_tree(directory: Path, root: Path) -> Path:
+    repository = directory / "repository"
+    for relative in (
+        "components/flash/rust-toolchain.toml",
+        "ci/automation-tools.json",
+        "rust-toolchain.toml",
+        "setup.sh",
+    ):
+        destination = repository / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, destination)
+    return repository
+
+
+def setup_environment(directory: Path, bin_directory: Path) -> dict[str, str]:
+    home = directory / "home"
+    home.mkdir(exist_ok=True)
+    return {
+        "HOME": str(home),
+        "FLASH_INSTALL_PREFIX": str(directory / "flash-prefix"),
+        "PATH": os.pathsep.join((str(bin_directory), "/usr/bin", "/bin")),
+        "SETUP_PROBE_REPORT": str(directory / "report"),
+    }
+
+
+def check_setup_entrypoint(root: Path = ROOT) -> None:
+    plan_cases = (
+        (
+            "linux apt",
+            "Linux",
+            "x86_64",
+            "apt-get",
+            (
+                "privileged package changes will use apt-get",
+                "sudo apt-get update",
+                "rustup toolchain install nightly-2026-05-24",
+                "rustup toolchain install 1.97.1",
+                "install-flash.sh",
+                "flash-automation-tools",
+                "plan complete; no changes made",
+            ),
+        ),
+        (
+            "linux dnf",
+            "Linux",
+            "x86_64",
+            "dnf",
+            (
+                "privileged package changes will use dnf",
+                "sudo dnf install git make python3 curl gzip tar coreutils podman",
+                "rustup toolchain install nightly-2026-05-24",
+                "rustup toolchain install 1.97.1",
+                "install-flash.sh",
+                "flash-automation-tools",
+                "plan complete; no changes made",
+            ),
+        ),
+        (
+            "linux pacman",
+            "Linux",
+            "x86_64",
+            "pacman",
+            (
+                "privileged package changes will use pacman",
+                "sudo pacman -S --needed git make python curl gzip tar "
+                "coreutils podman",
+                "rustup toolchain install nightly-2026-05-24",
+                "rustup toolchain install 1.97.1",
+                "install-flash.sh",
+                "flash-automation-tools",
+                "plan complete; no changes made",
+            ),
+        ),
+        (
+            "macos",
+            "Darwin",
+            "arm64",
+            "brew",
+            (
+                "brew install git make python@3 podman qemu",
+                "rustup toolchain install nightly-2026-05-24",
+                "rustup toolchain install 1.97.1",
+                "install-flash.sh",
+                "flash-automation-tools",
+                "plan complete; no changes made",
+            ),
+        ),
+    )
+    for label, kernel, machine, manager, markers in plan_cases:
+        with tempfile.TemporaryDirectory(prefix=f"flash-setup-plan-{label}-") as raw:
+            directory = Path(raw).resolve()
+            repository = prepare_setup_tree(directory, root)
+            bin_directory = directory / "bin"
+            bin_directory.mkdir()
+            write_setup_probe(
+                bin_directory / "uname",
+                'if [ "$1" = -s ]; then printf \'%s\\n\' "$SETUP_KERNEL"; '
+                'else printf \'%s\\n\' "$SETUP_MACHINE"; fi\n',
+            )
+            write_setup_probe(bin_directory / manager)
+            environment = setup_environment(directory, bin_directory)
+            environment.update({"SETUP_KERNEL": kernel, "SETUP_MACHINE": machine})
+            process = checked_runtime_process(
+                [repository / "setup.sh", "--plan"],
+                cwd=repository,
+                environment=environment,
+                label=f"setup {label} clean-host plan",
+            )
+            if process.returncode != 0 or process.stderr:
+                fail(
+                    f"setup {label} clean-host plan failed: "
+                    f"{(process.returncode, process.stdout, process.stderr)!r}"
+                )
+            for marker in markers:
+                if marker not in process.stdout:
+                    fail(f"setup {label} plan lacks {marker!r}: {process.stdout!r}")
+            report = Path(environment["SETUP_PROBE_REPORT"])
+            if report.exists() and report.read_text(encoding="utf-8"):
+                fail(f"setup {label} plan executed a change")
+
+    for label, sudo_code, expected_code, expected_calls in (
+        ("package failure", 17, 17, 1),
+        ("partial package installation", 0, 1, 2),
+    ):
+        with tempfile.TemporaryDirectory(prefix="flash-setup-package-") as raw:
+            directory = Path(raw).resolve()
+            repository = prepare_setup_tree(directory, root)
+            bin_directory = directory / "bin"
+            bin_directory.mkdir()
+            write_setup_probe(
+                bin_directory / "uname",
+                'if [ "$1" = -s ]; then printf \'Linux\\n\'; '
+                'else printf \'x86_64\\n\'; fi\n',
+            )
+            write_setup_probe(bin_directory / "apt-get")
+            write_setup_probe(
+                bin_directory / "sudo",
+                'printf \'%s\\n\' "$*" >> "$SETUP_PROBE_REPORT"\n'
+                'exit "$SETUP_SUDO_CODE"\n',
+            )
+            environment = setup_environment(directory, bin_directory)
+            environment["SETUP_SUDO_CODE"] = str(sudo_code)
+            process = checked_runtime_process(
+                [repository / "setup.sh", "--yes"],
+                cwd=repository,
+                environment=environment,
+                label=f"setup {label}",
+            )
+            if process.returncode != expected_code:
+                fail(
+                    f"setup {label} status differs: "
+                    f"{(process.returncode, process.stdout, process.stderr)!r}"
+                )
+            if "privileged package changes will use apt-get" not in process.stdout:
+                fail(f"setup {label} did not report privileged changes")
+            report = Path(environment["SETUP_PROBE_REPORT"])
+            calls = report.read_text(encoding="utf-8").splitlines()
+            if len(calls) != expected_calls:
+                fail(f"setup {label} package calls differ: {calls!r}")
+            if sudo_code == 0 and "did not provide" not in process.stderr:
+                fail(
+                    "setup partial installation did not fail closed: "
+                    f"{process.stderr!r}"
+                )
+
+    with tempfile.TemporaryDirectory(prefix="flash-setup-check-") as raw:
+        directory = Path(raw).resolve()
+        repository = prepare_setup_tree(directory, root)
+        bin_directory = directory / "bin"
+        bin_directory.mkdir()
+        write_setup_probe(
+            bin_directory / "uname",
+            'if [ "$1" = -s ]; then printf \'Linux\\n\'; '
+            'else printf \'x86_64\\n\'; fi\n',
+        )
+        for command in (
+            "apt-get",
+            "cargo",
+            "curl",
+            "git",
+            "gzip",
+            "make",
+            "podman",
+            "python3",
+            "qemu-system-x86_64",
+            "sha256sum",
+            "tar",
+        ):
+            write_setup_probe(bin_directory / command)
+        write_setup_probe(
+            bin_directory / "rustup",
+            'if [ "$1" = component ]; then\n'
+            "  printf '%s\\n' rust-src-x86_64-unknown-linux-gnu "
+            "rustfmt-x86_64-unknown-linux-gnu "
+            "clippy-x86_64-unknown-linux-gnu "
+            "rust-analyzer-x86_64-unknown-linux-gnu\n"
+            "fi\n"
+            "exit 0\n",
+        )
+        environment = setup_environment(directory, bin_directory)
+        flash_runtime = Path(environment["FLASH_INSTALL_PREFIX"]) / "bin/fsh"
+        flash_runtime.parent.mkdir(parents=True)
+        write_setup_probe(
+            flash_runtime,
+            'if [ "$1" = --version ]; then printf \'fsh 1.0.0\\n\'; fi\n',
+        )
+        tools = repository / "build/flash-automation-tools/linux-x86_64"
+        (tools / "bin").mkdir(parents=True)
+        shutil.copy2(root / "ci/automation-tools.json", tools / "manifest.json")
+        write_setup_probe(tools / "bin/taplo", "printf 'taplo 0.10.0\\n'\n")
+        write_setup_probe(tools / "bin/jq", "printf 'jq-1.7.1\\n'\n")
+        write_setup_probe(tools / "bin/rg", "printf 'ripgrep 15.2.0\\n'\n")
+        outputs: list[str] = []
+        for attempt in range(2):
+            process = checked_runtime_process(
+                [repository / "setup.sh", "--check"],
+                cwd=repository,
+                environment=environment,
+                label=f"setup idempotent check {attempt + 1}",
+            )
+            if process.returncode != 0 or process.stderr:
+                fail(
+                    f"setup idempotent check {attempt + 1} failed: "
+                    f"{(process.returncode, process.stdout, process.stderr)!r}"
+                )
+            if "setup: environment verified\n" not in process.stdout:
+                fail(f"setup check did not verify the environment: {process.stdout!r}")
+            outputs.append(process.stdout)
+        if outputs[0] != outputs[1]:
+            fail("setup check is not idempotent")
+
+        ambient_flash = bin_directory / "fsh"
+        shutil.copy2(flash_runtime, ambient_flash)
+        environment.pop("FLASH_INSTALL_PREFIX")
+        process = checked_runtime_process(
+            [repository / "setup.sh", "--check"],
+            cwd=repository,
+            environment=environment,
+            label="setup compatible ambient Flash check",
+        )
+        if process.returncode != 0 or process.stderr:
+            fail(
+                "setup compatible ambient Flash check failed: "
+                f"{(process.returncode, process.stdout, process.stderr)!r}"
+            )
+        expected_selection = (
+            "setup: Flash runtime already satisfies fsh 1.0.0 at "
+            f"{ambient_flash}\n"
+        )
+        if expected_selection not in process.stdout:
+            fail(f"setup did not select compatible ambient Flash: {process.stdout!r}")
+
+
+def check_setup_documentation(root: Path = ROOT) -> None:
+    documents = {
+        "README.md": ("./setup.sh --plan", "./setup.sh"),
+        "docs/getting-started.md": (
+            "./setup.sh --plan",
+            "./setup.sh --check",
+            "distinct Rust toolchains",
+            "does not clone or update",
+            "./install-flash.sh",
+            "The adapter is not an alternative",
+        ),
+        "docs/automation.md": (
+            "single documented operator-facing environment bootstrap",
+            "independent-validation exceptions",
+            "trust boundary circular",
+            "pre-Flash compatibility redirects",
+        ),
+        "docs/development.md": ("./setup.sh --check",),
+        "docs/verification.md": ("canonical `setup.sh`",),
+        "ci/README.md": (
+            "Independent Flash-runtime oracle",
+            "validates `setup.sh` as the only canonical",
+        ),
+    }
+    for relative, markers in documents.items():
+        source = (root / relative).read_text(encoding="utf-8")
+        for marker in markers:
+            if marker not in source:
+                fail(f"{relative} lacks setup documentation {marker!r}")
+    for relative in documents:
+        source = (root / relative).read_text(encoding="utf-8")
+        for legacy_command in ("./native_bootstrap.sh", "./podman_bootstrap.sh"):
+            if legacy_command in source:
+                fail(f"{relative} advertises legacy setup path {legacy_command}")
 
 
 def host_probe_environment(
@@ -1760,6 +2132,7 @@ def check_exercise_runner_parity(
             cwd=root,
             environment=environment,
             label="Flash v1 native exercise smoke",
+            timeout_seconds=60,
         )
         expected_stdout = (
             "".join(
@@ -4667,13 +5040,6 @@ def check_ci_policy_tests(runtime: Path, root: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--allow-incomplete",
-        action="store_true",
-        help=(
-            "exercise the current migration set while the final 60-file gate stays red"
-        ),
-    )
-    parser.add_argument(
         "--bootstrap-runtime",
         type=Path,
         help="first validate and execute parity with the immutable baseline fsh",
@@ -4685,8 +5051,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     inventory = scan()
-    validate(inventory, allow_incomplete=args.allow_incomplete)
+    validate(inventory)
     check_install_flash_adapter()
+    check_setup_entrypoint()
+    check_setup_documentation()
     if args.runtime is not None and args.bootstrap_runtime is None:
         fail("--runtime requires the independently acquired --bootstrap-runtime")
     bootstrap: Path | None = None

@@ -42,10 +42,37 @@ reviewed implementation route replaces 60 of them with genuine Flash programs
 - `recipes/tests/hello-redox/files/test.py` is the deliberately Python program
   installed by that external-language example.
 
-The percentage counts completed replacements, never planned paths or the four
-target programs above. Until all 60 replacements exist, the inventory command
-fails and reports the exact pending count. Branch-local Python migration
-infrastructure is also transitional and cannot remain in the final result.
+The percentage counts completed replacements, never planned paths, branch-local
+additions, or the four target programs above. All 60 selected replacements now
+exist. The Python public-automation checker and its focused unit test are two
+additional reviewed independent-validation exceptions: they must reject a
+missing, broken, or falsely successful candidate `fsh`, so implementing that
+oracle in the runtime under test would make the trust boundary circular.
+
+The two root legacy bootstrap paths contain no setup implementation; they are
+pre-Flash compatibility redirects to `setup.sh`. `podman/rustinstall.sh`
+remains the separate container/pre-Flash helper used inside the container
+boundary and is not a general host setup path.
+
+## Canonical setup boundary
+
+`setup.sh` is the single documented operator-facing environment bootstrap. On
+supported macOS arm64 and Linux x86_64 hosts it plans or installs the mapped
+host packages, installs the distinct root and Flash Rust toolchains, invokes
+the narrow Flash installer, acquires the byte-pinned automation tools, and
+verifies the complete environment:
+
+```bash
+./setup.sh --plan
+./setup.sh
+./setup.sh --check
+```
+
+The plan is read-only and reports privileged package changes before elevation.
+The apply path is idempotent. The check path is read-only and fails when any
+required command, toolchain component, `fsh` version, tool manifest, or pinned
+tool version is absent. The bootstrap never clones or updates Git, edits shell
+startup files, starts an emulator, or accesses a physical device.
 
 `build.fsh` is the primary source-build interface and preserves the former
 build command's option, default, environment, output, filesystem-effect, and

@@ -42,6 +42,12 @@ Read [Architecture](architecture.md) before changing system boundaries. Use [Ver
 
 Complete the setup in [Getting Started](getting-started.md) before beginning repository development.
 
+Verify the complete host environment without changing it:
+
+```bash
+./setup.sh --check
+```
+
 The standard local configuration is:
 
 ```make
@@ -153,8 +159,10 @@ ci/
     Hosted quality, image, security, and release workflows
 
 podman/
-podman_bootstrap.sh
-    Container build environment and host dependency bootstrap
+    Container build definitions and the separate pre-Flash container helper
+
+setup.sh
+    Canonical host packages, Rust toolchains, Flash, and automation-tool setup
 
 docs/
     General public FlashOS documentation

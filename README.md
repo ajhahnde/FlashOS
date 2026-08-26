@@ -51,7 +51,13 @@ Device-specific test results and the limits of current hardware evidence are mai
 
 ## Quick start
 
-Complete the prerequisites and local configuration described in [Getting Started](docs/getting-started.md).
+From an existing clone, review and apply the canonical environment bootstrap,
+then complete the local configuration described in [Getting Started](docs/getting-started.md):
+
+```bash
+./setup.sh --plan
+./setup.sh
+```
 
 Build the development image with:
 

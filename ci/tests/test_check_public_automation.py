@@ -36,21 +36,27 @@ class PublicAutomationTests(unittest.TestCase):
 
     def test_repository_inventory_is_complete(self) -> None:
         inventory = automation.scan()
-        automation.validate(inventory, allow_incomplete=True)
-        migrated, pending = automation.validate_expanded_contract(allow_incomplete=True)
+        automation.validate(inventory)
+        migrated, pending = automation.validate_expanded_contract()
         self.assertEqual(migrated, 60)
         self.assertEqual(migrated + len(pending), 60)
+        self.assertEqual(pending, ())
         self.assertEqual(inventory.dispositions["reviewed-exception"], 8)
         self.assertEqual(inventory.dispositions["bootstrap-adapter"], 1)
+        self.assertEqual(inventory.dispositions["bootstrap-entrypoint"], 1)
+        self.assertEqual(inventory.dispositions["independent-validation"], 2)
 
-    def test_expanded_gate_stays_red_until_real_migrations_exist(self) -> None:
-        stderr = io.StringIO()
-        with redirect_stderr(stderr), self.assertRaises(SystemExit):
-            automation.validate(automation.scan())
-        self.assertRegex(
-            stderr.getvalue(),
-            r"expanded standalone inventory drifted|migration keeps both|"
-            r"expanded migration is incomplete",
+    def test_independent_checker_boundary_is_explicit(self) -> None:
+        self.assertEqual(
+            set(automation.INDEPENDENT_VALIDATION),
+            {
+                "ci/check_public_automation.py",
+                "ci/tests/test_check_public_automation.py",
+            },
+        )
+        self.assertEqual(
+            Counter(map(automation.disposition, automation.INDEPENDENT_VALIDATION)),
+            Counter({"independent-validation": 2}),
         )
 
     def test_unknown_script_is_not_silently_excepted(self) -> None:
@@ -100,6 +106,13 @@ class PublicAutomationTests(unittest.TestCase):
         self.assertNotIn("build.fsh", installer)
         self.assertNotIn("make ", installer)
         automation.check_install_flash_adapter()
+
+    def test_canonical_setup_entrypoint_is_complete_and_idempotent(self) -> None:
+        self.assertEqual(
+            automation.disposition("setup.sh"), "bootstrap-entrypoint"
+        )
+        automation.check_setup_entrypoint()
+        automation.check_setup_documentation()
 
     def test_runtime_trust_probe_rejects_false_success_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="flash-runtime-probes-") as raw:

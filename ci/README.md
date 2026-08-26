@@ -28,7 +28,7 @@ Product-specific checks live under `ci/` so they can be used both locally and fr
 | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | [`ci/check_profile.fsh`](check_profile.fsh)                                                   | Product profiles, release settings, branding, pinning, and workflow invariants |
 | [`ci/check_developer_interface.fsh`](check_developer_interface.fsh)                           | Host command help, aliases, completion, and shell syntax                       |
-| [`ci/check_public_automation.py`](check_public_automation.py)                                 | Flash-native scripts, reviewed exceptions, package wiring, and parity          |
+| [`ci/check_public_automation.py`](check_public_automation.py)                                 | Independent Flash-runtime oracle, setup, inventory, package wiring, and parity |
 | [`ci/check_flashos_platform.fsh`](check_flashos_platform.fsh)                                 | FlashOS target/toolchain baseline and built target artifacts                   |
 | [`ci/check_flashos_capabilities.fsh`](check_flashos_capabilities.fsh)                         | Capability evidence inventory                                                  |
 | [`ci/check_flashos_operation_map.fsh`](check_flashos_operation_map.fsh)                       | Flash operation mapping to Rust, relibc, and Redox interfaces                  |
@@ -183,6 +183,14 @@ external-tool exceptions, generated/test data, package copies and runtime
 dependencies, installed non-Flash launchers, and `.gitattributes`. New
 standalone or embedded surfaces change the sealed inventory and fail until the
 disposition is reviewed.
+
+The checker and its focused Python unit test are intentional independent-
+validation exceptions. They reject broken and falsely successful candidate
+runtimes, so moving the oracle into the `fsh` under test would make its trust
+boundary circular. The same checker validates `setup.sh` as the only canonical
+operator bootstrap: clean-host package plans, both pinned Rust toolchains, the
+narrow Flash installer, pinned automation tools, read-only checks, idempotent
+reruns, and forbidden Git, shell-startup, emulator, and device effects.
 
 Shared host modules under `ci/lib/` are non-executable frozen-v1 Flash imports,
 not additional migration roots. Their external parsing/search boundary is
