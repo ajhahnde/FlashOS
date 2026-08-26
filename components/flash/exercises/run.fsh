@@ -56,6 +56,11 @@ if $internal_digest {
     exit 0
 }
 
+mut rg = env('FLASH_AUTOMATION_RG')
+if $rg == null || $rg == '' {
+    $rg = 'rg'
+}
+
 def assembled_exercises(binary, status_fixture, stream_fixture) {
     let stream_name = 'flash-e2e-stream-fixture'
     return [
@@ -326,7 +331,7 @@ def write_json_strings(values, destination) {
     }
 }
 
-def execute_case(exercise, flash_root, repository_root, suite_temporary, result_path) {
+def execute_case(exercise, flash_root, repository_root, suite_temporary, result_path, rg) {
     let identifier = $exercise.id
     let summary = $exercise.summary
     let program = $exercise.program
@@ -377,14 +382,14 @@ def execute_case(exercise, flash_root, repository_root, suite_temporary, result_
 
     mut passed = $observed_code == $expected_code
     for expected in $stdout_contains {
-        if ^rg --fixed-strings --quiet -- $expected $stdout_path {
+        if ^env $rg --fixed-strings --quiet -- $expected $stdout_path {
             let found = true
         } else {
             $passed = false
         }
     }
     for expected in $stderr_contains {
-        if ^rg --fixed-strings --quiet -- $expected $stderr_path {
+        if ^env $rg --fixed-strings --quiet -- $expected $stderr_path {
             let found = true
         } else {
             $passed = false
@@ -457,7 +462,7 @@ for argument in $args {
     } else if $argument == '--record' {
         $expecting_record = true
     } else if '--record=' in $argument {
-        if ^printf '%s' $argument | ^rg --quiet '^--record=' {
+        if ^printf '%s' $argument | ^env $rg --quiet '^--record=' {
             $record_path = "$(^printf '%s' $argument | ^sed 's/^--record=//')"
         } else {
             usage_error("unrecognized argument: $argument")
@@ -545,7 +550,7 @@ let assembled = assembled_exercises($binary, $status_fixture, $stream_fixture)
 for exercise in $assembled {
     let identifier = $exercise.id
     ^printf 'Flash v1 exercise: %s\n' $identifier || exit 1
-    let passed = execute_case($exercise, $flash_root, $repository_root, $suite_temporary, $results_path)
+    let passed = execute_case($exercise, $flash_root, $repository_root, $suite_temporary, $results_path, $rg)
     $count = $count + 1
     if !$passed {
         ^jq --slurp '.[-1]' $results_path
@@ -558,7 +563,7 @@ if $profile != 'smoke' {
     for exercise in $commands {
         let identifier = $exercise.id
         ^printf 'Flash v1 exercise: %s\n' $identifier || exit 1
-        let passed = execute_case($exercise, $flash_root, $repository_root, $suite_temporary, $results_path)
+        let passed = execute_case($exercise, $flash_root, $repository_root, $suite_temporary, $results_path, $rg)
         $count = $count + 1
         if !$passed {
             ^jq --slurp '.[-1]' $results_path
@@ -568,7 +573,7 @@ if $profile != 'smoke' {
     }
 }
 
-let suite_version = "$(^rg --only-matching '^suite_version = [0-9]+$' $contract_path | ^cut -d ' ' -f 3)"
+let suite_version = "$(^env $rg --only-matching '^suite_version = [0-9]+$' $contract_path | ^cut -d ' ' -f 3)"
 if !$status.ok || $suite_version == '' {
     ^rm -rf $suite_temporary
     exercise_error('cannot read suite_version from exercises/v1.toml')
@@ -603,7 +608,7 @@ if $nul_count != $line_count {
     ^rm -rf $suite_temporary
     exercise_error('candidate source paths containing newlines cannot be represented by the frozen-v1 digest iterator')
 }
-^rg --invert-match '^(components/flash/target/|components/flash/exercises/evidence/host-v1\.json)$' $candidates_unfiltered_path \
+^env $rg --invert-match '^(components/flash/target/|components/flash/exercises/evidence/host-v1\.json)$' $candidates_unfiltered_path \
 | ^env LC_ALL=C sort > $candidates_path
 if !$status.ok {
     ^rm -rf $suite_temporary

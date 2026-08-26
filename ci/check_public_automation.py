@@ -2196,6 +2196,20 @@ def check_exercise_runner_parity(
         record = directory / "record.json"
         environment = os.environ.copy()
         environment["FLASH_V1_BOOTSTRAP_FSH"] = str(bootstrap_runtime)
+        selected_rg = environment.get("FLASH_AUTOMATION_RG")
+        if not selected_rg:
+            fail("Flash v1 native exercise parity requires FLASH_AUTOMATION_RG")
+        rejected_tools = directory / "rejected-tools"
+        rejected_tools.mkdir()
+        rejected_rg = rejected_tools / "rg"
+        rejected_rg.write_text(
+            "#!/bin/sh\nprintf '%s\\n' 'ambient rg must not execute' >&2\nexit 127\n",
+            encoding="utf-8",
+        )
+        rejected_rg.chmod(0o755)
+        environment["PATH"] = os.pathsep.join(
+            [str(rejected_tools), environment.get("PATH", "")]
+        )
         process = checked_runtime_process(
             [runtime, script, "--profile", "smoke", "--no-build", "--record", record],
             cwd=root,

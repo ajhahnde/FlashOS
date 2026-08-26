@@ -39,8 +39,8 @@ def unique_nonempty(values, label) {
     return $values
 }
 
-def safe_file(root, flash_root, value, label) {
-    if ^printf '%s' $value | ^rg --quiet '(^/|(^|/)\.\.(/|$))' {
+def safe_file(root, flash_root, value, label, rg) {
+    if ^printf '%s' $value | ^env $rg --quiet '(^/|(^|/)\.\.(/|$))' {
         throw "$label must stay inside components/flash"
     }
     let path = "$flash_root/$value"
@@ -52,8 +52,8 @@ def safe_file(root, flash_root, value, label) {
     return $path
 }
 
-def owner_is_enabled(root, flash_root, owner, label) {
-    if ^printf '%s' $owner | ^rg --quiet '^[^:]+::[a-z][a-z0-9_]*$' {
+def owner_is_enabled(root, flash_root, owner, label, rg) {
+    if ^printf '%s' $owner | ^env $rg --quiet '^[^:]+::[a-z][a-z0-9_]*$' {
     } else {
         throw "$label must use path::test_name syntax"
     }
@@ -62,9 +62,9 @@ def owner_is_enabled(root, flash_root, owner, label) {
     if !$status.ok {
         throw "$label must use path::test_name syntax"
     }
-    let path = safe_file($root, $flash_root, $relative, "$label path")
+    let path = safe_file($root, $flash_root, $relative, "$label path", $rg)
     let declaration = "(?m)^#\\[test\\]\\n(?:#\\[[^\\n]+\\]\\n)*fn $test_name\\(\\) \\{"
-    if ^rg --multiline --quiet $declaration $path {
+    if ^env $rg --multiline --quiet $declaration $path {
     } else {
         throw "$label does not resolve to an enabled #[test]: $owner"
     }
@@ -320,7 +320,7 @@ while $family_index < 14 {
         }
         let owner = "$(^env $jq --raw-output --argjson family $family_index --argjson test $test_index '.document.family[$family].tests[$test]' $bundle)"
         try {
-            owner_is_enabled($root, $flash_root, $owner, "family[$family_index].tests[$test_index]")
+            owner_is_enabled($root, $flash_root, $owner, "family[$family_index].tests[$test_index]", $rg)
         } catch error {
             let message = $error.message
             ^rm -rf $temporary

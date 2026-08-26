@@ -79,10 +79,25 @@ let runtime = $runtime_value
 if "$(^$runtime --version 2>/dev/null)" != 'fsh 1.0.0' {
     test_error('FLASH_AUTOMATION_RUNTIME must report fsh 1.0.0')
 }
+let selected_rg = env('FLASH_AUTOMATION_RG')
+if $selected_rg == null || $selected_rg == '' {
+    test_error('FLASH_AUTOMATION_RG is required')
+}
 mut temporary_parent = env('TMPDIR')
 if $temporary_parent == null { $temporary_parent = '/tmp' }
 let temporary = "$(^mktemp -d "$temporary_parent/flash-conformance-tests.XXXXXX")"
 if !$status.ok || $temporary == '' { test_error('cannot create temporary directory') }
+
+let rejected_tools = "$temporary/rejected-tools"
+^mkdir $rejected_tools
+if !$status.ok { test_error('cannot create the rejected-tool fixture') }
+^printf '%s\n' '#!/bin/sh' "printf '%s\\n' 'ambient rg must not execute' 1>&2" 'exit 127' > "$rejected_tools/rg"
+if !$status.ok { test_error('cannot write the rejected rg fixture') }
+^chmod +x "$rejected_tools/rg"
+if !$status.ok { test_error('cannot activate the rejected rg fixture') }
+mut original_path = env('PATH')
+if $original_path == null { $original_path = '' }
+export PATH = "$rejected_tools:$original_path"
 
 let tracked = run_validator($runtime, "$root/ci/check_flash_conformance.fsh", $root, $temporary, 'tracked')
 expect_success($tracked, 'Flash v1 conformance: ok', 'tracked conformance inventory')
