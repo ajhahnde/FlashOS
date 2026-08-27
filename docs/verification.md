@@ -391,6 +391,7 @@ Its current checks include:
 - alignment of development and release profile structure;
 - a locked root account in the release profile;
 - rejection of well-known release-profile passwords;
+- an exact reviewed init-service set with no selected remote-login daemon;
 - required user access to the audio, display, event, and PTY schemes;
 - exclusion of Orbital scheme access;
 - absence of the legacy `/ui` configuration path;
@@ -561,6 +562,8 @@ This matters for two reasons:
 
 1. both smoke modes begin from the supplied image bytes rather than state left by an earlier test;
 2. runtime testing does not silently change the artifact whose checksum or provenance may later be evaluated.
+
+For release profiles, both disk paths also hash the exact assembled init-directory listing after login. This complements package-stage inspection: it detects an init entry added or omitted during image assembly, while the source contract rejects unexpected services in every selected package. It does not prove that inherited service implementations are vulnerability-free or qualify network exposure.
 
 The generated smoke log is diagnostic evidence from the session. It is not a replacement for the tested image or its checksum.
 
