@@ -164,7 +164,7 @@ Use the repository's executable inputs when determining what a particular FlashO
 | Which Rust dependency versions are selected?                   | The applicable committed `Cargo.lock`                                                                                                |
 | How is the target toolchain assembled?                         | [`mk/prefix.mk`](../../mk/prefix.mk)                                                                                                 |
 | How are packages and images assembled?                         | [`mk/repo.mk`](../../mk/repo.mk) and [`mk/disk.mk`](../../mk/disk.mk)                                                                |
-| Which product invariants are checked statically?               | [`ci/check_profile.py`](../../ci/check_profile.py)                                                                                   |
+| Which product invariants are checked statically?               | [`ci/check_profile.fsh`](../../ci/check_profile.fsh)                                                                                 |
 | Which artifact contents were recorded for a release candidate? | The release's image SBOM, source SBOM, checksums, and provenance evidence                                                            |
 
 The product-profile contract requires shipped Git-based recipes covered by that contract to use immutable commit revisions. This helps bind an image configuration to identified source inputs, but it does not make the retained files in this directory a dependency lock.

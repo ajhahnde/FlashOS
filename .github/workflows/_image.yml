@@ -48,10 +48,25 @@ jobs:
     name: docker-clean-room-build
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_TAPLO: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/taplo
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
+      FLASH_AUTOMATION_RG: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/rg
+      FLASH_AUTOMATION_READELF: /usr/bin/readelf
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      # These host-side tools must create build/ before the root container
+      # writes through the workspace bind mount and takes directory ownership.
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
 
       - name: Prepare the BuildKit builder
         run: docker buildx create --driver docker-container --use --name flashos-ci
@@ -139,7 +154,7 @@ jobs:
               repo-lock
 
       - name: Validate the FlashOS platform build baseline
-        run: python3 ci/check_flashos_platform.py --artifacts
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh --artifacts
 
       # Every package installed into the image is staged under its recipe as
       # target/<triple>/stage before it is packed. Scanning those trees
@@ -305,10 +320,21 @@ jobs:
     timeout-minutes: 20
     env:
       CONFIG_NAME: ${{ inputs.config-name }}
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_TAPLO: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/taplo
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
+      FLASH_AUTOMATION_RG: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/rg
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
 
       - name: Install QEMU and UEFI firmware
         run: |
@@ -340,6 +366,7 @@ jobs:
             *) echo "::error::unknown image profile: $CONFIG_NAME"; exit 1 ;;
           esac
           python3 ci/qemu_smoke.py \
+            --automation-runtime "$FLASH_AUTOMATION_RUNTIME" \
             --image dist/image/FlashOS-x86_64-harddrive.img \
             --disk-interface nvme \
             --log dist/qemu-harddrive-smoke.log \
@@ -367,6 +394,7 @@ jobs:
             *) echo "::error::unknown image profile: $CONFIG_NAME"; exit 1 ;;
           esac
           python3 ci/qemu_smoke.py \
+            --automation-runtime "$FLASH_AUTOMATION_RUNTIME" \
             --image dist/image/FlashOS-x86_64-live.iso \
             --disk-interface usb \
             --log dist/qemu-live-usb-smoke.log \

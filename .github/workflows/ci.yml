@@ -22,6 +22,9 @@ jobs:
     name: change-classification
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
     outputs:
       lane: ${{ steps.classify.outputs.lane }}
       image_required: ${{ steps.classify.outputs.image_required }}
@@ -33,6 +36,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
+
       - name: Classify changed paths
         id: classify
         env:
@@ -43,20 +52,29 @@ jobs:
           set -euo pipefail
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             git diff --name-only --no-renames -z "${BASE_SHA}" "${HEAD_SHA}" |
-              python3 ci/classify_changes.py --null
+              build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/classify_changes.fsh --null
           else
-            python3 ci/classify_changes.py </dev/null
+            build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/classify_changes.fsh </dev/null
           fi
 
   quality:
     name: repository-quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
 
       - name: Cache Cargo downloads
         if: inputs['cold-cache'] != true
@@ -95,29 +113,8 @@ jobs:
           ruff check ci/
           python3 -m unittest discover -s ci/tests -p 'test_*.py'
 
-      - name: Validate the developer command interface
-        run: python3 ci/check_developer_interface.py
-
-      - name: Validate package, TUI, shell, identity, and audio policy
-        run: python3 ci/check_profile.py
-
-      - name: Validate the FlashOS platform source baseline
-        run: python3 ci/check_flashos_platform.py
-
-      - name: Validate the FlashOS capability evidence inventory
-        run: python3 ci/check_flashos_capabilities.py
-
-      - name: Validate the FlashOS platform operation map
-        run: python3 ci/check_flashos_operation_map.py
-
-      - name: Validate the FlashOS platform capability classification
-        run: python3 ci/check_flashos_capability_classification.py
-
-      - name: Validate the versioned FlashOS capability report
-        run: python3 ci/check_flashos_capability_report.py
-
-      - name: Validate the FlashOS target capability matrix
-        run: python3 ci/check_flashos_target_matrix.py
+      - name: Validate the public automation inventory
+        run: python3 ci/check_public_automation.py
 
       - name: Reject whitespace errors
         env:
@@ -134,6 +131,13 @@ jobs:
     name: flash-quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_TAPLO: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/taplo
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
+      FLASH_AUTOMATION_RG: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/rg
+      FLASH_AUTOMATION_READELF: /usr/bin/readelf
+      FLASH_V1_BOOTSTRAP_FSH: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
     defaults:
       run:
         working-directory: components/flash
@@ -141,6 +145,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
 
       - name: Cache Flash Cargo downloads
         if: inputs['cold-cache'] != true
@@ -171,23 +176,82 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Validate the Flash v1 conformance inventory
-        run: python3 ../../ci/check_flash_conformance.py
-
-      - name: Validate the exhaustive Flash v1 exercise contract
-        run: python3 ../../ci/check_flash_v1_exercises.py
-
-      - name: Validate the Flash 1.0.0 release contract
-        run: python3 ../../ci/check_flash_release.py
-
-      - name: Validate the Flash performance contract
-        run: python3 ../../ci/flash_benchmarks.py
-
       - name: Host v1 conformance and workspace tests
         run: cargo test --workspace --locked
 
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        working-directory: ${{ github.workspace }}
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        working-directory: ${{ github.workspace }}
+        run: make flash-automation-tools
+
+      - name: Validate the developer command interface
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_developer_interface.fsh
+
+      - name: Validate package, TUI, shell, identity, and audio policy
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_profile.fsh
+
+      - name: Validate the FlashOS platform source baseline
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh
+
+      - name: Validate the FlashOS capability evidence inventory
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capabilities.fsh
+
+      - name: Validate the FlashOS platform operation map
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_operation_map.fsh
+
+      - name: Validate the FlashOS platform capability classification
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capability_classification.fsh
+
+      - name: Validate the Flash v1 conformance inventory
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flash_conformance.fsh
+
+      - name: Validate the Flash 1.0.0 release contract
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flash_release.fsh
+
+      - name: Validate the versioned FlashOS capability report
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capability_report.fsh
+
+      - name: Validate the FlashOS target capability matrix
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_target_matrix.fsh
+
+      - name: Validate the exhaustive Flash v1 exercise contract
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flash_v1_exercises.fsh
+
+      - name: Validate the Flash performance contract
+        working-directory: ${{ github.workspace }}
+        run: >-
+          build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+          ci/flash_benchmarks.fsh
+
+      - name: Test the Flash performance contract
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/tests/test_flash_benchmarks.fsh
+
+      - name: Exercise FlashOS public automation through Flash
+        working-directory: ${{ github.workspace }}
+        run: >-
+          python3 ci/check_public_automation.py
+          --bootstrap-runtime
+          build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+          --runtime components/flash/target/debug/fsh
+
       - name: Execute the exhaustive Flash v1 host exercises
-        run: python3 exercises/run.py --profile ci --no-build
+        working-directory: ${{ github.workspace }}
+        run: components/flash/target/debug/fsh components/flash/exercises/run.fsh --profile ci --no-build
 
       - name: Run the bounded Flash benchmark smoke
         run: python3 benchmarks/run.py --profile smoke
@@ -215,10 +279,20 @@ jobs:
     needs: [scope, quality, flash, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    env:
+      FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        run: make flash-automation-tools
 
       - name: Summarize and enforce every gate
         env:
@@ -232,4 +306,4 @@ jobs:
           ROOT_RESULT: ${{ needs.quality.result }}
           SHELL_RESULT: ${{ needs.flash.result }}
           IMAGE_RESULT: ${{ needs.image.result }}
-        run: python3 ci/aggregate_ci.py
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/aggregate_ci.fsh

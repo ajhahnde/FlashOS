@@ -26,19 +26,20 @@ Product-specific checks live under `ci/` so they can be used both locally and fr
 
 | Path                                                                                          | Purpose                                                                        |
 | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`ci/check_profile.py`](check_profile.py)                                                     | Product profiles, release settings, branding, pinning, and workflow invariants |
-| [`ci/check_developer_interface.py`](check_developer_interface.py)                             | Host command help, aliases, completion, and shell syntax                       |
-| [`ci/check_flashos_platform.py`](check_flashos_platform.py)                                   | FlashOS target/toolchain baseline and built target artifacts                   |
-| [`ci/check_flashos_capabilities.py`](check_flashos_capabilities.py)                           | Capability evidence inventory                                                  |
-| [`ci/check_flashos_operation_map.py`](check_flashos_operation_map.py)                         | Flash operation mapping to Rust, relibc, and Redox interfaces                  |
-| [`ci/check_flashos_capability_classification.py`](check_flashos_capability_classification.py) | Native/shimmed/unsupported capability classification                           |
-| [`ci/check_flash_conformance.py`](check_flash_conformance.py)                                | Flash v1 executable host-conformance inventory and refusal-boundary audit       |
-| [`ci/check_flash_release.py`](check_flash_release.py)                                        | Flash 1.0.0 version, evidence, claim, and candidate-workflow contract            |
-| [`ci/check_coverage.py`](check_coverage.py)                                                   | LCOV report completeness                                                       |
-| [`ci/classify_changes.py`](classify_changes.py)                                               | Fail-closed PR product and dependency-policy routing                            |
-| [`ci/aggregate_ci.py`](aggregate_ci.py)                                                       | Stable aggregate result and classifier/job agreement                            |
-| [`ci/check_candidate_qualification.py`](check_candidate_qualification.py)                     | Exact source-to-PR required/security evidence                                   |
-| [`ci/release_candidate.py`](release_candidate.py)                                             | Candidate manifest, inventory, checksum, tree, and QEMU-byte validation         |
+| [`ci/check_profile.fsh`](check_profile.fsh)                                                   | Product profiles, release settings, branding, pinning, and workflow invariants |
+| [`ci/check_developer_interface.fsh`](check_developer_interface.fsh)                           | Host command help, aliases, completion, and shell syntax                       |
+| [`ci/check_public_automation.py`](check_public_automation.py)                                 | Independent Flash-runtime oracle, setup, inventory, package wiring, and parity |
+| [`ci/check_flashos_platform.fsh`](check_flashos_platform.fsh)                                 | FlashOS target/toolchain baseline and built target artifacts                   |
+| [`ci/check_flashos_capabilities.fsh`](check_flashos_capabilities.fsh)                         | Capability evidence inventory                                                  |
+| [`ci/check_flashos_operation_map.fsh`](check_flashos_operation_map.fsh)                       | Flash operation mapping to Rust, relibc, and Redox interfaces                  |
+| [`ci/check_flashos_capability_classification.fsh`](check_flashos_capability_classification.fsh) | Native/shimmed/unsupported capability classification                         |
+| [`ci/check_flash_conformance.fsh`](check_flash_conformance.fsh)                              | Flash v1 executable host-conformance inventory and refusal-boundary audit       |
+| [`ci/check_flash_release.fsh`](check_flash_release.fsh)                                      | Flash 1.0.0 version, evidence, claim, and candidate-workflow contract            |
+| [`ci/check_coverage.fsh`](check_coverage.fsh)                                                 | LCOV report completeness                                                       |
+| [`ci/classify_changes.fsh`](classify_changes.fsh)                                             | Fail-closed PR product and dependency-policy routing                            |
+| [`ci/aggregate_ci.fsh`](aggregate_ci.fsh)                                                     | Stable aggregate result and classifier/job agreement                            |
+| [`ci/check_candidate_qualification.fsh`](check_candidate_qualification.fsh)                   | Exact source-to-PR required/security evidence                                   |
+| [`ci/release_candidate.fsh`](release_candidate.fsh)                                           | Candidate manifest, inventory, checksum, tree, and QEMU-byte validation         |
 | [`ci/qemu_smoke.py`](qemu_smoke.py)                                                           | x86_64 serial runtime smoke tests                                              |
 | [`ci/container/Dockerfile`](container/Dockerfile)                                             | Hosted image-build environment                                                 |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                                     | Main CI                                                                        |
@@ -96,7 +97,9 @@ Host tests, image construction, QEMU checks, and physical hardware testing are s
 Run the inventory and source-boundary check from the repository root:
 
 ```bash
-python3 ci/check_flash_conformance.py
+make flash-bootstrap
+make flash-automation-tools
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flash_conformance.fsh
 ```
 
 [`components/flash/conformance/v1.toml`](../components/flash/conformance/v1.toml)
@@ -118,7 +121,9 @@ behavior.
 Run the release-boundary check from the repository root:
 
 ```bash
-python3 ci/check_flash_release.py
+make flash-bootstrap
+make flash-automation-tools
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flash_release.fsh
 ```
 
 [`components/flash/release/v1.toml`](../components/flash/release/v1.toml)
@@ -135,10 +140,12 @@ image or establish physical-hardware support.
 Run:
 
 ```bash
-python3 ci/check_profile.py
+make flash-bootstrap
+make flash-automation-tools
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_profile.fsh
 ```
 
-`check_profile.py` catches repository-level product errors before an image build starts. Among other things it checks:
+`check_profile.fsh` catches repository-level product errors before an image build starts. Among other things it checks:
 
 - development and release profile composition;
 - package and account configuration;
@@ -162,12 +169,71 @@ Failures start with:
 profile contract:
 ```
 
+### Public automation
+
+Run the fail-closed public script and embedded-command inventory from the
+repository root:
+
+```bash
+python3 ci/check_public_automation.py
+```
+
+The static contract classifies native Flash roots, bootstrap/recovery and
+external-tool exceptions, generated/test data, package copies and runtime
+dependencies, installed non-Flash launchers, and `.gitattributes`. New
+standalone or embedded surfaces change the sealed inventory and fail until the
+disposition is reviewed.
+
+The checker and its focused Python unit test are intentional independent-
+validation exceptions. They reject broken and falsely successful candidate
+runtimes, so moving the oracle into the `fsh` under test would make its trust
+boundary circular. The same checker validates `setup.sh` as the only canonical
+operator bootstrap: clean-host package plans, both pinned Rust toolchains, the
+narrow Flash installer, pinned automation tools, read-only checks, idempotent
+reruns, and forbidden Git, shell-startup, emulator, and device effects.
+
+Shared host modules under `ci/lib/` are non-executable frozen-v1 Flash imports,
+not additional migration roots. Their external parsing/search boundary is
+sealed by `ci/automation-tools.json`: Taplo 0.10.0, jq 1.7.1, and ripgrep
+15.2.0. Explicit binaries may be selected with `FLASH_AUTOMATION_TAPLO`,
+`FLASH_AUTOMATION_JQ`, and `FLASH_AUTOMATION_RG`; version drift fails before
+project data is consumed. `github_qualification.fsh` owns the shared bounded,
+read-only GitHub evidence and qualification policy used by the main and
+candidate roots. `make flash-automation-tools` downloads the declared
+macOS arm64 or Linux x86_64 assets into `build/flash-automation-tools/` and
+verifies every SHA-256 before extraction.
+
+After the Flash workspace has built the candidate `fsh`, first acquire the
+independent Flash 1.0 bootstrap from the immutable baseline, then exercise the
+migrations through both runtimes:
+
+```bash
+make flash-bootstrap
+python3 ci/check_public_automation.py \
+  --bootstrap-runtime \
+    build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh \
+  --runtime components/flash/target/debug/fsh
+```
+
+The acquisition target checks out the fixed source commit and tree into an
+isolated temporary clone, uses the pinned Rust toolchain, verifies `fsh 1.0.0`,
+and binds the resulting binary digest in a local manifest. The parity gate
+rejects missing, non-executable, wrong-version, crashing, always-success,
+corrupt-output, or capture-overflow runtimes. It then checks canonical format,
+static analysis, ordered execution, cwd, argv, environment, stdout/stderr,
+filesystem effects, and exact unsuccessful-status propagation under the
+bootstrap before the candidate. Hosted CI runs the static inventory in
+`repository-quality` and the runtime parity in `flash-quality`. Package/image
+and QEMU evidence remain separate downstream gates.
+
 ### Platform baseline
 
 Run:
 
 ```bash
-python3 ci/check_flashos_platform.py
+make flash-bootstrap
+make flash-automation-tools
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh
 ```
 
 This compares the tracked FlashOS target record with the x86_64 profile, build toolchain, Rust compiler recipe, `relibc` recipe, and CI wiring.
@@ -175,7 +241,7 @@ This compares the tracked FlashOS target record with the x86_64 profile, build t
 After a clean image build has produced target package stages, artifact mode also checks the staged target compiler/configuration and ELF identity:
 
 ```bash
-python3 ci/check_flashos_platform.py --artifacts
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh --artifacts
 ```
 
 ### Capability model
@@ -183,11 +249,11 @@ python3 ci/check_flashos_platform.py --artifacts
 The current FlashOS capability data is checked with:
 
 ```bash
-python3 ci/check_flashos_capabilities.py
-python3 ci/check_flashos_operation_map.py
-python3 ci/check_flashos_capability_classification.py
-python3 ci/check_flashos_capability_report.py
-python3 ci/check_flashos_target_matrix.py
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capabilities.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_operation_map.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capability_classification.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capability_report.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_target_matrix.fsh
 ```
 
 These scripts keep the live `Capability` enum, evidence inventory, operation map, and architectural classification in sync.
@@ -227,8 +293,8 @@ ordered contract for an operator-observed target without claiming that it was
 run, use:
 
 ```bash
-python3 ci/flashos_runtime_fixtures.py
-python3 ci/flashos_target_matrix.py
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/flashos_runtime_fixtures.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/flashos_target_matrix.fsh
 ```
 
 The host needs Python 3, QEMU, compatible x86_64 OVMF/edk2 firmware, and an existing image.
@@ -328,15 +394,16 @@ at ready-for-review.
 The final `required` job combines these results into the stable status used by
 repository rules. [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml)
 then reports `verified` on the protected-main commit only after
-[`check_main_qualification.py`](check_main_qualification.py) verifies the
+[`check_main_qualification.fsh`](check_main_qualification.fsh) verifies the
 associated pull request, exact Git-tree identity, independently recomputed path
 classification, the appropriate successful or skipped image jobs, and
 `security-required` evidence. This preserves a meaningful visible check on
 `main` without executing the suite twice.
 
-The aggregate decision table and selected-run/artifact rules are Python
-contracts with negative unit tests, rather than untested shell branches that
-exist only in workflow YAML.
+The path classifier, required aggregate, protected-main transfer, and candidate
+evidence resolver are native Flash contracts with materialized Python-oracle
+success, failure, GitHub-output, and summary parity, rather than untested
+branches that exist only in workflow YAML.
 
 ### Coverage
 
@@ -344,7 +411,7 @@ exist only in workflow YAML.
 manually requested diagnostic that generates host-executable Flash coverage
 using the pinned Flash toolchain and pinned `cargo-llvm-cov`.
 
-Before upload, [`ci/check_coverage.py`](check_coverage.py) rejects a missing/empty report, reports without executed first-party lines, and reports that omit any of the workspace crates. There is no minimum percentage threshold.
+Before upload, [`ci/check_coverage.fsh`](check_coverage.fsh) runs through the immutable Flash runtime and rejects a missing/empty report, reports without executed first-party lines, and reports that omit any of the workspace crates. There is no minimum percentage threshold.
 
 Codecov upload uses GitHub OIDC rather than a persistent token. [`codecov.yml`](../codecov.yml) currently disables Codecov project/patch statuses, comments, and GitHub checks.
 
@@ -444,6 +511,10 @@ consumers boot those exact raw bytes on the NVMe and USB paths on their first
 attempt. Packaging verifies the handoff, compresses those same bytes, creates
 the source SBOM, promotes the image SBOM, carries the reviewed notes and QEMU
 evidence, writes `SHA256SUMS`, and creates `candidate-manifest.json`.
+Candidate creation and both publication-validation jobs acquire the immutable
+Flash 1.0 runtime and pinned jq before invoking
+[`release_candidate.fsh`](release_candidate.fsh); Flash owns selection,
+identity, inventory, checksum, tree, QEMU-attempt, and decompressed-byte policy.
 
 ```text
 FlashOS-<version>-x86_64-harddrive.img.zst
@@ -543,21 +614,38 @@ formatting/Clippy/tests, Ruff, and the offline Python unit tests.
 ### Direct checks
 
 ```bash
-python3 ci/check_developer_interface.py
-python3 ci/check_profile.py
-python3 ci/check_flashos_platform.py
-python3 ci/check_flashos_capabilities.py
-python3 ci/check_flashos_operation_map.py
-python3 ci/check_flashos_capability_classification.py
+make flash-bootstrap
+make flash-automation-tools
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_developer_interface.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_profile.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/classify_changes.fsh --json </dev/null
+python3 ci/check_public_automation.py
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capabilities.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_operation_map.fsh
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capability_classification.fsh
 
 ruff check ci/
 python3 -m unittest discover -s ci/tests -p 'test_*.py'
 ```
 
+The public-automation gate below runs each migrated `ci/tests/*.fsh` root with
+both the immutable bootstrap and the workspace candidate runtime. The current
+native CI roots are `test_classify_changes.fsh`, `test_aggregate_ci.fsh`,
+`test_check_coverage.fsh`, `test_flash_benchmarks.fsh`,
+`test_check_flash_conformance.fsh`, `test_check_flash_release.fsh`,
+`test_check_flash_v1_exercises.fsh`, `test_check_flashos_capabilities.fsh`,
+`test_check_flashos_capability_classification.fsh`,
+`test_check_flashos_capability_report.fsh`,
+`test_check_flashos_operation_map.fsh`, `test_check_flashos_platform.fsh`,
+`test_check_flashos_target_matrix.fsh`, `test_check_main_qualification.fsh`,
+`test_flashos_runtime_fixtures.fsh`, `test_flashos_target_matrix.fsh`, and
+`test_release_candidate.fsh`.
+
 Validate an existing LCOV report with:
 
 ```bash
-python3 ci/check_coverage.py coverage/flash.lcov
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_coverage.fsh coverage/flash.lcov
 ```
 
 ### QEMU smoke tests
@@ -662,7 +750,7 @@ When an intentional product or pipeline change breaks a check:
 
 Update [Verification and Testing](../docs/verification.md) only when the broader evidence model or public qualification claim changes.
 
-Artifact-name or SBOM-scope changes usually need matching changes in the producer, consumer, checksums, release packaging, and `check_profile.py`.
+Artifact-name or SBOM-scope changes usually need matching changes in the producer, consumer, checksums, release packaging, and `check_profile.fsh`.
 
 Keep third-party Actions pinned to full commit SHAs and external Git package sources pinned to immutable revisions.
 
@@ -673,21 +761,21 @@ Keep third-party Actions pinned to full commit SHAs and external Git package sou
 | Verification model        | [Verification and Testing](../docs/verification.md)                                        |
 | Development workflow      | [Development](../docs/development.md)                                                      |
 | Local helpers             | [`flashos.sh`](../flashos.sh)                                                              |
-| Developer interface check | [`check_developer_interface.py`](check_developer_interface.py)                             |
-| Product/profile checks    | [`check_profile.py`](check_profile.py)                                                     |
-| Platform baseline         | [`check_flashos_platform.py`](check_flashos_platform.py)                                   |
-| Capability evidence       | [`check_flashos_capabilities.py`](check_flashos_capabilities.py)                           |
-| Operation map             | [`check_flashos_operation_map.py`](check_flashos_operation_map.py)                         |
-| Capability classification | [`check_flashos_capability_classification.py`](check_flashos_capability_classification.py) |
-| Capability report         | [`check_flashos_capability_report.py`](check_flashos_capability_report.py)                 |
-| Target capability matrix  | [`check_flashos_target_matrix.py`](check_flashos_target_matrix.py)                         |
-| Change classification     | [`classify_changes.py`](classify_changes.py)                                               |
-| Required aggregate        | [`aggregate_ci.py`](aggregate_ci.py)                                                       |
+| Developer interface check | [`check_developer_interface.fsh`](check_developer_interface.fsh)                           |
+| Product/profile checks    | [`check_profile.fsh`](check_profile.fsh)                                                   |
+| Platform baseline         | [`check_flashos_platform.fsh`](check_flashos_platform.fsh)                                 |
+| Capability evidence       | [`check_flashos_capabilities.fsh`](check_flashos_capabilities.fsh)                         |
+| Operation map             | [`check_flashos_operation_map.fsh`](check_flashos_operation_map.fsh)                       |
+| Capability classification | [`check_flashos_capability_classification.fsh`](check_flashos_capability_classification.fsh) |
+| Capability report         | [`check_flashos_capability_report.fsh`](check_flashos_capability_report.fsh)                 |
+| Target capability matrix  | [`check_flashos_target_matrix.fsh`](check_flashos_target_matrix.fsh)                         |
+| Change classification     | [`classify_changes.fsh`](classify_changes.fsh)                                             |
+| Required aggregate        | [`aggregate_ci.fsh`](aggregate_ci.fsh)                                                     |
 | QEMU runtime checks       | [`qemu_smoke.py`](qemu_smoke.py)                                                           |
-| Main qualification        | [`check_main_qualification.py`](check_main_qualification.py)                               |
-| Candidate evidence        | [`check_candidate_qualification.py`](check_candidate_qualification.py)                     |
-| Candidate manifest        | [`release_candidate.py`](release_candidate.py)                                             |
-| Coverage validation       | [`check_coverage.py`](check_coverage.py)                                                   |
+| Main qualification        | [`check_main_qualification.fsh`](check_main_qualification.fsh)                             |
+| Candidate evidence        | [`check_candidate_qualification.fsh`](check_candidate_qualification.fsh)                   |
+| Candidate manifest        | [`release_candidate.fsh`](release_candidate.fsh)                                           |
+| Coverage validation       | [`check_coverage.fsh`](check_coverage.fsh)                                                 |
 | Hosted build environment  | [`container/Dockerfile`](container/Dockerfile)                                             |
 | Standard CI               | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)                                  |
 | Protected-main status     | [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml)  |

@@ -50,12 +50,16 @@ Install or provide the following host tools:
 - GNU Make
 - Python 3
 - Rust and Cargo, preferably managed through Rustup
+- Flash `fsh` with 1.0-compatible script behavior
 - Podman
 - QEMU with `qemu-system-x86_64`
 - x86_64 OVMF or edk2 firmware
 - sufficient storage for downloaded sources, toolchains, package caches, and generated images
 
-The exact package names vary between host operating systems and distributions. The repository provides a bootstrap script for several Unix-like host environments.
+The canonical bootstrap supports macOS arm64 with Homebrew and Linux x86_64
+with APT, DNF, or Pacman. It maps the exact packages for the detected host,
+installs both repository-pinned Rust toolchains, installs Flash, acquires the
+pinned automation tools, and verifies the resulting environment.
 
 On macOS, Podman normally runs through a Podman-managed virtual machine. On Linux, Podman commonly runs directly through the host container runtime.
 
@@ -72,20 +76,67 @@ All commands in this guide are run from the repository root unless stated otherw
 
 ## Install the build dependencies
 
-The repository bootstrap script can install the detected platform dependencies without cloning another copy of the repository:
+First review every change the bootstrap would make:
 
 ```bash
-./podman_bootstrap.sh -d -e qemu
+./setup.sh --plan
 ```
 
-Review the script before running it. Depending on the host, it may:
+The plan reports package-manager and privileged operations before any request
+for elevation. It does not change the host. Apply the plan with:
+
+```bash
+./setup.sh
+```
+
+Pass `--yes` only when the detected package manager should use its
+non-interactive confirmation mode. The bootstrap may:
 
 - invoke the system package manager;
 - request elevated privileges;
-- install Rustup when Rust is unavailable;
-- install Podman, QEMU, FUSE-related tools, and build utilities.
+- install Rustup without editing shell startup files;
+- install the distinct Rust toolchains pinned by `rust-toolchain.toml` and
+  `components/flash/rust-toolchain.toml`;
+- install Podman, QEMU, FUSE-related tools, and build utilities;
+- invoke the narrow `install-flash.sh` adapter; and
+- acquire the exact Taplo, jq, and ripgrep versions used by Flash automation.
 
-You may instead install the requirements manually through your operating system's package manager.
+Rerunning the bootstrap is safe. To verify an already prepared host without
+installing or changing anything, run:
+
+```bash
+./setup.sh --check
+```
+
+The bootstrap operates only on the existing clone. It does not clone or update
+Git state, edit shell startup files, start QEMU, or access a physical device.
+
+### Install the Flash build runtime
+
+The primary source-build interface is `build.fsh`, so the host must provide a
+compatible `fsh`. Check the selected runtime:
+
+```bash
+fsh --version
+```
+
+`setup.sh` accepts a compatible `fsh` already on `PATH`; otherwise it invokes
+the following narrow adapter when its selected Flash runtime is absent or
+incompatible:
+
+```bash
+./install-flash.sh
+```
+
+The adapter is useful for Flash-only bootstrap or recovery after the host
+packages and pinned Flash Rust toolchain already exist. It builds the selected
+runtime in a temporary Cargo root, verifies
+that it reports `fsh 1.0.0`, and only then installs it to
+`$HOME/.local/bin/fsh`. Set `FLASH_INSTALL_PREFIX` before running the adapter
+to select a different installation prefix. Add the selected `bin` directory to
+`PATH` before invoking `./build.fsh`. The adapter is not an alternative full
+setup path: it does not install host packages or toolchains, acquire automation
+tools, build FlashOS, or forward build options.
 
 ### Start Podman on macOS
 
@@ -152,7 +203,7 @@ Avoid adding unrelated build variables until the default configuration works. De
 Inspect the selected Make environment:
 
 ```bash
-make CONFIG_NAME=flashos setenv
+./build.fsh -c flashos setenv
 ```
 
 The output should include values equivalent to:
@@ -179,7 +230,7 @@ A missing optional `redoxer` installation does not prevent the normal image buil
 Build the standard development disk:
 
 ```bash
-make CONFIG_NAME=flashos all
+./build.fsh -c flashos all
 ```
 
 The first build may download source repositories, create the Podman build environment, obtain or compile the cross toolchain, prepare packages, and build the filesystem tools before assembling the image.
@@ -199,7 +250,7 @@ Build outputs are generated locally and must not be committed to the repository.
 Start the development image:
 
 ```bash
-make CONFIG_NAME=flashos qemu
+./build.fsh -c flashos qemu
 ```
 
 For the x86_64 profile, the Make configuration selects a QEMU `q35` machine with UEFI firmware. The default virtual machine configuration includes a display, keyboard input, emulated storage, networking, and serial diagnostic output.
@@ -281,7 +332,7 @@ The development disk and live image serve different workflows:
 Build the live image:
 
 ```bash
-make CONFIG_NAME=flashos live
+./build.fsh -c flashos live
 ```
 
 The resulting artifact is:
@@ -293,7 +344,7 @@ build/x86_64/flashos/redox-live.iso
 To expose the live image to QEMU as USB mass storage, run:
 
 ```bash
-make CONFIG_NAME=flashos qemu live=yes disk=usb
+./build.fsh -c flashos qemu live=yes disk=usb
 ```
 
 The live image is assembled with the live bootloader path and loads its root filesystem for an ephemeral session. Changes made during that session should not be treated as persistent development state.
@@ -408,7 +459,7 @@ If `podman info` fails, resolve the container runtime problem before retrying th
 Inspect the effective environment:
 
 ```bash
-make CONFIG_NAME=flashos setenv
+./build.fsh -c flashos setenv
 ```
 
 For this guide, it must report:
@@ -442,19 +493,19 @@ FlashOS expects an OVMF or edk2 x86_64 firmware file in one of the host paths re
 Check the selected output directory:
 
 ```bash
-make CONFIG_NAME=flashos setenv
+./build.fsh -c flashos setenv
 ```
 
 Build the development disk again:
 
 ```bash
-make CONFIG_NAME=flashos all
+./build.fsh -c flashos all
 ```
 
 Build the live image again:
 
 ```bash
-make CONFIG_NAME=flashos live
+./build.fsh -c flashos live
 ```
 
 The expected files are:
@@ -469,7 +520,7 @@ build/x86_64/flashos/redox-live.iso
 Rebuild the development image and its generated repository state:
 
 ```bash
-make CONFIG_NAME=flashos rebuild
+./build.fsh -c flashos rebuild
 ```
 
 This is broader than a normal incremental build. Use the narrower `all` or `live` target for routine iteration.

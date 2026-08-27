@@ -18,11 +18,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      FLASH_AUTOMATION_TAPLO: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/taplo
+      FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
+      FLASH_AUTOMATION_RG: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/rg
     defaults:
       run:
         working-directory: components/flash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Cache Flash Cargo downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -56,8 +62,17 @@ jobs:
             --output-path ../../coverage/flash.lcov \
             --ignore-filename-regex '(^|/)(tests|benches|examples)/'
 
+      - name: Acquire the immutable Flash 1.0 automation runtime
+        working-directory: ${{ github.workspace }}
+        run: make flash-bootstrap
+
+      - name: Acquire the pinned public automation tools
+        working-directory: ${{ github.workspace }}
+        run: make flash-automation-tools
+
       - name: Validate coverage completeness
-        run: python3 ../../ci/check_coverage.py ../../coverage/flash.lcov
+        working-directory: ${{ github.workspace }}
+        run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_coverage.fsh coverage/flash.lcov
 
       - name: Upload the validated report
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0

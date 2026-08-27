@@ -321,7 +321,7 @@ Architecture, build success, runtime qualification, and hardware support are sep
 
 ### Product-profile contract
 
-[`ci/check_profile.py`](../ci/check_profile.py) statically verifies repository-level product invariants, including:
+[`ci/check_profile.fsh`](../ci/check_profile.fsh) statically verifies repository-level product invariants, including:
 
 - the exact declared package set;
 - inclusion of the shared base profile;
@@ -407,7 +407,7 @@ Use the following files when evaluating or changing an architectural contract:
 | QEMU device model              | [`mk/qemu.mk`](../mk/qemu.mk)                                                     |
 | Flash source architecture      | [`components/flash/`](../components/flash/)                                       |
 | Flash image package            | [`recipes/terminal/flash/recipe.toml`](../recipes/terminal/flash/recipe.toml)     |
-| Product-profile invariants     | [`ci/check_profile.py`](../ci/check_profile.py)                                   |
+| Product-profile invariants     | [`ci/check_profile.fsh`](../ci/check_profile.fsh)                                 |
 | Runtime qualification          | [`ci/qemu_smoke.py`](../ci/qemu_smoke.py)                                         |
 | Release version                | [`versions.env`](../versions.env)                                                 |
 | Hardware evidence              | [Hardware Compatibility](hardware.md)                                             |

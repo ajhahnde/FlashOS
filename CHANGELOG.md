@@ -10,6 +10,18 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ### Changed
 
+- Migrated the installed `auto-test`, `acid-runner`, `relibc-tests-runner`, and
+  `os-test-runner` automation from Ion or generated Bash to tracked Flash
+  source with explicit runtime dependencies and preserved execution semantics.
+  A fail-closed public automation inventory now classifies standalone and
+  embedded scripts, reviews the remaining bootstrap/recovery/tool-interface
+  exceptions, checks `.fsh` language presentation, and exercises behavior and
+  failure parity through the real Flash runtime.
+- Replaced the inherited Bash source-build entry point with `build.fsh`, which
+  preserves its option, environment, Make, output, filesystem, refusal, and
+  status contract. Source builds now require a compatible host `fsh`; the new
+  `install-flash.sh` only acquires, verifies, and installs Flash for hosts that
+  do not yet provide it.
 - Released Flash 1.0.0 as the frozen component language, runtime, tooling, and
   platform-capability contract. Its exhaustive host inventory, exact-image
   FlashOS matrix, public claims, package version, and retained evidence now
@@ -311,7 +323,7 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 - Changed the default build configuration from the inherited `desktop` profile
   to `flashos`, so an invocation without an explicit `CONFIG_NAME` builds the
   TUI-only product image instead of a graphical desktop image. The same default
-  now applies to `build.sh` and to the `changelog`, `find-recipe`, and `ventoy`
+  now applies to `build.fsh` and to the `changelog`, `find-recipe`, and `ventoy`
   helper scripts.
 - Declared the license and repository of the build-support crate and dropped
   its inherited author field, matching the Flash workspace metadata.

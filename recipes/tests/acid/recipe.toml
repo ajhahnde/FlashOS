@@ -9,17 +9,11 @@ script = """
 mkdir -pv "${COOKBOOK_STAGE}/home/user/acid"
 cp -rv "${COOKBOOK_SOURCE}"/* "${COOKBOOK_STAGE}/home/user/acid"
 
-# Create runner script
+# Install the Flash-native runner.
 mkdir -p "${COOKBOOK_STAGE}/usr/bin"
-cat > "${COOKBOOK_STAGE}/usr/bin/acid-runner" <<EOF
-#!/usr/bin/env bash
-set -e
-cd /home/user/acid
-cargo test
-EOF
-
+cp "${COOKBOOK_RECIPE}/acid-runner.fsh" "${COOKBOOK_STAGE}/usr/bin/acid-runner"
 chmod +x "${COOKBOOK_STAGE}/usr/bin/acid-runner"
 
 """
 [package]
-dependencies = ["rust"]
+dependencies = ["flash", "rust"]
