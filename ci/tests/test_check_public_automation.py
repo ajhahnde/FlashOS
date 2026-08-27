@@ -127,6 +127,27 @@ class PublicAutomationTests(unittest.TestCase):
                 automation.check_bootstrap_workflow_checkouts(root)
             self.assertIn("must fetch full history", stderr.getvalue())
 
+    def test_qemu_consumer_acquires_explicit_immutable_runtime(self) -> None:
+        workflow = (ROOT / ".github/workflows/_image.yml").read_text(
+            encoding="utf-8"
+        )
+        _, consumer = workflow.split("  boot:\n", 1)
+        runtime = (
+            "${{ github.workspace }}/build/flash-bootstrap/"
+            f"{automation.BASELINE_COMMIT}/fsh"
+        )
+        self.assertIn(f"FLASH_AUTOMATION_RUNTIME: {runtime}", consumer)
+        self.assertIn("fetch-depth: 0", consumer)
+        self.assertIn(
+            "- name: Acquire the immutable Flash 1.0 automation runtime",
+            consumer,
+        )
+        self.assertIn("run: make flash-bootstrap", consumer)
+        self.assertEqual(
+            consumer.count('--automation-runtime "$FLASH_AUTOMATION_RUNTIME"'),
+            2,
+        )
+
     def test_canonical_setup_entrypoint_is_complete_and_idempotent(self) -> None:
         self.assertEqual(
             automation.disposition("setup.sh"), "bootstrap-entrypoint"
