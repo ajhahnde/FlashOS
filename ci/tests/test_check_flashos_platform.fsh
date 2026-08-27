@@ -93,7 +93,7 @@ def install_artifacts(candidate, temporary) {
     'if [ "${last##*/}" = "libc.so" ]; then' \
     '  printf "%s\\n" "Class:                             ELF64" "Machine:                           Advanced Micro Devices X86-64" "(SONAME)       Library soname: [libc.so.6]"' \
     'else' \
-    '  printf "%s\\n" "Class:                             ELF64"; printf "Data:                              2\\047s complement, little endian\\n"; printf "%s\\n" "Type:                              DYN (Shared object file)" "Machine:                           Advanced Micro Devices X86-64" "Requesting program interpreter: /lib/ld64.so.1" "(FLAGS_1)      NOW PIE" "(NEEDED) Shared library: [libgcc_s.so.1]" "(NEEDED) Shared library: [libc.so.6]"' \
+    '  printf "%s\\n" "Class:                             ELF64"; printf "Data:                              2\\047s complement, little endian\\n"; printf "%s\\n" "Type:                              DYN (Position-Independent Executable file)" "Machine:                           Advanced Micro Devices X86-64" "Requesting program interpreter: /lib/ld64.so.1" "(FLAGS_1)      NOW PIE" "(NEEDED) Shared library: [libgcc_s.so.1]" "(NEEDED) Shared library: [libc.so.6]"' \
     'fi' > $readelf
     ^chmod 755 $readelf
     if !$status.ok { test_error('cannot create readelf fixture') }
@@ -118,6 +118,15 @@ let artifacts = prepare_candidate($root, $temporary, 'artifacts')
 let readelf = install_artifacts($artifacts, $temporary)
 let artifact_result = run_validator($runtime, "$artifacts/ci/check_flashos_platform.fsh", $artifacts, $temporary, 'artifacts-result', ['--artifacts'], $readelf)
 expect_success($artifact_result, 'FlashOS platform baseline: source and artifact contract passed for x86_64-unknown-redox', 'synthetic compiler and ELF identity')
+
+let invalid_type = prepare_candidate($root, $temporary, 'invalid-elf-type')
+let invalid_type_readelf = install_artifacts($invalid_type, "$temporary/invalid-elf-type-tools")
+let rewritten_readelf = "$temporary/invalid-elf-type-readelf"
+^sed 's/DYN (Position-Independent Executable file)/EXEC (Executable file)/' $invalid_type_readelf > $rewritten_readelf
+^chmod 755 $rewritten_readelf
+if !$status.ok { test_error('cannot mutate ELF type fixture') }
+let invalid_type_result = run_validator($runtime, "$invalid_type/ci/check_flashos_platform.fsh", $invalid_type, $temporary, 'invalid-elf-type-result', ['--artifacts'], $rewritten_readelf)
+expect_failure($invalid_type_result, 'fsh ELF identity differs: Type: DYN', 'fsh ELF type mismatch')
 
 let mismatch = prepare_candidate($root, $temporary, 'relibc-mismatch')
 let mismatch_readelf = install_artifacts($mismatch, "$temporary/mismatch-tools")

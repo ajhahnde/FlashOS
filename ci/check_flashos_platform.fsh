@@ -310,10 +310,13 @@ if $artifacts {
     if !$status.ok {
         platform_error('cannot read ELF artifact recipes/core/relibc/target/x86_64-unknown-redox/stage/usr/lib/libc.so')
     }
+    if ^env $rg --quiet --regexp '^[[:space:]]*Type:[[:space:]]+DYN([[:space:]]|$)' $fsh_elf {
+    } else {
+        platform_error('fsh ELF identity differs: Type: DYN')
+    }
     for marker in [
     'Class:                             ELF64',
     "Data:                              2's complement, little endian",
-    'Type:                              DYN (Shared object file)',
     'Machine:                           Advanced Micro Devices X86-64',
     'Requesting program interpreter: /lib/ld64.so.1',
     '(FLAGS_1)      NOW PIE',
