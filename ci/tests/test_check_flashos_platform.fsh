@@ -88,12 +88,12 @@ def install_artifacts(candidate, temporary) {
     let readelf = "$temporary/readelf"
     ^printf '%s\n' \
     '#!/bin/sh' \
-    'if [ "$1" = "--version" ]; then printf "%s\\n" "Homebrew LLVM version 22.1.8"; exit 0; fi' \
+    'if [ "$1" = "--version" ]; then printf "%s\\n" "GNU readelf (GNU Binutils for Ubuntu) 2.42"; exit 0; fi' \
     'last=""; for argument in "$@"; do last="$argument"; done' \
     'if [ "${last##*/}" = "libc.so" ]; then' \
-    '  printf "%s\\n" "Class:                             ELF64" "Machine:                           Advanced Micro Devices X86-64" "(SONAME)       Library soname: [libc.so.6]"' \
+    '  printf "%s\\n" "  Class:                             ELF64" "  Machine:                           Advanced Micro Devices X86-64" " 0x000000000000000e (SONAME)             Library soname: [libc.so.6]"' \
     'else' \
-    '  printf "%s\\n" "Class:                             ELF64"; printf "Data:                              2\\047s complement, little endian\\n"; printf "%s\\n" "Type:                              DYN (Position-Independent Executable file)" "Machine:                           Advanced Micro Devices X86-64" "Requesting program interpreter: /lib/ld64.so.1" "(FLAGS_1)      NOW PIE" "(NEEDED) Shared library: [libgcc_s.so.1]" "(NEEDED) Shared library: [libc.so.6]"' \
+    '  printf "%s\\n" "  Class:                             ELF64"; printf "  Data:                              2\\047s complement, little endian\\n"; printf "%s\\n" "  Type:                              DYN (Position-Independent Executable file)" "  Machine:                           Advanced Micro Devices X86-64" "      [Requesting program interpreter: /lib/ld64.so.1]" " 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE" " 0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]" " 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]"' \
     'fi' > $readelf
     ^chmod 755 $readelf
     if !$status.ok { test_error('cannot create readelf fixture') }
@@ -127,6 +127,15 @@ let rewritten_readelf = "$temporary/invalid-elf-type-readelf"
 if !$status.ok { test_error('cannot mutate ELF type fixture') }
 let invalid_type_result = run_validator($runtime, "$invalid_type/ci/check_flashos_platform.fsh", $invalid_type, $temporary, 'invalid-elf-type-result', ['--artifacts'], $rewritten_readelf)
 expect_failure($invalid_type_result, 'fsh ELF identity differs: Type: DYN', 'fsh ELF type mismatch')
+
+let invalid_pie = prepare_candidate($root, $temporary, 'invalid-pie-flag')
+let invalid_pie_readelf = install_artifacts($invalid_pie, "$temporary/invalid-pie-tools")
+let rewritten_pie_readelf = "$temporary/invalid-pie-readelf"
+^sed 's/Flags: NOW PIE/Flags: NOW NODELETE/' $invalid_pie_readelf > $rewritten_pie_readelf
+^chmod 755 $rewritten_pie_readelf
+if !$status.ok { test_error('cannot mutate ELF PIE fixture') }
+let invalid_pie_result = run_validator($runtime, "$invalid_pie/ci/check_flashos_platform.fsh", $invalid_pie, $temporary, 'invalid-pie-result', ['--artifacts'], $rewritten_pie_readelf)
+expect_failure($invalid_pie_result, 'executable.position_independent artifact identity differs', 'fsh ELF PIE flag mismatch')
 
 let mismatch = prepare_candidate($root, $temporary, 'relibc-mismatch')
 let mismatch_readelf = install_artifacts($mismatch, "$temporary/mismatch-tools")

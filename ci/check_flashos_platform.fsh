@@ -68,6 +68,13 @@ def require_marker(path, marker, message, rg) {
     }
 }
 
+def require_readelf_pattern(path, pattern, message, rg) {
+    if ^env $rg --quiet --regexp $pattern $path {
+    } else {
+        platform_error($message)
+    }
+}
+
 def require_readelf() {
     mut program = selected_tool('FLASH_AUTOMATION_READELF', 'llvm-readelf')
     mut version = "$(^env $program --version 2>/dev/null | ^sed -n '1p')"
@@ -310,36 +317,19 @@ if $artifacts {
     if !$status.ok {
         platform_error('cannot read ELF artifact recipes/core/relibc/target/x86_64-unknown-redox/stage/usr/lib/libc.so')
     }
-    if ^env $rg --quiet --regexp '^[[:space:]]*Type:[[:space:]]+DYN([[:space:]]|$)' $fsh_elf {
-    } else {
-        platform_error('fsh ELF identity differs: Type: DYN')
-    }
-    for marker in [
-    'Class:                             ELF64',
-    "Data:                              2's complement, little endian",
-    'Machine:                           Advanced Micro Devices X86-64',
-    'Requesting program interpreter: /lib/ld64.so.1',
-    '(FLAGS_1)      NOW PIE',
-    ] {
-        if ^env $rg --fixed-strings --quiet -- $marker $fsh_elf {
-        } else {
-            platform_error("fsh ELF identity differs: $marker")
-        }
-    }
+    require_readelf_pattern($fsh_elf, '^[[:space:]]*Class:[[:space:]]+ELF64[[:space:]]*$', 'fsh ELF identity differs: Class: ELF64', $rg)
+    require_readelf_pattern($fsh_elf, "^[[:space:]]*Data:[[:space:]]+2's complement, little endian[[:space:]]*$", "fsh ELF identity differs: Data: 2's complement, little endian", $rg)
+    require_readelf_pattern($fsh_elf, '^[[:space:]]*Type:[[:space:]]+DYN([[:space:]]|$)', 'fsh ELF identity differs: Type: DYN', $rg)
+    require_readelf_pattern($fsh_elf, '^[[:space:]]*Machine:[[:space:]]+Advanced Micro Devices X86-64[[:space:]]*$', 'fsh ELF identity differs: Machine: Advanced Micro Devices X86-64', $rg)
+    require_readelf_pattern($fsh_elf, 'Requesting program interpreter:[[:space:]]*/lib/ld64\.so\.1', 'fsh ELF identity differs: Requesting program interpreter: /lib/ld64.so.1', $rg)
+    require_readelf_pattern($fsh_elf, '\(FLAGS_1\).*([[:space:]]|:)PIE([[:space:]]|$)', 'executable.position_independent artifact identity differs', $rg)
     let needed = "$(^env $rg --only-matching --replace '$1' '\(NEEDED\).*\[([^]]+)\]' $fsh_elf | ^env LC_ALL=C sort)"
     if $needed != "libc.so.6\nlibgcc_s.so.1" {
         platform_error('executable.required_libraries artifact identity differs')
     }
-    for marker in [
-    'Class:                             ELF64',
-    'Machine:                           Advanced Micro Devices X86-64',
-    '(SONAME)       Library soname: [libc.so.6]',
-    ] {
-        if ^env $rg --fixed-strings --quiet -- $marker $libc_elf {
-        } else {
-            platform_error("libc ELF identity differs: $marker")
-        }
-    }
+    require_readelf_pattern($libc_elf, '^[[:space:]]*Class:[[:space:]]+ELF64[[:space:]]*$', 'libc ELF identity differs: Class: ELF64', $rg)
+    require_readelf_pattern($libc_elf, '^[[:space:]]*Machine:[[:space:]]+Advanced Micro Devices X86-64[[:space:]]*$', 'libc ELF identity differs: Machine: Advanced Micro Devices X86-64', $rg)
+    require_readelf_pattern($libc_elf, '\(SONAME\).*Library soname:[[:space:]]*\[libc\.so\.6\]', 'libc.soname artifact identity differs', $rg)
 }
 
 ^rm -rf $temporary
