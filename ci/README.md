@@ -149,6 +149,7 @@ build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_prof
 
 - development and release profile composition;
 - package and account configuration;
+- runtime/build package separation and excluded compatibility payloads;
 - `/usr/bin/fsh` as the configured shell;
 - release root-account locking;
 - FlashOS identity and version surfaces;
@@ -157,6 +158,15 @@ build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_prof
 - full commit pins for third-party GitHub Actions;
 - branding patches and package-web source links;
 - QEMU NVMe/USB smoke-test wiring.
+
+After target packages have been built, pass `--artifacts` to verify the exact
+runtime stage metadata, required boot/runtime files, preserved development and
+debug outputs, and excluded image payload. The separately staged
+`flash.lsp` package remains selected because the exact-image Flash v1 matrix
+exercises it; it is not a login-shell payload or service. Release SBOM
+collection uses the same reported package closure and refuses runtime
+dependencies it cannot account for; it does not scan unrelated build-package
+stages.
 
 `FLASHOS_RELEASE_VERSION` in [`versions.env`](../versions.env) is the central
 FlashOS release version. Flash has an independent component version bound to

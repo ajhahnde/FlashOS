@@ -7,6 +7,14 @@
 import { require_jq, require_rg, toml_to_json } from './lib/tools.fsh'
 import { repository_root } from './lib/repository.fsh'
 
+mut artifact_mode = false
+if $args == ['--artifacts'] {
+    $artifact_mode = true
+} else if $args != [] {
+    ^printf '%s\n' 'usage: ci/check_profile.fsh [--artifacts]' 1>&2
+    exit 2
+}
+
 def profile_error(message) {
     ^printf 'profile contract: %s\n' $message 1>&2
     exit 1
@@ -32,13 +40,11 @@ def validate(bundle) {
     }
     let expected_packages = [
     'base',
-    'bootloader',
     'coreutils',
-    'extrautils',
     'flash',
+    'flash.lsp',
     'kernel',
     'libgcc',
-    'libstdcxx',
     'netdb',
     'netutils',
     'relibc',
@@ -50,6 +56,9 @@ def validate(bundle) {
     }
     if $bundle.gui_packages != [] {
         throw "GUI package selected: ${$bundle.gui_packages[0]}"
+    }
+    if $bundle.dead_runtime_paths != [] {
+        throw "dead runtime compatibility path returned: ${$bundle.dead_runtime_paths[0]}"
     }
     for account in ['root', 'user'] {
         if $bundle.profile.users[$account].shell != '/usr/bin/fsh' {
@@ -221,7 +230,7 @@ if $version == '' {
 --slurpfile flash_recipe $flash_recipe \
 --slurpfile login $login \
 --arg version $version \
-'. as $profile | (($base[0].packages|keys) + ($profile.packages|keys) | unique | sort) as $packages | {profile:$profile, release:$release[0], base:$base[0], root:$root[0], flash:$flash[0], flash_release:$flash_release[0], flash_recipe:$flash_recipe[0], login:$login[0], version:$version, flash_version_semantic:(try ($flash[0].workspace.package.version|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) catch false), packages:$packages, gui_packages:[$packages[]|select(ascii_downcase|test("cosmic|orbital|wayland|weston|x11|xorg"))], profile_users:($profile.users|keys|sort), release_users:($release[0].users|keys|sort), release_root_has_password:($release[0].users.root|has("password")), release_user_records:[$release[0].users|to_entries[]|{name:.key,password:(.value.password//null),password_lower:(try (.value.password|ascii_downcase) catch null)}], login_file_count:([$base[0].files[]|select(.path=="/etc/login_schemes.toml")]|length), legacy_ui_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/ui" or startswith("/ui/"))], os_release_count:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))]|length), os_release_data:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))][0].data//null), issue_count:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))]|length), issue_data:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))][0].data//null), identity_postinstall:["/etc/hostname","/etc/issue","/etc/motd","/etc/os-release","/usr/lib/os-release"] | map(. as $path | [($base[0].files+$profile.files)[]|select(.path==$path)][-1].postinstall//false)}' \
+'. as $profile | (($base[0].packages|keys) + ($profile.packages|keys) | unique | sort) as $packages | {profile:$profile, release:$release[0], base:$base[0], root:$root[0], flash:$flash[0], flash_release:$flash_release[0], flash_recipe:$flash_recipe[0], login:$login[0], version:$version, flash_version_semantic:(try ($flash[0].workspace.package.version|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) catch false), packages:$packages, gui_packages:[$packages[]|select(ascii_downcase|test("cosmic|orbital|wayland|weston|x11|xorg"))], profile_users:($profile.users|keys|sort), release_users:($release[0].users|keys|sort), release_root_has_password:($release[0].users.root|has("password")), release_user_records:[$release[0].users|to_entries[]|{name:.key,password:(.value.password//null),password_lower:(try (.value.password|ascii_downcase) catch null)}], login_file_count:([$base[0].files[]|select(.path=="/etc/login_schemes.toml")]|length), legacy_ui_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/ui" or startswith("/ui/"))], dead_runtime_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/etc/pkg.d/50_redox" or .=="/usr/include" or .=="/include" or .=="/usr/libexec" or .=="/usr/share" or .=="/share")], os_release_count:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))]|length), os_release_data:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))][0].data//null), issue_count:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))]|length), issue_data:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))][0].data//null), identity_postinstall:["/etc/hostname","/etc/issue","/etc/motd","/etc/os-release","/usr/lib/os-release"] | map(. as $path | [($base[0].files+$profile.files)[]|select(.path==$path)][-1].postinstall//false)}' \
 $profile > $bundle 2> $errors
 if !$status.ok {
     profile_error('cannot project the FlashOS profile contract')
@@ -330,6 +339,9 @@ $image_workflow,
 'GIT_CONFIG_KEY_0=safe.directory',
 'GIT_CONFIG_VALUE_0=/workspace',
 'name: Record the selected recipe resolution',
+'ci/check_profile.fsh --artifacts',
+'runtime package closure',
+'recipe_name = name.split(".", 1)[0]',
 'repo-lock',
 'build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh --artifacts',
 '--disk-interface nvme',
@@ -527,8 +539,63 @@ require_markers(
 [
 'COOKBOOK_CARGO_PATH="crates/flash-cli" cookbook_cargo --bin fsh',
 'COOKBOOK_CARGO_PATH="crates/flash-lsp" cookbook_cargo --bin flash-language-server',
+'name = "lsp"',
+'"usr/bin/flash-language-server"',
 ],
 'Flash workspace recipe is missing packaged binary build',
+$rg,
+)
+require_markers(
+"$root/recipes/core/relibc/recipe.toml",
+[
+'name = "dev"',
+'"usr/include/**"',
+'"usr/lib/*.a"',
+'"usr/lib/*.o"',
+],
+'relibc runtime/development package split is incomplete',
+$rg,
+)
+require_markers(
+"$root/mk/prefix.mk",
+[
+'cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial/$(GNU_TARGET)"',
+'cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial"',
+'cp -r "$(RELIBC_FREESTANDING_TARGET)/stage.dev/usr/". "$@.partial/$(GNU_TARGET)"',
+],
+'compiler sysroot must retain the relibc development projection',
+$rg,
+)
+require_markers(
+"$root/recipes/core/base/recipe.toml",
+[
+'"bootloader"',
+'"${COOKBOOK_STAGE}/usr/bin/redoxerd"',
+'"${COOKBOOK_STAGE}/usr/lib/drivers/vboxd"',
+'"${COOKBOOK_STAGE}/usr/lib/pcid.d/vboxd.toml"',
+],
+'base runtime exclusion contract is incomplete',
+$rg,
+)
+require_markers(
+"$root/recipes/core/kernel/recipe.toml",
+[
+'"${COOKBOOK_STAGE}/usr/lib/boot/kernel.all"',
+'"${COOKBOOK_STAGE}/usr/lib/boot/kernel.sym"',
+],
+'kernel runtime/debug separation is incomplete',
+$rg,
+)
+require_markers(
+"$root/recipes/groups/sys/recipe.toml",
+['"relibc.dev"'],
+'system build group must select the relibc development projection',
+$rg,
+)
+require_markers(
+"$root/recipes/tests/os-test-result/recipe.toml",
+['"relibc.dev"'],
+'relibc tests must select the relibc development projection',
 $rg,
 )
 
@@ -536,11 +603,9 @@ for package in [
 'base',
 'bootloader',
 'coreutils',
-'extrautils',
 'flash',
 'kernel',
 'libgcc',
-'libstdcxx',
 'netdb',
 'netutils',
 'relibc',
@@ -619,8 +684,74 @@ reject_markers(
 'package web source links still point to the inherited Redox repository',
 $rg,
 )
+
+if $artifact_mode {
+    for metadata in [
+    'recipes/core/base/target/x86_64-unknown-redox/stage.toml',
+    'recipes/core/coreutils/target/x86_64-unknown-redox/stage.toml',
+    'recipes/terminal/flash/target/x86_64-unknown-redox/stage.toml',
+    'recipes/terminal/flash/target/x86_64-unknown-redox/stage.lsp.toml',
+    'recipes/core/kernel/target/x86_64-unknown-redox/stage.toml',
+    'recipes/libs/libgcc/target/x86_64-unknown-redox/stage.toml',
+    'recipes/core/netdb/target/x86_64-unknown-redox/stage.toml',
+    'recipes/core/netutils/target/x86_64-unknown-redox/stage.toml',
+    'recipes/core/relibc/target/x86_64-unknown-redox/stage.toml',
+    'recipes/core/userutils/target/x86_64-unknown-redox/stage.toml',
+    'recipes/core/uutils/target/x86_64-unknown-redox/stage.toml',
+    ] {
+        let artifact = "$root/$metadata"
+        if ^test -f $artifact {
+        } else {
+            profile_error("selected package metadata is missing: $metadata")
+        }
+        if $metadata == 'recipes/terminal/flash/target/x86_64-unknown-redox/stage.lsp.toml' {
+            require_markers($artifact, ['depends = ["flash"]'], 'selected language-server package lost its runtime dependency', $rg)
+        } else {
+            require_markers($artifact, ['depends = []'], 'selected runtime package gained an uncollected dependency', $rg)
+        }
+        if ^env $rg --quiet '^storage_size = [1-9][0-9]*$' $artifact {
+        } else {
+            profile_error("selected package has no measured storage size: $metadata")
+        }
+    }
+    for required in [
+    'recipes/core/bootloader/target/x86_64-unknown-redox/stage/usr/lib/boot/bootloader.efi',
+    'recipes/core/bootloader/target/x86_64-unknown-redox/stage/usr/lib/boot/bootloader-live.efi',
+    'recipes/core/kernel/target/x86_64-unknown-redox/stage/usr/lib/boot/kernel',
+    'recipes/core/kernel/target/x86_64-unknown-redox/build/kernel.all',
+    'recipes/core/kernel/target/x86_64-unknown-redox/build/kernel.sym',
+    'recipes/core/relibc/target/x86_64-unknown-redox/stage/usr/lib/libc.so',
+    'recipes/core/relibc/target/x86_64-unknown-redox/stage/usr/lib/ld64.so.1',
+    'recipes/core/relibc/target/x86_64-unknown-redox/stage.dev/usr/include',
+    'recipes/core/relibc/target/x86_64-unknown-redox/stage.dev/usr/lib/libc.a',
+    'recipes/terminal/flash/target/x86_64-unknown-redox/stage/usr/bin/fsh',
+    'recipes/terminal/flash/target/x86_64-unknown-redox/stage.lsp/usr/bin/flash-language-server',
+    ] {
+        if ^test -e "$root/$required" {
+        } else {
+            profile_error("required runtime or supporting artifact is missing: $required")
+        }
+    }
+    for forbidden in [
+    'recipes/core/base/target/x86_64-unknown-redox/stage/usr/bin/redoxerd',
+    'recipes/core/base/target/x86_64-unknown-redox/stage/usr/lib/drivers/vboxd',
+    'recipes/core/base/target/x86_64-unknown-redox/stage/usr/lib/pcid.d/vboxd.toml',
+    'recipes/core/kernel/target/x86_64-unknown-redox/stage/usr/lib/boot/kernel.all',
+    'recipes/core/kernel/target/x86_64-unknown-redox/stage/usr/lib/boot/kernel.sym',
+    'recipes/core/relibc/target/x86_64-unknown-redox/stage/usr/include',
+    'recipes/core/relibc/target/x86_64-unknown-redox/stage/usr/lib/libc.a',
+    'recipes/terminal/flash/target/x86_64-unknown-redox/stage/usr/bin/flash-language-server',
+    ] {
+        if ^test -e "$root/$forbidden" {
+            profile_error("excluded runtime artifact is still staged: $forbidden")
+        }
+    }
+}
 ^rm -rf $temporary
 ^printf 'profile contract: ok\n'
 ^printf 'release: %s\n' $version
-^printf 'packages: base, bootloader, coreutils, extrautils, flash, kernel, libgcc, libstdcxx, netdb, netutils, relibc, userutils, uutils\n'
+^printf 'packages: base, coreutils, flash, flash.lsp, kernel, libgcc, netdb, netutils, relibc, userutils, uutils\n'
+if $artifact_mode {
+    ^printf 'artifacts: runtime and supporting stages are separated\n'
+}
 ^printf 'interface: TUI-only; framebuffer/input/audio retained\n'

@@ -74,7 +74,9 @@ fn move_dir_all_inner_fn<'a>(
     mv: &'a Box<impl Fn(PathBuf) -> Option<&'a Path>>,
 ) -> io::Result<()> {
     let mut files = Vec::new();
+    let mut had_entries = false;
     for entry in fs::read_dir(&src)? {
+        had_entries = true;
         let entry = entry?;
         let ty = entry.file_type()?;
         if ty.is_dir() {
@@ -95,7 +97,53 @@ fn move_dir_all_inner_fn<'a>(
         fs::create_dir_all(&path.parent().unwrap())?;
         std::fs::rename(&src, &path)?;
     }
+    if src.as_ref() != srcrel.as_ref() && had_entries && fs::read_dir(&src)?.next().is_none() {
+        fs::remove_dir(&src)?;
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::move_dir_all_fn;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        process,
+    };
+
+    #[test]
+    fn moving_optional_package_files_prunes_only_vacated_directories() {
+        let root = std::env::temp_dir().join(format!("flashos-cook-fs-{}", process::id()));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        let include = source.join("usr/include/nested");
+        let declared_empty = source.join("var/lib/runtime");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&include).unwrap();
+        fs::create_dir_all(&declared_empty).unwrap();
+        fs::write(include.join("header.h"), b"header\n").unwrap();
+
+        move_dir_all_fn(
+            &source,
+            &Box::new(|path: PathBuf| {
+                if path.starts_with(Path::new("usr/include")) {
+                    Some(destination.as_path())
+                } else {
+                    None
+                }
+            }),
+        )
+        .unwrap();
+
+        assert!(!source.join("usr/include").exists());
+        assert!(declared_empty.is_dir());
+        assert_eq!(
+            fs::read(destination.join("usr/include/nested/header.h")).unwrap(),
+            b"header\n"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> Result<()> {

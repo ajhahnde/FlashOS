@@ -141,6 +141,8 @@ The bootloader and kernel are fetched through pinned recipes:
 
 Both apply local patches for FlashOS-visible identity. The bootloader provides BIOS and UEFI outputs for architectures supported by its upstream recipe, but the active FlashOS product path uses the x86_64 UEFI output.
 
+The bootloader package is a media-build dependency, not an installed root-filesystem package. The installer stages it in a temporary host directory, extracts the BIOS or UEFI bytes needed by the disk and live-media partitions, and removes the temporary tree. The kernel package similarly installs only the bootable kernel into the image; its complete image and symbol table remain in the build tree for host debugging.
+
 The kernel provides the low-level process, memory, scheme, interrupt, and hardware-driver foundation. FlashOS does not currently maintain an independent kernel implementation.
 
 ### Base system and services
@@ -154,21 +156,24 @@ The `base` and `userutils` packages provide inherited system initialization, log
 - filesystem layout;
 - development-network defaults.
 
-Runtime drivers and services are selected through the package set and initialized by the installed system scripts. Their presence in an upstream source tree is not sufficient to classify them as active or qualified FlashOS functionality.
+Runtime drivers and services are selected through the package set and initialized by the installed system scripts. Their presence in an upstream source tree is not sufficient to classify them as active or qualified FlashOS functionality. The current base package excludes the unused `redoxerd` host/debug daemon and the unqualified VirtualBox guest driver; QEMU q35/UEFI remains the defined virtual-machine path.
 
 ### Userspace utilities
 
-The active image selects a small console-oriented userspace. It includes a mixture of Redox utilities, uutils-based commands, networking support, runtime libraries, and Flash.
+The active image selects a small console-oriented userspace. It includes a mixture of Redox utilities, uutils-based commands, networking support, runtime libraries, and Flash. The `extrautils` recipe remains buildable for explicit developer use but is not selected by either image profile because no current guest setup, recovery, or QEMU contract requires its commands.
 
 These programs remain separate processes. Flash coordinates command execution but does not reimplement every external utility included in the image.
 
 ### Flash
 
-Flash is the primary FlashOS-owned user-facing component. The package installs
-the `fsh` shell and the separate `flash-language-server` protocol executable.
-The active system profiles assign `/usr/bin/fsh` as the login shell for both
-configured accounts; the language server is an editor-launched, non-executing
-stdio service rather than a login interface.
+Flash is the primary FlashOS-owned user-facing component. The base `flash`
+package installs the `fsh` shell. The separately staged `flash.lsp` package
+provides the `flash-language-server` protocol executable without coupling it to
+the login shell. Both active profiles select that package because the frozen
+Flash v1 target contract exercises the server in the exact image. No editor is
+installed and the language server is not started as a service. The active
+system profiles assign `/usr/bin/fsh` as the login shell for both configured
+accounts.
 
 Flash is a userspace process. It does not replace the kernel, system initialization, authentication service, filesystem, package manager, or external command implementations.
 
@@ -190,10 +195,8 @@ The declared base package set includes:
 
 ```text
 base
-bootloader
 kernel
 libgcc
-libstdcxx
 netdb
 netutils
 relibc
@@ -209,8 +212,8 @@ The development and release profiles add:
 
 ```text
 flash
+flash.lsp
 coreutils
-extrautils
 ```
 
 They also define:
@@ -221,7 +224,15 @@ They also define:
 - console startup through `inputd` and `getty`;
 - `/usr/bin/fsh` as the configured login shell.
 
-These names are the packages explicitly selected by the image manifests. Cookbook may resolve additional recipe dependencies required to build and install them.
+These names are the packages explicitly selected by the image manifests. The selected `relibc` package contains the dynamic runtime and loader aliases. Headers, static archives, and CRT objects are separated into `relibc.dev`, which the target build/sysroot boundary selects explicitly and the image does not install. `libstdcxx` is not selected because no current runtime ELF declares it as a dynamic dependency.
+
+Cookbook still resolves supporting build dependencies. In particular, the
+pinned bootloader is built for the installer's temporary media-staging path,
+while `redoxfs`, development libraries, and kernel symbols remain outside the
+shipped root filesystem. The separately staged language-server package is
+selected because it owns an existing exact-image Flash v1 exercise, but it does
+not add an editor or service. The image also carries no package-source
+configuration because it installs no package-manager executable.
 
 ### Development and release variants
 
@@ -324,6 +335,8 @@ Architecture, build success, runtime qualification, and hardware support are sep
 [`ci/check_profile.fsh`](../ci/check_profile.fsh) statically verifies repository-level product invariants, including:
 
 - the exact declared package set;
+- separation of runtime packages from bootloader, debug, development, editor,
+  and unqualified compatibility payloads;
 - inclusion of the shared base profile;
 - exclusion of selected graphical-stack identifiers;
 - Flash login-shell paths;
@@ -338,7 +351,7 @@ Architecture, build success, runtime qualification, and hardware support are sep
 - presence of required local branding patches without inherited Redox product
   identity additions.
 
-This check validates configuration and repository structure. It does not boot an image.
+With `--artifacts`, the same check also verifies the selected staged-package metadata, preserved bootloader/kernel/development outputs, and the absence of excluded files from runtime stages. It does not boot an image.
 
 ### Runtime contract
 

@@ -4,11 +4,11 @@ same_as = "../os-test"
 [build]
 template = "custom"
 dev-dependencies = [
-    "host:redoxer",
-# allows rebuilding relibc without updating prefix
-    "relibc",
-    "gnu-grep",
-    "libarchive",
+  "host:redoxer",
+  # allows rebuilding relibc without updating prefix
+  "relibc.dev",
+  "gnu-grep",
+  "libarchive",
 ]
 script = """
 if [ "$TARGET" = "$COOKBOOK_HOST_TARGET" ]; then

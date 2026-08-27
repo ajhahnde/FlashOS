@@ -289,7 +289,7 @@ The preferred model is a small set of composable, keyboard-driven tools rather t
 
 ### Utility integration
 
-Inherited `coreutils`, `extrautils`, and other terminal programs should continue to be tested against Flash's execution model.
+Inherited `coreutils`, optional `extrautils`, and other terminal programs should continue to be tested against Flash's execution model before they become part of the selected runtime.
 
 Priority should be given to:
 

@@ -10,10 +10,8 @@ prompt = false
 
 [packages]
 base = {}
-bootloader = "source"
 kernel = "source"
 libgcc = {}
-libstdcxx = {}
 netdb = {}
 netutils = {}
 relibc = {}
@@ -90,11 +88,6 @@ data = "../usr/lib/os-release"
 symlink = true
 postinstall = true
 
-# Transitional package source while the inherited userspace is replaced.
-[[files]]
-path = "/etc/pkg.d/50_redox"
-data = "https://static.redox-os.org/pkg"
-
 # /usr and usrmerge symlinks.
 [[files]]
 path = "/usr"
@@ -114,17 +107,6 @@ data = "usr/bin"
 symlink = true
 
 [[files]]
-path = "/usr/include"
-data = ""
-directory = true
-mode = 0o755
-
-[[files]]
-path = "/include"
-data = "usr/include"
-symlink = true
-
-[[files]]
 path = "/usr/lib"
 data = ""
 directory = true
@@ -133,23 +115,6 @@ mode = 0o755
 [[files]]
 path = "/lib"
 data = "usr/lib"
-symlink = true
-
-[[files]]
-path = "/usr/libexec"
-data = ""
-directory = true
-mode = 0o755
-
-[[files]]
-path = "/usr/share"
-data = ""
-directory = true
-mode = 0o755
-
-[[files]]
-path = "/share"
-data = "usr/share"
 symlink = true
 
 # Runtime state directories.

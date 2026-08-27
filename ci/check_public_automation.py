@@ -2315,6 +2315,113 @@ VALIDATOR_ORACLE_DEPENDENCIES = {
 VALIDATOR_ORACLE_REWRITES = {
     "ci/check_profile.py": (
         (
+            '''EXPECTED_PACKAGES = {
+    "base",
+    "bootloader",
+    "coreutils",
+    "extrautils",
+    "flash",
+    "kernel",
+    "libgcc",
+    "libstdcxx",
+    "netdb",
+    "netutils",
+    "relibc",
+    "userutils",
+    "uutils",
+}''',
+            '''EXPECTED_PACKAGES = {
+    "base",
+    "coreutils",
+    "flash",
+    "flash.lsp",
+    "kernel",
+    "libgcc",
+    "netdb",
+    "netutils",
+    "relibc",
+    "userutils",
+    "uutils",
+}''',
+        ),
+        (
+            "if any(path == \"/ui\" or path.startswith(\"/ui/\") "
+            "for path in configured_paths):\n"
+            '    fail("legacy /ui compatibility path returned")',
+            """if any(path == "/ui" or path.startswith("/ui/") """
+            """for path in configured_paths):
+    fail("legacy /ui compatibility path returned")
+
+dead_runtime_paths = {
+    "/etc/pkg.d/50_redox",
+    "/usr/include",
+    "/include",
+    "/usr/libexec",
+    "/usr/share",
+    "/share",
+}
+returned_dead_paths = sorted(configured_paths & dead_runtime_paths)
+if returned_dead_paths:
+    fail(f"dead runtime compatibility path returned: {returned_dead_paths[0]}")""",
+        ),
+        (
+            '''    "name: Record the selected recipe resolution",
+    "repo-lock",''',
+            '''    "name: Record the selected recipe resolution",
+    "ci/check_profile.fsh --artifacts",
+    "runtime package closure",
+    'recipe_name = name.split(".", 1)[0]',
+    "repo-lock",''',
+        ),
+        (
+            '''# Every external Git package that reaches the image retains an explicit
+# revision. Without one, the same FlashOS tag could build whatever the
+# repository's default branch happened to contain later.''',
+            '''recipe_separation_markers = {
+    "recipes/terminal/flash/recipe.toml": (
+        'name = "lsp"',
+        '"usr/bin/flash-language-server"',
+    ),
+    "recipes/core/relibc/recipe.toml": (
+        'name = "dev"',
+        '"usr/include/**"',
+        '"usr/lib/*.a"',
+        '"usr/lib/*.o"',
+    ),
+    "mk/prefix.mk": (
+        'cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial/$(GNU_TARGET)"',
+        'cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial"',
+        'cp -r "$(RELIBC_FREESTANDING_TARGET)/stage.dev/usr/". '
+        '"$@.partial/$(GNU_TARGET)"',
+    ),
+    "recipes/core/base/recipe.toml": (
+        '"bootloader"',
+        '"${COOKBOOK_STAGE}/usr/bin/redoxerd"',
+        '"${COOKBOOK_STAGE}/usr/lib/drivers/vboxd"',
+        '"${COOKBOOK_STAGE}/usr/lib/pcid.d/vboxd.toml"',
+    ),
+    "recipes/core/kernel/recipe.toml": (
+        '"${COOKBOOK_STAGE}/usr/lib/boot/kernel.all"',
+        '"${COOKBOOK_STAGE}/usr/lib/boot/kernel.sym"',
+    ),
+    "recipes/groups/sys/recipe.toml": ('"relibc.dev"',),
+    "recipes/tests/os-test-result/recipe.toml": ('"relibc.dev"',),
+}
+for relative, markers in recipe_separation_markers.items():
+    recipe_source = (ROOT / relative).read_text()
+    for marker in markers:
+        if marker not in recipe_source:
+            fail(f"release-surface recipe contract is missing: {relative}: {marker}")
+
+# Every external Git package that reaches the image retains an explicit
+# revision. Without one, the same FlashOS tag could build whatever the
+# repository's default branch happened to contain later.''',
+        ),
+        (
+            "for package in sorted(packages):",
+            'for package in sorted(packages | {"bootloader"}):',
+        ),
+        (
             "python3 ci/check_candidate_qualification.py",
             "build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh "
             "ci/check_candidate_qualification.fsh",

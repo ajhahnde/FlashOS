@@ -5,6 +5,9 @@ rev = "9392d543fbca5c2663aefec29cd3d38328a49204"
 [build]
 template = "custom"
 dependencies = [
+  # The installer consumes these bytes out of band when it creates the disk
+  # and live-media boot partitions; they are not installed in the rootfs.
+  "bootloader",
   "redoxfs",
 ]
 script = """
@@ -12,4 +15,11 @@ cd "${COOKBOOK_SOURCE}" && make install-base \
     SRC_DIR="${COOKBOOK_SOURCE}" SYSROOT="${COOKBOOK_SYSROOT}" \
     LINKER="${GNU_TARGET}-ld" CARGO="${COOKBOOK_CARGO}" \
     BUILD_DIR="${COOKBOOK_BUILD}" DESTDIR="${COOKBOOK_STAGE}"
+
+# These host/debug compatibility services have no selected FlashOS runtime
+# configuration or qualified product path.
+rm -f \
+    "${COOKBOOK_STAGE}/usr/bin/redoxerd" \
+    "${COOKBOOK_STAGE}/usr/lib/drivers/vboxd" \
+    "${COOKBOOK_STAGE}/usr/lib/pcid.d/vboxd.toml"
 """
