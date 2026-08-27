@@ -233,7 +233,7 @@ EXPECTED_EMBEDDED = {
     "cookbook-shell-body": 164,
     "docker-command": 1,
     "make-target": 23,
-    "workflow-run-body": 85,
+    "workflow-run-body": 86,
 }
 
 EXPECTED_INSTALLED_NON_FLASH = {
