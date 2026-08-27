@@ -82,6 +82,10 @@ def validate(bundle) {
     if $bundle.release.users.user.password != '' {
         throw 'the release user must remain passwordless'
     }
+    let expected_console_init = "inputd -A 2\nnowait getty 2\nnowait getty /scheme/debug/no-preserve -J\n"
+    if $bundle.console_init_count != 1 || $bundle.console_init_data != $expected_console_init {
+        throw 'console initialization must contain only input and local getty processes'
+    }
     let well_known = [
     '123456',
     'admin',
@@ -230,7 +234,7 @@ if $version == '' {
 --slurpfile flash_recipe $flash_recipe \
 --slurpfile login $login \
 --arg version $version \
-'. as $profile | (($base[0].packages|keys) + ($profile.packages|keys) | unique | sort) as $packages | {profile:$profile, release:$release[0], base:$base[0], root:$root[0], flash:$flash[0], flash_release:$flash_release[0], flash_recipe:$flash_recipe[0], login:$login[0], version:$version, flash_version_semantic:(try ($flash[0].workspace.package.version|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) catch false), packages:$packages, gui_packages:[$packages[]|select(ascii_downcase|test("cosmic|orbital|wayland|weston|x11|xorg"))], profile_users:($profile.users|keys|sort), release_users:($release[0].users|keys|sort), release_root_has_password:($release[0].users.root|has("password")), release_user_records:[$release[0].users|to_entries[]|{name:.key,password:(.value.password//null),password_lower:(try (.value.password|ascii_downcase) catch null)}], login_file_count:([$base[0].files[]|select(.path=="/etc/login_schemes.toml")]|length), legacy_ui_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/ui" or startswith("/ui/"))], dead_runtime_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/etc/pkg.d/50_redox" or .=="/usr/include" or .=="/include" or .=="/usr/libexec" or .=="/usr/share" or .=="/share")], os_release_count:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))]|length), os_release_data:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))][0].data//null), issue_count:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))]|length), issue_data:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))][0].data//null), identity_postinstall:["/etc/hostname","/etc/issue","/etc/motd","/etc/os-release","/usr/lib/os-release"] | map(. as $path | [($base[0].files+$profile.files)[]|select(.path==$path)][-1].postinstall//false)}' \
+'. as $profile | (($base[0].packages|keys) + ($profile.packages|keys) | unique | sort) as $packages | {profile:$profile, release:$release[0], base:$base[0], root:$root[0], flash:$flash[0], flash_release:$flash_release[0], flash_recipe:$flash_recipe[0], login:$login[0], version:$version, flash_version_semantic:(try ($flash[0].workspace.package.version|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) catch false), packages:$packages, gui_packages:[$packages[]|select(ascii_downcase|test("cosmic|orbital|wayland|weston|x11|xorg"))], profile_users:($profile.users|keys|sort), release_users:($release[0].users|keys|sort), release_root_has_password:($release[0].users.root|has("password")), release_user_records:[$release[0].users|to_entries[]|{name:.key,password:(.value.password//null),password_lower:(try (.value.password|ascii_downcase) catch null)}], console_init_count:([$profile.files[]|select(.path=="/usr/lib/init.d/30_console" and ((.append//false)|not))]|length), console_init_data:([$profile.files[]|select(.path=="/usr/lib/init.d/30_console" and ((.append//false)|not))][0].data//null), login_file_count:([$base[0].files[]|select(.path=="/etc/login_schemes.toml")]|length), legacy_ui_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/ui" or startswith("/ui/"))], dead_runtime_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/etc/pkg.d/50_redox" or .=="/usr/include" or .=="/include" or .=="/usr/libexec" or .=="/usr/share" or .=="/share")], os_release_count:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))]|length), os_release_data:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))][0].data//null), issue_count:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))]|length), issue_data:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))][0].data//null), identity_postinstall:["/etc/hostname","/etc/issue","/etc/motd","/etc/os-release","/usr/lib/os-release"] | map(. as $path | [($base[0].files+$profile.files)[]|select(.path==$path)][-1].postinstall//false)}' \
 $profile > $bundle 2> $errors
 if !$status.ok {
     profile_error('cannot project the FlashOS profile contract')
@@ -347,6 +351,7 @@ $image_workflow,
 '--disk-interface nvme',
 '--disk-interface usb',
 '--expect-passwordless-user',
+'--expect-release-services',
 'source-ref:',
 'type=gha,scope=${CACHE_SCOPE}',
 'ignore-error=true',
@@ -357,6 +362,9 @@ $rg,
 )
 if "$(^env $rg --fixed-strings --count-matches -- '--expect-passwordless-user' $image_workflow)" != '2' {
     profile_error('both release QEMU consumers must assert the passwordless user')
+}
+if "$(^env $rg --fixed-strings --count-matches -- '--expect-release-services' $image_workflow)" != '2' {
+    profile_error('both release QEMU consumers must inspect the installed service set')
 }
 let security_workflow = "$root/.github/workflows/security.yml"
 if "$(^sed -n '1p' $security_workflow)" != 'name: Security' {
@@ -604,10 +612,12 @@ for package in [
 'bootloader',
 'coreutils',
 'flash',
+'installer',
 'kernel',
 'libgcc',
 'netdb',
 'netutils',
+'redoxfs',
 'relibc',
 'userutils',
 'uutils',
@@ -635,6 +645,32 @@ for package in [
         profile_error("shipped recipe is not pinned to an immutable revision: $recipe")
     }
 }
+let container_recipe = "$root/ci/container/Dockerfile"
+if "$(^env $rg --pcre2 --count-matches '^ARG REDOX_BASE_IMAGE=\S+@sha256:[0-9a-f]{64}$' $container_recipe)" != '1' {
+    profile_error('CI container base image must have one immutable digest')
+}
+if "$(^env $rg --pcre2 --count-matches '^ARG RUSTUP_SHA256=[0-9a-f]{64}$' $container_recipe)" != '1' {
+    profile_error('CI container Rust installer must have one SHA-256 checksum')
+}
+require_markers(
+$container_recipe,
+[
+'FROM ${REDOX_BASE_IMAGE}',
+'sha256sum --check --strict -',
+'cargo install --locked',
+],
+'CI container supply-chain contract',
+$rg,
+)
+require_markers(
+"$root/Makefile",
+[
+"curl --fail --location --retry 3 --proto '=https'",
+'test "$$observed" = "$$expected"',
+],
+'automation-tool download contract',
+$rg,
+)
 require_markers(
 "$root/ci/qemu_smoke.py",
 [
@@ -647,6 +683,9 @@ require_markers(
 '"--expect-passwordless-user"',
 'if args.expect_passwordless_user:',
 'reject=b"password:"',
+'"--expect-release-services"',
+'if args.expect_release_services:',
+'RELEASE_INIT_SERVICES',
 ],
 'QEMU qualification contract',
 $rg,
@@ -748,10 +787,49 @@ if $artifact_mode {
     }
 }
 ^rm -rf $temporary
+if $artifact_mode {
+    let base_init = "$root/recipes/core/base/target/x86_64-unknown-redox/stage/usr/lib/init.d"
+    let expected_services = [
+    "$base_init/00_base.target",
+    "$base_init/00_fbcond.service",
+    "$base_init/00_ipcd.service",
+    "$base_init/00_pcid-spawner.service",
+    "$base_init/00_ptyd.service",
+    "$base_init/00_sudo.service",
+    "$base_init/00_tmp",
+    "$base_init/10_dhcpd.service",
+    "$base_init/10_net.target",
+    "$base_init/10_smolnetd.service",
+    "$base_init/20_audiod.service",
+    ]
+    let observed_services = "$(^find $base_init -mindepth 1 -maxdepth 1 -print | ^sort)"
+    let reviewed_services = "$(^printf '%s\n' ...$expected_services | ^sort)"
+    if !$status.ok || $observed_services != $reviewed_services {
+        profile_error('base service inventory differs from the reviewed release set')
+    }
+    for stage in [
+    'recipes/core/coreutils/target/x86_64-unknown-redox/stage',
+    'recipes/terminal/flash/target/x86_64-unknown-redox/stage',
+    'recipes/terminal/flash/target/x86_64-unknown-redox/stage.lsp',
+    'recipes/core/kernel/target/x86_64-unknown-redox/stage',
+    'recipes/libs/libgcc/target/x86_64-unknown-redox/stage',
+    'recipes/core/netdb/target/x86_64-unknown-redox/stage',
+    'recipes/core/netutils/target/x86_64-unknown-redox/stage',
+    'recipes/core/relibc/target/x86_64-unknown-redox/stage',
+    'recipes/core/userutils/target/x86_64-unknown-redox/stage',
+    'recipes/core/uutils/target/x86_64-unknown-redox/stage',
+    ] {
+        let unexpected_services = glob("$root/$stage/usr/lib/init.d/*")
+        if $unexpected_services != [] {
+            profile_error("selected package installs an unexpected service: ${$unexpected_services[0]}")
+        }
+    }
+}
 ^printf 'profile contract: ok\n'
 ^printf 'release: %s\n' $version
 ^printf 'packages: base, coreutils, flash, flash.lsp, kernel, libgcc, netdb, netutils, relibc, userutils, uutils\n'
 if $artifact_mode {
     ^printf 'artifacts: runtime and supporting stages are separated\n'
+    ^printf 'services: reviewed local/system set; no network-login daemon\n'
 }
 ^printf 'interface: TUI-only; framebuffer/input/audio retained\n'

@@ -682,15 +682,19 @@ python3 ci/qemu_smoke.py \
   --disk-interface nvme \
   --log build/x86_64/flashos-release/qemu-harddrive-smoke.log \
   --expect-root-locked \
-  --expect-passwordless-user
+  --expect-passwordless-user \
+  --expect-release-services
 
 python3 ci/qemu_smoke.py \
   --image build/x86_64/flashos-release/redox-live.iso \
   --disk-interface usb \
   --log build/x86_64/flashos-release/qemu-live-usb-smoke.log \
   --expect-root-locked \
-  --expect-passwordless-user
+  --expect-passwordless-user \
+  --expect-release-services
 ```
+
+The release-only service assertion compares the assembled `/usr/lib/init.d` inventory with the exact reviewed local/system set. It rejects added remote-login or other unexpected init entries; it is not a vulnerability scan of the inherited service implementations.
 
 Add `--ovmf` if the firmware is not found automatically.
 

@@ -135,6 +135,29 @@ expect_success($create_result, 'release candidate: ok', 'manifest creation')
 let validate_result = run_candidate($runtime, $script, $temporary, 'validate-result', validate_arguments($source_root, $bundle), $host_path)
 expect_success($validate_result, 'release candidate: ok', 'round-trip bundle validation')
 
+let wrong_tree_result = run_candidate(
+$runtime,
+$script,
+$temporary,
+'wrong-tree-result',
+[
+'validate', '--root', $source_root, '--bundle', $bundle,
+'--source-tree', '3333333333333333333333333333333333333333',
+],
+$host_path,
+)
+expect_failure($wrong_tree_result, 'candidate source tree mismatch', 'source-tree substitution')
+
+let wrong_tag_result = run_candidate(
+$runtime,
+$script,
+$temporary,
+'wrong-tag-result',
+['validate', '--root', $source_root, '--bundle', $bundle, '--tag', 'v0.2.1'],
+$host_path,
+)
+expect_failure($wrong_tag_result, 'tag does not match the candidate version', 'tag substitution')
+
 let tampered = "$temporary/tampered"
 ^cp -R $bundle $tampered
 ^printf '%s' 'substitute' > "$tampered/FlashOS-0.2.0-x86_64-live.iso.zst"
@@ -179,6 +202,19 @@ let artifacts_path = "$temporary/artifacts.json"
 let select_result = run_candidate($runtime, $script, $temporary, 'select-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
 expect_success($select_result, '{"artifact_name":"flashos-release-candidate-123-2","run_attempt":2}', 'exact candidate artifact selection')
 
+^printf '%s\n' '{"id":123,"head_repository":{"full_name":"attacker/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
+let repository_result = run_candidate($runtime, $script, $temporary, 'repository-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
+expect_failure($repository_result, 'candidate run belongs to another repository', 'repository substitution')
+
+^printf '%s\n' '{"id":123,"head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/ci.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
+let workflow_result = run_candidate($runtime, $script, $temporary, 'workflow-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
+expect_failure($workflow_result, 'selected run is not candidate.yml', 'workflow substitution')
+
+^printf '%s\n' '{"id":123,"head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"failure","run_attempt":2}' > $run_path
+let unsuccessful_result = run_candidate($runtime, $script, $temporary, 'unsuccessful-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
+expect_failure($unsuccessful_result, 'selected candidate run is not successfully completed', 'unsuccessful producer')
+
+^printf '%s\n' '{"id":123,"head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
 ^printf '%s\n' '{"artifacts":[{"name":"flashos-release-candidate-123-2","expired":true}]}' > $artifacts_path
 let expired_result = run_candidate($runtime, $script, $temporary, 'expired-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
 expect_failure($expired_result, 'candidate artifact is missing, ambiguous, or expired', 'expired candidate artifact')

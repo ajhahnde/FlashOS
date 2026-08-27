@@ -8,7 +8,9 @@ This policy explains which FlashOS versions and components are eligible for secu
 
 - [Supported versions](#supported-versions)
 - [Security scope](#security-scope)
+- [Evaluation threat model](#evaluation-threat-model)
 - [Known evaluation limitations](#known-evaluation-limitations)
+- [Release correction and withdrawal](#release-correction-and-withdrawal)
 - [Reporting a vulnerability](#reporting-a-vulnerability)
 - [Information to include](#information-to-include)
 - [Report handling and disclosure](#report-handling-and-disclosure)
@@ -58,6 +60,24 @@ The following observations are not treated as FlashOS vulnerabilities unless the
 - Resource exhaustion caused only by intentionally consuming the resources available to an unrestricted local process.
 - Missing production hardening or functionality that the project does not claim to provide.
 
+## Evaluation threat model
+
+The assets considered here are the identity and integrity of a FlashOS release, the evaluator's files and process authority inside an instance, and the accuracy of claims made about qualified image bytes. Relevant hostile inputs include local-console access, Flash source and startup state, native arguments and environment values, filesystem objects, inherited source and build inputs, workflow metadata, caches, and downloaded artifacts.
+
+FlashOS assumes that the repository revision selected for a release and the protected GitHub release environment are maintainer-controlled. It does not assume that Flash programs, external commands, ordinary filesystem contents, build caches, network traffic, or a person at the local console are trustworthy.
+
+| Boundary | Prevention and detection | Recovery and residual risk |
+| -------- | ------------------------ | -------------------------- |
+| Local access and privilege | Release images lock direct root password login. Both release-image QEMU paths must reject root login and accept the documented passwordless evaluation user. | **Accepted high risk:** the passwordless user belongs to `sudo`; local console access is effectively administrative. Rebuild or replace the release rather than treating account locking as containment. |
+| Flash source and process execution | Flash parses source as Flash syntax; values are not reinterpreted as source. External programs receive direct native `argv` and a complete explicit environment without an intervening shell. NUL is rejected where the operating-system boundary cannot represent it, while non-UTF-8 names and byte streams remain native. Spread arguments, redirect order, descriptor closing, capture limits, cancellation, and child reaping have regression tests. | **Accepted high risk:** a Flash program is code, not a sandboxed document. Run untrusted source only in a disposable instance with the authority and data you are prepared to expose. |
+| Configuration, history, and files | Interactive configuration is permission-checked and evaluated with process, terminal, and general filesystem effects unavailable. Persistent history requires private ownership and modes, rejects a final symlink, and opens relative to a checked directory. Formatter replacement rejects unsafe targets and uses same-directory temporary files and atomic rename. | Compromise of the account that owns these files remains outside this boundary. Filesystem and inherited-kernel defects are not ruled out by these checks. |
+| Jobs, signals, and cleanup | Host process-group, descriptor, cancellation, failure-cleanup, and wait behavior is exercised directly. The FlashOS adapter advertises only completely qualified capability groups. | **Accepted limitation:** the FlashOS target withholds the indivisible `Signals` capability because stopped-child transitions are not qualified. Target QEMU does not claim signal or stopped-job coverage. |
+| Installed services and networking | The release profile has an exact package closure. Artifact inspection allowlists the inherited init entries, rejects services from every other selected package, and both release QEMU paths verify the assembled init-directory inventory. No remote-login service is selected. | **Accepted high risk:** a network stack and DHCP client are present, inherited services are not comprehensively audited, and absence of SSH does not qualify exposure to an untrusted network. Use isolated networking. |
+| Build and dependency inputs | Active runtime and image-writing recipes use immutable Git revisions; Cargo lockfiles and source policy are checked; the CI base image and third-party Actions use immutable digests; downloaded automation tools and the Rust installer are checksum-verified. Dependency review and Cargo policy run independently. | **Accepted high risk:** FlashOS inherits a large operating-system and toolchain surface. The build is not a bit-for-bit reproducible-build proof, caches are not evidence by themselves, and automated advisory checks do not establish absence of vulnerabilities. |
+| Candidate and publication bytes | Candidate production requires exact successful `required` and `security-required` evidence, builds the release profile once, verifies checksums at every handoff, binds QEMU-consumed raw-image digests to compressed assets, records an allowlisted manifest, emits SBOMs and provenance, and refuses mismatched tags, trees, runs, attempts, repositories, workflows, inventories, symlinks, and existing releases. | Recovery is a new qualified candidate and later release. Trust in GitHub's workflow, artifact, and attestation services remains; publication does not independently rebuild and compare the bytes. |
+
+A critical substitution, injection, privilege-boundary, descriptor-lifetime, or process-lifetime failure in a claimed boundary blocks a new release. High risks may be accepted only when they are explicit evaluation limitations with a practical avoidance or recovery path.
+
 ## Known evaluation limitations
 
 FlashOS images are evaluation artifacts, not hardened production systems.
@@ -93,6 +113,14 @@ FlashOS does not currently claim:
 - that automated dependency, image, or QEMU checks prove the absence of vulnerabilities.
 
 Do not use a current FlashOS image to protect sensitive information or as a security boundary between mutually untrusted users.
+
+## Release correction and withdrawal
+
+Published tags and assets are immutable evidence. FlashOS does not retag a different tree, overwrite an existing release, or silently replace an asset under the same name.
+
+When a published statement is wrong but the bytes remain suitable for their documented evaluation purpose, the project may correct current documentation and identify the affected release explicitly. When a vulnerability makes continued distribution unsafe, the project may mark the release as withdrawn and remove it from ordinary availability; it must not substitute different bytes. A corrected build uses a new version, new tag, new candidate run, new checksums, and new provenance.
+
+Evaluators should retain the version, tag, and checksum of any image they test. If a release is withdrawn or an advisory says their boundary is affected, they should stop using that image, isolate or discard affected instances, rotate any data or credentials exposed to them, and move to a separately qualified successor when one exists.
 
 ## Reporting a vulnerability
 

@@ -43,6 +43,24 @@ PUBLIC_AUTOMATION_ROOTS = (
 # uncontrolled input; multicore behavior belongs in a dedicated runtime gate.
 QUALIFICATION_VCPUS = 1
 
+# Exact init entries allowed in a release image. The package-stage contract
+# checks their source inventory; the QEMU assertion below proves that image
+# assembly did not add or omit an entry. None is a remote-login service.
+RELEASE_INIT_SERVICES = (
+    "00_base.target",
+    "00_fbcond.service",
+    "00_ipcd.service",
+    "00_pcid-spawner.service",
+    "00_ptyd.service",
+    "00_sudo.service",
+    "00_tmp",
+    "10_dhcpd.service",
+    "10_net.target",
+    "10_smolnetd.service",
+    "20_audiod.service",
+    "30_console",
+)
+
 
 def release_version() -> str:
     for line in (REPOSITORY_ROOT / "versions.env").read_text().splitlines():
@@ -91,6 +109,11 @@ def parse_args() -> argparse.Namespace:
         "--expect-passwordless-user",
         action="store_true",
         help="Assert that the ordinary user logs in without a password prompt",
+    )
+    parser.add_argument(
+        "--expect-release-services",
+        action="store_true",
+        help="Assert the exact reviewed release init-service inventory",
     )
     parser.add_argument(
         "--benchmark-output",
@@ -520,6 +543,24 @@ def confirm_preceding_command() -> None:
     collect_until(b"Q", observation_start, visible=True)
 
 
+def inspect_release_services() -> None:
+    """Prove the assembled image contains only the reviewed init entries."""
+    # `ls` writes to a pipe, so it cannot select terminal colour implicitly.
+    # Enter the command in the same bounded chunks as the target matrix rather
+    # than weakening the proven UART interaction limit for this inspection.
+    command = b"^ls -1A /usr/lib/init.d|^sha256sum"
+    observation_start = len(captured)
+    for offset in range(0, len(command), EDITOR_INTERACTION_LIMIT):
+        send_editor_input(
+            command[offset : offset + EDITOR_INTERACTION_LIMIT], b""
+        )
+    time.sleep(EDITOR_INTERACTION_SETTLE)
+    send(runtime_suite.terminator)
+    inventory = ("\n".join(RELEASE_INIT_SERVICES) + "\n").encode()
+    expected_digest = hashlib.sha256(inventory).hexdigest().encode()
+    collect_until(expected_digest, observation_start, visible=True)
+
+
 def materialize_named_script(source: bytes, short_name: bytes) -> None:
     """Create one short-lived executable source fixture in the guest home."""
     materialize_matrix_script(source)
@@ -799,6 +840,12 @@ try:
                 "summary": summarize_samples(completion_samples),
             }
         )
+
+    # Run this after the behavioral suites: the external pipeline used for the
+    # inventory digest advances Flash's job counter, which is itself covered by
+    # the versioned runtime fixtures above.
+    if args.expect_release_services:
+        inspect_release_services()
 except BaseException as error:
     failure = error
 finally:
@@ -878,4 +925,6 @@ if args.expect_root_locked:
     verified.append("locked root account")
 if args.expect_passwordless_user:
     verified.append("passwordless user account")
+if args.expect_release_services:
+    verified.append("reviewed release service inventory")
 print(f"verified: {', '.join(verified)}")
