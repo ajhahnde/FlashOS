@@ -2388,6 +2388,12 @@ if returned_dead_paths:
         '"usr/lib/*.a"',
         '"usr/lib/*.o"',
     ),
+    "mk/prefix.mk": (
+        'cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial/$(GNU_TARGET)"',
+        'cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial"',
+        'cp -r "$(RELIBC_FREESTANDING_TARGET)/stage.dev/usr/". '
+        '"$@.partial/$(GNU_TARGET)"',
+    ),
     "recipes/core/base/recipe.toml": (
         '"bootloader"',
         '"${COOKBOOK_STAGE}/usr/bin/redoxerd"',

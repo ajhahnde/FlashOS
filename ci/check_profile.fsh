@@ -557,6 +557,16 @@ require_markers(
 $rg,
 )
 require_markers(
+"$root/mk/prefix.mk",
+[
+'cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial/$(GNU_TARGET)"',
+'cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial"',
+'cp -r "$(RELIBC_FREESTANDING_TARGET)/stage.dev/usr/". "$@.partial/$(GNU_TARGET)"',
+],
+'compiler sysroot must retain the relibc development projection',
+$rg,
+)
+require_markers(
 "$root/recipes/core/base/recipe.toml",
 [
 '"bootloader"',

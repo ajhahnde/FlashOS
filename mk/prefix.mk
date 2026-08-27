@@ -75,11 +75,13 @@ endif
 	$(REPO_BIN) cook relibc $(COOKBOOK_OPTS)
 ifneq ($(HOSTED_REDOX),1)
 	cp -r "$(RELIBC_TARGET)/stage/usr/". "$@.partial/$(GNU_TARGET)"
+	cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial/$(GNU_TARGET)"
 	mkdir -p "$@.partial/$(GNU_TARGET)/usr"
 	ln -s "../include" "$@.partial/$(GNU_TARGET)/usr/include"
 	ln -s "../lib" "$@.partial/$(GNU_TARGET)/usr/lib"
 else
 	cp -r "$(RELIBC_TARGET)/stage/usr/". "$@.partial"
+	cp -r "$(RELIBC_TARGET)/stage.dev/usr/". "$@.partial"
 	mkdir -p "$@.partial/usr"
 	ln -s "../include" "$@.partial/usr/include"
 	ln -s "../lib" "$@.partial/usr/lib"
@@ -271,6 +273,7 @@ else
 	export $(PREFIX_CONFIG) COOKBOOK_HOST_SYSROOT=/usr COOKBOOK_CROSS_TARGET=$(HOST_TARGET) && \
 	$(REPO_BIN) cook relibc
 	cp -r "$(RELIBC_FREESTANDING_TARGET)/stage/usr/". "$@.partial/$(GNU_TARGET)"
+	cp -r "$(RELIBC_FREESTANDING_TARGET)/stage.dev/usr/". "$@.partial/$(GNU_TARGET)"
 	touch "$@.partial"
 	mv "$@.partial" "$@"
 endif
