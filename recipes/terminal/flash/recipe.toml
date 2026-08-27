@@ -11,3 +11,9 @@ DYNAMIC_INIT
 COOKBOOK_CARGO_PATH="crates/flash-cli" cookbook_cargo --bin fsh
 COOKBOOK_CARGO_PATH="crates/flash-lsp" cookbook_cargo --bin flash-language-server
 """
+
+# Editors and host/developer environments can install the protocol server
+# explicitly; the TUI login-shell image selects only the base `flash` package.
+[[optional-packages]]
+name = "lsp"
+files = ["usr/bin/flash-language-server"]

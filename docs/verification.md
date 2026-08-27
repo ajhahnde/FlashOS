@@ -379,8 +379,15 @@ Its current checks include:
 - exclusion of selected graphical-stack identifiers;
 - disabled graphical XDG user-directory creation;
 - `/usr/bin/fsh` as the configured shell for `root` and `user`;
-- the in-tree Flash package recipe builds both `fsh` and
-  `flash-language-server` from the checkout-bound component workspace;
+- the in-tree Flash package recipe builds `fsh` and the separately staged and
+  selected `flash.lsp` language-server package from the checkout-bound
+  component workspace;
+- the selected runtime excludes bootloader files, `libstdcxx`, `extrautils`,
+  development headers/static libraries, kernel debug outputs, dead package
+  configuration, and unqualified compatibility services;
+- the build graph retains the bootloader media bytes, relibc development
+  projection, kernel debug outputs, and separately packaged Flash language
+  server;
 - alignment of development and release profile structure;
 - a locked root account in the release profile;
 - rejection of well-known release-profile passwords;
@@ -398,10 +405,24 @@ Its current checks include:
 - presence of the required local branding patch files and rejection of added
   inherited product-identity strings in those patches.
 
-The script combines parsed TOML checks with selected repository-text assertions. It does not:
+After a package/image build, validate the staged runtime and supporting outputs with:
+
+```bash
+build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_profile.fsh --artifacts
+```
+
+Artifact mode requires metadata for the exact eleven-package runtime closure,
+including the language server's exact dependency on `flash`, rejects any other
+uncollected runtime dependency, verifies the runtime/shared-library and boot
+inputs, and proves that development, debug, Redoxer-daemon, and VirtualBox files
+are staged outside the image or absent as intended. The release-image SBOM
+collector consumes the same reported closure instead of all recipe stages, so
+build-only packages do not appear as shipped components.
+
+The script combines parsed TOML checks with selected repository-text and built-artifact assertions. Static mode does not:
 
 - compile any Rust source;
-- resolve the complete transitive package graph;
+- inspect built package payloads;
 - apply or validate the behavior of a patch;
 - build either image;
 - execute a GitHub Actions workflow;

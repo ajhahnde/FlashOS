@@ -156,10 +156,9 @@ jobs:
       - name: Validate the FlashOS platform build baseline
         run: build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh --artifacts
 
-      # Every package installed into the image is staged under its recipe as
-      # target/<triple>/stage before it is packed. Scanning those trees
-      # describes what the image actually contains, which a scan of the
-      # repository working tree does not.
+      # Scan only the exact profile closure. Build-only recipes also produce a
+      # target/<triple>/stage directory, so a repository-wide stage scan would
+      # overstate the shipped image.
       - name: Collect the staged image payload
         if: inputs.release-evidence
         run: |
@@ -167,18 +166,51 @@ jobs:
           # dist/image must exist before the SBOM step, which writes into it
           # one step earlier than the images are staged there.
           mkdir -p dist/payload dist/image
+          profile_output="$(${FLASH_AUTOMATION_RUNTIME} ci/check_profile.fsh --artifacts)"
+          printf '%s\n' "${profile_output}"
+          package_csv="$(sed -n 's/^packages: //p' <<<"${profile_output}")"
+          if [ -z "${package_csv}" ]; then
+            echo "::error::profile contract did not report the runtime package closure"
+            exit 1
+          fi
+          IFS=',' read -ra runtime_packages <<<"${package_csv}"
           found=0
-          while IFS= read -r stage; do
-            recipe="$(basename "$(dirname "$(dirname "$(dirname "${stage}")")")")"
-            mkdir -p "dist/payload/${recipe}"
-            cp -a "${stage}/." "dist/payload/${recipe}/"
+          for raw_package in "${runtime_packages[@]}"; do
+            package="$(xargs <<<"${raw_package}")"
+            recipe="${package%%.*}"
+            if [[ "${package}" == *.* ]]; then
+              stage_name="stage.${package#*.}"
+            else
+              stage_name="stage"
+            fi
+            mapfile -t stages < <(
+              find recipes -type d \
+                -path "*/${recipe}/target/x86_64-unknown-redox/${stage_name}"
+            )
+            if [ "${#stages[@]}" -ne 1 ]; then
+              echo "::error::selected package ${package} resolved to ${#stages[@]} stages"
+              exit 1
+            fi
+            stage="${stages[0]}"
+            metadata="${stage}.toml"
+            if [ "${package}" = "flash.lsp" ]; then
+              if ! grep -Fxq 'depends = ["flash"]' "${metadata}"; then
+                echo "::error::selected package ${package} lost its exact runtime dependency"
+                exit 1
+              fi
+            elif ! grep -Fxq 'depends = []' "${metadata}"; then
+              echo "::error::selected package ${package} gained an uncollected runtime dependency"
+              exit 1
+            fi
+            mkdir -p "dist/payload/${package}"
+            cp -a "${stage}/." "dist/payload/${package}/"
             found=$((found + 1))
-          done < <(find recipes -type d -path "*/target/x86_64-unknown-redox/stage")
-          if [ "${found}" -eq 0 ]; then
+          done
+          if [ "${found}" -ne "${#runtime_packages[@]}" ]; then
             echo "::error::no staged package payload found; the image SBOM would be empty"
             exit 1
           fi
-          echo "staged payload collected from ${found} recipes"
+          echo "staged payload collected from ${found} selected runtime packages"
 
       - name: Generate the image SBOM
         if: inputs.release-evidence
@@ -223,7 +255,10 @@ jobs:
               return hashlib.sha256((image_dir / name).read_bytes()).hexdigest()
 
           def recipe_for(name: str) -> pathlib.Path | None:
-              matches = sorted(pathlib.Path("recipes").glob(f"*/{name}/recipe.toml"))
+              recipe_name = name.split(".", 1)[0]
+              matches = sorted(
+                  pathlib.Path("recipes").glob(f"*/{recipe_name}/recipe.toml")
+              )
               return matches[0] if matches else None
 
           components = list(sbom.get("components", []))

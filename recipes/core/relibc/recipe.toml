@@ -21,3 +21,10 @@ export CARGO=${CARGO:-env -u CARGO cargo}
     DESTDIR="${COOKBOOK_STAGE}/usr" \
     install
 """
+
+# The base package is the shared-library runtime selected by FlashOS images.
+# Headers, static archives, and CRT objects remain available to target builds
+# through the explicitly selected development projection.
+[[optional-packages]]
+name = "dev"
+files = ["usr/include/**", "usr/lib/*.a", "usr/lib/*.o"]

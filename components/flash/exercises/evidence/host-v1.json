@@ -1,8 +1,8 @@
 {
   "candidate": {
-    "commit": "b64171d22eaca510766645ae445e629aee4647b4",
-    "source_sha256": "615bf9009265a2fbbe17559bf7a3f784e0b42d64725eaee7daaba540d3bbf011",
-    "tree": "23cef1761e102a813fcbfdc5adb25083a8e78997",
+    "commit": "4e7d94420b20d46bead8573da813119766f65cfb",
+    "source_sha256": "e2f35160fd2c39c497509976b81ca1342dfa0a6c4e1c9c60d33897d7c9a65c4c",
+    "tree": "433ed5719d64d92dc7d7d845441f8ca184dd81dc",
     "worktree": "dirty"
   },
   "contract_cases": {
