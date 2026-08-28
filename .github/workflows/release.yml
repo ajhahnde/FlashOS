@@ -33,10 +33,29 @@ jobs:
       FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
       FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout current validation tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate release inputs
+        env:
+          TAG: ${{ inputs.tag }}
+          CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
+        run: |
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] ||
+             [[ ! "${CANDIDATE_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::tag or candidate run ID has an invalid form"
+            exit 1
+          fi
+
+      - name: Checkout immutable tag source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}
-          fetch-depth: 0
+          path: dist/tag-source
+          fetch-depth: 1
 
       - name: Acquire the immutable Flash 1.0 automation runtime
         run: make flash-bootstrap
@@ -47,15 +66,9 @@ jobs:
       - name: Download the selected candidate run
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
           CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
         run: |
           set -euo pipefail
-          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] ||
-             [[ ! "${CANDIDATE_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::tag or candidate run ID has an invalid form"
-            exit 1
-          fi
           mkdir -p dist/selection
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" \
             > dist/selection/run.json
@@ -81,15 +94,17 @@ jobs:
           CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
         run: |
           set -euo pipefail
-          source versions.env
-          if [ "${TAG}" != "v${FLASHOS_RELEASE_VERSION}" ]; then
+          FLASHOS_RELEASE_VERSION="$(sed -n 's/^FLASHOS_RELEASE_VERSION=//p' dist/tag-source/versions.env)"
+          if [[ ! "${FLASHOS_RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] ||
+             [ "${TAG}" != "v${FLASHOS_RELEASE_VERSION}" ]; then
             echo "::error::tag does not match versions.env"
             exit 1
           fi
           source_commit="$(cat dist/candidate-source-commit)"
-          source_tree="$(git rev-parse "${TAG}^{tree}")"
+          source_tree="$(git -C dist/tag-source rev-parse 'HEAD^{tree}')"
           run_attempt="$(cat dist/candidate-run-attempt)"
           build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/release_candidate.fsh validate \
+            --root dist/tag-source \
             --bundle dist/release \
             --repository "${GITHUB_REPOSITORY}" \
             --version "${FLASHOS_RELEASE_VERSION}" \
@@ -128,10 +143,29 @@ jobs:
       actions: read
       contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout current validation tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate release inputs
+        env:
+          TAG: ${{ inputs.tag }}
+          CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
+        run: |
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] ||
+             [[ ! "${CANDIDATE_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::tag or candidate run ID has an invalid form"
+            exit 1
+          fi
+
+      - name: Checkout immutable tag source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}
-          fetch-depth: 0
+          path: dist/tag-source
+          fetch-depth: 1
 
       - name: Acquire the immutable Flash 1.0 automation runtime
         run: make flash-bootstrap
@@ -169,11 +203,17 @@ jobs:
           CANDIDATE_RUN_ID: ${{ inputs['candidate-run-id'] }}
         run: |
           set -euo pipefail
-          source versions.env
+          FLASHOS_RELEASE_VERSION="$(sed -n 's/^FLASHOS_RELEASE_VERSION=//p' dist/tag-source/versions.env)"
+          if [[ ! "${FLASHOS_RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] ||
+             [ "${TAG}" != "v${FLASHOS_RELEASE_VERSION}" ]; then
+            echo "::error::tag does not match versions.env"
+            exit 1
+          fi
           source_commit="$(cat dist/candidate-source-commit)"
-          source_tree="$(git rev-parse "${TAG}^{tree}")"
+          source_tree="$(git -C dist/tag-source rev-parse 'HEAD^{tree}')"
           run_attempt="$(cat dist/candidate-run-attempt)"
           build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/release_candidate.fsh validate \
+            --root dist/tag-source \
             --bundle dist/release \
             --repository "${GITHUB_REPOSITORY}" \
             --version "${FLASHOS_RELEASE_VERSION}" \

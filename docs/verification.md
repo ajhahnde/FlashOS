@@ -867,11 +867,17 @@ Its default mode is a non-publishing dry run. It verifies the selected run is a
 successful `candidate.yml` workflow in this repository, selects its exact run
 attempt, rejects missing/ambiguous/expired artifacts, and then checks:
 
+Publication executes the validator and pinned automation dependencies from the
+exact protected-main workflow revision. It checks out the immutable tag into a
+separate source-only directory for version, tree, manifest-input, and candidate
+validation; tag contents never replace or supply publication tooling.
+
 - tag equality with `v<FLASHOS_RELEASE_VERSION>`;
 - candidate source commit equality with the selected workflow run head and
   candidate source tree equality with the tag tree (the commits may differ
   after a squash merge);
-- manifest schema and pinned input graph against the tag checkout;
+- manifest schema and pinned input graph against the isolated tag-source
+  checkout;
 - the exact allowlisted inventory, regular-file boundary, sizes, and digests;
 - every `SHA256SUMS` entry;
 - decompressed disk/live digests against the raw images QEMU consumed; and
