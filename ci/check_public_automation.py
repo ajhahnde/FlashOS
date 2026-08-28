@@ -3776,6 +3776,40 @@ def require_release_candidate_result(
         )
 
 
+def require_release_candidate_selection_result(
+    runtime: Path,
+    repository: Path,
+    extra: list[str],
+) -> None:
+    observed = release_candidate_result(
+        runtime,
+        repository,
+        "select",
+        extra=extra,
+    )
+    expected = release_candidate_result(
+        None,
+        repository,
+        "select",
+        extra=extra,
+    )
+    try:
+        document = json.loads(observed[1])
+    except (json.JSONDecodeError, TypeError):
+        document = None
+    source_commit = None
+    projected_stdout = observed[1]
+    if isinstance(document, dict):
+        source_commit = document.pop("source_commit", None)
+        projected_stdout = json.dumps(document, separators=(",", ":")) + "\n"
+    projected = (observed[0], projected_stdout, observed[2])
+    if source_commit != RELEASE_CANDIDATE_COMMIT or projected != expected:
+        fail(
+            "release candidate materialized-oracle parity differs for "
+            f"artifact selection: observed={observed!r}, expected={expected!r}"
+        )
+
+
 def check_release_candidate_parity(runtime: Path, root: Path) -> None:
     flash_source = root / "ci/release_candidate.fsh"
     if not flash_source.is_file():
@@ -3941,6 +3975,7 @@ def check_release_candidate_parity(runtime: Path, root: Path) -> None:
             json.dumps(
                 {
                     "id": 123,
+                    "head_sha": RELEASE_CANDIDATE_COMMIT,
                     "head_repository": {"full_name": "example/FlashOS"},
                     "path": ".github/workflows/candidate.yml",
                     "event": "workflow_dispatch",
@@ -3970,12 +4005,10 @@ def check_release_candidate_parity(runtime: Path, root: Path) -> None:
             "--run-id",
             "123",
         ]
-        require_release_candidate_result(
+        require_release_candidate_selection_result(
             runtime,
             repository,
-            "artifact selection",
-            "select",
-            extra=selection,
+            selection,
         )
         artifacts["artifacts"][0]["expired"] = True
         artifacts_path.write_text(json.dumps(artifacts), encoding="utf-8")
