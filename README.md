@@ -12,7 +12,7 @@
     <a href="https://github.com/ajhahnde/FlashOS/actions/workflows/main-qualification.yml">
       <img src="https://github.com/ajhahnde/FlashOS/actions/workflows/main-qualification.yml/badge.svg?branch=main&amp;event=push" alt="Main verified">
     </a>
-    <img src="https://img.shields.io/badge/Version-0.1.0-f59e0b?style=square" alt="FlashOS 0.1.0">
+    <img src="https://img.shields.io/badge/Version-0.2.0-f59e0b?style=square" alt="FlashOS 0.2.0">
     <img src="https://img.shields.io/badge/Status-pre--alpha-f59e0b?style=square" alt="Pre-alpha">
     <img src="https://img.shields.io/badge/Target-x86__64--unknown--redox-lightgrey?style=square" alt="x86_64-unknown-redox">
   </p>

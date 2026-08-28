@@ -298,11 +298,17 @@ $release_workflow,
 $rg,
 )
 let candidate_workflow = "$root/.github/workflows/candidate.yml"
+let release_notes_path = "docs/releases/v$version.md"
+if ^test -f "$root/$release_notes_path" {
+} else {
+    profile_error("reviewed release notes are missing: $release_notes_path")
+}
 require_markers(
 $candidate_workflow,
 [
 'name: Release candidate',
 'source-sha:',
+"default: $release_notes_path",
 'make flash-bootstrap',
 'make flash-automation-tools',
 'build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_candidate_qualification.fsh',

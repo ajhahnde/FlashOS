@@ -22,7 +22,7 @@ The [FlashOS README](../README.md) is the front door. From there, the public doc
 - **Main product guide:** [Product Guide](README.md) → [Getting Started](getting-started.md) → [Flash and FlashOS](flash.md) → [Architecture](architecture.md) → [Development](development.md) → [Public Automation](automation.md) → [Verification and Testing](verification.md) → [Hardware Compatibility](hardware.md) → [Roadmap](roadmap.md) → [About Me](aboutme.md) → [Contributing](../CONTRIBUTING.md) → [Upstream References](upstream/README.md).
 - **Flash guide:** [Flash Overview](../components/flash/README.md) → [Flash Documentation](../components/flash/docs/README.md) → [Flash by Example](../components/flash/docs/by-example.md) → [Language Guide](../components/flash/docs/language-guide.md) → [Scripting Guide](../components/flash/docs/scripting.md) → [Flash Architecture](../components/flash/docs/architecture.md) → [Flash Development](../components/flash/docs/development.md) → [CI/CD Contracts](../ci/README.md).
 - **Focused Flash references:** [Flash Changelog](../components/flash/CHANGELOG.md), [Performance Benchmarks](../components/flash/benchmarks/README.md), [Flash v1 Exercises](../components/flash/exercises/README.md), [Scheduling Stress](../components/flash/scheduling/README.md), [Fuzz Targets](../components/flash/fuzz/README.md), [End-to-end Tests](../components/flash/tests/e2e/README.md), [Test Fixtures](../components/flash/tests/fixtures/README.md), [Grammar Corpus](../components/flash/tests/golden/grammar/README.md), and [Lexical Corpus](../components/flash/tests/golden/lexical/README.md).
-- **Project records and policies:** [CI/CD Contracts](../ci/README.md) → [Changelog](../CHANGELOG.md) → [Security Policy](../.github/SECURITY.md) → [Trademark and Project Identity](../TRADEMARK.md).
+- **Project records and policies:** [CI/CD Contracts](../ci/README.md) → [Changelog](../CHANGELOG.md) → [FlashOS v0.2.0 Release Notes](releases/v0.2.0.md) → [Security Policy](../.github/SECURITY.md) → [Trademark and Project Identity](../TRADEMARK.md).
 - **Compatibility redirects:** [Documentation](../DOCUMENTATION.md), [Setup](../SETUP.md), and [Hardware](../HARDWARE.md) keep older links working.
 - **Issue routes:** [Bug Report](../.github/ISSUE_TEMPLATE/bug_report.md), [Documentation Issue](../.github/ISSUE_TEMPLATE/documentation.md), [Hardware Report](../.github/ISSUE_TEMPLATE/hardware_report.md), and [Proposal](../.github/ISSUE_TEMPLATE/proposal.md).
 - **Retained Redox snapshots:** [Hardware](upstream/REDOX_HARDWARE.md) and [Trademark](upstream/REDOX_TRADEMARK.md) are historical upstream references reached through [Upstream References](upstream/README.md); they do not define FlashOS behavior or policy.
@@ -53,6 +53,8 @@ The [FlashOS README](../README.md) is the front door. From there, the public doc
 ## Policies and project records
 
 - [Changelog](../CHANGELOG.md) — FlashOS release history and current unreleased changes.
+- [FlashOS v0.2.0 Release Notes](releases/v0.2.0.md) — Highlights,
+  evaluation boundaries, credentials, qualification scope, and release assets.
 - [Security Policy](../.github/SECURITY.md) — Reporting, evaluation scope, supported-version policy, and pre-alpha limitations.
 - [Trademark and Project Identity](../TRADEMARK.md) — FlashOS identity and upstream mark boundaries.
 - [License](../LICENSE) and [Notice](../NOTICE) — Root licensing, third-party licenses, and attribution.

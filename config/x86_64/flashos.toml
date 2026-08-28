@@ -30,10 +30,10 @@ postinstall = true
 [[files]]
 path = "/usr/lib/os-release"
 data = """
-PRETTY_NAME="FlashOS 0.1.0"
+PRETTY_NAME="FlashOS 0.2.0"
 NAME="FlashOS"
-VERSION_ID="0.1.0"
-VERSION="0.1.0"
+VERSION_ID="0.2.0"
+VERSION="0.2.0"
 ID="flashos"
 ID_LIKE="redox-os"
 
@@ -45,7 +45,7 @@ postinstall = true
 
 [[files]]
 path = "/etc/issue"
-data = "FlashOS 0.1.0\n"
+data = "FlashOS 0.2.0\n"
 postinstall = true
 
 [[files]]

@@ -14,7 +14,7 @@ on:
       release-notes-path:
         description: Reviewed repository-relative Markdown release notes.
         type: string
-        default: CHANGELOG.md
+        default: docs/releases/v0.2.0.md
       cold-cache:
         description: Build without restoring or saving BuildKit cache layers.
         type: boolean

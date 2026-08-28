@@ -76,7 +76,7 @@ class PublicAutomationTests(unittest.TestCase):
         automation.check_documentation()
         contract = automation.load_documentation_contract()
         self.assertEqual(contract["schema"], 1)
-        self.assertEqual(len(contract["documents"]), 42)
+        self.assertEqual(len(contract["documents"]), 43)
         self.assertEqual(
             {entry["path"] for entry in contract["examples"]},
             automation.PUBLIC_EXAMPLES,

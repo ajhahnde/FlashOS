@@ -1,6 +1,6 @@
 [package]
 name = "flashos_build"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # This crate is the inherited build system. Every file under `src/` originates
 # upstream and remains MIT-licensed; its retained copyright notice is in
