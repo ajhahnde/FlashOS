@@ -1,11 +1,11 @@
 # Public Automation
 
-[FlashOS](../README.md) › [Documentation](README.md) › Public Automation
+[FlashOS](../README.md) › [Product Guide](README.md) › Public Automation
 
-Flash is the default language for public FlashOS automation when a usable
-`fsh` can already exist at the execution boundary. Public non-Flash scripts
-remain only where bootstrap, recovery, an external tool interface, or
-independent correctness requires another interpreter.
+Flash is the default language for public project automation once `fsh` is
+available. A smaller set of non-Flash scripts remains for bootstrapping,
+recovery, third-party tool interfaces, and checks that must stay independent
+of Flash.
 
 ## Native Flash programs
 
@@ -103,6 +103,10 @@ Bash startup files and Zsh integration remain their own external interfaces;
 fixtures remain visibly classified. None authorizes a general second public
 scripting layer.
 
+The four programs under `components/flash/examples/` are public teaching
+examples and run during the documentation check. They are not installed in the
+target image and are not part of the fixed 68-file pre-migration count.
+
 ## Declared host tools
 
 Host-side Flash programs use the exact external parsing and search tool
@@ -170,4 +174,4 @@ evidence.
 
 ---
 
-[← Development](development.md) · [Verification and Testing →](verification.md)
+[← Previous: Development](development.md) · [Documentation index](README.md) · [Next: Verification and Testing →](verification.md)

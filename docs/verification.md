@@ -1,8 +1,8 @@
 # Verification and Testing
 
-[FlashOS](../README.md) › [Documentation](README.md) › Verification
+[FlashOS](../README.md) › [Product Guide](README.md) › Verification
 
-This guide explains how FlashOS distinguishes source checks, target compilation, product-profile validation, image construction, virtual-machine qualification, physical hardware evidence, and release evidence. It is intended for developers and evaluators deciding which claims a particular test result supports; exact CI script and workflow behavior is documented in [CI/CD Contracts](../ci/README.md).
+Not every green check proves the same thing. This guide separates source checks, target compilation, profile validation, image construction, QEMU runs, physical hardware tests, and release evidence. For individual scripts and hosted workflows, see [CI/CD Contracts](../ci/README.md).
 
 ## On this page
 
@@ -178,6 +178,21 @@ proves that a package was built, included
 in an image, or executed on FlashOS; those remain downstream package, image,
 and QEMU gates. See [Public Automation](automation.md) for the native programs
 and retained interpreter boundaries.
+
+### Public documentation
+
+Run the public documentation check with:
+
+```bash
+source flashos.sh
+flashos check docs
+```
+
+`ci/documentation.json` lists the public pages, their indexes, and the curated
+examples. The command checks page structure, navigation, local links, and
+anchors. It also formats, analyzes, and runs the examples with the fixed Flash
+1.0 runtime. Editorial review, external links, rendered pages, and any target
+or image claims still need separate checks.
 
 ### Shell helpers and whitespace
 
@@ -591,7 +606,7 @@ categories:
 | **Advertised capability matrix**      | Startup, configuration, scripts, built-ins, argv/environment, directories, pipelines, redirections, cancellation, history, completion, structured data, typed capture, structured errors, dynamic execution, statuses, globbing, Unicode/multiline editing, supported jobs, and clean exit |
 | **Release root policy**              | Rejection of a root login attempt when the release-profile assertion is requested                                                       |
 
-For the complete line-by-line runtime contract and serial synchronization rules, consult [CI/CD Contracts](../ci/README.md#runtime-assertions).
+For the complete line-by-line runtime contract and serial synchronization rules, consult [CI/CD Contracts](../ci/README.md#qemu-runtime-checks).
 
 The contract verifies those specific interactions. It does not currently establish:
 
@@ -1048,4 +1063,4 @@ When descriptive documentation conflicts with an executable script or active wor
 
 ---
 
-[← Previous: Development](development.md) · [Documentation index](README.md) · [Next: Hardware Compatibility →](hardware.md)
+[← Previous: Public Automation](automation.md) · [Documentation index](README.md) · [Next: Hardware Compatibility →](hardware.md)

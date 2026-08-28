@@ -784,6 +784,12 @@ flashos-clean() {
 _flashos_check_docs() {
   local _drift_dir="${FLASHOS_PRIVATE_DIR:-${_FLASHOS_DIR}/.private}"
   local _drift_script="$_drift_dir/scripts/check_drift.sh"
+
+  _flashos_acquire_automation || return 1
+  _flashos_root command python3 ci/check_public_automation.py \
+    --documentation-only \
+    --documentation-runtime "$_FLASHOS_AUTOMATION_RUNTIME" || return 1
+
   if [ -x "$_drift_script" ]; then
     _flashos_root command "$_drift_script"
   else

@@ -1,8 +1,8 @@
 # Getting Started
 
-[FlashOS](../README.md) › [Documentation](README.md) › Getting Started
+[FlashOS](../README.md) › [Product Guide](README.md) › Getting Started
 
-This guide takes you from a fresh repository clone to an interactive FlashOS session in QEMU. It covers the default x86_64 development profile, its local build configuration, the generated image artifacts, and first-login checks; repository development and verification workflows are documented separately.
+Start here to build FlashOS from a fresh clone and reach a Flash prompt in QEMU. The steps use the default x86_64 development profile and cover local configuration, image files, login, and a few first checks. Development and verification work continues in separate guides.
 
 > **Project status:** FlashOS is pre-alpha software. Build requirements, image formats, interfaces, and supported workflows may change without compatibility guarantees.
 
@@ -570,4 +570,4 @@ After reaching a working Flash prompt:
 
 ---
 
-[← Previous: Documentation Index](README.md) · [Documentation index](README.md) · [Next: Architecture →](architecture.md)
+[← Documentation index](README.md) · [Next: Flash and FlashOS →](flash.md)

@@ -1,8 +1,8 @@
 # Architecture
 
-[FlashOS](../README.md) › [Documentation](README.md) › Architecture
+[FlashOS](../README.md) › [Product Guide](README.md) › Architecture
 
-This document describes the current FlashOS system layers, image composition, build-to-boot path, and boundaries between project-owned components and inherited infrastructure. It is intended for developers and evaluators who need to understand how the x86_64 product profile is assembled without treating every capability present in the wider repository or upstream Redox ecosystem as a supported FlashOS feature.
+This guide follows FlashOS from configuration and source through packages, image assembly, boot, and the first Flash session. It also shows which parts are maintained by FlashOS and which still come from Redox or other upstream projects. The presence of code elsewhere in the repository or upstream does not make it a supported FlashOS feature.
 
 ## On this page
 
@@ -431,4 +431,4 @@ When these sources disagree, configuration, recipes, executable checks, and curr
 
 ---
 
-[← Previous: Getting Started](getting-started.md) · [Documentation index](README.md) · [Next: Development →](development.md)
+[← Previous: Flash and FlashOS](flash.md) · [Documentation index](README.md) · [Next: Development →](development.md)

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security reports
+    url: https://github.com/ajhahnde/FlashOS/security/policy
+    about: Report suspected vulnerabilities privately; do not open a public issue.
