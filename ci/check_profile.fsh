@@ -170,6 +170,13 @@ def reject_markers(path, markers, label, rg) {
     }
 }
 
+def require_marker_count(path, marker, expected, label, rg) {
+    let observed = "$(^env $rg --fixed-strings --count-matches -- $marker $path)"
+    if !$status.ok || $observed != $expected {
+        profile_error("$label expected $expected occurrences of '$marker', observed '$observed'")
+    }
+}
+
 let root = repository_root('versions.env')
 let jq = require_jq()
 let rg = require_rg()
@@ -283,6 +290,9 @@ $release_workflow,
 'release publisher contract',
 $rg,
 )
+require_marker_count($release_workflow, 'source_commit="$(jq -r .source_commit <<<"${selection}")"', '2', 'release publisher selected-run source binding', $rg)
+require_marker_count($release_workflow, 'source_commit="$(cat dist/candidate-source-commit)"', '2', 'release publisher candidate source validation', $rg)
+require_marker_count($release_workflow, 'git rev-parse "${TAG}^{tree}"', '2', 'release publisher tag-tree validation', $rg)
 reject_markers(
 $release_workflow,
 [
@@ -293,6 +303,7 @@ $release_workflow,
 'uses: ./.github/workflows/_image.yml',
 'tags: ["v*"]',
 '--clobber',
+'git rev-parse "${TAG}^{commit}"',
 ],
 'release publisher must not regenerate or overwrite candidate bytes',
 $rg,

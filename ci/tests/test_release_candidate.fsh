@@ -197,24 +197,28 @@ expect_failure($compressed_result, 'bytes differ from the QEMU-qualified raw ima
 
 let run_path = "$temporary/run.json"
 let artifacts_path = "$temporary/artifacts.json"
-^printf '%s\n' '{"id":123,"head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
+^printf '%s\n' '{"id":123,"head_sha":"3333333333333333333333333333333333333333","head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
 ^printf '%s\n' '{"artifacts":[{"name":"flashos-release-candidate-123-2","expired":false}]}' > $artifacts_path
 let select_result = run_candidate($runtime, $script, $temporary, 'select-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
-expect_success($select_result, '{"artifact_name":"flashos-release-candidate-123-2","run_attempt":2}', 'exact candidate artifact selection')
+expect_success($select_result, '{"artifact_name":"flashos-release-candidate-123-2","run_attempt":2,"source_commit":"3333333333333333333333333333333333333333"}', 'exact candidate artifact selection')
 
-^printf '%s\n' '{"id":123,"head_repository":{"full_name":"attacker/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
+^printf '%s\n' '{"id":123,"head_sha":"invalid","head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
+let source_commit_result = run_candidate($runtime, $script, $temporary, 'source-commit-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
+expect_failure($source_commit_result, 'candidate run head SHA must be a full lowercase Git object ID', 'invalid candidate run head SHA')
+
+^printf '%s\n' '{"id":123,"head_sha":"3333333333333333333333333333333333333333","head_repository":{"full_name":"attacker/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
 let repository_result = run_candidate($runtime, $script, $temporary, 'repository-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
 expect_failure($repository_result, 'candidate run belongs to another repository', 'repository substitution')
 
-^printf '%s\n' '{"id":123,"head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/ci.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
+^printf '%s\n' '{"id":123,"head_sha":"3333333333333333333333333333333333333333","head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/ci.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
 let workflow_result = run_candidate($runtime, $script, $temporary, 'workflow-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
 expect_failure($workflow_result, 'selected run is not candidate.yml', 'workflow substitution')
 
-^printf '%s\n' '{"id":123,"head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"failure","run_attempt":2}' > $run_path
+^printf '%s\n' '{"id":123,"head_sha":"3333333333333333333333333333333333333333","head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"failure","run_attempt":2}' > $run_path
 let unsuccessful_result = run_candidate($runtime, $script, $temporary, 'unsuccessful-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
 expect_failure($unsuccessful_result, 'selected candidate run is not successfully completed', 'unsuccessful producer')
 
-^printf '%s\n' '{"id":123,"head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
+^printf '%s\n' '{"id":123,"head_sha":"3333333333333333333333333333333333333333","head_repository":{"full_name":"example/FlashOS"},"path":".github/workflows/candidate.yml","event":"workflow_dispatch","status":"completed","conclusion":"success","run_attempt":2}' > $run_path
 ^printf '%s\n' '{"artifacts":[{"name":"flashos-release-candidate-123-2","expired":true}]}' > $artifacts_path
 let expired_result = run_candidate($runtime, $script, $temporary, 'expired-result', ['select', '--run', $run_path, '--artifacts', $artifacts_path, '--repository', 'example/FlashOS', '--run-id', '123'], $host_path)
 expect_failure($expired_result, 'candidate artifact is missing, ambiguous, or expired', 'expired candidate artifact')

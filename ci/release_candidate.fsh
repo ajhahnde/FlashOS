@@ -220,6 +220,8 @@ def validate_selection(document) {
     require_candidate($document.run_status == 'completed', 'selected candidate run is not successfully completed')
     require_candidate($document.conclusion_kind == 'string', 'selected candidate run is not successfully completed')
     require_candidate($document.conclusion == 'success', 'selected candidate run is not successfully completed')
+    require_candidate($document.source_commit_kind == 'string', 'candidate run head SHA must be a full lowercase Git object ID')
+    validate_ascii_codes($document.source_commit_codes, 40, 'lower-hex', 'candidate run head SHA must be a full lowercase Git object ID')
     require_candidate($document.attempt_kind == 'number', 'candidate run attempt must be positive')
     validate_ascii_codes($document.attempt_codes, 0, 'positive', 'candidate run attempt must be positive')
     require_candidate($document.artifacts_kind == 'array', 'candidate artifact response is invalid')
@@ -239,7 +241,7 @@ def validate_selection(document) {
         }
     }
     require_candidate($matches == 1, 'candidate artifact is missing, ambiguous, or expired')
-    {artifact_name: $expected_name, run_attempt: $document.run_attempt}
+    {artifact_name: $expected_name, run_attempt: $document.run_attempt, source_commit: $document.source_commit}
 }
 
 def sha256(path) {
@@ -876,6 +878,8 @@ $artifact_response[0].artifacts as $artifacts |
   event: $run.event, event_kind: ($run.event | type),
   run_status: $run.status, status_kind: ($run.status | type),
   conclusion: $run.conclusion, conclusion_kind: ($run.conclusion | type),
+  source_commit: $run.head_sha, source_commit_kind: ($run.head_sha | type),
+  source_commit_codes: (if ($run.head_sha | type) == "string" then ($run.head_sha | explode) else [] end),
   run_attempt: $run.run_attempt, attempt_kind: ($run.run_attempt | type),
   attempt_codes: (if ($run.run_attempt | type) == "number" then ($run.run_attempt | tostring | explode) else [] end),
   artifacts_kind: ($artifacts | type),
