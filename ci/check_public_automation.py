@@ -243,7 +243,7 @@ EXPECTED_EMBEDDED = {
     "cookbook-shell-body": 164,
     "docker-command": 1,
     "make-target": 23,
-    "workflow-run-body": 86,
+    "workflow-run-body": 88,
 }
 
 EXPECTED_INSTALLED_NON_FLASH = {
@@ -909,34 +909,52 @@ def check_bootstrap_workflow_checkouts(root: Path = ROOT) -> None:
             jobs.append((job_name, job_lines))
 
         for job_name, job_lines in jobs:
-            bootstraps = (
-                line.strip().removeprefix("- ") == "run: make flash-bootstrap"
-                for line in job_lines
-            )
-            if not any(bootstraps):
+            bootstrap_indices = [
+                index
+                for index, line in enumerate(job_lines)
+                if line.strip().removeprefix("- ")
+                == "run: make flash-bootstrap"
+            ]
+            if not bootstrap_indices:
                 continue
-            checkout_steps: list[list[str]] = []
+            checkout_steps: list[tuple[int, list[str]]] = []
             for index, line in enumerate(job_lines):
-                if not re.match(r"^      - uses: actions/checkout@", line):
+                if not line.startswith("      - "):
                     continue
                 end = index + 1
                 while end < len(job_lines) and not job_lines[end].startswith(
                     "      - "
                 ):
                     end += 1
-                checkout_steps.append(job_lines[index:end])
+                step = job_lines[index:end]
+                if any(
+                    line.strip()
+                    .removeprefix("- ")
+                    .startswith("uses: actions/checkout@")
+                    for line in step
+                ):
+                    checkout_steps.append((index, step))
             relative = workflow.relative_to(root)
-            if len(checkout_steps) != 1:
-                fail(
-                    f"{relative} job {job_name} must have one checkout before "
-                    "Flash bootstrap"
-                )
-            if not any(
-                line.strip() == "fetch-depth: 0" for line in checkout_steps[0]
+            primary_checkouts = [
+                (index, step)
+                for index, step in checkout_steps
+                if not any(line.strip().startswith("path:") for line in step)
+            ]
+            if (
+                len(primary_checkouts) != 1
+                or primary_checkouts[0][0] >= bootstrap_indices[0]
             ):
                 fail(
-                    f"{relative} job {job_name} must fetch full history for "
-                    "Flash bootstrap"
+                    f"{relative} job {job_name} must have exactly one primary "
+                    "checkout before Flash bootstrap"
+                )
+            primary_checkout = primary_checkouts[0][1]
+            if not any(
+                line.strip() == "fetch-depth: 0" for line in primary_checkout
+            ):
+                fail(
+                    f"{relative} job {job_name} primary checkout must fetch full "
+                    "history for Flash bootstrap"
                 )
 
 

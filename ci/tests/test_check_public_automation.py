@@ -134,7 +134,7 @@ class PublicAutomationTests(unittest.TestCase):
         self.assertNotIn("make ", installer)
         automation.check_install_flash_adapter()
 
-    def test_bootstrap_workflow_checkouts_fetch_full_history(self) -> None:
+    def test_bootstrap_workflow_checkouts_preserve_primary_history(self) -> None:
         automation.check_bootstrap_workflow_checkouts()
         with tempfile.TemporaryDirectory(prefix="flash-workflow-history-") as raw:
             root = Path(raw)
@@ -144,7 +144,32 @@ class PublicAutomationTests(unittest.TestCase):
                 "jobs:\n"
                 "  probe:\n"
                 "    steps:\n"
-                "      - uses: actions/checkout@pinned\n"
+                "      - name: Checkout current tooling\n"
+                "        uses: actions/checkout@pinned\n"
+                "        with:\n"
+                "          fetch-depth: 0\n"
+                "      - name: Checkout isolated tag source\n"
+                "        uses: actions/checkout@pinned\n"
+                "        with:\n"
+                "          path: dist/tag-source\n"
+                "          fetch-depth: 1\n"
+                "      - name: Bootstrap\n"
+                "        run: make flash-bootstrap\n",
+                encoding="utf-8",
+            )
+            automation.check_bootstrap_workflow_checkouts(root)
+
+            (workflows / "probe.yml").write_text(
+                "jobs:\n"
+                "  probe:\n"
+                "    steps:\n"
+                "      - name: Checkout current tooling\n"
+                "        uses: actions/checkout@pinned\n"
+                "      - name: Checkout isolated tag source\n"
+                "        uses: actions/checkout@pinned\n"
+                "        with:\n"
+                "          path: dist/tag-source\n"
+                "          fetch-depth: 0\n"
                 "      - name: Bootstrap\n"
                 "        run: make flash-bootstrap\n",
                 encoding="utf-8",
@@ -152,7 +177,48 @@ class PublicAutomationTests(unittest.TestCase):
             stderr = io.StringIO()
             with redirect_stderr(stderr), self.assertRaises(SystemExit):
                 automation.check_bootstrap_workflow_checkouts(root)
-            self.assertIn("must fetch full history", stderr.getvalue())
+            self.assertIn(
+                "primary checkout must fetch full history", stderr.getvalue()
+            )
+
+            (workflows / "probe.yml").write_text(
+                "jobs:\n"
+                "  probe:\n"
+                "    steps:\n"
+                "      - name: Checkout isolated tag source\n"
+                "        uses: actions/checkout@pinned\n"
+                "        with:\n"
+                "          path: dist/tag-source\n"
+                "          fetch-depth: 0\n"
+                "      - name: Bootstrap\n"
+                "        run: make flash-bootstrap\n",
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit):
+                automation.check_bootstrap_workflow_checkouts(root)
+            self.assertIn(
+                "must have exactly one primary checkout", stderr.getvalue()
+            )
+
+            (workflows / "probe.yml").write_text(
+                "jobs:\n"
+                "  probe:\n"
+                "    steps:\n"
+                "      - uses: actions/checkout@pinned\n"
+                "        with:\n"
+                "          fetch-depth: 0\n"
+                "      - name: Bootstrap\n"
+                "        run: make flash-bootstrap\n"
+                "      - uses: actions/checkout@pinned\n",
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit):
+                automation.check_bootstrap_workflow_checkouts(root)
+            self.assertIn(
+                "must have exactly one primary checkout", stderr.getvalue()
+            )
 
     def test_qemu_consumer_acquires_explicit_immutable_automation(self) -> None:
         workflow = (ROOT / ".github/workflows/_image.yml").read_text(
