@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import re
@@ -14,15 +15,17 @@ import subprocess
 import sys
 import tempfile
 import threading
-from collections import Counter
+import unicodedata
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "ci/public_automation.json"
 TOOL_CONTRACT_PATH = ROOT / "ci/automation-tools.json"
+DOCUMENTATION_CONTRACT_PATH = ROOT / "ci/documentation.json"
 
 
 def load_expanded_contract(path: Path = CONTRACT_PATH) -> dict[str, object]:
@@ -162,6 +165,13 @@ NATIVE_FLASH = {
     "recipes/tests/relibc-tests-bins/relibc-tests-runner.fsh",
 }
 
+PUBLIC_EXAMPLES = {
+    "components/flash/examples/checked-status.fsh",
+    "components/flash/examples/json-boundary.fsh",
+    "components/flash/examples/planned-pipeline.fsh",
+    "components/flash/examples/structured-files.fsh",
+}
+
 HOST_INTERFACE = {
     "bin/aarch64-unknown-redox-llvm-config",
     "bin/aarch64-unknown-redox-pkg-config",
@@ -293,6 +303,371 @@ def repository_files(root: Path = ROOT) -> tuple[str, ...]:
     )
 
 
+def load_documentation_contract(
+    path: Path = DOCUMENTATION_CONTRACT_PATH,
+) -> dict[str, object]:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if set(document) != {"documents", "examples", "schema"}:
+        fail(f"documentation contract keys drifted: {sorted(document)!r}")
+    if document["schema"] != 1:
+        fail(f"documentation schema drifted: {document['schema']!r}")
+    if not isinstance(document["documents"], list) or not isinstance(
+        document["examples"], list
+    ):
+        fail("documentation documents and examples must be arrays")
+    return document
+
+
+def markdown_without_fences(source: str) -> str:
+    output: list[str] = []
+    fence: str | None = None
+    for line in source.splitlines():
+        match = re.match(r"^\s*(```+|~~~+)", line)
+        if match:
+            marker = match.group(1)[0]
+            if fence is None:
+                fence = marker
+            elif fence == marker:
+                fence = None
+            output.append("")
+        elif fence is None:
+            output.append(line)
+        else:
+            output.append("")
+    if fence is not None:
+        fail("documentation contains an unterminated fenced block")
+    return "\n".join(output)
+
+
+def markdown_slug(value: str) -> str:
+    value = re.sub(r"<[^>]*>", "", value)
+    value = re.sub(r"\[([^]]+)\]\([^)]*\)", r"\1", value)
+    value = re.sub(r"[`*_~]", "", value)
+    value = html.unescape(value).strip().lower()
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(
+        character
+        for character in value
+        if not unicodedata.combining(character)
+    )
+    value = re.sub(r"[^\w\- ]", "", value, flags=re.UNICODE)
+    value = re.sub(r"\s+", "-", value)
+    return re.sub(r"-+", "-", value).strip("-")
+
+
+def markdown_anchors(source: str) -> set[str]:
+    anchors: set[str] = set()
+    duplicates: Counter[str] = Counter()
+    for line in markdown_without_fences(source).splitlines():
+        explicit = re.search(r'<a\s+(?:name|id)=["\']([^"\']+)["\']', line, re.I)
+        if explicit:
+            anchors.add(explicit.group(1))
+        heading = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if heading is None:
+            continue
+        base = markdown_slug(heading.group(1))
+        suffix = duplicates[base]
+        anchors.add(base if suffix == 0 else f"{base}-{suffix}")
+        duplicates[base] += 1
+    return anchors
+
+
+def markdown_heading_levels(source: str) -> tuple[int, ...]:
+    levels: list[int] = []
+    for line in markdown_without_fences(source).splitlines():
+        heading = re.match(r"^\s{0,3}(#{1,6})\s+.+?\s*#*\s*$", line)
+        if heading is not None:
+            levels.append(len(heading.group(1)))
+    return tuple(levels)
+
+
+def markdown_links(source: str) -> list[str]:
+    source = markdown_without_fences(source)
+    links = [
+        match.group(1).strip()
+        for match in re.finditer(r"(?<!!)\[[^]]*\]\(([^)]+)\)", source)
+    ]
+    links.extend(
+        match.group(1).strip()
+        for match in re.finditer(r"!\[[^]]*\]\(([^)]+)\)", source)
+    )
+    links.extend(
+        match.group(1).strip()
+        for match in re.finditer(
+            r"\b(?:href|src|srcset)=[\"']([^\"']+)[\"']", source, re.I
+        )
+    )
+    return links
+
+
+def documentation_forbidden_markers(source: str) -> tuple[str, ...]:
+    patterns = (
+        r"\bajhahn(?:de)/(?:governance|systems|work|workflows)/",
+        r"\bCo-authored-by:",
+        r"\bAI[- ](?:assisted|generated)\b",
+        r"\bmerge unit\b",
+    )
+    matches = {
+        match.group(0)
+        for pattern in patterns
+        for match in re.finditer(pattern, source, re.IGNORECASE)
+    }
+    return tuple(sorted(matches, key=str.casefold))
+
+
+def check_documentation(
+    root: Path = ROOT,
+    *,
+    runtime: Path | None = None,
+    contract_path: Path | None = None,
+) -> None:
+    contract = load_documentation_contract(
+        contract_path or root / "ci/documentation.json"
+    )
+    allowed_classes = {
+        "canonical-guide",
+        "compatibility-redirect",
+        "front-door",
+        "frozen-contract",
+        "issue-template",
+        "policy",
+        "release-record",
+        "retained-upstream-snapshot",
+        "source-adjacent-reference",
+        "upstream-index",
+    }
+    entries: dict[str, dict[str, object]] = {}
+    for raw in contract["documents"]:
+        if not isinstance(raw, dict) or set(raw) != {"class", "owner", "path"}:
+            fail(f"documentation entry has invalid fields: {raw!r}")
+        path = str(raw["path"])
+        owner = raw["owner"]
+        classification = str(raw["class"])
+        if path in entries:
+            fail(f"documentation path is repeated: {path}")
+        if classification not in allowed_classes:
+            fail(f"documentation class is invalid for {path}: {classification}")
+        if owner is not None and not isinstance(owner, str):
+            fail(f"documentation owner is invalid for {path}: {owner!r}")
+        entries[path] = raw
+
+    observed = {
+        path
+        for path in repository_files(root)
+        if path.endswith((".md", ".markdown"))
+    }
+    declared = set(entries)
+    if declared != observed:
+        fail(
+            "documentation inventory drifted: "
+            f"missing={sorted(observed - declared)!r}, "
+            f"extra={sorted(declared - observed)!r}"
+        )
+
+    sources = {
+        path: (root / path).read_text(encoding="utf-8") for path in sorted(declared)
+    }
+    anchor_map = {path: markdown_anchors(source) for path, source in sources.items()}
+    heading_map = {
+        path: markdown_heading_levels(source) for path, source in sources.items()
+    }
+    graph: dict[str, set[str]] = defaultdict(set)
+    direct_links: dict[str, set[str]] = defaultdict(set)
+    diagnostics: list[str] = []
+
+    for source_path, source in sources.items():
+        forbidden = documentation_forbidden_markers(source)
+        if forbidden:
+            diagnostics.append(
+                f"{source_path}: private or provenance markers {forbidden!r}"
+            )
+        for raw_target in markdown_links(source):
+            target = raw_target.strip("<>")
+            if " " in target and not raw_target.startswith("<"):
+                target = target.split(" ", 1)[0]
+            parts = urlsplit(target)
+            if parts.scheme in {"http", "https", "mailto"} or target.startswith("//"):
+                continue
+            relative = unquote(parts.path)
+            fragment = unquote(parts.fragment)
+            if relative:
+                candidate = ((root / source_path).parent / relative).resolve()
+                try:
+                    destination = candidate.relative_to(root.resolve()).as_posix()
+                except ValueError:
+                    diagnostics.append(
+                        f"{source_path}: link escapes repository: {target}"
+                    )
+                    continue
+            else:
+                destination = source_path
+            if not (root / destination).exists():
+                diagnostics.append(
+                    f"{source_path}: missing local target {target} -> {destination}"
+                )
+                continue
+            if destination in declared:
+                direct_links[source_path].add(destination)
+                graph[source_path].add(destination)
+                if fragment and fragment not in anchor_map[destination]:
+                    diagnostics.append(
+                        f"{source_path}: missing anchor {destination}#{fragment}"
+                    )
+
+    for path, entry in entries.items():
+        owner = entry["owner"]
+        if owner is None:
+            if path != "README.md":
+                diagnostics.append(f"{path}: only README.md may have no owner")
+            continue
+        if owner not in entries:
+            diagnostics.append(f"{path}: unknown documentation owner {owner}")
+        elif path not in direct_links[str(owner)]:
+            diagnostics.append(f"{path}: owner {owner} does not link to it directly")
+
+    h1_classes = {
+        "canonical-guide",
+        "compatibility-redirect",
+        "frozen-contract",
+        "retained-upstream-snapshot",
+        "source-adjacent-reference",
+        "upstream-index",
+    }
+    for path, levels in heading_map.items():
+        requires_h1 = entries[path]["class"] in h1_classes or (
+            entries[path]["class"] == "front-door" and path != "README.md"
+        )
+        if requires_h1 and levels.count(1) != 1:
+            diagnostics.append(f"{path}: expected exactly one level-1 heading")
+        for previous, current in zip(levels, levels[1:], strict=False):
+            if current > previous + 1:
+                diagnostics.append(
+                    f"{path}: heading level jumps from {previous} to {current}"
+                )
+
+    reachable: set[str] = set()
+    pending = deque(["README.md"])
+    while pending:
+        path = pending.popleft()
+        if path in reachable:
+            continue
+        reachable.add(path)
+        pending.extend(graph[path] - reachable)
+    if declared - reachable:
+        diagnostics.append(
+            f"documents unreachable from README.md: {sorted(declared - reachable)!r}"
+        )
+
+    full_guides = {
+        path
+        for path, entry in entries.items()
+        if entry["class"]
+        in {
+            "canonical-guide",
+            "front-door",
+            "frozen-contract",
+            "policy",
+            "release-record",
+            "upstream-index",
+        }
+        and path != "README.md"
+    }
+    for path in sorted(full_guides):
+        tail = "\n".join(sources[path].splitlines()[-12:])
+        if "---" not in tail or not markdown_links(tail):
+            diagnostics.append(f"{path}: full guide lacks footer navigation")
+
+    if diagnostics:
+        fail("documentation validation failed:\n  " + "\n  ".join(diagnostics))
+
+    examples = contract["examples"]
+    example_paths: set[str] = set()
+    for raw in examples:
+        if not isinstance(raw, dict) or "path" not in raw or "mode" not in raw:
+            fail(f"documentation example is invalid: {raw!r}")
+        path = str(raw["path"])
+        if path in example_paths:
+            fail(f"documentation example is repeated: {path}")
+        example_paths.add(path)
+        if not (root / path).is_file():
+            fail(f"documentation example is missing: {path}")
+    if example_paths != PUBLIC_EXAMPLES:
+        fail(
+            "documentation example inventory drifted: "
+            f"observed={sorted(example_paths)!r}"
+        )
+
+    if runtime is None:
+        return
+    runtime = validate_runtime_binary(runtime, label="documentation Flash runtime")
+    environment = os.environ.copy()
+    environment["NO_COLOR"] = "1"
+    ordered_paths = sorted(example_paths)
+    for path in ordered_paths:
+        process = checked_runtime_process(
+            [runtime, "check", root / path],
+            cwd=root,
+            environment=environment,
+            label=f"documentation example check {path}",
+        )
+        require_process(
+            process,
+            code=0,
+            stdout="",
+            stderr="",
+            label=f"documentation example check {path}",
+        )
+    process = checked_runtime_process(
+        [runtime, "format", "--check", *(root / path for path in ordered_paths)],
+        cwd=root,
+        environment=environment,
+        label="documentation example format",
+    )
+    require_process(
+        process,
+        code=0,
+        stdout="",
+        stderr="",
+        label="documentation example format",
+    )
+    for raw in examples:
+        path = str(raw["path"])
+        mode = str(raw["mode"])
+        arguments = [runtime, root / path]
+        if mode == "plan":
+            arguments = [runtime, "plan", root / path]
+        process = checked_runtime_process(
+            arguments,
+            cwd=root,
+            environment=environment,
+            label=f"documentation example {path}",
+        )
+        if process.returncode != 0 or process.stderr:
+            fail(
+                f"documentation example {path} failed: "
+                f"{(process.returncode, process.stdout, process.stderr)!r}"
+            )
+        if mode == "run" and process.stdout != raw.get("stdout"):
+            fail(f"documentation example {path} stdout differs: {process.stdout!r}")
+        if mode == "plan":
+            missing = [
+                marker
+                for marker in raw.get("stdout_contains", [])
+                if marker not in process.stdout
+            ]
+            if missing:
+                fail(f"documentation example {path} plan lacks {missing!r}")
+        if mode == "run-json-list":
+            try:
+                value = json.loads(process.stdout)
+            except json.JSONDecodeError as error:
+                fail(f"documentation example {path} emitted invalid JSON: {error}")
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) for item in value
+            ):
+                fail(f"documentation example {path} did not emit a string list")
+
+
 def is_test_data(path: str) -> bool:
     return path in TEST_DATA or (
         path.startswith("components/flash/tests/golden/") and path.endswith(".fsh")
@@ -314,6 +689,8 @@ def disposition(path: str) -> str | None:
         return "bootstrap-entrypoint"
     if path in NATIVE_FLASH:
         return "native-flash"
+    if path in PUBLIC_EXAMPLES:
+        return "public-example"
     if path in SHARED_FLASH_MODULES:
         return "shared-flash-module"
     if is_test_data(path):
@@ -5248,6 +5625,16 @@ def check_ci_policy_tests(runtime: Path, root: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--documentation-only",
+        action="store_true",
+        help="run the public documentation inventory, navigation, and example gate",
+    )
+    parser.add_argument(
+        "--documentation-runtime",
+        type=Path,
+        help="execute documentation examples through this Flash 1.0 runtime",
+    )
+    parser.add_argument(
         "--bootstrap-runtime",
         type=Path,
         help="first validate and execute parity with the immutable baseline fsh",
@@ -5258,11 +5645,20 @@ def main(argv: list[str] | None = None) -> int:
         help="then execute behavior and failure-path parity through this candidate fsh",
     )
     args = parser.parse_args(argv)
+    if args.documentation_only:
+        if args.bootstrap_runtime is not None or args.runtime is not None:
+            fail("--documentation-only does not accept parity runtime options")
+        check_documentation(runtime=args.documentation_runtime)
+        print("documentation contract: ok")
+        return 0
+    if args.documentation_runtime is not None:
+        fail("--documentation-runtime requires --documentation-only")
     inventory = scan()
     validate(inventory)
     check_install_flash_adapter()
     check_setup_entrypoint()
     check_setup_documentation()
+    check_documentation()
     if args.runtime is not None and args.bootstrap_runtime is None:
         fail("--runtime requires the independently acquired --bootstrap-runtime")
     bootstrap: Path | None = None

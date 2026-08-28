@@ -1,8 +1,8 @@
 # Hardware Compatibility
 
-[FlashOS](../README.md) › [Documentation](README.md) › Hardware Compatibility
+[FlashOS](../README.md) › [Product Guide](README.md) › Hardware Compatibility
 
-This document records device-specific evidence from running FlashOS on physical x86_64 systems. It defines how hardware results are classified, tested, and reported without converting upstream driver availability, QEMU behavior, or unperformed test plans into FlashOS support claims.
+This page records what happened when a specific FlashOS image was tested on a specific x86_64 machine. It also explains how to test and report results safely. A driver found upstream, a QEMU result, or a test that was never run is not evidence that FlashOS supports a physical device.
 
 ## On this page
 

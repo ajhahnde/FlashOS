@@ -2,10 +2,10 @@
 
 [FlashOS](README.md) › Documentation redirect
 
-This compatibility page is retained for older links and bookmarks. The canonical entry point for current FlashOS system, component, automation, release, and policy documentation is the [FlashOS Documentation Index](docs/README.md).
+This file keeps old links and bookmarks working. Current system, Flash, automation, release, and policy documentation starts in the [FlashOS Product Guide](docs/README.md).
 
-New links should target the canonical documentation pages rather than this forwarding file.
+Please link to the relevant guide instead of this redirect.
 
 ---
 
-[← Back to FlashOS](README.md) · [Open Documentation Index →](docs/README.md)
+[← Back to FlashOS](README.md) · [Open Product Guide →](docs/README.md)

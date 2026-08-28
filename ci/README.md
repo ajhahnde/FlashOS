@@ -1,10 +1,8 @@
 # CI/CD Contracts
 
-[FlashOS](../README.md) › CI/CD
+[FlashOS](../README.md) › [Product Guide](../docs/README.md) › CI/CD
 
-The scripts under `ci/` and the workflows under `.github/workflows/` implement the automated checks used for FlashOS development, image builds, runtime testing, security checks, and releases.
-
-This page focuses on how the pipeline is structured, how to run its checks locally, and where to start when something fails. The broader verification model is documented in [Verification and Testing](../docs/verification.md).
+The scripts under `ci/` and workflows under `.github/workflows/` check source changes, build images, test the runtime, enforce security policy, and prepare releases. This page explains how to run those checks and where to look when one fails. [Verification and Testing](../docs/verification.md) explains what the results do and do not prove.
 
 ## On this page
 
@@ -28,7 +26,7 @@ Product-specific checks live under `ci/` so they can be used both locally and fr
 | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | [`ci/check_profile.fsh`](check_profile.fsh)                                                   | Product profiles, release settings, branding, pinning, and workflow invariants |
 | [`ci/check_developer_interface.fsh`](check_developer_interface.fsh)                           | Host command help, aliases, completion, and shell syntax                       |
-| [`ci/check_public_automation.py`](check_public_automation.py)                                 | Independent Flash-runtime oracle, setup, inventory, package wiring, and parity |
+| [`ci/check_public_automation.py`](check_public_automation.py)                                 | Independent Flash-runtime oracle, setup, automation and documentation inventory, package wiring, examples, links, and parity |
 | [`ci/check_flashos_platform.fsh`](check_flashos_platform.fsh)                                 | FlashOS target/toolchain baseline and built target artifacts                   |
 | [`ci/check_flashos_capabilities.fsh`](check_flashos_capabilities.fsh)                         | Capability evidence inventory                                                  |
 | [`ci/check_flashos_operation_map.fsh`](check_flashos_operation_map.fsh)                       | Flash operation mapping to Rust, relibc, and Redox interfaces                  |
@@ -235,6 +233,29 @@ filesystem effects, and exact unsuccessful-status propagation under the
 bootstrap before the candidate. Hosted CI runs the static inventory in
 `repository-quality` and the runtime parity in `flash-quality`. Package/image
 and QEMU evidence remain separate downstream gates.
+
+### Documentation contract
+
+Run the public documentation check with:
+
+```bash
+source flashos.sh
+flashos check docs
+```
+
+`ci/documentation.json` lists every public Markdown page and curated `.fsh`
+example. The check catches missing or unlisted pages, broken local links and
+anchors, orphaned pages, missing index links, incomplete guide footers, invalid
+heading structure, private process terms, and unlisted examples. It also
+formats, checks, and runs each example with the fixed Flash 1.0 documentation
+runtime.
+
+The check cannot judge the rendered page or the quality of its prose, and it
+does not test whether external websites are available. Those still need human
+review.
+
+An optional local drift checker may run afterward when available, but it does
+not replace this public check.
 
 ### Platform baseline
 

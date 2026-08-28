@@ -7,7 +7,7 @@
 <h1>Trademark and Project Identity</h1>
 <p>
     <a href="README.md"><b>README</b></a> ·
-    <a href="docs/README.md"><b>Documentation</b></a> ·
+    <a href="docs/README.md"><b>Product Guide</b></a> ·
     <a href="docs/getting-started.md"><b>Getting Started</b></a> ·
     <a href="ci/README.md"><b>CI/CD</b></a> ·
     <a href="CHANGELOG.md"><b>Changelog</b></a> ·
@@ -29,4 +29,4 @@ The upstream Redox OS trademark policy is retained for reference in
 
 ---
 
-[← Previous: Security Policy](.github/SECURITY.md) · [FlashOS README](README.md) · [Next: Attribution Notice →](NOTICE)
+[← Previous: Security Policy](.github/SECURITY.md) · [Product Guide](docs/README.md) · [Next: Attribution Notice →](NOTICE)

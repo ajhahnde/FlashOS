@@ -1,8 +1,8 @@
 # Security Policy
 
-[FlashOS](../README.md) › Security Policy
+[FlashOS](../README.md) › [Product Guide](../docs/README.md) › Security Policy
 
-This policy explains which FlashOS versions and components are eligible for security review, how to report suspected vulnerabilities privately, and which limitations apply to current evaluation images. It is intended for security researchers, evaluators, and contributors. FlashOS is pre-alpha software and does not provide production security guarantees, long-term support, or response and remediation service-level agreements.
+Use this policy to report a suspected vulnerability privately and to check which versions are currently reviewed. FlashOS is pre-alpha software. It does not provide production security guarantees, long-term support, or guaranteed response and remediation times.
 
 ## On this page
 

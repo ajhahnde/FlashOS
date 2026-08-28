@@ -1,8 +1,8 @@
 # Upstream References
 
-[FlashOS](../../README.md) › [Documentation](../README.md) › Upstream References
+[FlashOS](../../README.md) › [Product Guide](../README.md) › Upstream References
 
-This directory contains retained reference copies from the Redox OS project, whose ecosystem currently provides substantial parts of the FlashOS technical foundation. These files offer upstream context and attribution but do not define current FlashOS behavior, dependency revisions, hardware compatibility, licensing as a whole, or project policy.
+This directory keeps reference copies from Redox OS, which still provides much of FlashOS's technical foundation. They are useful for upstream context and attribution. They do not define current FlashOS behavior, dependency versions, hardware support, overall licensing, or project policy.
 
 ## On this page
 
@@ -244,10 +244,10 @@ For an exact release artifact, use its accompanying source and image inventories
 - [Verification and Testing](../verification.md) — Evidence layers and the limits of build and runtime results
 - [Hardware Compatibility](../hardware.md) — Authoritative FlashOS physical-device evidence
 - [Roadmap](../roadmap.md) — Intended evolution of transitional dependencies
-- [Root README](../../README.md#flashos-and-upstream-redox-os) — Public project relationship summary
+- [Root README](../../README.md#what-ships-today) — Public project relationship summary
 - [Attribution Notice](../../NOTICE) — Legal and project-origin attribution
 - [Trademark and Project Identity](../../TRADEMARK.md) — FlashOS identity policy
 
 ---
 
-[← Previous: Roadmap](../roadmap.md) · [Documentation index](../README.md) · [Next: Flash Overview →](../../components/flash/README.md)
+[← Previous: Contributing](../../CONTRIBUTING.md) · [Documentation index](../README.md) · [Next: Flash Overview →](../../components/flash/README.md)

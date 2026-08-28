@@ -1,48 +1,69 @@
-# FlashOS Documentation
+# FlashOS Product Guide
 
-[FlashOS](../README.md) › Documentation
+[FlashOS](../README.md) › Product Guide
 
-This page is the central index for the public FlashOS documentation. It directs users, developers, and evaluators to the appropriate system-wide guide; component-specific details for Flash and CI are maintained in their own documentation areas.
+Not sure where to begin? Pick a goal from the first table. The rest of this page is the full index for system guides, Flash references, policies, and project records.
 
-## General guides
+## Start here
 
-| Goal                                      | Guide                                                  | Scope                                                                                                          |
-| ----------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Build and boot FlashOS for the first time | [Getting Started](getting-started.md)                  | Host requirements, repository setup, image building, QEMU execution, and initial session checks                |
-| Understand how the system is structured   | [Architecture](architecture.md)                        | System layers, image configuration, build-to-boot flow, component ownership, and upstream boundaries           |
-| Work on the repository                    | [Development](development.md)                          | Development environment, repository layout, common workflows, build operations, and documentation rules        |
-| Review public scripting boundaries        | [Public Automation](automation.md)                     | Native Flash programs, reviewed interpreter exceptions, dependencies, and verification                          |
-| Verify changes and built images           | [Verification and Testing](verification.md)            | Verification layers, local qualification steps, QEMU testing, and the relationship between local checks and CI |
-| Review physical hardware evidence         | [Hardware Compatibility](hardware.md)                  | Recorded hardware results, validation levels, test methodology, reporting guidance, and media-writing safety   |
-| Review the project direction              | [Roadmap](roadmap.md)                                  | Current priorities, longer-term direction, system-boundary evolution, and explicit non-goals                   |
-| Interpret inherited upstream material     | [Upstream Reference Documentation](upstream/README.md) | Preserved Redox OS reference documents and the limits of applying upstream observations to FlashOS             |
+| Goal | Page | Covers |
+| --- | --- | --- |
+| Build and boot FlashOS | [Getting Started](getting-started.md) | Host setup, local configuration, image construction, QEMU, login, first checks, and troubleshooting |
+| Understand how Flash fits | [Flash and FlashOS](flash.md) | The current shell integration, data and status handling, and the planned Shell/View design |
+| Try the language | [Flash by Example](../components/flash/docs/by-example.md) | Small executable programs for structured values, external bytes, `check`, and `plan` |
+| Learn Flash in depth | [Flash Documentation](../components/flash/docs/README.md) | Tutorials, the Flash 1.0 language reference, scripting, internals, and development |
+| About Me | [About Me](aboutme.md) | Personal background, motivation, working approach, and project principles |
+| Contribute | [Contributing](../CONTRIBUTING.md) | Issues, proposals, safe starter work, verification, documentation standards, and review expectations |
 
-## Component and automation documentation
+## Documentation map
 
-Some areas maintain separate documentation because their responsibilities extend beyond the general operating-system guides:
+The [FlashOS README](../README.md) is the front door. From there, the public documentation splits into these paths:
 
-- [Flash Overview](../components/flash/README.md) — Entry point for Flash (`fsh`), its design, usage, and component documentation.
-- [Flash Documentation Index](../components/flash/docs/README.md) — Language, scripting, internal architecture, development, and testing guides for Flash.
-- [Flash Scheduling Stress](../components/flash/scheduling/README.md) — Seeded host pipeline-cancellation and job-control campaigns, retained results, and exact replay.
-- [CI/CD Contracts](../ci/README.md) — Technical contracts implemented by the local CI scripts and their integration with hosted workflows.
+- **Main product guide:** [Product Guide](README.md) → [Getting Started](getting-started.md) → [Flash and FlashOS](flash.md) → [Architecture](architecture.md) → [Development](development.md) → [Public Automation](automation.md) → [Verification and Testing](verification.md) → [Hardware Compatibility](hardware.md) → [Roadmap](roadmap.md) → [About Me](aboutme.md) → [Contributing](../CONTRIBUTING.md) → [Upstream References](upstream/README.md).
+- **Flash guide:** [Flash Overview](../components/flash/README.md) → [Flash Documentation](../components/flash/docs/README.md) → [Flash by Example](../components/flash/docs/by-example.md) → [Language Guide](../components/flash/docs/language-guide.md) → [Scripting Guide](../components/flash/docs/scripting.md) → [Flash Architecture](../components/flash/docs/architecture.md) → [Flash Development](../components/flash/docs/development.md) → [CI/CD Contracts](../ci/README.md).
+- **Focused Flash references:** [Flash Changelog](../components/flash/CHANGELOG.md), [Performance Benchmarks](../components/flash/benchmarks/README.md), [Flash v1 Exercises](../components/flash/exercises/README.md), [Scheduling Stress](../components/flash/scheduling/README.md), [Fuzz Targets](../components/flash/fuzz/README.md), [End-to-end Tests](../components/flash/tests/e2e/README.md), [Test Fixtures](../components/flash/tests/fixtures/README.md), [Grammar Corpus](../components/flash/tests/golden/grammar/README.md), and [Lexical Corpus](../components/flash/tests/golden/lexical/README.md).
+- **Project records and policies:** [CI/CD Contracts](../ci/README.md) → [Changelog](../CHANGELOG.md) → [Security Policy](../.github/SECURITY.md) → [Trademark and Project Identity](../TRADEMARK.md).
+- **Compatibility redirects:** [Documentation](../DOCUMENTATION.md), [Setup](../SETUP.md), and [Hardware](../HARDWARE.md) keep older links working.
+- **Issue routes:** [Bug Report](../.github/ISSUE_TEMPLATE/bug_report.md), [Documentation Issue](../.github/ISSUE_TEMPLATE/documentation.md), [Hardware Report](../.github/ISSUE_TEMPLATE/hardware_report.md), and [Proposal](../.github/ISSUE_TEMPLATE/proposal.md).
+- **Retained Redox snapshots:** [Hardware](upstream/REDOX_HARDWARE.md) and [Trademark](upstream/REDOX_TRADEMARK.md) are historical upstream references reached through [Upstream References](upstream/README.md); they do not define FlashOS behavior or policy.
 
-## Project records and policies
+## FlashOS system guides
 
-- [Changelog](../CHANGELOG.md) — Public release history and notable changes to the FlashOS source tree.
-- [Security Policy](../.github/SECURITY.md) — Supported versions, vulnerability reporting, security scope, and known pre-alpha limitations.
-- [License](../LICENSE) — License text covering the root build infrastructure.
-- [Notice](../NOTICE) — Upstream attribution and licensing boundaries for inherited and separately licensed components.
-- [Trademark and Project Identity](../TRADEMARK.md) — Use of the FlashOS identity and its relationship to upstream names and marks.
+| Guide | Scope |
+| --- | --- |
+| [Architecture](architecture.md) | Current system layers, image profiles, build-to-boot flow, component ownership, and upstream boundaries |
+| [Development](development.md) | Repository workflow, build operations, packages, profiles, generated state, and review preparation |
+| [Public Automation](automation.md) | Flash-native programs, reviewed interpreter exceptions, setup boundary, and host tools |
+| [Verification and Testing](verification.md) | Source, target, profile, image, QEMU, release, and physical-hardware evidence |
+| [Hardware Compatibility](hardware.md) | Device-specific results, qualification vocabulary, safe testing, and reporting |
+| [Roadmap](roadmap.md) | Work in progress, likely next steps, later ideas, and non-goals |
 
-## Legacy paths
+## Flash guides and technical references
 
-The following root-level files remain as forwarding pages for existing links and bookmarks:
+- [Flash Overview](../components/flash/README.md) — Component role, v1 contract, implementation, tooling, and entry points.
+- [Flash by Example](../components/flash/docs/by-example.md) — Curated executable examples.
+- [Language Guide](../components/flash/docs/language-guide.md) — Frozen Flash 1.0 syntax, values, functions, modules, and pipelines.
+- [Scripting Guide](../components/flash/docs/scripting.md) — Files, arguments, checking, formatting, processes, statuses, errors, and jobs.
+- [Flash Architecture](../components/flash/docs/architecture.md) — Crates, analysis, planning, execution, platform capabilities, and lifecycle.
+- [Flash Development](../components/flash/docs/development.md) — Component toolchains, tests, target work, fuzzing, benchmarks, and documentation maintenance.
+- [Flash Changelog](../components/flash/CHANGELOG.md) — Component release history.
+- [Flash Supporting References](../components/flash/docs/README.md#supporting-technical-references) — Exercises, benchmarks, scheduling stress, fuzzing, and test corpora.
+- [CI/CD Contracts](../ci/README.md) — Exact local scripts, hosted workflows, classification, artifacts, and failure interpretation.
 
-- [Legacy documentation path](../DOCUMENTATION.md)
-- [Legacy setup path](../SETUP.md)
-- [Legacy hardware path](../HARDWARE.md)
+## Policies and project records
 
-New documentation should link directly to the current guides listed above rather than to these forwarding files.
+- [Changelog](../CHANGELOG.md) — FlashOS release history and current unreleased changes.
+- [Security Policy](../.github/SECURITY.md) — Reporting, evaluation scope, supported-version policy, and pre-alpha limitations.
+- [Trademark and Project Identity](../TRADEMARK.md) — FlashOS identity and upstream mark boundaries.
+- [License](../LICENSE) and [Notice](../NOTICE) — Root licensing, third-party licenses, and attribution.
+- [Upstream References](upstream/README.md) — Classification and interpretation of retained Redox reference snapshots.
+
+## Compatibility paths
+
+[Legacy documentation](../DOCUMENTATION.md), [setup](../SETUP.md), and
+[hardware](../HARDWARE.md) files remain as redirects for old links and
+bookmarks. New links should point here, to [Getting Started](getting-started.md),
+or to [Hardware Compatibility](hardware.md).
 
 ---
 

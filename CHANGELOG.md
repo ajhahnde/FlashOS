@@ -1,8 +1,8 @@
 # Changelog
 
-[FlashOS](README.md) › Changelog
+[FlashOS](README.md) › [Product Guide](docs/README.md) › Changelog
 
-All notable changes to the current FlashOS source tree are recorded in this document. It serves as the chronological source of truth for public releases and significant system updates. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+This file records notable FlashOS changes and public releases. Its format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 The `0.9.0` and older tags inherited with the Redox OS source history are upstream tags, not FlashOS releases. The former AArch64 FlashOS release history remains available in the archived `FlashOS-old` repository.
 
@@ -463,4 +463,4 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ---
 
-[← Previous: CI/CD Contracts](ci/README.md) · [FlashOS README](README.md) · [Next: Security Policy →](.github/SECURITY.md)
+[← Previous: CI/CD Contracts](ci/README.md) · [Product Guide](docs/README.md) · [Next: Security Policy →](.github/SECURITY.md)

@@ -1,8 +1,8 @@
 # Development
 
-[FlashOS](../README.md) › [Documentation](README.md) › Development
+[FlashOS](../README.md) › [Product Guide](README.md) › Development
 
-This guide describes the repository-wide workflow for modifying FlashOS system profiles, build infrastructure, packages, and component integration. It assumes that the host environment and first development image already work as described in [Getting Started](getting-started.md); detailed verification contracts and Flash-internal development procedures are documented separately.
+Use this guide when changing system profiles, build code, packages, or component integration. It assumes you can already build and boot the development image by following [Getting Started](getting-started.md). Flash internals and the full verification reference have their own guides.
 
 ## On this page
 
@@ -856,12 +856,16 @@ Place detailed information in its primary location:
 | Topic                        | Primary document                                                    |
 | ---------------------------- | ------------------------------------------------------------------- |
 | First build and boot         | [Getting Started](getting-started.md)                               |
+| FlashOS product model        | [Flash and FlashOS](flash.md)                                       |
 | System layers and boundaries | [Architecture](architecture.md)                                     |
 | Repository workflow          | This document                                                       |
+| Runnable Flash examples      | [Flash by Example](../components/flash/docs/by-example.md)           |
 | Verification model           | [Verification and Testing](verification.md)                         |
 | Exact CI behavior            | [CI/CD Contracts](../ci/README.md)                                  |
 | Hardware evidence            | [Hardware Compatibility](hardware.md)                               |
 | Future direction             | [Roadmap](roadmap.md)                                               |
+| Contributor path             | [Contributing](../CONTRIBUTING.md)                                   |
+| Maintainer introduction      | [About Me](aboutme.md)                                               |
 | Flash details                | [Flash Documentation](../components/flash/docs/README.md)           |
 
 Other documents should provide a short summary and link to the primary source rather than duplicating a full procedure.
@@ -878,6 +882,19 @@ Before documenting a command, path, syntax form, or runtime claim:
 - avoid turning inherited upstream behavior into a FlashOS support claim.
 
 Flash examples require particular care because it is not a POSIX shell and uses platform-specific integrations.
+
+After changing Markdown, navigation, help examples, or the curated Flash
+examples, run:
+
+```bash
+source flashos.sh
+flashos check docs
+```
+
+The command checks the public page inventory, local links and anchors, heading
+structure, index links, and guide footer navigation. It also formats, checks,
+and runs the curated examples with the fixed Flash 1.0 documentation runtime.
+The page and example lists are in `ci/documentation.json`.
 
 ### Preserve navigation
 
@@ -958,4 +975,4 @@ A successful local check is evidence for the specific layer it exercises. It is 
 
 ---
 
-[← Previous: Architecture](architecture.md) · [Documentation index](README.md) · [Next: Verification →](verification.md)
+[← Previous: Architecture](architecture.md) · [Documentation index](README.md) · [Next: Public Automation →](automation.md)

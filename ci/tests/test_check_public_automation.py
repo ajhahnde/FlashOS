@@ -67,6 +67,33 @@ class PublicAutomationTests(unittest.TestCase):
             Counter(map(automation.disposition, automation.NATIVE_FLASH)),
             Counter({"native-flash": 4}),
         )
+        self.assertEqual(
+            Counter(map(automation.disposition, automation.PUBLIC_EXAMPLES)),
+            Counter({"public-example": 4}),
+        )
+
+    def test_documentation_inventory_navigation_and_links_are_complete(self) -> None:
+        automation.check_documentation()
+        contract = automation.load_documentation_contract()
+        self.assertEqual(contract["schema"], 1)
+        self.assertEqual(len(contract["documents"]), 42)
+        self.assertEqual(
+            {entry["path"] for entry in contract["examples"]},
+            automation.PUBLIC_EXAMPLES,
+        )
+
+    def test_documentation_heading_levels_ignore_fenced_examples(self) -> None:
+        source = "# Guide\n\n## Task\n\n```text\n### Not a heading\n```\n"
+        self.assertEqual(automation.markdown_heading_levels(source), (1, 2))
+
+    def test_documentation_forbidden_markers_are_detected(self) -> None:
+        generated_marker = "AI" + "-generated"
+        private_path = "ajhahn" + "de/governance/policy.md"
+        source = f"{private_path}\n{generated_marker}\n"
+        self.assertEqual(
+            set(automation.documentation_forbidden_markers(source)),
+            {private_path.removesuffix("policy.md"), generated_marker},
+        )
 
     def test_shared_modules_and_external_tools_are_exact(self) -> None:
         self.assertEqual(
