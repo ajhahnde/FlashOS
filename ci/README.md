@@ -573,6 +573,11 @@ digests, and release absence. Publication repeats validation in the protected
 `production` environment and uploads the candidate files without building,
 compressing, generating, attesting, or substituting anything.
 
+Both publication jobs execute pinned validation tooling from the exact
+protected-main workflow revision and check out the immutable tag separately as
+source-only validation input. Tag contents cannot replace the publisher's
+selector or validator.
+
 ## Artifacts and supply chain
 
 The normal image handoff is:

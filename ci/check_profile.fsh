@@ -292,7 +292,15 @@ $rg,
 )
 require_marker_count($release_workflow, 'source_commit="$(jq -r .source_commit <<<"${selection}")"', '2', 'release publisher selected-run source binding', $rg)
 require_marker_count($release_workflow, 'source_commit="$(cat dist/candidate-source-commit)"', '2', 'release publisher candidate source validation', $rg)
-require_marker_count($release_workflow, 'git rev-parse "${TAG}^{tree}"', '2', 'release publisher tag-tree validation', $rg)
+require_marker_count($release_workflow, 'name: Checkout current validation tooling', '2', 'release publisher current-tooling checkout', $rg)
+require_marker_count($release_workflow, 'ref: ${{ github.sha }}', '2', 'release publisher current-tooling revision', $rg)
+require_marker_count($release_workflow, 'name: Checkout immutable tag source', '2', 'release publisher tag-source checkout', $rg)
+require_marker_count($release_workflow, 'ref: ${{ inputs.tag }}', '2', 'release publisher immutable tag selection', $rg)
+require_marker_count($release_workflow, 'path: dist/tag-source', '2', 'release publisher isolated tag-source path', $rg)
+require_marker_count($release_workflow, 'FLASHOS_RELEASE_VERSION="$(sed -n', '2', 'release publisher inert tag version parsing', $rg)
+require_marker_count($release_workflow, "s/^FLASHOS_RELEASE_VERSION=//p", '2', 'release publisher tag version selection', $rg)
+require_marker_count($release_workflow, "git -C dist/tag-source rev-parse 'HEAD^{tree}'", '2', 'release publisher tag-tree validation', $rg)
+require_marker_count($release_workflow, '--root dist/tag-source', '2', 'release publisher tag-root validation', $rg)
 reject_markers(
 $release_workflow,
 [
@@ -304,6 +312,9 @@ $release_workflow,
 'tags: ["v*"]',
 '--clobber',
 'git rev-parse "${TAG}^{commit}"',
+'git rev-parse "${TAG}^{tree}"',
+'source versions.env',
+'source dist/tag-source/versions.env',
 ],
 'release publisher must not regenerate or overwrite candidate bytes',
 $rg,
