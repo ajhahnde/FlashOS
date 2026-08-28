@@ -69,9 +69,11 @@ jobs:
             --run-id "${CANDIDATE_RUN_ID}")"
           attempt="$(jq -r .run_attempt <<<"${selection}")"
           artifact="$(jq -r .artifact_name <<<"${selection}")"
+          source_commit="$(jq -r .source_commit <<<"${selection}")"
           mkdir -p dist/release
           gh run download "${CANDIDATE_RUN_ID}" --name "${artifact}" --dir dist/release
           echo "${attempt}" > dist/candidate-run-attempt
+          echo "${source_commit}" > dist/candidate-source-commit
 
       - name: Validate run, tag, tree, manifest, inventory, and checksums
         env:
@@ -84,7 +86,7 @@ jobs:
             echo "::error::tag does not match versions.env"
             exit 1
           fi
-          source_commit="$(git rev-parse "${TAG}^{commit}")"
+          source_commit="$(cat dist/candidate-source-commit)"
           source_tree="$(git rev-parse "${TAG}^{tree}")"
           run_attempt="$(cat dist/candidate-run-attempt)"
           build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/release_candidate.fsh validate \
@@ -156,8 +158,10 @@ jobs:
             --run-id "${CANDIDATE_RUN_ID}")"
           attempt="$(jq -r .run_attempt <<<"${selection}")"
           artifact="$(jq -r .artifact_name <<<"${selection}")"
+          source_commit="$(jq -r .source_commit <<<"${selection}")"
           gh run download "${CANDIDATE_RUN_ID}" --name "${artifact}" --dir dist/release
           echo "${attempt}" > dist/candidate-run-attempt
+          echo "${source_commit}" > dist/candidate-source-commit
 
       - name: Revalidate immediately before publication
         env:
@@ -166,14 +170,17 @@ jobs:
         run: |
           set -euo pipefail
           source versions.env
+          source_commit="$(cat dist/candidate-source-commit)"
+          source_tree="$(git rev-parse "${TAG}^{tree}")"
+          run_attempt="$(cat dist/candidate-run-attempt)"
           build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/release_candidate.fsh validate \
             --bundle dist/release \
             --repository "${GITHUB_REPOSITORY}" \
             --version "${FLASHOS_RELEASE_VERSION}" \
-            --source-commit "$(git rev-parse "${TAG}^{commit}")" \
-            --source-tree "$(git rev-parse "${TAG}^{tree}")" \
+            --source-commit "${source_commit}" \
+            --source-tree "${source_tree}" \
             --run-id "${CANDIDATE_RUN_ID}" \
-            --run-attempt "$(cat dist/candidate-run-attempt)" \
+            --run-attempt "${run_attempt}" \
             --tag "${TAG}" \
             --verify-compressed
 

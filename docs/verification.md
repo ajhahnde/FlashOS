@@ -868,7 +868,9 @@ successful `candidate.yml` workflow in this repository, selects its exact run
 attempt, rejects missing/ambiguous/expired artifacts, and then checks:
 
 - tag equality with `v<FLASHOS_RELEASE_VERSION>`;
-- candidate source commit/tree equality with the tag commit/tree;
+- candidate source commit equality with the selected workflow run head and
+  candidate source tree equality with the tag tree (the commits may differ
+  after a squash merge);
 - manifest schema and pinned input graph against the tag checkout;
 - the exact allowlisted inventory, regular-file boundary, sizes, and digests;
 - every `SHA256SUMS` entry;
