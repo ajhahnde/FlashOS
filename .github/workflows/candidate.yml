@@ -35,6 +35,7 @@ jobs:
     env:
       FLASH_AUTOMATION_RUNTIME: ${{ github.workspace }}/build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh
       FLASH_AUTOMATION_JQ: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/jq
+      FLASH_AUTOMATION_RG: ${{ github.workspace }}/build/flash-automation-tools/linux-x86_64/bin/rg
     permissions:
       actions: read
       contents: read
