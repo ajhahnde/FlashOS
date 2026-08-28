@@ -8,8 +8,20 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-28
+
 ### Changed
 
+- Published one coherent FlashOS and Flash product guide with checked quick
+  starts and examples, explicit shipped-versus-future boundaries, an approved
+  maintainer page, and public contribution and issue routes.
+- Defined the pre-alpha evaluation threat model and release boundaries across
+  local credentials, Flash execution, installed services, immutable build
+  inputs, candidate identity, checksums, SBOMs, provenance, correction, and
+  withdrawal. The release profile locks direct root login while retaining a
+  passwordless administrative evaluation user.
+- Bound candidate production by default to the reviewed, version-specific
+  [v0.2.0 release notes](docs/releases/v0.2.0.md).
 - Migrated the installed `auto-test`, `acid-runner`, `relibc-tests-runner`, and
   `os-test-runner` automation from Ion or generated Bash to tracked Flash
   source with explicit runtime dependencies and preserved execution semantics.
@@ -460,6 +472,10 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
   CycloneDX SBOM generation, and build-provenance attestation.
 - Physical live USB boot, display, keyboard, login, and FlashShell validation
   on a Sony VAIO VPCEB4L1E.
+
+[Unreleased]: https://github.com/ajhahnde/FlashOS/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ajhahnde/FlashOS/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/ajhahnde/FlashOS/releases/tag/v0.1.0
 
 ---
 
