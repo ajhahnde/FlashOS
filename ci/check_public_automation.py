@@ -4287,6 +4287,11 @@ def check_ci_qualification_parity(runtime: Path, root: Path) -> None:
             "ci/check_candidate_qualification.py",
         ):
             materialize_baseline_source(relative, candidate / relative, root)
+        replace_occurrence(
+            candidate / "ci/check_main_qualification.py",
+            "was classified for the fast lane",
+            "was classified for a non-image lane",
+        )
 
         repository = "/repos/example/flashos"
         required_jobs = [
@@ -4324,7 +4329,7 @@ def check_ci_qualification_parity(runtime: Path, root: Path) -> None:
                 {"candidate_jobs": required_jobs},
             ),
             (
-                "candidate rejects image work on the fast lane",
+                "candidate rejects image work on a non-image lane",
                 "candidate",
                 {"changed_paths": ["docs/verification.md"]},
             ),
