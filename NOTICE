@@ -11,9 +11,10 @@ notice in LICENSE unless a file or component states otherwise. That license
 does not relicense third-party packages or separately licensed inherited
 components.
 
-Flash, located under components/flash, carries a component-local copy of the
-same MIT License and Anton Hahn copyright notice so that the workspace remains
-self-contained when distributed separately. See components/flash/LICENSE.
+Flash, located under components/flash, is Copyright 2026 Anton Hahn and licensed
+separately under the Mozilla Public License 2.0. Earlier Flash distributions
+remain governed by the licenses under which they were received. See
+components/flash/LICENSE.
 
 The inherited build-system code is derived from Redox OS and remains available
 under its MIT License and copyright notice in LICENSES/REDOX-BUILD-SYSTEM-MIT:

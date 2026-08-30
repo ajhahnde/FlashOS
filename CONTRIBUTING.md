@@ -82,6 +82,16 @@ A reviewable pull request:
 
 Review may ask for a smaller change, stronger tests, compatibility fixes, clearer attribution, or a simpler implementation. The amount of work already invested does not determine whether a change is accepted.
 
+## Licensing contributions
+
+Unless explicitly agreed otherwise in writing, a contribution intentionally
+submitted for inclusion is provided under the license that governs the files
+it changes. Flash contributions under `components/flash/` are provided under
+the [Mozilla Public License 2.0](components/flash/LICENSE); other original
+FlashOS material remains under its applicable repository license. Third-party
+material retains its own terms and notices. Submit only work that you have the
+right to provide under those terms.
+
 ## Documentation standards
 
 Write public documentation in English for readers who only know the public repository. Separate what works now from current limitations and future ideas. Explain a topic fully in one place and link to it elsewhere instead of repeating the same warning on every page.
