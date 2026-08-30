@@ -172,6 +172,12 @@ PUBLIC_EXAMPLES = {
     "components/flash/examples/structured-files.fsh",
 }
 
+SYSTEM_API_FLASH = {
+    "system/api/examples/system-description.fsh",
+    "system/api/flash/system.fsh",
+    "system/api/flash/tests/module.fsh",
+}
+
 HOST_INTERFACE = {
     "bin/aarch64-unknown-redox-llvm-config",
     "bin/aarch64-unknown-redox-pkg-config",
@@ -240,10 +246,10 @@ SCRIPT_SUFFIXES = {
 }
 
 EXPECTED_EMBEDDED = {
-    "cookbook-shell-body": 164,
+    "cookbook-shell-body": 165,
     "docker-command": 1,
     "make-target": 23,
-    "workflow-run-body": 88,
+    "workflow-run-body": 92,
 }
 
 EXPECTED_INSTALLED_NON_FLASH = {
@@ -691,6 +697,8 @@ def disposition(path: str) -> str | None:
         return "native-flash"
     if path in PUBLIC_EXAMPLES:
         return "public-example"
+    if path in SYSTEM_API_FLASH:
+        return "system-api-flash"
     if path in SHARED_FLASH_MODULES:
         return "shared-flash-module"
     if is_test_data(path):

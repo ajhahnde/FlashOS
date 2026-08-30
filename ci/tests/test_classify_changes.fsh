@@ -80,6 +80,17 @@ for path in ['components/flash/crates/flash-cli/src/main.rs', 'recipes/groups/au
     expect_projection($jq, $target, '.lane', 'product', "target lane for $path")
     expect_projection($jq, $target, '.target_required', 'true', "target decision for $path")
 }
+for path in ['system/api/src/contract.rs', 'system/api/src/transport.rs', 'system/api/tests/flash_integration.rs'] {
+    let source = run_success($runtime, $script, $jq, $temporary, 'source', [$path])
+    expect_projection($jq, $source, '.lane', 'source', "source lane for $path")
+    expect_projection($jq, $source, '.image_required', 'false', "source image decision for $path")
+    expect_projection($jq, $source, '.target_required', 'false', "source target decision for $path")
+}
+for path in ['system/api/src/provider.rs', 'system/api/src/main.rs', 'system/api/flash/system.fsh', 'recipes/system/flashos-system/recipe.toml', 'config/x86_64/flashos.toml'] {
+    let api_target = run_success($runtime, $script, $jq, $temporary, 'api-target', [$path])
+    expect_projection($jq, $api_target, '.lane', 'product', "API product lane for $path")
+    expect_projection($jq, $api_target, '.target_required', 'true', "API target decision for $path")
+}
 for path in ['.github/workflows/ci.yml', 'ci/classify_changes.fsh', 'future/subsystem/input.bin'] {
     let product = run_success($runtime, $script, $jq, $temporary, 'product', [$path])
     expect_projection($jq, $product, '.lane', 'product', "product lane for $path")
@@ -99,7 +110,7 @@ let mixed = run_success($runtime, $script, $jq, $temporary, 'mixed', ['docs/veri
 expect_projection($jq, $mixed, '.lane', 'product', 'mixed lane')
 expect_projection($jq, $mixed, '.image_required', 'true', 'mixed image decision')
 
-for path in ['Cargo.lock', 'components/flash/crates/flash-cli/Cargo.toml', '.github/workflows/security.yml'] {
+for path in ['Cargo.lock', 'components/flash/crates/flash-cli/Cargo.toml', 'system/api/Cargo.toml', 'system/api/Cargo.lock', '.github/workflows/security.yml'] {
     let security = run_success($runtime, $script, $jq, $temporary, 'security', [$path])
     expect_projection($jq, $security, '.security_required', 'true', "security decision for $path")
 }

@@ -177,6 +177,23 @@ accounts.
 
 Flash is a userspace process. It does not replace the kernel, system initialization, authentication service, filesystem, package manager, or external command implementations.
 
+### FlashOS system API
+
+The FlashOS-owned [`system/api/`](../system/api/) package defines a small local
+semantic contract outside the independently versioned Flash workspace. Its
+`flashos-system` executable is a single-shot JSON adapter over that contract;
+the transport is not the API owner and is not a stable Rust, C, syscall, or
+network ABI.
+
+Schema 1 contains only the read-only `system.describe` query. The installed
+provider reads the release identity from `/usr/lib/os-release` and uses the
+compiled target architecture. It never substitutes host development identity.
+The same package installs a pure Flash validator at
+`/usr/share/flashos/flash/system.fsh`, allowing an explicit external-command →
+`from json` → typed validator pipeline without adding a Flash built-in or
+changing the frozen Flash 1.0 contract. See [FlashOS System API](system-api.md)
+for the public shape, compatibility rules, and limits.
+
 ## Image configuration
 
 FlashOS image composition is defined by three central configuration files:

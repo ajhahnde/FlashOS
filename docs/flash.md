@@ -66,7 +66,13 @@ The longer-term idea is to let commands and interactive terminal views use the s
 
 The principle is: **every action has a command; every command can have a view.** Higher-level views should make common work easier without hiding the command language.
 
-None of this is available yet. FlashOS does not currently ship the dedicated TUI, a stable system API, shared Shell/View actions, a general service interface, controlled apply, secret handling, a cloud SDK, or an infrastructure state engine. The current `plan` command can inspect one pipeline without running it; it is not a general-purpose dry run.
+The first narrow piece is available: the experimental
+[`system.describe`](system-api.md) query and its explicit Flash typed pipeline.
+FlashOS does not yet ship the dedicated TUI, a stable system API, shared
+Shell/View mutations, a general service interface, controlled apply, secret
+handling, a cloud SDK, or an infrastructure state engine. The current `plan`
+command can inspect one pipeline without running it; it is not a general-purpose
+dry run.
 
 ## Relationship to other structured shells
 

@@ -634,6 +634,62 @@ export PATH = "/home/user:/usr/bin"
         )
 
 
+def exercise_system_api() -> None:
+    """Qualify the installed transport and exact static Flash integration."""
+    source = b"""#!/usr/bin/env fsh
+import { system_description_from_envelope } from '/usr/share/flashos/flash/system.fsh'
+
+def qualify_system_description(outcome: Record) -> Record {
+    if !$outcome.ok || $outcome.error != null {
+        throw 'FlashOS system API outcome is not successful'
+    }
+    if $outcome.result.action != 'system.describe' {
+        throw 'FlashOS system API action differs'
+    }
+    if $outcome.result.system.name != 'FlashOS' {
+        throw 'FlashOS system API product name differs'
+    }
+    if $outcome.result.system.release != '@VERSION@' {
+        throw 'FlashOS system API release differs'
+    }
+    if $outcome.result.system.architecture != 'x86_64' {
+        throw 'FlashOS system API architecture differs'
+    }
+    return $outcome
+}
+
+^flashos-system describe --schema 1 --format json \
+| from json \
+| each {|envelope| system_description_from_envelope($envelope)} \
+| each {|outcome| qualify_system_description($outcome)} \
+| to json \
+| ^cat
+
+let api_status = $status
+if !$api_status.ok || !$api_status.stages[0].ok {
+    throw 'FlashOS system API transport failed'
+}
+^printf '%s\n' FLASHOS-SYSTEM-API-OK
+""".replace(b"@VERSION@", version.encode())
+    materialize_matrix_script(source)
+    command = b"^fsh m"
+    observation_start = submit_line(command, target_matrix.primary_prompt + command)
+    collect_until(b"FLASHOS-SYSTEM-API-OK", observation_start, visible=True)
+    transcript = CSI_SEQUENCE.sub(b"", bytes(captured[observation_start:]))
+    required = (
+        b'"ok":true',
+        b'"action":"system.describe"',
+        b'"name":"FlashOS"',
+        f'"release":"{version}"'.encode(),
+        b'"architecture":"x86_64"',
+    )
+    for marker in required:
+        if marker not in transcript:
+            raise RuntimeError(f"FlashOS system API output omitted {marker!r}")
+    if b'"error":null' not in transcript or b'"ok":false' in transcript:
+        raise RuntimeError("FlashOS system API output did not remain a success outcome")
+
+
 failure: BaseException | None = None
 benchmark_measurements: list[dict[str, object]] = []
 try:
@@ -742,6 +798,7 @@ try:
                 )
 
     exercise_public_automation()
+    exercise_system_api()
 
     if args.benchmark_output is not None:
         benchmark_measurements.append(
@@ -913,6 +970,7 @@ verified = [
     "Flash internal command",
     "Flash target runtime",
     "non-interactive Flash script",
+    "experimental FlashOS system API",
     "external pipeline",
     "structured directory command",
     "foreground and background job execution",

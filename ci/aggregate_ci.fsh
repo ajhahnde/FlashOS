@@ -89,6 +89,8 @@ def parse_and_enforce(classification) {
     mut valid_lane = false
     if $lane == 'fast' && !$image_required && !$target_required {
         $valid_lane = true
+    } else if $lane == 'source' && !$image_required && !$target_required {
+        $valid_lane = true
     } else if $lane == 'product' && $image_required {
         $valid_lane = true
     }

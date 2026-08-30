@@ -43,6 +43,7 @@ def observe(projected) {
     '.github/dependabot.yml', '.github/workflows/security.yml', 'Cargo.lock',
     'Cargo.toml', 'deny.toml', 'components/flash/Cargo.lock',
     'components/flash/Cargo.toml', 'components/flash/deny.toml',
+    'system/api/Cargo.lock', 'system/api/Cargo.toml', 'system/api/deny.toml',
     ]
     mut low_risk = false
     if $projected.normalized in $low_risk_files {
@@ -61,6 +62,8 @@ def observe(projected) {
         $target = true
     } else if $projected.flash_recipe_prefix {
         $target = true
+    } else if $projected.system_api_target {
+        $target = true
     }
     mut security = false
     if $projected.normalized in $security_files {
@@ -72,6 +75,7 @@ def observe(projected) {
         position: $projected.position,
         path: $projected.normalized,
         low_risk: $low_risk,
+        source_qualified: $projected.system_api_source,
         target: $target,
         security: $security,
     }
@@ -97,13 +101,16 @@ def product_reason(observation) -> String {
 
 def decide(observations) {
     mut product_count = 0
+    mut source_count = 0
     mut security_required = false
     mut target_required = false
     for observation in $observations {
         if $observation.security {
             $security_required = true
         }
-        if !$observation.low_risk {
+        if $observation.source_qualified {
+            $source_count = $source_count + 1
+        } else if !$observation.low_risk {
             $product_count = $product_count + 1
             if $observation.target {
                 $target_required = true
@@ -117,6 +124,7 @@ def decide(observations) {
             target_required: true,
             security_required: true,
             product_count: 0,
+            source_count: 0,
         }
         return $empty
     }
@@ -127,8 +135,20 @@ def decide(observations) {
             target_required: $target_required,
             security_required: $security_required,
             product_count: $product_count,
+            source_count: $source_count,
         }
         return $product
+    }
+    if $source_count > 0 {
+        let source = {
+            lane: 'source',
+            image_required: false,
+            target_required: false,
+            security_required: $security_required,
+            product_count: 0,
+            source_count: $source_count,
+        }
+        return $source
     }
     let fast = {
         lane: 'fast',
@@ -136,6 +156,7 @@ def decide(observations) {
         target_required: false,
         security_required: $security_required,
         product_count: 0,
+        source_count: 0,
     }
     return $fast
 }
@@ -148,6 +169,7 @@ def validate(envelope) {
     expect_unique($result.paths, 'classification paths contain duplicates')
     mut previous = null
     mut product_count = 0
+    mut source_count = 0
     mut security_required = false
     mut target_required = false
     mut path_index = 0
@@ -161,7 +183,9 @@ def validate(envelope) {
         if $observation.security {
             $security_required = true
         }
-        if !$observation.low_risk {
+        if $observation.source_qualified {
+            $source_count = $source_count + 1
+        } else if !$observation.low_risk {
             $product_count = $product_count + 1
             if $observation.target {
                 $target_required = true
@@ -183,11 +207,18 @@ def validate(envelope) {
         return $result
     }
     expect_equal($result.security_required, $security_required, 'classification security decision differs')
-    if $product_count == 0 {
+    if $product_count == 0 && $source_count == 0 {
         expect_equal($result.lane, 'fast', 'fast classification lane differs')
         expect_equal($result.image_required, false, 'fast classification image decision differs')
         expect_equal($result.target_required, false, 'fast classification target decision differs')
         expect_equal($result.reasons, ['every changed path is explicitly isolated documentation, policy, reporting, or host tooling'], 'fast classification reasons differ')
+        return $result
+    }
+    if $product_count == 0 {
+        expect_equal($result.lane, 'source', 'source classification lane differs')
+        expect_equal($result.image_required, false, 'source image decision differs')
+        expect_equal($result.target_required, false, 'source target decision differs')
+        expect_equal($result.reasons, ['every product path is covered by the complete FlashOS system API host contract'], 'source classification reasons differ')
         return $result
     }
     expect_equal($result.lane, 'product', 'product classification lane differs')
@@ -205,7 +236,7 @@ def validate(envelope) {
     expect_equal($result.reasons[0], 'product or unknown paths require image and runtime qualification', 'product classification reason heading differs')
     mut reason_index = 1
     for observation in $observations {
-        if !$observation.low_risk {
+        if !$observation.low_risk && !$observation.source_qualified {
             expect_equal($result.reasons[$reason_index], "product: ${$observation.path}", 'product classification reason order differs')
             $reason_index = $reason_index + 1
         }
@@ -290,7 +321,9 @@ map(.key as $position | .value as $raw |
       component_prefix:($normalized|startswith("components/flash/")),
       config_prefix:($normalized|startswith("config/")),
       flash_recipe_prefix:($normalized|startswith("recipes/terminal/flash/")),
-      security_nested_manifest:($normalized|test("^components/flash/.+/Cargo\\.toml$"))
+      system_api_source:($normalized|test("^system/api/(src/(contract|lib|transport)\\.rs|tests/[^/]+\\.rs)$")),
+      system_api_target:($normalized|test("^(system/api/(Cargo\\.(lock|toml)|src/(main|provider)\\.rs|flash/|examples/)|recipes/system/flashos-system/)")),
+      security_nested_manifest:($normalized|test("^(components/flash/.+/Cargo\\.toml|system/api/Cargo\\.toml)$"))
     })'
 ^env $jq --null-input --argjson nul $nul_mode --rawfile raw $input $project_paths > $decoded 2> $errors
 if !$status.ok {
@@ -327,13 +360,15 @@ let selected_target = "$(^env $jq --raw-output .target_required $decision)"
 let selected_security = "$(^env $jq --raw-output .security_required $decision)"
 if $selected_lane == 'fast' {
     ^printf '%s' '"every changed path is explicitly isolated documentation, policy, reporting, or host tooling"' > $reason_documents || exit 1
+} else if $selected_lane == 'source' {
+    ^printf '%s' '"every product path is covered by the complete FlashOS system API host contract"' > $reason_documents || exit 1
 } else if "$(^env $jq --raw-output 'length' $observations)" == '0' {
     ^printf '%s' '"no changed paths were supplied; qualification fails closed"' > $reason_documents || exit 1
 } else {
     ^printf '%s' '"product or unknown paths require image and runtime qualification"' > $reason_documents || exit 1
     open $observations \
     | from json array \
-    | where {|observation| !$observation.low_risk} \
+    | where {|observation| !$observation.low_risk && !$observation.source_qualified} \
     | each {|observation| product_reason($observation)} \
     | to json >> $reason_documents
     if $selected_target == 'true' {

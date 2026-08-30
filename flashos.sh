@@ -348,6 +348,15 @@ _flashos_check_root() {
     _flashos_root command cargo test --locked
 }
 
+_flashos_check_system_api() {
+  _flashos_root command cargo fmt --manifest-path system/api/Cargo.toml --all --check &&
+    _flashos_root command cargo clippy --manifest-path system/api/Cargo.toml \
+      --all-targets --locked -- -D warnings &&
+    _flashos_root command cargo test --manifest-path system/api/Cargo.toml --locked &&
+    _flashos_root command env RUSTDOCFLAGS="-D warnings" cargo doc \
+      --manifest-path system/api/Cargo.toml --locked --no-deps
+}
+
 flashos-check() {
   local scope="${1:-quick}"
   [ "$#" -eq 0 ] || shift
@@ -366,6 +375,7 @@ flashos-check() {
     ci)
       _flashos_check_quick &&
         _flashos_check_root &&
+        _flashos_check_system_api &&
         flash-check all &&
         _flashos_check_python
       ;;

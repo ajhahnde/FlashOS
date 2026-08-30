@@ -43,6 +43,7 @@ def validate(bundle) {
     'coreutils',
     'flash',
     'flash.lsp',
+    'flashos-system',
     'kernel',
     'libgcc',
     'netdb',
@@ -150,6 +151,15 @@ def validate(bundle) {
     if $bundle.flash_recipe.build.template != 'custom' || !('DYNAMIC_INIT' in $bundle.flash_recipe.build.script) {
         throw 'Flash workspace recipe must initialize the Cargo build template'
     }
+    if $bundle.system_api.package.name != 'flashos-system-api' || !$bundle.system_api_version_semantic {
+        throw 'FlashOS system API package identity is invalid'
+    }
+    if $bundle.system_api_recipe.source != {workspace: 'system/api'} {
+        throw 'FlashOS system API recipe must use the in-tree system/api source'
+    }
+    if $bundle.system_api_recipe.build.template != 'custom' || !('DYNAMIC_INIT' in $bundle.system_api_recipe.build.script) {
+        throw 'FlashOS system API recipe must initialize the Cargo build template'
+    }
     return true
 }
 
@@ -196,6 +206,8 @@ let root_manifest = "$temporary/root.json"
 let flash_manifest = "$temporary/flash.json"
 let flash_release = "$temporary/flash-release.json"
 let flash_recipe = "$temporary/flash-recipe.json"
+let system_api_manifest = "$temporary/system-api.json"
+let system_api_recipe = "$temporary/system-api-recipe.json"
 let login = "$temporary/login.json"
 let bundle = "$temporary/bundle.json"
 let profile_document = toml_to_json("$root/config/x86_64/flashos.toml", $errors)
@@ -221,6 +233,13 @@ let flash_recipe_document = toml_to_json(
 $errors,
 )
 ^printf '%s\n' $flash_recipe_document > $flash_recipe
+let system_api_document = toml_to_json("$root/system/api/Cargo.toml", $errors)
+^printf '%s\n' $system_api_document > $system_api_manifest
+let system_api_recipe_document = toml_to_json(
+"$root/recipes/system/flashos-system/recipe.toml",
+$errors,
+)
+^printf '%s\n' $system_api_recipe_document > $system_api_recipe
 ^env $jq --raw-output '.files[] | select(.path == "/etc/login_schemes.toml") | .data' $base > "$temporary/login.toml"
 if !$status.ok {
     profile_error('cannot project /etc/login_schemes.toml')
@@ -239,9 +258,11 @@ if $version == '' {
 --slurpfile flash $flash_manifest \
 --slurpfile flash_release $flash_release \
 --slurpfile flash_recipe $flash_recipe \
+--slurpfile system_api $system_api_manifest \
+--slurpfile system_api_recipe $system_api_recipe \
 --slurpfile login $login \
 --arg version $version \
-'. as $profile | (($base[0].packages|keys) + ($profile.packages|keys) | unique | sort) as $packages | {profile:$profile, release:$release[0], base:$base[0], root:$root[0], flash:$flash[0], flash_release:$flash_release[0], flash_recipe:$flash_recipe[0], login:$login[0], version:$version, flash_version_semantic:(try ($flash[0].workspace.package.version|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) catch false), packages:$packages, gui_packages:[$packages[]|select(ascii_downcase|test("cosmic|orbital|wayland|weston|x11|xorg"))], profile_users:($profile.users|keys|sort), release_users:($release[0].users|keys|sort), release_root_has_password:($release[0].users.root|has("password")), release_user_records:[$release[0].users|to_entries[]|{name:.key,password:(.value.password//null),password_lower:(try (.value.password|ascii_downcase) catch null)}], console_init_count:([$profile.files[]|select(.path=="/usr/lib/init.d/30_console" and ((.append//false)|not))]|length), console_init_data:([$profile.files[]|select(.path=="/usr/lib/init.d/30_console" and ((.append//false)|not))][0].data//null), login_file_count:([$base[0].files[]|select(.path=="/etc/login_schemes.toml")]|length), legacy_ui_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/ui" or startswith("/ui/"))], dead_runtime_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/etc/pkg.d/50_redox" or .=="/usr/include" or .=="/include" or .=="/usr/libexec" or .=="/usr/share" or .=="/share")], os_release_count:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))]|length), os_release_data:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))][0].data//null), issue_count:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))]|length), issue_data:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))][0].data//null), identity_postinstall:["/etc/hostname","/etc/issue","/etc/motd","/etc/os-release","/usr/lib/os-release"] | map(. as $path | [($base[0].files+$profile.files)[]|select(.path==$path)][-1].postinstall//false)}' \
+'. as $profile | (($base[0].packages|keys) + ($profile.packages|keys) | unique | sort) as $packages | {profile:$profile, release:$release[0], base:$base[0], root:$root[0], flash:$flash[0], flash_release:$flash_release[0], flash_recipe:$flash_recipe[0], system_api:$system_api[0], system_api_recipe:$system_api_recipe[0], login:$login[0], version:$version, flash_version_semantic:(try ($flash[0].workspace.package.version|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) catch false), system_api_version_semantic:(try ($system_api[0].package.version|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) catch false), packages:$packages, gui_packages:[$packages[]|select(ascii_downcase|test("cosmic|orbital|wayland|weston|x11|xorg"))], profile_users:($profile.users|keys|sort), release_users:($release[0].users|keys|sort), release_root_has_password:($release[0].users.root|has("password")), release_user_records:[$release[0].users|to_entries[]|{name:.key,password:(.value.password//null),password_lower:(try (.value.password|ascii_downcase) catch null)}], console_init_count:([$profile.files[]|select(.path=="/usr/lib/init.d/30_console" and ((.append//false)|not))]|length), console_init_data:([$profile.files[]|select(.path=="/usr/lib/init.d/30_console" and ((.append//false)|not))][0].data//null), login_file_count:([$base[0].files[]|select(.path=="/etc/login_schemes.toml")]|length), legacy_ui_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/ui" or startswith("/ui/"))], dead_runtime_paths:[($base[0].files+$profile.files)[]|.path|select(.=="/etc/pkg.d/50_redox" or .=="/usr/include" or .=="/include" or .=="/usr/libexec" or .=="/usr/share" or .=="/share")], os_release_count:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))]|length), os_release_data:([$profile.files[]|select(.path=="/usr/lib/os-release" and ((.append//false)|not))][0].data//null), issue_count:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))]|length), issue_data:([$profile.files[]|select(.path=="/etc/issue" and ((.append//false)|not))][0].data//null), identity_postinstall:["/etc/hostname","/etc/issue","/etc/motd","/etc/os-release","/usr/lib/os-release"] | map(. as $path | [($base[0].files+$profile.files)[]|select(.path==$path)][-1].postinstall//false)}' \
 $profile > $bundle 2> $errors
 if !$status.ok {
     profile_error('cannot project the FlashOS profile contract')
@@ -480,7 +501,8 @@ $ci_workflow,
 'root-target-v1-',
 'flash-target-v1-',
 'github.event.pull_request.draft == false',
-'release-evidence: false',
+"contains(needs.scope.outputs.classification, 'system/api/')",
+"contains(needs.scope.outputs.classification, 'recipes/system/flashos-system/')",
 'PR_DRAFT:',
 "\n  required:\n",
 ],
@@ -583,6 +605,18 @@ require_markers(
 $rg,
 )
 require_markers(
+"$root/recipes/system/flashos-system/recipe.toml",
+[
+'workspace = "system/api"',
+'cookbook_cargo --bin flashos-system',
+'"${COOKBOOK_STAGE}/usr/share/flashos/flash"',
+'"${COOKBOOK_SOURCE}/flash/system.fsh"',
+'"${COOKBOOK_SOURCE}/examples/system-description.fsh"',
+],
+'FlashOS system API recipe is incomplete',
+$rg,
+)
+require_markers(
 "$root/recipes/core/relibc/recipe.toml",
 [
 'name = "dev"',
@@ -641,6 +675,7 @@ for package in [
 'bootloader',
 'coreutils',
 'flash',
+'flashos-system',
 'installer',
 'kernel',
 'libgcc',
@@ -652,7 +687,7 @@ for package in [
 'uutils',
 ] {
     mut recipe = ''
-    for section in ['core', 'libs', 'terminal'] {
+    for section in ['core', 'libs', 'terminal', 'system'] {
         let candidate = "$root/recipes/$section/$package/recipe.toml"
         if $recipe == '' && ^test -f $candidate {
             $recipe = $candidate
@@ -759,6 +794,7 @@ if $artifact_mode {
     'recipes/core/coreutils/target/x86_64-unknown-redox/stage.toml',
     'recipes/terminal/flash/target/x86_64-unknown-redox/stage.toml',
     'recipes/terminal/flash/target/x86_64-unknown-redox/stage.lsp.toml',
+    'recipes/system/flashos-system/target/x86_64-unknown-redox/stage.toml',
     'recipes/core/kernel/target/x86_64-unknown-redox/stage.toml',
     'recipes/libs/libgcc/target/x86_64-unknown-redox/stage.toml',
     'recipes/core/netdb/target/x86_64-unknown-redox/stage.toml',
@@ -794,6 +830,9 @@ if $artifact_mode {
     'recipes/core/relibc/target/x86_64-unknown-redox/stage.dev/usr/lib/libc.a',
     'recipes/terminal/flash/target/x86_64-unknown-redox/stage/usr/bin/fsh',
     'recipes/terminal/flash/target/x86_64-unknown-redox/stage.lsp/usr/bin/flash-language-server',
+    'recipes/system/flashos-system/target/x86_64-unknown-redox/stage/usr/bin/flashos-system',
+    'recipes/system/flashos-system/target/x86_64-unknown-redox/stage/usr/share/flashos/flash/system.fsh',
+    'recipes/system/flashos-system/target/x86_64-unknown-redox/stage/usr/share/doc/flashos-system/examples/system-description.fsh',
     ] {
         if ^test -e "$root/$required" {
         } else {
@@ -840,6 +879,7 @@ if $artifact_mode {
     'recipes/core/coreutils/target/x86_64-unknown-redox/stage',
     'recipes/terminal/flash/target/x86_64-unknown-redox/stage',
     'recipes/terminal/flash/target/x86_64-unknown-redox/stage.lsp',
+    'recipes/system/flashos-system/target/x86_64-unknown-redox/stage',
     'recipes/core/kernel/target/x86_64-unknown-redox/stage',
     'recipes/libs/libgcc/target/x86_64-unknown-redox/stage',
     'recipes/core/netdb/target/x86_64-unknown-redox/stage',
@@ -856,7 +896,7 @@ if $artifact_mode {
 }
 ^printf 'profile contract: ok\n'
 ^printf 'release: %s\n' $version
-^printf 'packages: base, coreutils, flash, flash.lsp, kernel, libgcc, netdb, netutils, relibc, userutils, uutils\n'
+^printf 'packages: base, coreutils, flash, flash.lsp, flashos-system, kernel, libgcc, netdb, netutils, relibc, userutils, uutils\n'
 if $artifact_mode {
     ^printf 'artifacts: runtime and supporting stages are separated\n'
     ^printf 'services: reviewed local/system set; no network-login daemon\n'

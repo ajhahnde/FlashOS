@@ -86,6 +86,12 @@ jobs:
           manifest-path: components/flash/Cargo.toml
           command: check advisories bans licenses sources
 
+      - name: FlashOS system API advisories, licenses, bans, and sources
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          manifest-path: system/api/Cargo.toml
+          command: check advisories bans licenses sources
+
   required:
     name: security-required
     if: always()

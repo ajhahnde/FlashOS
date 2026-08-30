@@ -10,6 +10,7 @@ create_xdg_user_dirs = false
 # TUI-only profile: no Orbital, COSMIC, X11, Wayland, or GUI installer.
 flash = {}
 "flash.lsp" = {}
+flashos-system = {}
 coreutils = {}
 
 [users.root]

@@ -75,6 +75,8 @@ for image in ['skipped', 'failure', 'cancelled'] {
 
 let fast = run_case($runtime, $script, $jq, $temporary, 'fast', 'pull_request', 'false', 'fast', 'fast', 'false', 'false', 'skipped', 'success', 'success', 'success')
 expect_success($fast, 'fast lane controlled image skip')
+let source = run_case($runtime, $script, $jq, $temporary, 'source', 'pull_request', 'false', 'source', 'source', 'false', 'false', 'skipped', 'success', 'success', 'success')
+expect_success($source, 'source lane controlled image skip')
 let contrary = run_case($runtime, $script, $jq, $temporary, 'fast-contrary', 'pull_request', 'false', 'fast', 'fast', 'false', 'false', 'success', 'success', 'success', 'success')
 expect_failure($contrary, 'ran contrary', 'fast lane image execution')
 

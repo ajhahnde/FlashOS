@@ -162,7 +162,7 @@ expect_success($fast_result, "main qualification: ok: PR #47 tree $tree_sha", 'c
 let fast_image = "$temporary/fast-image"
 write_fixture_set($fast_image, $main_sha, $tree_sha, 'docs/verification.md', true, true, false, 'open')
 let fast_image_result = run_main($runtime, $main_script, $temporary, $curl, $fast_image, 'fast-image-result')
-expect_failure($fast_image_result, 'classified for the fast lane but image jobs ran', 'unexpected fast-lane image evidence')
+expect_failure($fast_image_result, 'classified for a non-image lane but image jobs ran', 'unexpected fast-lane image evidence')
 
 let missing_security = "$temporary/missing-security"
 write_fixture_set($missing_security, $main_sha, $tree_sha, 'docs/verification.md', false, false, false, 'open')

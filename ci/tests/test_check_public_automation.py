@@ -67,6 +67,12 @@ class PublicAutomationTests(unittest.TestCase):
             Counter(map(automation.disposition, automation.NATIVE_FLASH)),
             Counter({"native-flash": 4}),
         )
+
+    def test_system_api_flash_surfaces_are_explicit(self) -> None:
+        self.assertEqual(
+            Counter(map(automation.disposition, automation.SYSTEM_API_FLASH)),
+            Counter({"system-api-flash": 3}),
+        )
         self.assertEqual(
             Counter(map(automation.disposition, automation.PUBLIC_EXAMPLES)),
             Counter({"public-example": 4}),
@@ -76,7 +82,7 @@ class PublicAutomationTests(unittest.TestCase):
         automation.check_documentation()
         contract = automation.load_documentation_contract()
         self.assertEqual(contract["schema"], 1)
-        self.assertEqual(len(contract["documents"]), 43)
+        self.assertEqual(len(contract["documents"]), 44)
         self.assertEqual(
             {entry["path"] for entry in contract["examples"]},
             automation.PUBLIC_EXAMPLES,

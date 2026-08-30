@@ -10,6 +10,7 @@ Not sure where to begin? Pick a goal from the first table. The rest of this page
 | --- | --- | --- |
 | Build and boot FlashOS | [Getting Started](getting-started.md) | Host setup, local configuration, image construction, QEMU, login, first checks, and troubleshooting |
 | Understand how Flash fits | [Flash and FlashOS](flash.md) | The current shell integration, data and status handling, and the planned Shell/View design |
+| Query FlashOS from Flash | [FlashOS System API](system-api.md) | Experimental schema 1, `system.describe`, typed validation, statuses, errors, and limits |
 | Try the language | [Flash by Example](../components/flash/docs/by-example.md) | Small executable programs for structured values, external bytes, `check`, and `plan` |
 | Learn Flash in depth | [Flash Documentation](../components/flash/docs/README.md) | Tutorials, the Flash 1.0 language reference, scripting, internals, and development |
 | About Me | [About Me](aboutme.md) | Personal background, motivation, working approach, and project principles |
@@ -19,7 +20,7 @@ Not sure where to begin? Pick a goal from the first table. The rest of this page
 
 The [FlashOS README](../README.md) is the front door. From there, the public documentation splits into these paths:
 
-- **Main product guide:** [Product Guide](README.md) → [Getting Started](getting-started.md) → [Flash and FlashOS](flash.md) → [Architecture](architecture.md) → [Development](development.md) → [Public Automation](automation.md) → [Verification and Testing](verification.md) → [Hardware Compatibility](hardware.md) → [Roadmap](roadmap.md) → [About Me](aboutme.md) → [Contributing](../CONTRIBUTING.md) → [Upstream References](upstream/README.md).
+- **Main product guide:** [Product Guide](README.md) → [Getting Started](getting-started.md) → [Flash and FlashOS](flash.md) → [FlashOS System API](system-api.md) → [Architecture](architecture.md) → [Development](development.md) → [Public Automation](automation.md) → [Verification and Testing](verification.md) → [Hardware Compatibility](hardware.md) → [Roadmap](roadmap.md) → [About Me](aboutme.md) → [Contributing](../CONTRIBUTING.md) → [Upstream References](upstream/README.md).
 - **Flash guide:** [Flash Overview](../components/flash/README.md) → [Flash Documentation](../components/flash/docs/README.md) → [Flash by Example](../components/flash/docs/by-example.md) → [Language Guide](../components/flash/docs/language-guide.md) → [Scripting Guide](../components/flash/docs/scripting.md) → [Flash Architecture](../components/flash/docs/architecture.md) → [Flash Development](../components/flash/docs/development.md) → [CI/CD Contracts](../ci/README.md).
 - **Focused Flash references:** [Flash Changelog](../components/flash/CHANGELOG.md), [Performance Benchmarks](../components/flash/benchmarks/README.md), [Flash v1 Exercises](../components/flash/exercises/README.md), [Scheduling Stress](../components/flash/scheduling/README.md), [Fuzz Targets](../components/flash/fuzz/README.md), [End-to-end Tests](../components/flash/tests/e2e/README.md), [Test Fixtures](../components/flash/tests/fixtures/README.md), [Grammar Corpus](../components/flash/tests/golden/grammar/README.md), and [Lexical Corpus](../components/flash/tests/golden/lexical/README.md).
 - **Project records and policies:** [CI/CD Contracts](../ci/README.md) → [Changelog](../CHANGELOG.md) → [FlashOS v0.2.0 Release Notes](releases/v0.2.0.md) → [Security Policy](../.github/SECURITY.md) → [Trademark and Project Identity](../TRADEMARK.md).
@@ -32,6 +33,7 @@ The [FlashOS README](../README.md) is the front door. From there, the public doc
 | Guide | Scope |
 | --- | --- |
 | [Architecture](architecture.md) | Current system layers, image profiles, build-to-boot flow, component ownership, and upstream boundaries |
+| [FlashOS System API](system-api.md) | Experimental local semantic contract, JSON transport, Flash validator module, limits, and compatibility |
 | [Development](development.md) | Repository workflow, build operations, packages, profiles, generated state, and review preparation |
 | [Public Automation](automation.md) | Flash-native programs, reviewed interpreter exceptions, setup boundary, and host tools |
 | [Verification and Testing](verification.md) | Source, target, profile, image, QEMU, release, and physical-hardware evidence |
