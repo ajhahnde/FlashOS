@@ -2738,6 +2738,7 @@ VALIDATOR_ORACLE_REWRITES = {
     "coreutils",
     "flash",
     "flash.lsp",
+    "flashos-system",
     "kernel",
     "libgcc",
     "netdb",
@@ -2746,6 +2747,12 @@ VALIDATOR_ORACLE_REWRITES = {
     "userutils",
     "uutils",
 }''',
+        ),
+        (
+            '    "release-evidence: false",',
+            "    \"contains(needs.scope.outputs.classification, 'system/api/')\",\n"
+            '    "contains(needs.scope.outputs.classification, '
+            "'recipes/system/flashos-system/')\",",
         ),
         (
             "if any(path == \"/ui\" or path.startswith(\"/ui/\") "
