@@ -674,16 +674,18 @@ The primary CI workflow separates source checks, static product validation, imag
 
 The standard CI workflow runs two independent jobs for:
 
-- root workspace formatting and tests together with CI Python linting, Python
-  tests, the product-profile contract, and whitespace validation;
+- root and FlashOS system API formatting, linting, locked tests, API
+  documentation, CI Python linting and tests, the product-profile contract, and
+  whitespace validation;
 - Flash formatting, Clippy, and host tests;
 
 The workflow first classifies the exact changed paths. Draft pull requests stop
-after source feedback. Ready pull requests skip the image only when every path
-belongs to the explicit documentation, policy, reporting, or isolated host-tool
-allowlist. Product source, target integration, recipes, profiles, image/QEMU
-tooling, CI orchestration, mixed changes, and unknown paths fail closed into the
-product lane. Manual CI defaults to the product lane.
+after source feedback. Ready pull requests skip the image for the explicit
+documentation, policy, reporting, or isolated host-tool allowlist and for the
+narrow FlashOS system API contract/test paths whose complete host contract runs
+in `repository-quality`. Provider, manifest, recipe, installed-module, profile,
+target, image/QEMU tooling, CI orchestration, mixed, and unknown paths fail
+closed into the product lane. Manual CI defaults to the product lane.
 
 The classifier is unit tested, its decision and reasons appear in the workflow
 summary, and the stable `required` aggregate rejects any job result that does

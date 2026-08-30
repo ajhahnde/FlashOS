@@ -53,6 +53,7 @@ This is the checked-in [`json-boundary.fsh`](components/flash/examples/json-boun
 | User environment | Keyboard-first, text-based interface |
 | Primary interface | Flash at `/usr/bin/fsh` |
 | Flash contract | Flash 1.0 component release; availability in a FlashOS version or image is qualified separately |
+| System API | Experimental schema 1 `system.describe` query through `/usr/bin/flashos-system` |
 | Evaluation baseline | QEMU `q35` with UEFI firmware; physical results are device- and artifact-specific |
 | Maturity | Pre-alpha evaluation software, without production security or support guarantees |
 
@@ -64,7 +65,11 @@ Flash keeps structured values intact until a program asks for a conversion. Exte
 
 The result is one language for exploring the system interactively and for writing automation that can be checked into the repository. FlashOS uses it as the login shell and, where `fsh` is already available, for public project automation.
 
-Over time, commands and higher-level terminal views should be able to work with the same actions and data. That design still needs a dedicated TUI and a stable FlashOS system API, neither of which ships today. [Flash and FlashOS](docs/flash.md) explains the idea; the [Roadmap](docs/roadmap.md) shows where it fits.
+FlashOS now has one deliberately small experimental system API query and a
+structured Flash consumer. It is not yet a stable system API, service
+interface, or dedicated TUI. [FlashOS System API](docs/system-api.md) documents
+the shipped boundary, [Flash and FlashOS](docs/flash.md) explains the broader
+idea, and the [Roadmap](docs/roadmap.md) shows what remains future work.
 
 ## Quick start
 
@@ -89,6 +94,7 @@ The [Getting Started Guide](docs/getting-started.md) covers host requirements, c
 
 - [Getting Started](docs/getting-started.md) — Build, boot, log in, and diagnose the first QEMU session.
 - [Flash and FlashOS](docs/flash.md) — Understand the shipped system integration and future interaction direction.
+- [FlashOS System API](docs/system-api.md) — Query the experimental local system contract from Flash or another local consumer.
 - [Flash by Example](components/flash/docs/by-example.md) — Run small checked programs, then continue to the complete [Flash documentation](components/flash/docs/README.md).
 - [Architecture](docs/architecture.md) — Follow the current build-to-boot layers and ownership boundaries.
 - [Roadmap](docs/roadmap.md) — See what is being finished now and what may follow.

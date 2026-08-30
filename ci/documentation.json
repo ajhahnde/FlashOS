@@ -39,6 +39,7 @@
     {"class": "canonical-guide", "owner": "docs/README.md", "path": "docs/hardware.md"},
     {"class": "release-record", "owner": "docs/README.md", "path": "docs/releases/v0.2.0.md"},
     {"class": "canonical-guide", "owner": "docs/README.md", "path": "docs/roadmap.md"},
+    {"class": "canonical-guide", "owner": "docs/README.md", "path": "docs/system-api.md"},
     {"class": "upstream-index", "owner": "docs/README.md", "path": "docs/upstream/README.md"},
     {"class": "retained-upstream-snapshot", "owner": "docs/upstream/README.md", "path": "docs/upstream/REDOX_HARDWARE.md"},
     {"class": "retained-upstream-snapshot", "owner": "docs/upstream/README.md", "path": "docs/upstream/REDOX_TRADEMARK.md"},

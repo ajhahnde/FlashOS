@@ -8,6 +8,14 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ## [Unreleased]
 
+### Added
+
+- Added the experimental schema 1 FlashOS system API with the bounded read-only
+  `system.describe` query, a single-shot local JSON transport, strict installed
+  release identity, and an installed pure Flash validator used after the
+  explicit `from json` boundary. The API remains local and experimental; it is
+  not a stable ABI, network service, or general system-management interface.
+
 ## [0.2.0] - 2026-08-28
 
 ### Changed

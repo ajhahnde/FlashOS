@@ -94,6 +94,13 @@ jobs:
           path: target
           key: root-target-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml') }}-test
 
+      - name: Cache FlashOS system API build outputs
+        if: inputs['cold-cache'] != true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: system/api/target
+          key: system-api-target-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'system/api/Cargo.lock', 'system/api/Cargo.toml') }}-test
+
       - name: Activate the pinned root toolchain
         run: |
           rustup show active-toolchain || rustup toolchain install
@@ -104,6 +111,20 @@ jobs:
 
       - name: Build-system tests
         run: cargo test --locked
+
+      - name: FlashOS system API formatting
+        run: cargo fmt --manifest-path system/api/Cargo.toml --all --check
+
+      - name: FlashOS system API lint
+        run: cargo clippy --manifest-path system/api/Cargo.toml --all-targets --locked -- -D warnings
+
+      - name: FlashOS system API contract and Flash integration tests
+        run: cargo test --manifest-path system/api/Cargo.toml --locked
+
+      - name: FlashOS system API documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --manifest-path system/api/Cargo.toml --locked --no-deps
 
       # Product contracts and the QEMU harness are held to the same
       # source-quality standard as the Rust workspaces.
@@ -267,7 +288,9 @@ jobs:
     with:
       artifact-name: flashos-x86_64-ci-${{ github.event.pull_request.head.sha || github.sha }}
       retention-days: 7
-      release-evidence: false
+      release-evidence: >-
+        ${{ contains(needs.scope.outputs.classification, 'system/api/') ||
+            contains(needs.scope.outputs.classification, 'recipes/system/flashos-system/') }}
       source-ref: ${{ github.event.pull_request.head.sha || github.sha }}
       cold-cache: ${{ inputs['cold-cache'] || false }}
     permissions:

@@ -30,6 +30,7 @@ FlashOS development spans several distinct layers:
 | Product configuration  | `config/`                                     | Changes to installed packages, users, files, services, or permissions          |
 | Package integration    | `recipes/`                                    | Target packages consumed by the image                                          |
 | Build orchestration    | `Makefile`, `mk/`, `src/`, `podman/`          | Changes to package cooking, toolchains, image assembly, or container execution |
+| FlashOS system API     | `system/api/`, `recipes/system/flashos-system/` | Semantic contract, local transport, Flash integration, and target package      |
 | Flash                  | `components/flash/`                           | Changes to the primary interactive and scripting interface                     |
 | Verification contracts | `ci/`, `.github/workflows/`                   | Changes to repository, image, or runtime qualification                         |
 | Public documentation   | `README.md`, `docs/`, component documentation | Changes to public usage and technical guidance                                 |
@@ -151,6 +152,9 @@ recipes/
 
 components/flash/
     Independent Flash Cargo workspace and component documentation
+
+system/api/
+    Experimental FlashOS-owned semantic API, local transport, and Flash module
 
 ci/
     Executable local product and runtime contracts

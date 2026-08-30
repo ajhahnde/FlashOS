@@ -51,7 +51,9 @@ The intended interaction model is:
                  Flash              View
 ```
 
-This work still needs designs and working implementations for:
+The experimental [`system.describe`](system-api.md) vertical slice establishes
+the first read-only seam. The broader environment still needs designs and
+working implementations for:
 
 - FlashOS-owned system actions and structured queries;
 - keyboard-first views over those actions and values;
@@ -59,7 +61,8 @@ This work still needs designs and working implementations for:
 - consistent permissions, errors, cancellation, and audit records; and
 - the “Flash never disappears” principle: direct commands remain available when a higher-level view exists.
 
-The dedicated TUI, stable system API, shared Shell/View actions, and service interface do not exist today.
+The dedicated TUI, stable system API, shared Shell/View mutations, and service
+interface do not exist today.
 
 ## Later: take ownership where it helps
 

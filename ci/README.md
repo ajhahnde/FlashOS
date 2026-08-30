@@ -58,7 +58,7 @@ The candidate and protected-main path is:
 pull request
     │
     ├── change-classification
-    │   └── fast or product lane; unknown paths fail closed
+    │   └── fast, source, or product lane; unknown paths fail closed
     │
     ├── repository-quality
     │   └── root checks + Python/product checks
@@ -77,10 +77,13 @@ pull request
 ```
 
 Draft pull requests stop after the source jobs. Ready pull requests take the
-product lane unless every changed path belongs to the explicit documentation,
-policy, reporting, or isolated host-tool allowlist. Unknown and mixed paths
-fail closed into image and QEMU qualification. The `required` aggregate checks
-that the jobs agree with the classifier. Protected-main verification
+product lane unless every changed path belongs to either the explicit
+documentation/policy/reporting/isolated-host-tool allowlist or the narrowly
+defined FlashOS system API contract-and-host-test set. The latter selects the
+source lane only after the complete API host contract runs. Provider, package,
+installed-module, profile, target, unknown, and mixed paths fail closed into
+image and QEMU qualification. The `required` aggregate checks that the jobs
+agree with the classifier. Protected-main verification
 independently classifies the merged PR, proves exact tree identity, and checks
 the successful `required` and `security-required` evidence instead of rerunning
 the suite. Coverage is manual. Dependency policy runs when classified, weekly,
@@ -408,7 +411,7 @@ The classifier and two source-quality jobs are:
 | Job                    | Checks                                                                        |
 | ---------------------- | ----------------------------------------------------------------------------- |
 | `change-classification` | Changed paths, selected lane, image requirement, and dependency-policy scope  |
-| `repository-quality`   | Root formatting/tests, Ruff, Python tests, product checks, whitespace          |
+| `repository-quality`   | Root and system-API formatting/lint/tests/docs, Ruff, product checks, whitespace |
 | `flash-quality`        | Flash formatting, Clippy, v1 conformance inventory, and locked host tests      |
 
 The source jobs remain required on every PR. Their Cargo downloads and build
@@ -417,10 +420,16 @@ disables these caches so cached and clean results can be compared.
 
 `image-and-runtime` calls `_image.yml` only when the classifier selects the
 product lane and the PR is ready. Documentation, policy, reporting, and
-isolated host-tool paths may select the fast lane. Product source, recipes,
-profiles, image/QEMU tooling, CI orchestration, mixed changes, and unknown paths
-select the product lane. Drafts defer the image even when it will be required
-at ready-for-review.
+isolated host-tool paths may select the fast lane. The explicitly listed pure
+system-API contract and host-test paths select the source lane; the required
+source job still runs formatting, Clippy, locked tests, Flash integration, and
+Rust documentation. Provider, manifest, recipe, installed Flash module,
+profile, target, image/QEMU tooling, CI orchestration, mixed, and unknown paths
+select the product lane. A ready pull request whose classification includes the
+system API manifest, provider, transport entry point, installed Flash surface,
+example, or recipe requests both disk/NVMe and live/USB evidence from the shared
+image workflow. Drafts defer the image even when it will be required at
+ready-for-review.
 
 The final `required` job combines these results into the stable status used by
 repository rules. [`.github/workflows/main-qualification.yml`](../.github/workflows/main-qualification.yml)
@@ -656,6 +665,10 @@ build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_deve
 build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_profile.fsh
 build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/classify_changes.fsh --json </dev/null
 python3 ci/check_public_automation.py
+cargo fmt --manifest-path system/api/Cargo.toml --all --check
+cargo clippy --manifest-path system/api/Cargo.toml --all-targets --locked -- -D warnings
+cargo test --manifest-path system/api/Cargo.toml --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path system/api/Cargo.toml --locked --no-deps
 build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_platform.fsh
 build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_capabilities.fsh
 build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh ci/check_flashos_operation_map.fsh

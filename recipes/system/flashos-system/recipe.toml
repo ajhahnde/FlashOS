@@ -1,0 +1,13 @@
+[source]
+workspace = "system/api"
+
+[build]
+template = "custom"
+script = """
+DYNAMIC_INIT
+cookbook_cargo --bin flashos-system
+install -d "${COOKBOOK_STAGE}/usr/share/flashos/flash"
+install -m 0644 "${COOKBOOK_SOURCE}/flash/system.fsh" "${COOKBOOK_STAGE}/usr/share/flashos/flash/system.fsh"
+install -d "${COOKBOOK_STAGE}/usr/share/doc/flashos-system/examples"
+install -m 0644 "${COOKBOOK_SOURCE}/examples/system-description.fsh" "${COOKBOOK_STAGE}/usr/share/doc/flashos-system/examples/system-description.fsh"
+"""

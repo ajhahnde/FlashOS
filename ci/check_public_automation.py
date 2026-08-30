@@ -172,6 +172,12 @@ PUBLIC_EXAMPLES = {
     "components/flash/examples/structured-files.fsh",
 }
 
+SYSTEM_API_FLASH = {
+    "system/api/examples/system-description.fsh",
+    "system/api/flash/system.fsh",
+    "system/api/flash/tests/module.fsh",
+}
+
 HOST_INTERFACE = {
     "bin/aarch64-unknown-redox-llvm-config",
     "bin/aarch64-unknown-redox-pkg-config",
@@ -240,10 +246,10 @@ SCRIPT_SUFFIXES = {
 }
 
 EXPECTED_EMBEDDED = {
-    "cookbook-shell-body": 164,
+    "cookbook-shell-body": 165,
     "docker-command": 1,
     "make-target": 23,
-    "workflow-run-body": 88,
+    "workflow-run-body": 92,
 }
 
 EXPECTED_INSTALLED_NON_FLASH = {
@@ -691,6 +697,8 @@ def disposition(path: str) -> str | None:
         return "native-flash"
     if path in PUBLIC_EXAMPLES:
         return "public-example"
+    if path in SYSTEM_API_FLASH:
+        return "system-api-flash"
     if path in SHARED_FLASH_MODULES:
         return "shared-flash-module"
     if is_test_data(path):
@@ -2730,6 +2738,7 @@ VALIDATOR_ORACLE_REWRITES = {
     "coreutils",
     "flash",
     "flash.lsp",
+    "flashos-system",
     "kernel",
     "libgcc",
     "netdb",
@@ -2738,6 +2747,12 @@ VALIDATOR_ORACLE_REWRITES = {
     "userutils",
     "uutils",
 }''',
+        ),
+        (
+            '    "release-evidence: false",',
+            "    \"contains(needs.scope.outputs.classification, 'system/api/')\",\n"
+            '    "contains(needs.scope.outputs.classification, '
+            "'recipes/system/flashos-system/')\",",
         ),
         (
             "if any(path == \"/ui\" or path.startswith(\"/ui/\") "
@@ -4272,6 +4287,11 @@ def check_ci_qualification_parity(runtime: Path, root: Path) -> None:
             "ci/check_candidate_qualification.py",
         ):
             materialize_baseline_source(relative, candidate / relative, root)
+        replace_occurrence(
+            candidate / "ci/check_main_qualification.py",
+            "was classified for the fast lane",
+            "was classified for a non-image lane",
+        )
 
         repository = "/repos/example/flashos"
         required_jobs = [
@@ -4309,7 +4329,7 @@ def check_ci_qualification_parity(runtime: Path, root: Path) -> None:
                 {"candidate_jobs": required_jobs},
             ),
             (
-                "candidate rejects image work on the fast lane",
+                "candidate rejects image work on a non-image lane",
                 "candidate",
                 {"changed_paths": ["docs/verification.md"]},
             ),

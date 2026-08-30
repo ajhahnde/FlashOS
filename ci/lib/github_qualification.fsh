@@ -128,6 +128,8 @@ def validate_classification(classification) {
     mut valid = false
     if $classification.lane == 'fast' && !$classification.image_required && !$classification.target_required {
         $valid = true
+    } else if $classification.lane == 'source' && !$classification.image_required && !$classification.target_required {
+        $valid = true
     } else if $classification.lane == 'product' && $classification.image_required {
         $valid = true
     }
@@ -291,7 +293,7 @@ def qualify(mode, api_url, token, repository, source_sha, directory, evidence_pa
         if $image_required == 'true' {
             qualification_error("pull request #$pull_number was classified for product qualification but successful image jobs are missing: $image_failure")
         }
-        qualification_error("pull request #$pull_number was classified for the fast lane but image jobs ran: $image_failure")
+        qualification_error("pull request #$pull_number was classified for a non-image lane but image jobs ran: $image_failure")
     }
 
     let security_run = "$directory/security-run.json"
