@@ -228,7 +228,7 @@ The primary repository references are:
 
 - [`NOTICE`](../../NOTICE) — project relationship and high-level attribution;
 - [`LICENSE`](../../LICENSE) — primary MIT license for original FlashOS material;
-- [`components/flash/LICENSE`](../../components/flash/LICENSE) — component-local copy of the FlashOS MIT license and copyright notice for Flash;
+- [`components/flash/LICENSE`](../../components/flash/LICENSE) — Mozilla Public License 2.0 for Flash;
 - [`LICENSES/REDOX-BUILD-SYSTEM-MIT`](../../LICENSES/REDOX-BUILD-SYSTEM-MIT) — retained MIT license and copyright notice for the inherited Redox build-system code;
 - [`LICENSES/REDOX-KERNEL-MIT`](../../LICENSES/REDOX-KERNEL-MIT) — retained MIT license and copyright notice for the incorporated Redox kernel;
 - [`TRADEMARK.md`](../../TRADEMARK.md) — FlashOS identity and use of Redox references.

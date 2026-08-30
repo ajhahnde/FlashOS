@@ -2947,6 +2947,20 @@ for relative, markers in recipe_separation_markers.items():
     ),
     "ci/check_flash_release.py": (
         (
+            '''    heading = f"## [Unreleased]\\n\\n## [{version}] - {release_date}\\n"
+    if heading not in changelog:
+        fail("component changelog does not promote the exact release and date")''',
+            '''    unreleased_heading = "## [Unreleased]"
+    release_heading = f"## [{version}] - {release_date}"
+    headings = changelog.splitlines()
+    if (
+        unreleased_heading not in headings
+        or release_heading not in headings
+        or headings.index(release_heading) <= headings.index(unreleased_heading)
+    ):
+        fail("component changelog does not promote the exact release and date")''',
+        ),
+        (
             "python3 ci/check_flashos_capability_report.py",
             "build/flash-bootstrap/134635a5e1282b5d8455a4b2aeb754be5a3a77c1/fsh "
             "ci/check_flashos_capability_report.fsh",

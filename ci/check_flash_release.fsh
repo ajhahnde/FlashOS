@@ -329,8 +329,8 @@ for claim in [
         }
     }
 }
-let heading = "## [Unreleased]\n\n## [1.0.0] - $release_date"
-if ^env $rg --multiline --fixed-strings --quiet -- $heading "$flash_root/CHANGELOG.md" {
+let heading = "(?m)^## \\[Unreleased\\]\n(?s:.*?)^## \\[1\\.0\\.0\\] - $release_date$"
+if ^env $rg --multiline --quiet -- $heading "$flash_root/CHANGELOG.md" {
 } else {
     ^rm -rf $temporary
     release_error('component changelog does not promote the exact release and date')

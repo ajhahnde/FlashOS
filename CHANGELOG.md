@@ -8,6 +8,12 @@ The `0.9.0` and older tags inherited with the Redox OS source history are upstre
 
 ## [Unreleased]
 
+### Changed
+
+- Relicense Flash from MIT to the Mozilla Public License 2.0. Earlier Flash
+  distributions remain available under their then-applicable licenses; the
+  primary FlashOS license and third-party terms are unchanged.
+
 ## [0.2.0] - 2026-08-28
 
 ### Changed
