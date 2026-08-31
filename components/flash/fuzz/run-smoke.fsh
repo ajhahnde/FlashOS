@@ -86,6 +86,8 @@ for target in ['lexer', 'parser', 'expander'] {
     "$root/tests/v2-foundation/language/lexical" \
     "$root/tests/v2-foundation/language/modules/complete" \
     "$root/tests/v2-foundation/language/modules/invalid" \
+    "$root/tests/v2-foundation/language/types/complete" \
+    "$root/tests/v2-foundation/language/types/invalid" \
     -- \
     "-runs=$runs" \
     -max_len=4096 \

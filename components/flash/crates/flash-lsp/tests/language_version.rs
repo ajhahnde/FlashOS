@@ -145,6 +145,8 @@ fn v2_alias_reexport_and_nominal_type_queries_share_identity_and_provenance() {
     let root = concat!(
         "language 2\n\n",
         "import './facade.fsh' as api\n",
+        "let item: api::model::Item = api::model::Item { value: 1 }\n",
+        "let api::model::Item { value: selected } = $item\n",
         "export { api }\n",
     );
     let facade = concat!(
@@ -152,7 +154,7 @@ fn v2_alias_reexport_and_nominal_type_queries_share_identity_and_provenance() {
         "import './model.fsh' as model\n",
         "export { model }\n",
     );
-    let model = "language 2\n\ntype Item = { value: Int, }\n";
+    let model = "language 2\n\ntype Item = { value: Int, }\n\nexport { Item }\n";
     let mut workspace = Workspace::for_language(LanguageMajor::V2);
     workspace.open(root_uri.clone(), 1, root.into()).unwrap();
     workspace
@@ -206,6 +208,32 @@ fn v2_alias_reexport_and_nominal_type_queries_share_identity_and_provenance() {
         "{item_markdown}"
     );
     assert!(item_markdown.contains("model.fsh"), "{item_markdown}");
+
+    for needle in [
+        "api::model::Item { value: 1 }",
+        "api::model::Item { value: selected }",
+    ] {
+        let cursor = root.find(needle).unwrap() + needle.find("Item").unwrap() + 1;
+        let hover = lsp_request(
+            &workspace,
+            "textDocument/hover",
+            positional(&root_uri, root, cursor),
+        );
+        let markdown = hover["contents"]["value"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{needle:?} returned {hover}"));
+        assert!(markdown.contains("type `Item`"), "{markdown}");
+        let definition = lsp_request(
+            &workspace,
+            "textDocument/definition",
+            positional(&root_uri, root, cursor),
+        );
+        assert_eq!(definition["uri"], model_uri.as_str());
+        assert_eq!(
+            definition["range"]["start"],
+            json!({"line": 2, "character": 5})
+        );
+    }
 }
 
 fn positional(uri: &DocumentUri, text: &str, offset: usize) -> Value {

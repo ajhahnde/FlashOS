@@ -6,6 +6,7 @@
 //! process execution with the established structured diagnostics.
 
 use std::any::Any;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -23,19 +24,19 @@ use flash_platform::{
 use flash_syntax::{
     AndChain, Assignment, BinaryOperator, Block, CallExpression, Closure, CommandItemKind,
     ConditionalChain, ControlTransfer, Declaration, ElseBranch, EnvironmentStatement, Expression,
-    ExpressionKind, ForStatement, FunctionDefinition, IfStatement, Literal, LiteralKind, MatchArm,
-    MatchStatement, Parameter, Pattern, Pipeline, RecordKey, RedirectionKind, Script, SourceFile,
-    Span, StageKind, Statement, StatementKind, TryStatement, UnaryOperator, VariableReference,
-    WhileStatement, Word, WordPart, WordPartKind,
+    ExpressionKind, ForStatement, FunctionDefinition, IfStatement, LanguageMajor, Literal,
+    LiteralKind, MatchArm, MatchStatement, Parameter, Pattern, Pipeline, RecordKey,
+    RedirectionKind, Script, SourceFile, Span, StageKind, Statement, StatementKind, TryStatement,
+    UnaryOperator, VariableReference, WhileStatement, Word, WordPart, WordPartKind,
 };
 
 use crate::glob::{DEFAULT_GLOB_ENTRY_LIMIT, GlobPattern};
 use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
-use crate::module::{RuntimeBindingTypes, ValueType};
+use crate::module::{ResolvedTypeParameter, RuntimeBindingTypes, ValueType};
 use crate::operation::{self, OperationError};
 use crate::{
-    BindingMutability, Callable, Environment, NativePath, Record, ScopeError, ScopeStack, Status,
-    Value,
+    BindingMutability, Callable, Environment, NativePath, NominalRecordValue, Record, ScopeError,
+    ScopeStack, Status, Value, VariantValue,
 };
 
 /// Successful automatic continuations allowed for one member in one blocking operation.
@@ -389,6 +390,12 @@ pub enum RuntimeErrorKind {
     ReturnOutsideFunction,
     /// A `match` whose scrutinee matched no arm.
     NoMatchingArm,
+    /// A declaration or parameter destructuring pattern that did not match.
+    PatternMismatch,
+    /// A nominal constructor did not match its declared record or variant schema.
+    NominalConstruction { message: String },
+    /// Runtime generic inference or an explicit dynamic instantiation failed.
+    GenericInstantiation { message: String },
     /// A call whose callee is not a function or closure.
     NotCallable { actual: &'static str },
     /// A call whose argument count does not match the parameter count.
@@ -630,6 +637,9 @@ impl RuntimeErrorKind {
             | Self::LogicOperandNotBool { .. }
             | Self::ConditionalOperandNotBoolOrStatus { .. }
             | Self::NotIterable { .. }
+            | Self::PatternMismatch
+            | Self::NominalConstruction { .. }
+            | Self::GenericInstantiation { .. }
             | Self::NotCallable { .. }
             | Self::ArityMismatch { .. }
             | Self::BindingTypeMismatch { .. }
@@ -759,6 +769,9 @@ impl fmt::Display for RuntimeErrorKind {
             }
             Self::ReturnOutsideFunction => formatter.write_str("`return` used outside a function"),
             Self::NoMatchingArm => formatter.write_str("no match arm matched the value"),
+            Self::PatternMismatch => formatter.write_str("value does not match the pattern"),
+            Self::NominalConstruction { message } => formatter.write_str(message),
+            Self::GenericInstantiation { message } => formatter.write_str(message),
             Self::NotCallable { actual } => {
                 write!(formatter, "cannot call a {actual}")
             }
@@ -1696,6 +1709,7 @@ pub(crate) fn evaluate_with_host(
     let mut evaluator = Evaluator {
         source,
         binding_types,
+        current_result_type: None,
         cancel: limits.cancel.clone(),
         budget: limits.budget,
         host,
@@ -1778,6 +1792,7 @@ pub(crate) fn evaluate_closure_argument_with_binding_types(
     let evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types,
+        current_result_type: None,
         cancel: limits.cancel,
         budget: limits.budget,
         host: &mut host,
@@ -1846,6 +1861,7 @@ pub fn apply_callable(
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::clone(&function.binding_types),
+        current_result_type: None,
         cancel: limits.cancel.clone(),
         budget: limits.budget,
         host: &mut host,
@@ -1864,7 +1880,7 @@ pub fn apply_callable(
         .into_iter()
         .map(|value| RuntimeArgument { value, span })
         .collect();
-    match evaluator.run_call(callable, function, arguments, span) {
+    match evaluator.run_call(callable, function, arguments, span, None, None) {
         Ok(value) => Ok(Completion::Value(value)),
         Err(Abort::Cancelled(cancellation)) => Ok(Completion::Cancelled(cancellation)),
         Err(Abort::Error(error)) => Err(error),
@@ -1949,6 +1965,7 @@ pub(crate) fn expand_word_with_environment(
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::new(RuntimeBindingTypes::default()),
+        current_result_type: None,
         cancel: limits.cancel.clone(),
         budget: limits.budget,
         host: &mut host,
@@ -1990,6 +2007,7 @@ pub fn expand_spread(
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::new(RuntimeBindingTypes::default()),
+        current_result_type: None,
         cancel: limits.cancel.clone(),
         budget: limits.budget,
         host: &mut host,
@@ -2042,6 +2060,7 @@ struct FlowValue {
 struct Evaluator<'host> {
     source: Arc<SourceFile>,
     binding_types: Arc<RuntimeBindingTypes>,
+    current_result_type: Option<ValueType>,
     cancel: CancellationToken,
     budget: ResourceBudget,
     host: &'host mut dyn EvaluationHost,
@@ -2073,6 +2092,11 @@ impl Evaluator<'_> {
         let span = statement.span();
         self.charge(span)?;
         match statement.kind() {
+            StatementKind::ModuleImport(_) | StatementKind::ModuleExport(_)
+                if self.binding_types.language(self.source.id()) == Some(LanguageMajor::V2) =>
+            {
+                Ok(Flow::Fallthrough(None))
+            }
             StatementKind::Import(_)
             | StatementKind::ModuleImport(_)
             | StatementKind::ModuleExport(_)
@@ -2091,7 +2115,9 @@ impl Evaluator<'_> {
                 // flash-v1-boundary(embedding-refusal): The module-program loader owns import and export execution.
                 Err(self.error(RuntimeErrorKind::ExecutionUnsupported, span))
             }
-            StatementKind::NominalType(_) => Ok(Flow::Fallthrough(None)),
+            StatementKind::NominalType(_) | StatementKind::VariantType(_) => {
+                Ok(Flow::Fallthrough(None))
+            }
             StatementKind::Declaration(declaration) => {
                 self.declaration(declaration, scope)?;
                 Ok(Flow::Fallthrough(None))
@@ -2115,47 +2141,94 @@ impl Evaluator<'_> {
             StatementKind::Try(try_statement) => self.try_statement(try_statement, scope),
             StatementKind::Throw(expression) => self.throw(expression, scope),
             StatementKind::Control(control) => self.control(control, scope, span),
-            StatementKind::Job(job) => {
-                if self.host.policy() == EvaluationPolicy::Startup {
-                    return Err(self.error(
-                        RuntimeErrorKind::RestrictedStartup {
-                            capability: RestrictedCapability::ProcessExecution,
-                        },
-                        span,
-                    ));
-                }
-                if job.background_span.is_some() {
-                    // flash-v1-boundary(embedding-refusal): The session job coordinator owns background launch.
-                    return Err(self.error(RuntimeErrorKind::ExecutionUnsupported, span));
-                }
-                let value = if self.host.manages_foreground_jobs()
-                    && chain_contains_command_stage(&job.chain)
-                {
-                    Value::Status(self.execute_chain(&job.chain, scope, true)?)
-                } else {
-                    self.eval_chain(&job.chain, scope)?
-                };
-                Ok(Flow::Fallthrough(Some(FlowValue {
-                    value,
-                    span: job.chain.span(),
-                })))
-            }
+            StatementKind::Job(job) => self.job(job, scope, span, None),
         }
     }
 
+    fn job(
+        &mut self,
+        job: &flash_syntax::JobStatement,
+        scope: &mut ScopeStack,
+        span: Span,
+        expected: Option<&ValueType>,
+    ) -> Eval<Flow> {
+        if self.host.policy() == EvaluationPolicy::Startup {
+            return Err(self.error(
+                RuntimeErrorKind::RestrictedStartup {
+                    capability: RestrictedCapability::ProcessExecution,
+                },
+                span,
+            ));
+        }
+        if job.background_span.is_some() {
+            // flash-v1-boundary(embedding-refusal): The session job coordinator owns background launch.
+            return Err(self.error(RuntimeErrorKind::ExecutionUnsupported, span));
+        }
+        let value =
+            if self.host.manages_foreground_jobs() && chain_contains_command_stage(&job.chain) {
+                Value::Status(self.execute_chain(&job.chain, scope, true)?)
+            } else {
+                self.eval_chain_with_expected(&job.chain, scope, expected)?
+            };
+        Ok(Flow::Fallthrough(Some(FlowValue {
+            value,
+            span: job.chain.span(),
+        })))
+    }
+
     fn declaration(&mut self, declaration: &Declaration, scope: &mut ScopeStack) -> Eval<()> {
-        let name = self.text(declaration.name.span()).to_owned();
-        self.ensure_lexical_name(&name, declaration.name.span())?;
-        let value = self.expression(&declaration.value, scope)?;
+        let value_type = declaration
+            .type_annotation
+            .as_ref()
+            .and_then(|annotation| {
+                self.binding_types
+                    .annotation_type(self.source.id(), annotation.span)
+                    .cloned()
+            })
+            .or_else(|| {
+                matches!(declaration.pattern, Pattern::Binding(_))
+                    .then(|| {
+                        self.binding_types
+                            .binding_type(self.source.id(), declaration.name.span())
+                            .cloned()
+                    })
+                    .flatten()
+            });
+        let value =
+            self.expression_with_expected(&declaration.value, scope, value_type.as_ref())?;
         let mutability = if declaration.mutable {
             BindingMutability::Mutable
         } else {
             BindingMutability::Immutable
         };
-        let value_type = self
-            .binding_types
-            .binding_type(self.source.id(), declaration.name.span())
-            .cloned();
+        if let Some(expected) = &value_type
+            && !expected.accepts(&value)
+        {
+            return Err(self.error(
+                RuntimeErrorKind::BindingTypeMismatch {
+                    expected: expected.clone(),
+                    actual: value.family_name(),
+                },
+                declaration.value.span(),
+            ));
+        }
+        if !matches!(declaration.pattern, Pattern::Binding(_)) {
+            let checkpoint = scope.clone();
+            let pattern_type = value_type.clone().or_else(|| runtime_value_type(&value));
+            if !self.pattern_matches(
+                &declaration.pattern,
+                &value,
+                scope,
+                mutability,
+                pattern_type.as_ref(),
+            )? {
+                *scope = checkpoint;
+                return Err(self.error(RuntimeErrorKind::PatternMismatch, declaration.name.span()));
+            }
+            return Ok(());
+        }
+        let name = self.text(declaration.name.span()).to_owned();
+        self.ensure_lexical_name(&name, declaration.name.span())?;
         scope
             .declare_typed(name, mutability, value, value_type)
             .map_err(|error| {
@@ -2381,7 +2454,14 @@ impl Evaluator<'_> {
         subject: &Value,
         scope: &mut ScopeStack,
     ) -> Eval<Option<Flow>> {
-        if !self.pattern_matches(&arm.pattern, subject, scope)? {
+        let subject_type = runtime_value_type(subject);
+        if !self.pattern_matches(
+            &arm.pattern,
+            subject,
+            scope,
+            BindingMutability::Immutable,
+            subject_type.as_ref(),
+        )? {
             return Ok(None);
         }
         if let Some(guard) = &arm.guard {
@@ -2400,6 +2480,8 @@ impl Evaluator<'_> {
         pattern: &Pattern,
         subject: &Value,
         scope: &mut ScopeStack,
+        mutability: BindingMutability,
+        expected_type: Option<&ValueType>,
     ) -> Eval<bool> {
         match pattern {
             Pattern::Wildcard(_) => Ok(true),
@@ -2411,10 +2493,151 @@ impl Evaluator<'_> {
                 let name = self.text(identifier.span());
                 self.ensure_lexical_name(name, identifier.span())?;
                 scope
-                    .declare(name, BindingMutability::Immutable, subject.clone())
+                    .declare_typed(name, mutability, subject.clone(), expected_type.cloned())
                     .map_err(|error| {
                         self.error(RuntimeErrorKind::Scope(error), identifier.span())
                     })?;
+                Ok(true)
+            }
+            Pattern::List(pattern) => {
+                let Value::List(values) = subject else {
+                    return Ok(false);
+                };
+                if values.len() < pattern.elements.len()
+                    || (pattern.rest.is_none() && values.len() != pattern.elements.len())
+                {
+                    return Ok(false);
+                }
+                for (element, value) in pattern.elements.iter().zip(values.iter()) {
+                    let element_type = match expected_type {
+                        Some(ValueType::List(element)) => Some(element.as_ref()),
+                        _ => None,
+                    };
+                    if !self.pattern_matches(element, value, scope, mutability, element_type)? {
+                        return Ok(false);
+                    }
+                }
+                if let Some(rest) = pattern.rest {
+                    let name = self.text(rest.span());
+                    self.ensure_lexical_name(name, rest.span())?;
+                    let rest_type = match expected_type {
+                        Some(ValueType::List(element)) => Some(ValueType::List(element.clone())),
+                        _ => None,
+                    };
+                    scope
+                        .declare_typed(
+                            name,
+                            mutability,
+                            Value::list(values[pattern.elements.len()..].to_vec()),
+                            rest_type,
+                        )
+                        .map_err(|error| self.error(RuntimeErrorKind::Scope(error), rest.span()))?;
+                }
+                Ok(true)
+            }
+            Pattern::NominalRecord(pattern) => {
+                let Value::NominalRecord(value) = subject else {
+                    return Ok(false);
+                };
+                let segments = pattern
+                    .name
+                    .segments
+                    .iter()
+                    .map(|segment| self.text(segment.span()))
+                    .collect::<Vec<_>>();
+                let Some(nominal) = self
+                    .binding_types
+                    .qualified_nominal(self.source.id(), &segments)
+                    .cloned()
+                else {
+                    return Ok(false);
+                };
+                if nominal.id() != value.id() {
+                    return Ok(false);
+                }
+                let substitutions = nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(value.type_arguments())
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                for field in &pattern.fields {
+                    let name = self.text(field.name.span());
+                    let Some(subject) = value.get(name) else {
+                        return Ok(false);
+                    };
+                    let expected = nominal
+                        .fields()
+                        .iter()
+                        .find(|schema| schema.name() == name)
+                        .map(|schema| {
+                            crate::module::substitute_type(schema.value_type(), &substitutions)
+                        });
+                    if !self.pattern_matches(
+                        &field.pattern,
+                        subject,
+                        scope,
+                        mutability,
+                        expected.as_ref(),
+                    )? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            Pattern::Variant(pattern) => {
+                let Value::Variant(value) = subject else {
+                    return Ok(false);
+                };
+                if pattern.constructor.segments.len() < 2 {
+                    return Ok(false);
+                }
+                let segments = pattern
+                    .constructor
+                    .segments
+                    .iter()
+                    .map(|segment| self.text(segment.span()))
+                    .collect::<Vec<_>>();
+                let Some((nominal, constructor)) = self
+                    .binding_types
+                    .qualified_variant(self.source.id(), &segments)
+                    .map(|(nominal, constructor)| (nominal.clone(), constructor.to_owned()))
+                else {
+                    return Ok(false);
+                };
+                if nominal.id() != value.id()
+                    || constructor != value.constructor()
+                    || pattern.payload.len() != value.payload().len()
+                {
+                    return Ok(false);
+                }
+                let substitutions = nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(value.type_arguments())
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                let payload_types = nominal
+                    .variants()
+                    .iter()
+                    .find(|variant| variant.name() == constructor)
+                    .map_or(&[][..], |variant| variant.payload());
+                for (index, (pattern, subject)) in
+                    pattern.payload.iter().zip(value.payload()).enumerate()
+                {
+                    let expected = payload_types.get(index).map(|value_type| {
+                        crate::module::substitute_type(value_type, &substitutions)
+                    });
+                    if !self.pattern_matches(
+                        pattern,
+                        subject,
+                        scope,
+                        mutability,
+                        expected.as_ref(),
+                    )? {
+                        return Ok(false);
+                    }
+                }
                 Ok(true)
             }
         }
@@ -2468,10 +2691,17 @@ impl Evaluator<'_> {
             ControlTransfer::Continue => Ok(Flow::Continue(span)),
             ControlTransfer::Return(expression) => {
                 let result = match expression {
-                    Some(expression) => FlowValue {
-                        value: self.expression(expression, scope)?,
-                        span: expression.span(),
-                    },
+                    Some(expression) => {
+                        let expected = self.current_result_type.clone();
+                        FlowValue {
+                            value: self.expression_with_expected(
+                                expression,
+                                scope,
+                                expected.as_ref(),
+                            )?,
+                            span: expression.span(),
+                        }
+                    }
                     None => FlowValue {
                         value: Value::Null,
                         span,
@@ -2534,19 +2764,34 @@ impl Evaluator<'_> {
     /// A single-term chain is transparent. Multiple `||` terms return the last
     /// evaluated operand and branch over either `Bool` or `Status`.
     fn eval_chain(&mut self, chain: &ConditionalChain, scope: &mut ScopeStack) -> Eval<Value> {
+        self.eval_chain_with_expected(chain, scope, None)
+    }
+
+    fn eval_chain_with_expected(
+        &mut self,
+        chain: &ConditionalChain,
+        scope: &mut ScopeStack,
+        expected: Option<&ValueType>,
+    ) -> Eval<Value> {
         let manage_foreground =
             chain.or_terms().len() == 1 && chain.or_terms()[0].and_terms().len() == 1;
+        let transparent = chain.or_terms().len() == 1;
         let mut terms = chain.or_terms().iter();
         let first = terms
             .next()
             .expect("a parsed conditional chain contains an operand");
-        let mut value = self.eval_and_chain(first, scope, manage_foreground)?;
+        let mut value = self.eval_and_chain(
+            first,
+            scope,
+            manage_foreground,
+            transparent.then_some(expected).flatten(),
+        )?;
         let mut value_span = first.span();
         for and_chain in terms {
             if self.expect_logic_condition(&value, value_span)? {
                 return Ok(value);
             }
-            value = self.eval_and_chain(and_chain, scope, false)?;
+            value = self.eval_and_chain(and_chain, scope, false, None)?;
             value_span = and_chain.span();
         }
         if chain.or_terms().len() > 1 {
@@ -2561,18 +2806,25 @@ impl Evaluator<'_> {
         and_chain: &AndChain,
         scope: &mut ScopeStack,
         manage_foreground: bool,
+        expected: Option<&ValueType>,
     ) -> Eval<Value> {
+        let transparent = and_chain.and_terms().len() == 1;
         let mut terms = and_chain.and_terms().iter();
         let first = terms
             .next()
             .expect("a parsed and-chain contains an operand");
-        let mut value = self.eval_pipeline(first, scope, manage_foreground)?;
+        let mut value = self.eval_pipeline(
+            first,
+            scope,
+            manage_foreground,
+            transparent.then_some(expected).flatten(),
+        )?;
         let mut value_span = first.span();
         for pipeline in terms {
             if !self.expect_logic_condition(&value, value_span)? {
                 return Ok(value);
             }
-            value = self.eval_pipeline(pipeline, scope, false)?;
+            value = self.eval_pipeline(pipeline, scope, false, None)?;
             value_span = pipeline.span();
         }
         if and_chain.and_terms().len() > 1 {
@@ -2588,11 +2840,12 @@ impl Evaluator<'_> {
         pipeline: &Pipeline,
         scope: &mut ScopeStack,
         manage_foreground: bool,
+        expected: Option<&ValueType>,
     ) -> Eval<Value> {
         if let [stage] = pipeline.stages()
             && let StageKind::Expression(expression) = stage.kind()
         {
-            return self.expression(expression, scope);
+            return self.expression_with_expected(expression, scope, expected);
         }
         if self.host.policy() == EvaluationPolicy::Startup {
             return Err(self.error(
@@ -2649,6 +2902,15 @@ impl Evaluator<'_> {
     }
 
     fn expression(&mut self, expression: &Expression, scope: &mut ScopeStack) -> Eval<Value> {
+        self.expression_with_expected(expression, scope, None)
+    }
+
+    fn expression_with_expected(
+        &mut self,
+        expression: &Expression,
+        scope: &mut ScopeStack,
+        expected: Option<&ValueType>,
+    ) -> Eval<Value> {
         let span = expression.span();
         self.charge(span)?;
         match expression.kind() {
@@ -2661,10 +2923,27 @@ impl Evaluator<'_> {
                 // flash-v1-boundary(carrier-refusal): Bare symbols are patterns and names rather than runtime values.
                 Err(self.unsupported("bare symbol", span))
             }
+            ExpressionKind::Qualified(name) => {
+                let binding = name
+                    .segments
+                    .iter()
+                    .map(|segment| self.text(segment.span()))
+                    .collect::<Vec<_>>()
+                    .join("::");
+                if let Some(value) = scope.get(&binding) {
+                    Ok(value.clone())
+                } else {
+                    self.qualified_value(name, span, expected)
+                }
+            }
             ExpressionKind::List(elements) => {
                 let mut values = Vec::with_capacity(elements.len());
+                let expected_element = match expected {
+                    Some(ValueType::List(element)) => Some(element.as_ref()),
+                    _ => None,
+                };
                 for element in elements {
-                    values.push(self.expression(element, scope)?);
+                    values.push(self.expression_with_expected(element, scope, expected_element)?);
                 }
                 Ok(Value::list(values))
             }
@@ -2684,11 +2963,14 @@ impl Evaluator<'_> {
                     )
                 })
             }
+            ExpressionKind::NominalRecord(record) => {
+                self.nominal_record(record, scope, span, expected)
+            }
             ExpressionKind::Closure(closure) => self.make_closure(closure, scope),
             ExpressionKind::CommandSubstitution(_) | ExpressionKind::GroupedJob(_) => {
                 self.grouped_or_substitution(expression, scope)
             }
-            ExpressionKind::Call(call) => self.call(call, scope, span),
+            ExpressionKind::Call(call) => self.call(call, scope, span, expected),
             ExpressionKind::Index(index) => {
                 let target = self.expression(&index.target, scope)?;
                 let position = self.expression(&index.index, scope)?;
@@ -2716,6 +2998,220 @@ impl Evaluator<'_> {
                 self.binary(*binary.operator.kind(), &left, &right, span)
             }
         }
+    }
+
+    fn qualified_value(
+        &self,
+        name: &flash_syntax::QualifiedName,
+        span: Span,
+        expected: Option<&ValueType>,
+    ) -> Eval<Value> {
+        if name.segments.len() >= 2 {
+            let segments = name
+                .segments
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>();
+            if let Some((nominal, constructor)) = self
+                .binding_types
+                .qualified_variant(self.source.id(), &segments)
+                && nominal.kind() == crate::module::NominalTypeKind::Variant
+                && let Some(variant) = nominal
+                    .variants()
+                    .iter()
+                    .find(|variant| variant.name() == constructor)
+                && variant.payload().is_empty()
+            {
+                let type_arguments = if nominal.type_parameters().is_empty() {
+                    Vec::new()
+                } else if let Some(ValueType::Nominal { id, arguments }) = expected
+                    && id.as_ref() == nominal.id()
+                    && arguments.len() == nominal.type_parameters().len()
+                {
+                    arguments.clone()
+                } else {
+                    return Err(self.error(
+                        RuntimeErrorKind::GenericInstantiation {
+                            message: format!(
+                                "cannot infer type argument `{}`; provide it explicitly",
+                                nominal.type_parameters()[0].name()
+                            ),
+                        },
+                        span,
+                    ));
+                };
+                self.validate_runtime_nominal_constraints(nominal, &type_arguments, span)?;
+                return Ok(Value::Variant(Box::new(VariantValue::new(
+                    nominal.id().clone(),
+                    type_arguments,
+                    constructor.to_owned(),
+                    Vec::new(),
+                ))));
+            }
+        }
+        Err(self.unsupported("qualified value", span))
+    }
+
+    fn nominal_record(
+        &mut self,
+        record: &flash_syntax::NominalRecordExpression,
+        scope: &mut ScopeStack,
+        span: Span,
+        expected_result: Option<&ValueType>,
+    ) -> Eval<Value> {
+        let Some(type_segment) = record.name.segments.last() else {
+            return Err(self.unsupported("nominal record construction", span));
+        };
+        let type_name = self.text(type_segment.span()).to_owned();
+        let segments = record
+            .name
+            .segments
+            .iter()
+            .map(|segment| self.text(segment.span()))
+            .collect::<Vec<_>>();
+        let Some(nominal) = self
+            .binding_types
+            .qualified_nominal(self.source.id(), &segments)
+            .cloned()
+        else {
+            return Err(self.error(
+                RuntimeErrorKind::NominalConstruction {
+                    message: format!("unknown nominal record `{type_name}`"),
+                },
+                span,
+            ));
+        };
+        if nominal.kind() != crate::module::NominalTypeKind::Record {
+            return Err(self.error(
+                RuntimeErrorKind::NominalConstruction {
+                    message: format!("`{type_name}` is not a nominal record"),
+                },
+                span,
+            ));
+        }
+        let mut substitutions = BTreeMap::new();
+        if let Some(ValueType::Nominal { id, arguments }) = expected_result
+            && id.as_ref() == nominal.id()
+            && arguments.len() == nominal.type_parameters().len()
+        {
+            substitutions.extend(
+                nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone())),
+            );
+        }
+        let mut evaluated = BTreeMap::new();
+        for field in &record.fields {
+            let name = self.text(field.name.span()).to_owned();
+            let expected = nominal
+                .fields()
+                .iter()
+                .find(|schema| schema.name() == name)
+                .map(|schema| crate::module::substitute_type(schema.value_type(), &substitutions));
+            let value = self.expression_with_expected(&field.value, scope, expected.as_ref())?;
+            if evaluated.insert(name.clone(), value).is_some() {
+                return Err(self.error(
+                    RuntimeErrorKind::NominalConstruction {
+                        message: format!("nominal record field `{name}` is repeated"),
+                    },
+                    field.span,
+                ));
+            }
+        }
+        if let Some(unknown) = evaluated.keys().find(|name| {
+            !nominal
+                .fields()
+                .iter()
+                .any(|field| field.name() == name.as_str())
+        }) {
+            return Err(self.error(
+                RuntimeErrorKind::NominalConstruction {
+                    message: format!("nominal record `{type_name}` has no field `{unknown}`"),
+                },
+                span,
+            ));
+        }
+        let mut fields = Vec::with_capacity(nominal.fields().len());
+        for schema in nominal.fields() {
+            let Some(value) = evaluated.remove(schema.name()) else {
+                return Err(self.error(
+                    RuntimeErrorKind::NominalConstruction {
+                        message: format!(
+                            "nominal record `{type_name}` requires field `{}`",
+                            schema.name()
+                        ),
+                    },
+                    span,
+                ));
+            };
+            infer_runtime_substitution(schema.value_type(), &value, &mut substitutions);
+            fields.push((Arc::from(schema.name()), value));
+        }
+        let mut type_arguments = Vec::with_capacity(nominal.type_parameters().len());
+        for parameter in nominal.type_parameters() {
+            let Some(value_type) = substitutions.get(parameter.name()).cloned() else {
+                return Err(self.error(
+                    RuntimeErrorKind::GenericInstantiation {
+                        message: format!(
+                            "cannot infer type argument `{}`; provide it explicitly",
+                            parameter.name()
+                        ),
+                    },
+                    span,
+                ));
+            };
+            type_arguments.push(value_type);
+        }
+        for (schema, (_, value)) in nominal.fields().iter().zip(&fields) {
+            let expected = crate::module::substitute_type(schema.value_type(), &substitutions);
+            if !expected.accepts(value) {
+                return Err(self.error(
+                    RuntimeErrorKind::NominalConstruction {
+                        message: format!(
+                            "nominal record field `{}` expects `{expected}`, found {}",
+                            schema.name(),
+                            value.family_name()
+                        ),
+                    },
+                    span,
+                ));
+            }
+        }
+        self.validate_runtime_nominal_constraints(&nominal, &type_arguments, span)?;
+        Ok(Value::NominalRecord(Box::new(NominalRecordValue::new(
+            nominal.id().clone(),
+            type_arguments,
+            fields,
+        ))))
+    }
+
+    fn validate_runtime_nominal_constraints(
+        &self,
+        nominal: &crate::module::NominalType,
+        arguments: &[ValueType],
+        span: Span,
+    ) -> Eval<()> {
+        for (parameter, value_type) in nominal.type_parameters().iter().zip(arguments) {
+            for constraint in parameter.constraints() {
+                if !self
+                    .binding_types
+                    .type_satisfies_constraint(value_type, *constraint)
+                {
+                    return Err(self.error(
+                        RuntimeErrorKind::GenericInstantiation {
+                            message: format!(
+                                "type `{value_type}` does not satisfy `{constraint:?}` for `{}`",
+                                parameter.name()
+                            ),
+                        },
+                        span,
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn grouped_or_substitution(
@@ -3069,15 +3565,23 @@ impl Evaluator<'_> {
     ) -> Eval<()> {
         let name: Arc<str> = Arc::from(self.text(definition.name.span()));
         self.ensure_lexical_name(&name, definition.name.span())?;
-        let parameters = self.parameters(&definition.parameters)?;
-        let inspection = self
+        let signature = self
             .binding_types
             .function_signature(self.source.id(), definition.name.span())
-            .cloned()
+            .cloned();
+        let parameters = self.parameters(
+            &definition.parameters,
+            signature.as_ref().map(|signature| signature.parameters()),
+        )?;
+        let inspection = signature
+            .clone()
             .map(|signature| crate::help::FunctionInspection::new(signature, &self.source));
         let callable = CallableValue {
             name: Some(Arc::clone(&name)),
             parameters,
+            type_parameters: signature
+                .as_ref()
+                .map_or_else(Vec::new, |signature| signature.type_parameters().to_vec()),
             body: CallableBody::Block(definition.body.clone()),
             captured: scope.captured_snapshot(),
             source: Arc::clone(&self.source),
@@ -3099,15 +3603,20 @@ impl Evaluator<'_> {
     }
 
     fn make_closure(&self, closure: &Closure, scope: &ScopeStack) -> Eval<Value> {
-        let parameters = self.parameters(&closure.parameters)?;
+        let parameters = self.parameters(&closure.parameters, None)?;
         let callable = CallableValue {
             name: None,
             parameters,
+            type_parameters: Vec::new(),
             body: CallableBody::Expression(closure.body.clone()),
             captured: scope.captured_snapshot(),
             source: Arc::clone(&self.source),
             binding_types: Arc::clone(&self.binding_types),
-            result_type: None,
+            result_type: closure.result_type.as_ref().and_then(|annotation| {
+                self.binding_types
+                    .annotation_type(self.source.id(), annotation.span)
+                    .cloned()
+            }),
             location: self.location(closure.span),
             inspection: None,
             origin_span: closure.span,
@@ -3116,7 +3625,11 @@ impl Evaluator<'_> {
     }
 
     /// Collects parameter names, rejecting a repeated name at creation time.
-    fn parameters(&self, parameters: &[Parameter]) -> Eval<Vec<CallableParameter>> {
+    fn parameters(
+        &self,
+        parameters: &[Parameter],
+        signatures: Option<&[crate::module::FunctionParameterSignature]>,
+    ) -> Eval<Vec<CallableParameter>> {
         let mut resolved = Vec::with_capacity(parameters.len());
         for parameter in parameters {
             let name = self.text(parameter.name.span());
@@ -3132,22 +3645,41 @@ impl Evaluator<'_> {
                     parameter.span,
                 ));
             }
-            let value_type = self
-                .binding_types
-                .binding_type(self.source.id(), parameter.name.span())
-                .cloned()
+            let value_type = signatures
+                .and_then(|signatures| signatures.get(resolved.len()))
+                .map(|signature| signature.value_type().clone())
+                .or_else(|| {
+                    parameter.type_annotation.as_ref().and_then(|annotation| {
+                        self.binding_types
+                            .annotation_type(self.source.id(), annotation.span)
+                            .cloned()
+                    })
+                })
                 .unwrap_or(ValueType::Any);
             resolved.push(CallableParameter {
                 name: Arc::from(name),
                 value_type,
+                pattern: Some(parameter.pattern.clone()),
             });
         }
         Ok(resolved)
     }
 
-    fn call(&mut self, call: &CallExpression, scope: &mut ScopeStack, span: Span) -> Eval<Value> {
+    fn call(
+        &mut self,
+        call: &CallExpression,
+        scope: &mut ScopeStack,
+        span: Span,
+        expected_result: Option<&ValueType>,
+    ) -> Eval<Value> {
         // Cancellation is polled before entering any call.
         self.check_cancel(span)?;
+
+        if let ExpressionKind::Qualified(name) = call.callee.kind()
+            && let Some(value) = self.variant_value(name, call, scope, span, expected_result)?
+        {
+            return Ok(value);
+        }
 
         if let ExpressionKind::Symbol(identifier) = call.callee.kind() {
             let name = self.text(identifier.span());
@@ -3220,15 +3752,187 @@ impl Evaluator<'_> {
             ));
         }
 
+        let explicit_type_arguments: Option<Vec<ValueType>> = if call.type_arguments.is_empty() {
+            None
+        } else {
+            Some(
+                call.type_arguments
+                    .iter()
+                    .map(|argument| {
+                        self.binding_types
+                            .annotation_type(self.source.id(), argument.span)
+                            .cloned()
+                            .unwrap_or(ValueType::Any)
+                    })
+                    .collect(),
+            )
+        };
+        let mut expected_substitutions = BTreeMap::new();
+        if let Some(explicit) = &explicit_type_arguments {
+            for (parameter, value_type) in function.type_parameters.iter().zip(explicit) {
+                expected_substitutions.insert(parameter.name().to_owned(), value_type.clone());
+            }
+        } else if let (Some(result_type), Some(expected_result)) =
+            (&function.result_type, expected_result)
+        {
+            infer_runtime_type_value(result_type, expected_result, &mut expected_substitutions);
+        }
         let mut arguments = Vec::with_capacity(call.arguments.len());
-        for argument in &call.arguments {
+        for (argument, parameter) in call.arguments.iter().zip(&function.parameters) {
+            let expected =
+                crate::module::substitute_type(&parameter.value_type, &expected_substitutions);
+            let value = self.expression_with_expected(argument, scope, Some(&expected))?;
+            if explicit_type_arguments.is_none() {
+                infer_runtime_substitution(
+                    &parameter.value_type,
+                    &value,
+                    &mut expected_substitutions,
+                );
+            }
             arguments.push(RuntimeArgument {
-                value: self.expression(argument, scope)?,
+                value,
                 span: argument.span(),
             });
         }
+        self.run_call(
+            &callable,
+            function,
+            arguments,
+            span,
+            explicit_type_arguments,
+            expected_result,
+        )
+    }
 
-        self.run_call(&callable, function, arguments, span)
+    fn variant_value(
+        &mut self,
+        name: &flash_syntax::QualifiedName,
+        call: &CallExpression,
+        scope: &mut ScopeStack,
+        span: Span,
+        expected_result: Option<&ValueType>,
+    ) -> Eval<Option<Value>> {
+        if name.segments.len() < 2 {
+            return Ok(None);
+        }
+        let segments = name
+            .segments
+            .iter()
+            .map(|segment| self.text(segment.span()))
+            .collect::<Vec<_>>();
+        let Some((nominal, constructor)) = self
+            .binding_types
+            .qualified_variant(self.source.id(), &segments)
+            .map(|(nominal, constructor)| (nominal.clone(), constructor.to_owned()))
+        else {
+            return Ok(None);
+        };
+        let type_name = nominal.id().name().to_owned();
+        if nominal.kind() != crate::module::NominalTypeKind::Variant {
+            return Ok(None);
+        }
+        let Some(variant) = nominal
+            .variants()
+            .iter()
+            .find(|variant| variant.name() == constructor)
+            .cloned()
+        else {
+            return Err(self.error(
+                RuntimeErrorKind::NominalConstruction {
+                    message: format!(
+                        "variant type `{type_name}` has no `{constructor}` constructor"
+                    ),
+                },
+                span,
+            ));
+        };
+        if call.arguments.len() != variant.payload().len() {
+            return Err(self.error(
+                RuntimeErrorKind::ArityMismatch {
+                    expected: variant.payload().len(),
+                    actual: call.arguments.len(),
+                },
+                span,
+            ));
+        }
+        let mut substitutions = BTreeMap::new();
+        if !call.type_arguments.is_empty() {
+            if call.type_arguments.len() != nominal.type_parameters().len() {
+                return Err(self.error(
+                    RuntimeErrorKind::GenericInstantiation {
+                        message: format!(
+                            "expected {} type arguments, found {}",
+                            nominal.type_parameters().len(),
+                            call.type_arguments.len()
+                        ),
+                    },
+                    span,
+                ));
+            }
+            for (parameter, argument) in nominal.type_parameters().iter().zip(&call.type_arguments)
+            {
+                let value_type = self
+                    .binding_types
+                    .annotation_type(self.source.id(), argument.span)
+                    .cloned()
+                    .unwrap_or(ValueType::Any);
+                substitutions.insert(parameter.name().to_owned(), value_type);
+            }
+        } else if let Some(ValueType::Nominal { id, arguments }) = expected_result
+            && id.as_ref() == nominal.id()
+            && arguments.len() == nominal.type_parameters().len()
+        {
+            substitutions.extend(
+                nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone())),
+            );
+        }
+        let mut payload = Vec::with_capacity(call.arguments.len());
+        for (argument, expected) in call.arguments.iter().zip(variant.payload()) {
+            let expected_value = crate::module::substitute_type(expected, &substitutions);
+            let value = self.expression_with_expected(argument, scope, Some(&expected_value))?;
+            infer_runtime_substitution(expected, &value, &mut substitutions);
+            payload.push(value);
+        }
+        let mut type_arguments = Vec::with_capacity(nominal.type_parameters().len());
+        for parameter in nominal.type_parameters() {
+            let Some(value_type) = substitutions.get(parameter.name()).cloned() else {
+                return Err(self.error(
+                    RuntimeErrorKind::GenericInstantiation {
+                        message: format!(
+                            "cannot infer type argument `{}`; provide it explicitly",
+                            parameter.name()
+                        ),
+                    },
+                    span,
+                ));
+            };
+            type_arguments.push(value_type);
+        }
+        for (expected, value) in variant.payload().iter().zip(&payload) {
+            let expected = crate::module::substitute_type(expected, &substitutions);
+            if !expected.accepts(value) {
+                return Err(self.error(
+                    RuntimeErrorKind::NominalConstruction {
+                        message: format!(
+                            "variant payload expects `{expected}`, found {}",
+                            value.family_name()
+                        ),
+                    },
+                    span,
+                ));
+            }
+        }
+        self.validate_runtime_nominal_constraints(&nominal, &type_arguments, span)?;
+        Ok(Some(Value::Variant(Box::new(VariantValue::new(
+            nominal.id().clone(),
+            type_arguments,
+            constructor,
+            payload,
+        )))))
     }
 
     fn glob(&mut self, value: &Value, span: Span) -> Eval<Value> {
@@ -3316,19 +4020,101 @@ impl Evaluator<'_> {
     /// matched its arity; this is the shared body used by an ordinary call
     /// expression and by [`apply_callable`], which applies a callable to runtime
     /// values with no call-expression AST.
+    fn runtime_type_substitutions(
+        &self,
+        function: &CallableValue,
+        arguments: &[RuntimeArgument],
+        explicit: Option<&[ValueType]>,
+        expected_result: Option<&ValueType>,
+        span: Span,
+    ) -> Eval<BTreeMap<String, ValueType>> {
+        let mut substitutions = BTreeMap::new();
+        if let Some(explicit) = explicit {
+            if explicit.len() != function.type_parameters.len() {
+                return Err(self.error(
+                    RuntimeErrorKind::GenericInstantiation {
+                        message: format!(
+                            "expected {} type arguments, found {}",
+                            function.type_parameters.len(),
+                            explicit.len()
+                        ),
+                    },
+                    span,
+                ));
+            }
+            for (parameter, value_type) in function.type_parameters.iter().zip(explicit) {
+                substitutions.insert(parameter.name().to_owned(), value_type.clone());
+            }
+        } else {
+            for (parameter, argument) in function.parameters.iter().zip(arguments) {
+                infer_runtime_substitution(
+                    &parameter.value_type,
+                    &argument.value,
+                    &mut substitutions,
+                );
+            }
+            if let (Some(result_type), Some(expected_result)) =
+                (&function.result_type, expected_result)
+            {
+                infer_runtime_type_value(result_type, expected_result, &mut substitutions);
+            }
+        }
+
+        for parameter in &function.type_parameters {
+            let Some(value_type) = substitutions.get(parameter.name()) else {
+                return Err(self.error(
+                    RuntimeErrorKind::GenericInstantiation {
+                        message: format!(
+                            "cannot infer type argument `{}`; provide it explicitly",
+                            parameter.name()
+                        ),
+                    },
+                    span,
+                ));
+            };
+            for constraint in parameter.constraints() {
+                if !self
+                    .binding_types
+                    .type_satisfies_constraint(value_type, *constraint)
+                {
+                    return Err(self.error(
+                        RuntimeErrorKind::GenericInstantiation {
+                            message: format!(
+                                "type `{value_type}` does not satisfy `{constraint:?}` for `{}`",
+                                parameter.name()
+                            ),
+                        },
+                        span,
+                    ));
+                }
+            }
+        }
+        Ok(substitutions)
+    }
+
     fn run_call(
         &mut self,
         callable: &Arc<dyn Callable>,
         function: &CallableValue,
         arguments: Vec<RuntimeArgument>,
         span: Span,
+        explicit_type_arguments: Option<Vec<ValueType>>,
+        expected_result: Option<&ValueType>,
     ) -> Eval<Value> {
+        let substitutions = self.runtime_type_substitutions(
+            function,
+            &arguments,
+            explicit_type_arguments.as_deref(),
+            expected_result,
+            span,
+        )?;
         for (parameter, argument) in function.parameters.iter().zip(&arguments) {
-            if !parameter.value_type.accepts(&argument.value) {
+            let expected = crate::module::substitute_type(&parameter.value_type, &substitutions);
+            if !expected.accepts(&argument.value) {
                 return Err(self.error(
                     RuntimeErrorKind::ParameterTypeMismatch {
                         parameter: parameter.name.to_string(),
-                        expected: parameter.value_type.clone(),
+                        expected,
                         actual: argument.value.family_name(),
                     },
                     argument.span,
@@ -3351,32 +4137,49 @@ impl Evaluator<'_> {
                 .expect("a fresh frame cannot already hold the function name");
         }
         call_scope.push();
-        for (parameter, argument) in function.parameters.iter().zip(arguments) {
-            call_scope
-                .declare_typed(
-                    parameter.name.as_ref(),
-                    BindingMutability::Mutable,
-                    argument.value,
-                    Some(parameter.value_type.clone()),
-                )
-                .expect("parameter names are unique by construction");
-        }
-
-        // The body is entered here, so any error unwinding out of it records a
-        // call frame naming this callee and its call site. Everything above
-        // (cancellation, argument, arity, not-callable resolution) ran in the
-        // caller's context and is deliberately left unframed.
-        let frame = CallFrame::new(function.name.as_deref(), span, Arc::clone(&self.source));
-        self.run_body(function, &mut call_scope)
-            .map_err(|abort| abort.with_frame(frame))
-    }
-
-    /// Runs an already-prepared call body, reducing its control flow to a value.
-    fn run_body(&mut self, function: &CallableValue, scope: &mut ScopeStack) -> Eval<Value> {
         let caller_source = std::mem::replace(&mut self.source, Arc::clone(&function.source));
         let caller_binding_types =
             std::mem::replace(&mut self.binding_types, Arc::clone(&function.binding_types));
-        let result = self.run_body_in_defining_source(function, scope);
+        let result = (|| {
+            for (parameter, argument) in function.parameters.iter().zip(arguments) {
+                let expected =
+                    crate::module::substitute_type(&parameter.value_type, &substitutions);
+                let matched = if let Some(pattern) = &parameter.pattern {
+                    self.pattern_matches(
+                        pattern,
+                        &argument.value,
+                        &mut call_scope,
+                        BindingMutability::Mutable,
+                        Some(&expected),
+                    )?
+                } else {
+                    call_scope
+                        .declare_typed(
+                            parameter.name.as_ref(),
+                            BindingMutability::Mutable,
+                            argument.value,
+                            Some(expected),
+                        )
+                        .expect("parameter names are unique by construction");
+                    true
+                };
+                if !matched {
+                    return Err(self.error(RuntimeErrorKind::PatternMismatch, argument.span));
+                }
+            }
+
+            // The body is entered here, so any error unwinding out of it records a
+            // call frame naming this callee and its call site. Everything above
+            // (cancellation, argument, arity, not-callable resolution) ran in the
+            // caller's context and is deliberately left unframed.
+            let frame = CallFrame::new(function.name.as_deref(), span, Arc::clone(&self.source));
+            let result_type = function
+                .result_type
+                .as_ref()
+                .map(|result_type| crate::module::substitute_type(result_type, &substitutions));
+            self.run_body_in_defining_source(function, result_type.as_ref(), &mut call_scope)
+                .map_err(|abort| abort.with_frame(frame))
+        })();
         self.source = caller_source;
         self.binding_types = caller_binding_types;
         result
@@ -3385,20 +4188,27 @@ impl Evaluator<'_> {
     fn run_body_in_defining_source(
         &mut self,
         function: &CallableValue,
+        result_type: Option<&ValueType>,
         scope: &mut ScopeStack,
     ) -> Eval<Value> {
-        let outcome = match &function.body {
-            CallableBody::Block(block) => {
-                scope.push();
-                let flow = self.body_statements(&block.statements, scope);
-                scope.pop().expect("the body pushes exactly one frame");
-                flow?
-            }
-            CallableBody::Expression(chain) => Flow::Fallthrough(Some(FlowValue {
-                value: self.eval_chain(chain, scope)?,
-                span: chain.span(),
-            })),
-        };
+        let caller_result_type =
+            std::mem::replace(&mut self.current_result_type, result_type.cloned());
+        let outcome: Eval<Flow> = (|| {
+            Ok(match &function.body {
+                CallableBody::Block(block) => {
+                    scope.push();
+                    let flow = self.body_statements(&block.statements, scope);
+                    scope.pop().expect("the body pushes exactly one frame");
+                    flow?
+                }
+                CallableBody::Expression(chain) => Flow::Fallthrough(Some(FlowValue {
+                    value: self.eval_chain_with_expected(chain, scope, result_type)?,
+                    span: chain.span(),
+                })),
+            })
+        })();
+        self.current_result_type = caller_result_type;
+        let outcome = outcome?;
 
         let result = match outcome {
             Flow::Return(result, _) | Flow::Fallthrough(Some(result)) => result,
@@ -3423,7 +4233,7 @@ impl Evaluator<'_> {
             ))?,
         };
 
-        if let Some(expected) = &function.result_type
+        if let Some(expected) = result_type
             && !expected.accepts(&result.value)
         {
             return Err(self.error(
@@ -3444,14 +4254,34 @@ impl Evaluator<'_> {
             let name = self.text(identifier.span());
             return self.binding_value(name, scope, callee.span());
         }
+        if let ExpressionKind::Qualified(name) = callee.kind() {
+            let name = name
+                .segments
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>()
+                .join("::");
+            if let Some(value) = scope.get(&name) {
+                return Ok(value.clone());
+            }
+        }
         self.expression(callee, scope)
     }
 
     /// Runs a function body, tracking the last expression value as the result.
     fn body_statements(&mut self, statements: &[Statement], scope: &mut ScopeStack) -> Eval<Flow> {
         let mut last = None;
-        for statement in statements {
-            match self.statement(statement, scope)? {
+        for (index, statement) in statements.iter().enumerate() {
+            let flow = if index + 1 == statements.len()
+                && let StatementKind::Job(job) = statement.kind()
+            {
+                self.charge(statement.span())?;
+                let expected = self.current_result_type.clone();
+                self.job(job, scope, statement.span(), expected.as_ref())?
+            } else {
+                self.statement(statement, scope)?
+            };
+            match flow {
                 Flow::Fallthrough(Some(result)) => last = Some(result),
                 Flow::Fallthrough(None) => {}
                 transfer => return Ok(transfer),
@@ -3486,12 +4316,117 @@ fn chain_contains_command_stage(chain: &ConditionalChain) -> bool {
     })
 }
 
+fn infer_runtime_substitution(
+    expected: &ValueType,
+    value: &Value,
+    substitutions: &mut BTreeMap<String, ValueType>,
+) {
+    match (expected, value) {
+        (ValueType::TypeParameter(name), value) => {
+            if let Some(actual) = runtime_value_type(value) {
+                substitutions.entry(name.clone()).or_insert(actual);
+            }
+        }
+        (ValueType::List(expected), Value::List(values)) => {
+            for value in values.iter() {
+                infer_runtime_substitution(expected, value, substitutions);
+            }
+        }
+        (
+            ValueType::Nominal {
+                id: expected_id,
+                arguments: expected_arguments,
+            },
+            Value::NominalRecord(value),
+        ) if expected_id.as_ref() == value.id() => {
+            for (expected, actual) in expected_arguments.iter().zip(value.type_arguments()) {
+                infer_runtime_type_value(expected, actual, substitutions);
+            }
+        }
+        (
+            ValueType::Nominal {
+                id: expected_id,
+                arguments: expected_arguments,
+            },
+            Value::Variant(value),
+        ) if expected_id.as_ref() == value.id() => {
+            for (expected, actual) in expected_arguments.iter().zip(value.type_arguments()) {
+                infer_runtime_type_value(expected, actual, substitutions);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn infer_runtime_type_value(
+    expected: &ValueType,
+    actual: &ValueType,
+    substitutions: &mut BTreeMap<String, ValueType>,
+) {
+    match (expected, actual) {
+        (ValueType::TypeParameter(name), actual) => {
+            substitutions
+                .entry(name.clone())
+                .or_insert_with(|| actual.clone());
+        }
+        (ValueType::List(expected), ValueType::List(actual)) => {
+            infer_runtime_type_value(expected, actual, substitutions);
+        }
+        (
+            ValueType::Nominal {
+                id: expected_id,
+                arguments: expected_arguments,
+            },
+            ValueType::Nominal {
+                id: actual_id,
+                arguments: actual_arguments,
+            },
+        ) if expected_id == actual_id && expected_arguments.len() == actual_arguments.len() => {
+            for (expected, actual) in expected_arguments.iter().zip(actual_arguments) {
+                infer_runtime_type_value(expected, actual, substitutions);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn runtime_value_type(value: &Value) -> Option<ValueType> {
+    Some(match value {
+        Value::Null => ValueType::Null,
+        Value::Bool(_) => ValueType::Bool,
+        Value::Int(_) => ValueType::Int,
+        Value::Float(_) => ValueType::Float,
+        Value::String(_) => ValueType::String,
+        Value::Bytes(_) => ValueType::Bytes,
+        Value::Path(_) => ValueType::Path,
+        Value::Duration(_) => ValueType::Duration,
+        Value::ByteSize(_) => ValueType::ByteSize,
+        Value::List(values) => ValueType::List(Box::new(runtime_value_type(values.first()?)?)),
+        Value::Record(_) => ValueType::Record,
+        Value::Table(_) => ValueType::Table,
+        Value::Range(_) => ValueType::Range,
+        Value::Status(_) => ValueType::Status,
+        Value::Error(_) => ValueType::Error,
+        Value::Callable(callable) if callable.family() == "closure" => ValueType::Closure,
+        Value::Callable(_) => ValueType::Function,
+        Value::NominalRecord(value) => ValueType::Nominal {
+            id: Box::new(value.id().clone()),
+            arguments: value.type_arguments().to_vec(),
+        },
+        Value::Variant(value) => ValueType::Nominal {
+            id: Box::new(value.id().clone()),
+            arguments: value.type_arguments().to_vec(),
+        },
+    })
+}
+
 /// The single runtime callable: a named function or an anonymous closure.
 #[derive(Clone)]
 struct CallableValue {
     /// `Some` for a `def` function, `None` for a closure.
     name: Option<Arc<str>>,
     parameters: Vec<CallableParameter>,
+    type_parameters: Vec<ResolvedTypeParameter>,
     body: CallableBody,
     captured: ScopeStack,
     source: Arc<SourceFile>,
@@ -3560,8 +4495,10 @@ pub(crate) fn restore_callable(snapshot: CallableSnapshot) -> Result<Arc<dyn Cal
             .map(|(name, value_type)| CallableParameter {
                 name: Arc::from(name),
                 value_type,
+                pattern: None,
             })
             .collect(),
+        type_parameters: Vec::new(),
         body,
         captured: snapshot.captured,
         source,
@@ -3589,7 +4526,8 @@ fn find_callable_in_statement(
         StatementKind::Import(_)
         | StatementKind::ModuleImport(_)
         | StatementKind::ModuleExport(_)
-        | StatementKind::NominalType(_) => None,
+        | StatementKind::NominalType(_)
+        | StatementKind::VariantType(_) => None,
         StatementKind::Declaration(declaration) => {
             find_callable_in_expression(&declaration.value, snapshot)
         }
@@ -3737,7 +4675,9 @@ fn find_callable_in_expression(
                 .find_map(|part| find_callable_in_word_part(part, snapshot)),
             _ => None,
         },
-        ExpressionKind::Variable(_) | ExpressionKind::Symbol(_) => None,
+        ExpressionKind::Variable(_) | ExpressionKind::Symbol(_) | ExpressionKind::Qualified(_) => {
+            None
+        }
         ExpressionKind::List(elements) => elements
             .iter()
             .find_map(|element| find_callable_in_expression(element, snapshot)),
@@ -3748,6 +4688,10 @@ fn find_callable_in_expression(
             };
             key.or_else(|| find_callable_in_expression(&entry.value, snapshot))
         }),
+        ExpressionKind::NominalRecord(record) => record
+            .fields
+            .iter()
+            .find_map(|field| find_callable_in_expression(&field.value, snapshot)),
         ExpressionKind::Closure(closure) => find_callable_in_closure(closure, snapshot),
         ExpressionKind::CommandSubstitution(substitution) => {
             find_callable_in_chain(substitution.chain(), snapshot)
@@ -3802,6 +4746,7 @@ fn find_callable_in_word_part(
 struct CallableParameter {
     name: Arc<str>,
     value_type: ValueType,
+    pattern: Option<Pattern>,
 }
 
 struct RuntimeArgument {
@@ -4200,6 +5145,7 @@ mod tests {
         let mut evaluator = Evaluator {
             source,
             binding_types: Arc::new(RuntimeBindingTypes::default()),
+            current_result_type: None,
             cancel: CancellationToken::never(),
             budget: ResourceBudget::unlimited(),
             host: &mut host,

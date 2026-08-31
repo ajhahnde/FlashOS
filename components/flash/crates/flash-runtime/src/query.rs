@@ -416,6 +416,12 @@ impl SemanticQueries<'_> {
                 span: nominal.declaration_span(),
             });
         }
+        if let Some(nominal) = self.program.types().nominal_reference_at(module, offset) {
+            return Some(SourceLocation {
+                module: nominal.id().module().clone(),
+                span: nominal.declaration_span(),
+            });
+        }
         self.program
             .names()
             .target_at(module, offset)
@@ -494,6 +500,11 @@ impl SemanticQueries<'_> {
             }));
         }
         if let Some(nominal) = self.program.types().nominal_at(module, offset) {
+            return Some(SemanticHover::NominalType(NominalTypeHover {
+                nominal: nominal.clone(),
+            }));
+        }
+        if let Some(nominal) = self.program.types().nominal_reference_at(module, offset) {
             return Some(SemanticHover::NominalType(NominalTypeHover {
                 nominal: nominal.clone(),
             }));
@@ -840,7 +851,8 @@ impl<'a> CallFinder<'a> {
             StatementKind::Import(_)
             | StatementKind::ModuleImport(_)
             | StatementKind::ModuleExport(_)
-            | StatementKind::NominalType(_) => {}
+            | StatementKind::NominalType(_)
+            | StatementKind::VariantType(_) => {}
             StatementKind::Declaration(declaration) => self.expression(&declaration.value),
             StatementKind::Assignment(assignment) => self.expression(&assignment.value),
             StatementKind::Environment(environment) => {
@@ -956,7 +968,9 @@ impl<'a> CallFinder<'a> {
         }
         match expression.kind() {
             ExpressionKind::Literal(literal) => self.literal(literal),
-            ExpressionKind::Variable(_) | ExpressionKind::Symbol(_) => {}
+            ExpressionKind::Variable(_)
+            | ExpressionKind::Symbol(_)
+            | ExpressionKind::Qualified(_) => {}
             ExpressionKind::List(items) => {
                 for item in items {
                     self.expression(item);
@@ -968,6 +982,11 @@ impl<'a> CallFinder<'a> {
                         self.word_part(part);
                     }
                     self.expression(&entry.value);
+                }
+            }
+            ExpressionKind::NominalRecord(record) => {
+                for field in &record.fields {
+                    self.expression(&field.value);
                 }
             }
             ExpressionKind::Closure(closure) => self.chain(&closure.body),

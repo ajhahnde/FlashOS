@@ -85,6 +85,8 @@ fn aliases_reexports_and_nominal_types_keep_one_identity_and_provenance() {
                 "type Item = {\n",
                 "    value: Int,\n",
                 "}\n",
+                "\n",
+                "export { Item }\n",
             ),
         );
 

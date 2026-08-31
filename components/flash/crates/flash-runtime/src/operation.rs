@@ -389,6 +389,14 @@ pub fn field(target: &Value, name: &str) -> Result<Value, OperationError> {
                     name: name.to_owned(),
                 })
         }
+        Value::NominalRecord(record) => {
+            record
+                .get(name)
+                .cloned()
+                .ok_or_else(|| OperationError::MissingField {
+                    name: name.to_owned(),
+                })
+        }
         Value::Status(status) => match name {
             "code" => Ok(status.code().map_or(Value::Null, Value::Int)),
             "signal" => Ok(status.signal().map_or(Value::Null, |signal| {

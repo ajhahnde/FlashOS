@@ -20,10 +20,11 @@ use std::sync::Arc;
 use flash_syntax::{
     BinaryOperator, Block, Closure, CommandHeadKind, CommandItemKind, ConditionalChain,
     ControlTransfer, ControlledParseOutcome, ControlledVersionedParseOutcome, Diagnostic,
-    ElseBranch, Expression, ExpressionKind, LanguageMajor, LiteralKind, MatchArm, ParseOutcome,
-    Pattern, Pipeline, RecordKey, RedirectionKind, Script, Severity, SourceFile, SourceId, Span,
-    StageKind, Statement, StatementKind, TypeReference, UnaryOperator, VersionedParseOutcome, Word,
-    WordPart, WordPartKind, parse_v2_with_control, parse_with_control, render_diagnostic_sources,
+    ElseBranch, Expression, ExpressionKind, Identifier, LanguageMajor, LiteralKind, MatchArm,
+    ParseOutcome, Pattern, Pipeline, RecordKey, RedirectionKind, Script, Severity, SourceFile,
+    SourceId, Span, StageKind, Statement, StatementKind, TypeConstraint, TypeReference,
+    UnaryOperator, VersionedParseOutcome, Word, WordPart, WordPartKind, parse_v2_with_control,
+    parse_with_control, render_diagnostic_sources,
 };
 
 use crate::Value;
@@ -541,6 +542,16 @@ pub struct ModuleAliasRegistry {
 }
 
 impl ModuleAliasRegistry {
+    pub(crate) fn aliases<'a>(
+        &'a self,
+        module: &ModuleId,
+    ) -> impl Iterator<Item = &'a ModuleAlias> {
+        self.by_module
+            .get(module)
+            .into_iter()
+            .flat_map(|aliases| aliases.aliases.values())
+    }
+
     #[must_use]
     pub fn alias(&self, module: &ModuleId, name: &str) -> Option<&ModuleAlias> {
         self.by_module
@@ -553,6 +564,16 @@ impl ModuleAliasRegistry {
         self.by_module
             .get(module)
             .and_then(|aliases| aliases.exports.get(name))
+    }
+
+    pub(crate) fn exports<'a>(
+        &'a self,
+        module: &ModuleId,
+    ) -> impl Iterator<Item = &'a ModuleAliasExport> {
+        self.by_module
+            .get(module)
+            .into_iter()
+            .flat_map(|aliases| aliases.exports.values())
     }
 
     /// Resolves a local alias followed only by explicitly re-exported aliases.
@@ -601,13 +622,7 @@ impl ModuleAliasRegistry {
             }
             let mut occupied = BTreeMap::<String, Span>::new();
             for statement in entry.script().statements() {
-                let identifier = match statement.kind() {
-                    StatementKind::Declaration(declaration) => Some(declaration.name),
-                    StatementKind::Function(function) => Some(function.name),
-                    StatementKind::NominalType(declaration) => Some(declaration.name),
-                    _ => None,
-                };
-                if let Some(identifier) = identifier {
+                for identifier in top_level_declared_identifiers(statement) {
                     let name = entry
                         .source()
                         .slice(identifier.span())
@@ -1027,28 +1042,22 @@ impl ModuleNameRegistry {
             }
             let mut names = ModuleNames::default();
             for statement in entry.script().statements() {
-                let identifier = match statement.kind() {
-                    StatementKind::Declaration(declaration) => Some(declaration.name),
-                    StatementKind::Function(function) => Some(function.name),
-                    _ => None,
-                };
-                let Some(identifier) = identifier else {
-                    continue;
-                };
-                let name = entry
-                    .source()
-                    .slice(identifier.span())
-                    .expect("parsed identifiers belong to their module source")
-                    .to_owned();
-                if DynamicBinding::lookup(&name).is_some() {
-                    errors.push(ModuleNameError::ReservedBinding {
-                        module: entry.module().clone(),
-                        name,
-                        declaration_span: identifier.span(),
-                    });
-                    continue;
+                for identifier in top_level_declared_identifiers(statement) {
+                    let name = entry
+                        .source()
+                        .slice(identifier.span())
+                        .expect("parsed identifiers belong to their module source")
+                        .to_owned();
+                    if DynamicBinding::lookup(&name).is_some() {
+                        errors.push(ModuleNameError::ReservedBinding {
+                            module: entry.module().clone(),
+                            name,
+                            declaration_span: identifier.span(),
+                        });
+                        continue;
+                    }
+                    names.locals.entry(name).or_insert(identifier.span());
                 }
-                names.locals.entry(name).or_insert(identifier.span());
             }
             registry.by_module.insert(entry.module().clone(), names);
         }
@@ -1242,6 +1251,11 @@ pub enum ValueType {
     Error,
     Function,
     Closure,
+    TypeParameter(String),
+    Nominal {
+        id: Box<NominalTypeId>,
+        arguments: Vec<Self>,
+    },
 }
 
 impl ValueType {
@@ -1272,6 +1286,13 @@ impl ValueType {
             (Self::Error, Value::Error(_)) => true,
             (Self::Function, Value::Callable(callable)) => callable.family() == "function",
             (Self::Closure, Value::Callable(callable)) => callable.family() == "closure",
+            (Self::TypeParameter(_), _) => true,
+            (Self::Nominal { id, arguments }, Value::NominalRecord(value)) => {
+                nominal_runtime_type_matches(id, arguments, value.id(), value.type_arguments())
+            }
+            (Self::Nominal { id, arguments }, Value::Variant(value)) => {
+                nominal_runtime_type_matches(id, arguments, value.id(), value.type_arguments())
+            }
             _ => false,
         }
     }
@@ -1283,6 +1304,15 @@ impl ValueType {
             _ => self == actual,
         }
     }
+}
+
+fn nominal_runtime_type_matches(
+    id: &NominalTypeId,
+    arguments: &[ValueType],
+    runtime_id: &NominalTypeId,
+    runtime_arguments: &[ValueType],
+) -> bool {
+    id == runtime_id && arguments == runtime_arguments
 }
 
 impl fmt::Display for ValueType {
@@ -1306,7 +1336,82 @@ impl fmt::Display for ValueType {
             Self::Error => formatter.write_str("Error"),
             Self::Function => formatter.write_str("Function"),
             Self::Closure => formatter.write_str("Closure"),
+            Self::TypeParameter(name) => formatter.write_str(name),
+            Self::Nominal { id, arguments } => {
+                formatter.write_str(id.name())?;
+                if !arguments.is_empty() {
+                    formatter.write_str("[")?;
+                    for (index, argument) in arguments.iter().enumerate() {
+                        if index != 0 {
+                            formatter.write_str(", ")?;
+                        }
+                        argument.fmt(formatter)?;
+                    }
+                    formatter.write_str("]")?;
+                }
+                Ok(())
+            }
         }
+    }
+}
+
+pub(crate) fn substitute_type(
+    value_type: &ValueType,
+    substitutions: &BTreeMap<String, ValueType>,
+) -> ValueType {
+    match value_type {
+        ValueType::TypeParameter(name) => substitutions
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| value_type.clone()),
+        ValueType::List(element) => {
+            ValueType::List(Box::new(substitute_type(element, substitutions)))
+        }
+        ValueType::Nominal { id, arguments } => ValueType::Nominal {
+            id: id.clone(),
+            arguments: arguments
+                .iter()
+                .map(|argument| substitute_type(argument, substitutions))
+                .collect(),
+        },
+        _ => value_type.clone(),
+    }
+}
+
+fn unify_type(
+    expected: &ValueType,
+    actual: &ValueType,
+    substitutions: &mut BTreeMap<String, ValueType>,
+) -> bool {
+    match (expected, actual) {
+        (ValueType::TypeParameter(_), ValueType::Any) => true,
+        (ValueType::TypeParameter(name), actual) => match substitutions.get(name) {
+            Some(previous) => previous == actual,
+            None => {
+                substitutions.insert(name.clone(), actual.clone());
+                true
+            }
+        },
+        (ValueType::List(expected), ValueType::List(actual)) => {
+            unify_type(expected, actual, substitutions)
+        }
+        (
+            ValueType::Nominal {
+                id: expected_id,
+                arguments: expected_arguments,
+            },
+            ValueType::Nominal {
+                id: actual_id,
+                arguments: actual_arguments,
+            },
+        ) if expected_id == actual_id && expected_arguments.len() == actual_arguments.len() => {
+            expected_arguments
+                .iter()
+                .zip(actual_arguments)
+                .all(|(expected, actual)| unify_type(expected, actual, substitutions))
+        }
+        (ValueType::Any, _) | (_, ValueType::Any) => true,
+        _ => expected == actual,
     }
 }
 
@@ -1337,6 +1442,62 @@ pub struct NominalTypeField {
     span: Span,
 }
 
+/// One resolved invariant parameter on a generic nominal or callable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedTypeParameter {
+    name: String,
+    constraints: Vec<TypeConstraint>,
+    span: Span,
+}
+
+impl ResolvedTypeParameter {
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn constraints(&self) -> &[TypeConstraint] {
+        &self.constraints
+    }
+
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// One checked constructor in a closed nominal variant type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NominalVariant {
+    name: String,
+    payload: Vec<ValueType>,
+    span: Span,
+}
+
+impl NominalVariant {
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &[ValueType] {
+        &self.payload
+    }
+
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NominalTypeKind {
+    Record,
+    Variant,
+}
+
 impl NominalTypeField {
     #[must_use]
     pub fn name(&self) -> &str {
@@ -1359,7 +1520,10 @@ impl NominalTypeField {
 pub struct NominalType {
     id: NominalTypeId,
     declaration_span: Span,
+    kind: NominalTypeKind,
+    type_parameters: Vec<ResolvedTypeParameter>,
     fields: Vec<NominalTypeField>,
+    variants: Vec<NominalVariant>,
 }
 
 impl NominalType {
@@ -1374,8 +1538,23 @@ impl NominalType {
     }
 
     #[must_use]
+    pub const fn kind(&self) -> NominalTypeKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn type_parameters(&self) -> &[ResolvedTypeParameter] {
+        &self.type_parameters
+    }
+
+    #[must_use]
     pub fn fields(&self) -> &[NominalTypeField] {
         &self.fields
+    }
+
+    #[must_use]
+    pub fn variants(&self) -> &[NominalVariant] {
+        &self.variants
     }
 }
 
@@ -1434,6 +1613,7 @@ impl FunctionParameterSignature {
 pub struct FunctionSignature {
     name: String,
     declaration_span: Span,
+    type_parameters: Vec<ResolvedTypeParameter>,
     parameters: Vec<FunctionParameterSignature>,
     result: ValueType,
     result_annotation_span: Option<Span>,
@@ -1449,6 +1629,11 @@ impl FunctionSignature {
     #[must_use]
     pub const fn declaration_span(&self) -> Span {
         self.declaration_span
+    }
+
+    #[must_use]
+    pub fn type_parameters(&self) -> &[ResolvedTypeParameter] {
+        &self.type_parameters
     }
 
     #[must_use]
@@ -1476,9 +1661,16 @@ impl FunctionSignature {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ModuleTypes {
     annotations: Vec<ResolvedTypeAnnotation>,
+    nominal_references: Vec<ResolvedNominalReference>,
     functions: Vec<FunctionSignature>,
     bindings: Vec<ResolvedBindingType>,
     nominals: BTreeMap<String, NominalType>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ResolvedNominalReference {
+    span: Span,
+    id: NominalTypeId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1491,9 +1683,16 @@ struct ResolvedBindingType {
 pub(crate) struct RuntimeBindingTypes {
     by_source: BTreeMap<SourceId, Vec<ResolvedBindingType>>,
     functions_by_source: BTreeMap<SourceId, Vec<FunctionSignature>>,
+    annotations_by_source: BTreeMap<SourceId, Vec<ResolvedTypeAnnotation>>,
+    modules_by_source: BTreeMap<SourceId, ModuleId>,
+    nominals_by_module: BTreeMap<ModuleId, BTreeMap<String, NominalType>>,
+    aliases: ModuleAliasRegistry,
 }
 
 impl RuntimeBindingTypes {
+    pub(crate) fn language(&self, source: SourceId) -> Option<LanguageMajor> {
+        self.modules_by_source.get(&source).map(ModuleId::language)
+    }
     pub(crate) fn binding_type(
         &self,
         source: SourceId,
@@ -1536,6 +1735,121 @@ impl RuntimeBindingTypes {
         })
     }
 
+    pub(crate) fn qualified_nominal(
+        &self,
+        source: SourceId,
+        segments: &[&str],
+    ) -> Option<&NominalType> {
+        let (name, modules) = segments.split_last()?;
+        let current = self.modules_by_source.get(&source)?;
+        let owner = if modules.is_empty() {
+            current
+        } else {
+            self.aliases.resolve(current, modules)?
+        };
+        self.nominals_by_module.get(owner)?.get(*name)
+    }
+
+    pub(crate) fn qualified_variant<'name>(
+        &self,
+        source: SourceId,
+        segments: &'name [&'name str],
+    ) -> Option<(&NominalType, &'name str)> {
+        let (constructor, nominal) = segments.split_last()?;
+        Some((self.qualified_nominal(source, nominal)?, *constructor))
+    }
+
+    pub(crate) fn annotation_type(&self, source: SourceId, span: Span) -> Option<&ValueType> {
+        self.annotations_by_source
+            .get(&source)?
+            .iter()
+            .find(|annotation| annotation.span() == span)
+            .map(ResolvedTypeAnnotation::value_type)
+    }
+
+    pub(crate) fn type_satisfies_constraint(
+        &self,
+        value_type: &ValueType,
+        constraint: TypeConstraint,
+    ) -> bool {
+        self.type_satisfies_constraint_inner(value_type, constraint, &mut BTreeSet::new())
+    }
+
+    fn type_satisfies_constraint_inner(
+        &self,
+        value_type: &ValueType,
+        constraint: TypeConstraint,
+        visiting: &mut BTreeSet<NominalTypeId>,
+    ) -> bool {
+        match constraint {
+            TypeConstraint::Equal => match value_type {
+                ValueType::Any
+                | ValueType::Function
+                | ValueType::Closure
+                | ValueType::TypeParameter(_) => false,
+                ValueType::List(element) => {
+                    self.type_satisfies_constraint_inner(element, constraint, visiting)
+                }
+                ValueType::Nominal { id, arguments } => {
+                    if !arguments.iter().all(|argument| {
+                        self.type_satisfies_constraint_inner(argument, constraint, visiting)
+                    }) {
+                        return false;
+                    }
+                    if !visiting.insert(id.as_ref().clone()) {
+                        return true;
+                    }
+                    let result = self
+                        .nominals_by_module
+                        .get(id.module())
+                        .and_then(|nominals| nominals.get(id.name()))
+                        .filter(|nominal| nominal.type_parameters().len() == arguments.len())
+                        .is_some_and(|nominal| {
+                            let substitutions = nominal
+                                .type_parameters()
+                                .iter()
+                                .zip(arguments)
+                                .map(|(parameter, argument)| {
+                                    (parameter.name().to_owned(), argument.clone())
+                                })
+                                .collect::<BTreeMap<_, _>>();
+                            nominal.fields().iter().all(|field| {
+                                self.type_satisfies_constraint_inner(
+                                    &substitute_type(field.value_type(), &substitutions),
+                                    constraint,
+                                    visiting,
+                                )
+                            }) && nominal.variants().iter().all(|variant| {
+                                variant.payload().iter().all(|payload| {
+                                    self.type_satisfies_constraint_inner(
+                                        &substitute_type(payload, &substitutions),
+                                        constraint,
+                                        visiting,
+                                    )
+                                })
+                            })
+                        });
+                    visiting.remove(id.as_ref());
+                    result
+                }
+                _ => true,
+            },
+            TypeConstraint::Ordered => match value_type {
+                ValueType::Int
+                | ValueType::Float
+                | ValueType::String
+                | ValueType::Bytes
+                | ValueType::Path
+                | ValueType::Duration
+                | ValueType::ByteSize => true,
+                ValueType::List(element) => {
+                    self.type_satisfies_constraint_inner(element, constraint, visiting)
+                }
+                _ => false,
+            },
+        }
+    }
+
     pub(crate) fn analyze_source(
         source: &SourceFile,
         script: &Script,
@@ -1549,13 +1863,30 @@ impl RuntimeBindingTypes {
             source: source.clone(),
             script: script.clone(),
         };
-        let (types, errors) = TypeCollector::new(&entry, &AnalysisControl::never()).collect();
+        let control = AnalysisControl::never();
+        let aliases = ModuleAliasRegistry::default();
+        let names = ModuleNameRegistry::default();
+        let mut declarations = ModuleTypeRegistry::default();
+        declarations.by_module.insert(
+            entry.module().clone(),
+            TypeCollector::declarations(&entry, &control),
+        );
+        let (types, errors) =
+            TypeCollector::new(&entry, &aliases, &names, &declarations, &control).collect();
         if let Some(error) = errors.into_iter().next() {
             return Err(Box::new(error));
         }
         Ok(Self {
             by_source: BTreeMap::from([(source.id(), types.bindings)]),
             functions_by_source: BTreeMap::from([(source.id(), types.functions)]),
+            annotations_by_source: BTreeMap::from([(source.id(), types.annotations)]),
+            modules_by_source: BTreeMap::from([(source.id(), entry.module().clone())]),
+            nominals_by_module: declarations
+                .by_module
+                .into_iter()
+                .map(|(module, types)| (module, types.nominals))
+                .collect(),
+            aliases,
         })
     }
 }
@@ -1581,6 +1912,27 @@ impl ModuleTypeRegistry {
             .nominals
             .values()
             .find(|nominal| span_contains(nominal.declaration_span(), offset))
+    }
+
+    pub(crate) fn nominal_reference_at(
+        &self,
+        module: &ModuleId,
+        offset: usize,
+    ) -> Option<&NominalType> {
+        let types = self.by_module.get(module)?;
+        let id = types
+            .annotations
+            .iter()
+            .find(|annotation| span_contains(annotation.span(), offset))
+            .and_then(|annotation| nominal_type_id(annotation.value_type()))
+            .or_else(|| {
+                types
+                    .nominal_references
+                    .iter()
+                    .find(|reference| span_contains(reference.span, offset))
+                    .map(|reference| &reference.id)
+            })?;
+        self.nominal(id.module(), id.name())
     }
 
     /// Resolved annotations in deterministic source traversal order.
@@ -1641,16 +1993,28 @@ impl ModuleTypeRegistry {
 
     fn analyze(
         sources: &ModuleSourceRegistry,
+        aliases: &ModuleAliasRegistry,
         names: &ModuleNameRegistry,
         control: &AnalysisControl,
     ) -> Result<Self, Vec<ModuleTypeError>> {
+        let mut declarations = Self::default();
+        for entry in sources.entries() {
+            if control.is_cancelled() {
+                return Ok(declarations);
+            }
+            declarations.by_module.insert(
+                entry.module().clone(),
+                TypeCollector::declarations(entry, control),
+            );
+        }
         let mut registry = Self::default();
         let mut errors = Vec::new();
         for entry in sources.entries() {
             if control.is_cancelled() {
                 return Ok(registry);
             }
-            let (types, mut source_errors) = TypeCollector::new(entry, control).collect();
+            let (types, mut source_errors) =
+                TypeCollector::new(entry, aliases, names, &declarations, control).collect();
             errors.append(&mut source_errors);
             registry.by_module.insert(entry.module().clone(), types);
         }
@@ -1658,7 +2022,9 @@ impl ModuleTypeRegistry {
             if control.is_cancelled() {
                 return Ok(registry);
             }
-            errors.extend(SignatureValidator::new(entry, names, &registry, control).validate());
+            errors.extend(
+                SignatureValidator::new(entry, aliases, names, &registry, control).validate(),
+            );
         }
         let source_order = sources
             .entries()
@@ -1675,27 +2041,229 @@ impl ModuleTypeRegistry {
     }
 }
 
+fn nominal_type_id(value_type: &ValueType) -> Option<&NominalTypeId> {
+    match value_type {
+        ValueType::Nominal { id, .. } => Some(id.as_ref()),
+        ValueType::List(element) => nominal_type_id(element),
+        _ => None,
+    }
+}
+
+fn pattern_span(pattern: &Pattern) -> Span {
+    match pattern {
+        Pattern::Binding(identifier) => identifier.span(),
+        Pattern::Wildcard(span) => *span,
+        Pattern::Literal(literal) => literal.span(),
+        Pattern::List(pattern) => pattern.span,
+        Pattern::NominalRecord(pattern) => pattern.span,
+        Pattern::Variant(pattern) => pattern.span,
+    }
+}
+
+fn top_level_declared_identifiers(statement: &Statement) -> Vec<Identifier> {
+    fn collect_pattern(pattern: &Pattern, identifiers: &mut Vec<Identifier>) {
+        match pattern {
+            Pattern::Binding(identifier) => identifiers.push(*identifier),
+            Pattern::List(pattern) => {
+                for element in &pattern.elements {
+                    collect_pattern(element, identifiers);
+                }
+                if let Some(rest) = pattern.rest {
+                    identifiers.push(rest);
+                }
+            }
+            Pattern::NominalRecord(pattern) => {
+                for field in &pattern.fields {
+                    collect_pattern(&field.pattern, identifiers);
+                }
+            }
+            Pattern::Variant(pattern) => {
+                for payload in &pattern.payload {
+                    collect_pattern(payload, identifiers);
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_) => {}
+        }
+    }
+
+    let mut identifiers = Vec::new();
+    match statement.kind() {
+        StatementKind::Declaration(declaration) => {
+            collect_pattern(&declaration.pattern, &mut identifiers);
+        }
+        StatementKind::Function(function) => identifiers.push(function.name),
+        StatementKind::NominalType(declaration) => identifiers.push(declaration.name),
+        StatementKind::VariantType(declaration) => identifiers.push(declaration.name),
+        _ => {}
+    }
+    identifiers
+}
+
 struct TypeCollector<'a> {
     entry: &'a RegisteredModuleSource,
+    aliases: &'a ModuleAliasRegistry,
+    names: &'a ModuleNameRegistry,
+    declarations: &'a ModuleTypeRegistry,
     types: ModuleTypes,
+    type_parameter_scopes: Vec<BTreeMap<String, ResolvedTypeParameter>>,
     errors: Vec<ModuleTypeError>,
     control: &'a AnalysisControl,
 }
 
 impl<'a> TypeCollector<'a> {
-    fn new(entry: &'a RegisteredModuleSource, control: &'a AnalysisControl) -> Self {
+    fn new(
+        entry: &'a RegisteredModuleSource,
+        aliases: &'a ModuleAliasRegistry,
+        names: &'a ModuleNameRegistry,
+        declarations: &'a ModuleTypeRegistry,
+        control: &'a AnalysisControl,
+    ) -> Self {
         Self {
             entry,
-            types: ModuleTypes::default(),
+            aliases,
+            names,
+            declarations,
+            types: declarations
+                .by_module
+                .get(entry.module())
+                .cloned()
+                .unwrap_or_default(),
+            type_parameter_scopes: Vec::new(),
             errors: Vec::new(),
             control,
         }
     }
 
     fn collect(mut self) -> (ModuleTypes, Vec<ModuleTypeError>) {
+        self.resolve_nominal_schemas(self.entry.script().statements());
         self.statements(self.entry.script().statements())
             .expect("accumulating type collection does not fail fast");
         (self.types, self.errors)
+    }
+
+    fn declarations(entry: &RegisteredModuleSource, control: &AnalysisControl) -> ModuleTypes {
+        let mut types = ModuleTypes::default();
+        for statement in entry.script().statements() {
+            if control.is_cancelled() {
+                break;
+            }
+            let (name, parameters, kind) = match statement.kind() {
+                StatementKind::NominalType(declaration) => (
+                    declaration.name,
+                    &declaration.type_parameters,
+                    NominalTypeKind::Record,
+                ),
+                StatementKind::VariantType(declaration) => (
+                    declaration.name,
+                    &declaration.type_parameters,
+                    NominalTypeKind::Variant,
+                ),
+                _ => continue,
+            };
+            let name_text = entry
+                .source()
+                .slice(name.span())
+                .expect("parsed nominal names belong to their source")
+                .to_owned();
+            let type_parameters = parameters
+                .iter()
+                .map(|parameter| ResolvedTypeParameter {
+                    name: entry
+                        .source()
+                        .slice(parameter.name.span())
+                        .expect("parsed type parameters belong to their source")
+                        .to_owned(),
+                    constraints: parameter.constraints.clone(),
+                    span: parameter.span,
+                })
+                .collect();
+            types
+                .nominals
+                .entry(name_text.clone())
+                .or_insert_with(|| NominalType {
+                    id: NominalTypeId {
+                        module: entry.module().clone(),
+                        name: name_text,
+                    },
+                    declaration_span: name.span(),
+                    kind,
+                    type_parameters,
+                    fields: Vec::new(),
+                    variants: Vec::new(),
+                });
+        }
+        types
+    }
+
+    fn resolve_nominal_schemas(&mut self, statements: &[Statement]) {
+        for statement in statements {
+            match statement.kind() {
+                StatementKind::NominalType(declaration) => {
+                    let parameters = self.resolved_type_parameters(&declaration.type_parameters);
+                    self.push_type_parameters(&parameters);
+                    let fields = declaration
+                        .fields
+                        .iter()
+                        .map(|field| NominalTypeField {
+                            name: self.text(field.name.span()).to_owned(),
+                            value_type: self.resolve_type(&field.value_type),
+                            span: field.span,
+                        })
+                        .collect();
+                    self.type_parameter_scopes.pop();
+                    let name = self.text(declaration.name.span()).to_owned();
+                    if let Some(nominal) = self.types.nominals.get_mut(&name) {
+                        nominal.fields = fields;
+                    }
+                }
+                StatementKind::VariantType(declaration) => {
+                    let parameters = self.resolved_type_parameters(&declaration.type_parameters);
+                    self.push_type_parameters(&parameters);
+                    let variants = declaration
+                        .variants
+                        .iter()
+                        .map(|variant| NominalVariant {
+                            name: self.text(variant.name.span()).to_owned(),
+                            payload: variant
+                                .payload
+                                .iter()
+                                .map(|payload| self.resolve_type(payload))
+                                .collect(),
+                            span: variant.span,
+                        })
+                        .collect();
+                    self.type_parameter_scopes.pop();
+                    let name = self.text(declaration.name.span()).to_owned();
+                    if let Some(nominal) = self.types.nominals.get_mut(&name) {
+                        nominal.variants = variants;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn resolved_type_parameters(
+        &self,
+        parameters: &[flash_syntax::TypeParameter],
+    ) -> Vec<ResolvedTypeParameter> {
+        parameters
+            .iter()
+            .map(|parameter| ResolvedTypeParameter {
+                name: self.text(parameter.name.span()).to_owned(),
+                constraints: parameter.constraints.clone(),
+                span: parameter.span,
+            })
+            .collect()
+    }
+
+    fn push_type_parameters(&mut self, parameters: &[ResolvedTypeParameter]) {
+        self.type_parameter_scopes.push(
+            parameters
+                .iter()
+                .map(|parameter| (parameter.name.clone(), parameter.clone()))
+                .collect(),
+        );
     }
 
     fn statements(&mut self, statements: &[Statement]) -> Result<(), Box<ModuleTypeError>> {
@@ -1716,31 +2284,9 @@ impl<'a> TypeCollector<'a> {
             StatementKind::Import(_)
             | StatementKind::ModuleImport(_)
             | StatementKind::ModuleExport(_) => Ok(()),
-            StatementKind::NominalType(declaration) => {
-                let name = self.text(declaration.name.span()).to_owned();
-                let fields = declaration
-                    .fields
-                    .iter()
-                    .map(|field| NominalTypeField {
-                        name: self.text(field.name.span()).to_owned(),
-                        value_type: self.resolve_type(&field.value_type),
-                        span: field.span,
-                    })
-                    .collect();
-                self.types
-                    .nominals
-                    .entry(name.clone())
-                    .or_insert_with(|| NominalType {
-                        id: NominalTypeId {
-                            module: self.entry.module().clone(),
-                            name,
-                        },
-                        declaration_span: declaration.name.span(),
-                        fields,
-                    });
-                Ok(())
-            }
+            StatementKind::NominalType(_) | StatementKind::VariantType(_) => Ok(()),
             StatementKind::Declaration(declaration) => {
+                self.collect_nominal_pattern_references(&declaration.pattern);
                 let value_type = declaration
                     .type_annotation
                     .as_ref()
@@ -1755,10 +2301,7 @@ impl<'a> TypeCollector<'a> {
                         _ => None,
                     });
                 if let Some(value_type) = value_type {
-                    self.types.bindings.push(ResolvedBindingType {
-                        declaration_span: declaration.name.span(),
-                        value_type,
-                    });
+                    self.collect_pattern_bindings(&declaration.pattern, &value_type);
                 }
                 self.expression(&declaration.value)
             }
@@ -1768,15 +2311,15 @@ impl<'a> TypeCollector<'a> {
                 flash_syntax::EnvironmentStatement::Unset { .. } => Ok(()),
             },
             StatementKind::Function(function) => {
+                let type_parameters = self.resolved_type_parameters(&function.type_parameters);
+                self.push_type_parameters(&type_parameters);
                 let mut parameters = Vec::with_capacity(function.parameters.len());
                 for parameter in &function.parameters {
+                    self.collect_nominal_pattern_references(&parameter.pattern);
                     let value_type = match &parameter.type_annotation {
                         Some(annotation) => {
                             let value_type = self.resolve_type(annotation);
-                            self.types.bindings.push(ResolvedBindingType {
-                                declaration_span: parameter.name.span(),
-                                value_type: value_type.clone(),
-                            });
+                            self.collect_pattern_bindings(&parameter.pattern, &value_type);
                             value_type
                         }
                         None => ValueType::Any,
@@ -1798,6 +2341,7 @@ impl<'a> TypeCollector<'a> {
                 self.types.functions.push(FunctionSignature {
                     name: self.text(function.name.span()).to_owned(),
                     declaration_span: function.name.span(),
+                    type_parameters,
                     parameters,
                     result,
                     result_annotation_span: function
@@ -1809,6 +2353,7 @@ impl<'a> TypeCollector<'a> {
                         .as_ref()
                         .map(|block| Documentation::from_block(self.entry.source(), block)),
                 });
+                self.type_parameter_scopes.pop();
                 self.statements(&function.body.statements)
             }
             StatementKind::If(statement) => {
@@ -1834,6 +2379,7 @@ impl<'a> TypeCollector<'a> {
             StatementKind::Match(statement) => {
                 self.expression(&statement.value)?;
                 for arm in &statement.arms {
+                    self.collect_nominal_pattern_references(&arm.pattern);
                     if let Pattern::Literal(literal) = &arm.pattern {
                         self.literal(literal)?;
                     }
@@ -1899,6 +2445,10 @@ impl<'a> TypeCollector<'a> {
         match expression.kind() {
             ExpressionKind::Literal(literal) => self.literal(literal),
             ExpressionKind::Variable(_) | ExpressionKind::Symbol(_) => Ok(()),
+            ExpressionKind::Qualified(name) => {
+                self.record_nominal_reference(name, true);
+                Ok(())
+            }
             ExpressionKind::List(elements) => {
                 for element in elements {
                     self.expression(element)?;
@@ -1914,11 +2464,21 @@ impl<'a> TypeCollector<'a> {
                 }
                 Ok(())
             }
+            ExpressionKind::NominalRecord(record) => {
+                self.record_nominal_reference(&record.name, false);
+                for field in &record.fields {
+                    self.expression(&field.value)?;
+                }
+                Ok(())
+            }
             ExpressionKind::Closure(closure) => self.closure(closure),
             ExpressionKind::CommandSubstitution(substitution) => self.chain(substitution.chain()),
             ExpressionKind::GroupedJob(chain) => self.chain(chain),
             ExpressionKind::Call(call) => {
                 self.expression(&call.callee)?;
+                for type_argument in &call.type_arguments {
+                    self.resolve_type(type_argument);
+                }
                 for argument in &call.arguments {
                     self.expression(argument)?;
                 }
@@ -1942,15 +2502,207 @@ impl<'a> TypeCollector<'a> {
             return Ok(());
         }
         for parameter in &closure.parameters {
+            self.collect_nominal_pattern_references(&parameter.pattern);
             if let Some(annotation) = &parameter.type_annotation {
                 let value_type = self.resolve_type(annotation);
-                self.types.bindings.push(ResolvedBindingType {
-                    declaration_span: parameter.name.span(),
-                    value_type,
-                });
+                self.collect_pattern_bindings(&parameter.pattern, &value_type);
             }
         }
+        if let Some(result_type) = &closure.result_type {
+            self.resolve_type(result_type);
+        }
         self.chain(&closure.body)
+    }
+
+    fn collect_pattern_bindings(&mut self, pattern: &Pattern, value_type: &ValueType) {
+        match pattern {
+            Pattern::Binding(identifier) => self.types.bindings.push(ResolvedBindingType {
+                declaration_span: identifier.span(),
+                value_type: value_type.clone(),
+            }),
+            Pattern::Wildcard(_) | Pattern::Literal(_) => {}
+            Pattern::List(pattern) => {
+                let element_type = match value_type {
+                    ValueType::List(element) => element.as_ref().clone(),
+                    _ => ValueType::Any,
+                };
+                for element in &pattern.elements {
+                    self.collect_pattern_bindings(element, &element_type);
+                }
+                if let Some(rest) = pattern.rest {
+                    self.types.bindings.push(ResolvedBindingType {
+                        declaration_span: rest.span(),
+                        value_type: ValueType::List(Box::new(element_type)),
+                    });
+                }
+            }
+            Pattern::NominalRecord(pattern) => {
+                self.record_nominal_reference(&pattern.name, false);
+                let Some((nominal, substitutions)) =
+                    self.nominal_for_pattern(&pattern.name, value_type)
+                else {
+                    for field in &pattern.fields {
+                        self.collect_pattern_bindings(&field.pattern, &ValueType::Any);
+                    }
+                    return;
+                };
+                let field_types = nominal
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            substitute_type(&field.value_type, &substitutions),
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                for field in &pattern.fields {
+                    let name = self.text(field.name.span());
+                    self.collect_pattern_bindings(
+                        &field.pattern,
+                        field_types.get(name).unwrap_or(&ValueType::Any),
+                    );
+                }
+            }
+            Pattern::Variant(pattern) => {
+                self.record_nominal_reference(&pattern.constructor, true);
+                let Some((nominal, substitutions)) =
+                    self.nominal_for_pattern(&pattern.constructor, value_type)
+                else {
+                    for payload in &pattern.payload {
+                        self.collect_pattern_bindings(payload, &ValueType::Any);
+                    }
+                    return;
+                };
+                let constructor = pattern
+                    .constructor
+                    .segments
+                    .last()
+                    .map(|segment| self.text(segment.span()));
+                let payload_types = constructor
+                    .and_then(|name| nominal.variants.iter().find(|variant| variant.name == name))
+                    .map_or(&[][..], |variant| variant.payload.as_slice());
+                let resolved = payload_types
+                    .iter()
+                    .map(|value_type| substitute_type(value_type, &substitutions))
+                    .collect::<Vec<_>>();
+                for (index, payload) in pattern.payload.iter().enumerate() {
+                    self.collect_pattern_bindings(
+                        payload,
+                        resolved.get(index).unwrap_or(&ValueType::Any),
+                    );
+                }
+            }
+        }
+    }
+
+    fn collect_nominal_pattern_references(&mut self, pattern: &Pattern) {
+        match pattern {
+            Pattern::List(pattern) => {
+                for element in &pattern.elements {
+                    self.collect_nominal_pattern_references(element);
+                }
+            }
+            Pattern::NominalRecord(pattern) => {
+                self.record_nominal_reference(&pattern.name, false);
+                for field in &pattern.fields {
+                    self.collect_nominal_pattern_references(&field.pattern);
+                }
+            }
+            Pattern::Variant(pattern) => {
+                self.record_nominal_reference(&pattern.constructor, true);
+                for payload in &pattern.payload {
+                    self.collect_nominal_pattern_references(payload);
+                }
+            }
+            Pattern::Binding(_) | Pattern::Wildcard(_) | Pattern::Literal(_) => {}
+        }
+    }
+
+    fn record_nominal_reference(
+        &mut self,
+        name: &flash_syntax::QualifiedName,
+        constructor_member: bool,
+    ) {
+        let type_index = if constructor_member {
+            let Some(index) = name.segments.len().checked_sub(2) else {
+                return;
+            };
+            index
+        } else {
+            let Some(index) = name.segments.len().checked_sub(1) else {
+                return;
+            };
+            index
+        };
+        let type_name = self.text(name.segments[type_index].span());
+        let owner = if type_index == 0 {
+            self.entry.module()
+        } else {
+            let modules = name.segments[..type_index]
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>();
+            let Some(owner) = self.aliases.resolve(self.entry.module(), &modules) else {
+                return;
+            };
+            owner
+        };
+        if type_index != 0 && self.names.export(owner, type_name).is_none() {
+            return;
+        }
+        let Some(nominal) = self.declarations.nominal(owner, type_name) else {
+            return;
+        };
+        if constructor_member && nominal.kind() != NominalTypeKind::Variant {
+            return;
+        }
+        let reference = ResolvedNominalReference {
+            span: name.span,
+            id: nominal.id().clone(),
+        };
+        if !self.types.nominal_references.contains(&reference) {
+            self.types.nominal_references.push(reference);
+        }
+    }
+
+    fn nominal_for_pattern(
+        &self,
+        name: &flash_syntax::QualifiedName,
+        value_type: &ValueType,
+    ) -> Option<(NominalType, BTreeMap<String, ValueType>)> {
+        let ValueType::Nominal { id, arguments } = value_type else {
+            return None;
+        };
+        let type_name_index = if name.segments.len() > 1 {
+            name.segments.len() - 2
+        } else {
+            0
+        };
+        let type_name = self.text(name.segments[type_name_index].span());
+        let owner = if type_name_index == 0 {
+            self.entry.module()
+        } else {
+            let modules = name.segments[..type_name_index]
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>();
+            self.aliases.resolve(self.entry.module(), &modules)?
+        };
+        if type_name_index != 0 && self.names.export(owner, type_name).is_none() {
+            return None;
+        }
+        let nominal = self.declarations.nominal(owner, type_name)?.clone();
+        if nominal.id() != id.as_ref() {
+            return None;
+        }
+        let substitutions = nominal
+            .type_parameters
+            .iter()
+            .zip(arguments)
+            .map(|(parameter, argument)| (parameter.name.clone(), argument.clone()))
+            .collect();
+        Some((nominal, substitutions))
     }
 
     fn literal(&mut self, literal: &flash_syntax::Literal) -> Result<(), Box<ModuleTypeError>> {
@@ -2037,8 +2789,48 @@ impl<'a> TypeCollector<'a> {
         if self.control.is_cancelled() {
             return Ok(ValueType::Any);
         }
-        let name = self.text(reference.name.span());
-        let value_type = if name == "List" {
+        let qualified = self
+            .text(reference.span)
+            .split('[')
+            .next()
+            .expect("a type reference begins with its name");
+        let segments = qualified.split("::").map(str::trim).collect::<Vec<_>>();
+        let name = segments
+            .last()
+            .copied()
+            .expect("a type reference has one name segment");
+        if segments.len() == 1
+            && let Some(parameter) = self
+                .type_parameter_scopes
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name))
+        {
+            if !reference.arguments.is_empty() {
+                return Err(Box::new(ModuleTypeError::InvalidTypeArity {
+                    module: self.entry.module().clone(),
+                    name: name.to_owned(),
+                    expected: 0,
+                    actual: reference.arguments.len(),
+                    span: reference.span,
+                }));
+            }
+            return Ok(ValueType::TypeParameter(parameter.name.clone()));
+        }
+        let nominal_owner = if segments.len() == 1 {
+            Some(self.entry.module())
+        } else {
+            self.aliases.resolve(
+                self.entry.module(),
+                &segments[..segments.len().saturating_sub(1)],
+            )
+        };
+        let nominal = nominal_owner.and_then(|owner| {
+            (segments.len() == 1 || self.names.export(owner, name).is_some())
+                .then(|| self.declarations.nominal(owner, name))
+                .flatten()
+        });
+        let value_type = if segments.len() == 1 && name == "List" {
             if reference.arguments.len() != 1 {
                 return Err(Box::new(ModuleTypeError::InvalidTypeArity {
                     module: self.entry.module().clone(),
@@ -2049,6 +2841,26 @@ impl<'a> TypeCollector<'a> {
                 }));
             }
             ValueType::List(Box::new(self.resolve_type_value(&reference.arguments[0])?))
+        } else if let Some(nominal) = nominal {
+            let expected = nominal.type_parameters().len();
+            let id = nominal.id().clone();
+            if reference.arguments.len() != expected {
+                return Err(Box::new(ModuleTypeError::InvalidTypeArity {
+                    module: self.entry.module().clone(),
+                    name: name.to_owned(),
+                    expected,
+                    actual: reference.arguments.len(),
+                    span: reference.span,
+                }));
+            }
+            ValueType::Nominal {
+                id: Box::new(id),
+                arguments: reference
+                    .arguments
+                    .iter()
+                    .map(|argument| self.resolve_type_value(argument))
+                    .collect::<Result<_, _>>()?,
+            }
         } else {
             if !reference.arguments.is_empty() {
                 return Err(Box::new(ModuleTypeError::InvalidTypeArity {
@@ -2059,24 +2871,24 @@ impl<'a> TypeCollector<'a> {
                     span: reference.span,
                 }));
             }
-            match name {
-                "Any" => ValueType::Any,
-                "Null" => ValueType::Null,
-                "Bool" => ValueType::Bool,
-                "Int" => ValueType::Int,
-                "Float" => ValueType::Float,
-                "String" => ValueType::String,
-                "Bytes" => ValueType::Bytes,
-                "Path" => ValueType::Path,
-                "Duration" => ValueType::Duration,
-                "ByteSize" => ValueType::ByteSize,
-                "Record" => ValueType::Record,
-                "Table" => ValueType::Table,
-                "Range" => ValueType::Range,
-                "Status" => ValueType::Status,
-                "Error" => ValueType::Error,
-                "Function" => ValueType::Function,
-                "Closure" => ValueType::Closure,
+            match (segments.len() == 1).then_some(name) {
+                Some("Any") => ValueType::Any,
+                Some("Null") => ValueType::Null,
+                Some("Bool") => ValueType::Bool,
+                Some("Int") => ValueType::Int,
+                Some("Float") => ValueType::Float,
+                Some("String") => ValueType::String,
+                Some("Bytes") => ValueType::Bytes,
+                Some("Path") => ValueType::Path,
+                Some("Duration") => ValueType::Duration,
+                Some("ByteSize") => ValueType::ByteSize,
+                Some("Record") => ValueType::Record,
+                Some("Table") => ValueType::Table,
+                Some("Range") => ValueType::Range,
+                Some("Status") => ValueType::Status,
+                Some("Error") => ValueType::Error,
+                Some("Function") => ValueType::Function,
+                Some("Closure") => ValueType::Closure,
                 _ => {
                     return Err(Box::new(ModuleTypeError::UnknownType {
                         module: self.entry.module().clone(),
@@ -2099,8 +2911,11 @@ impl<'a> TypeCollector<'a> {
 
 struct SignatureValidator<'a> {
     entry: &'a RegisteredModuleSource,
+    aliases: &'a ModuleAliasRegistry,
     names: &'a ModuleNameRegistry,
     types: &'a ModuleTypeRegistry,
+    inferred_bindings: RefCell<BTreeMap<(ModuleId, usize), ValueType>>,
+    type_parameter_scopes: RefCell<Vec<BTreeMap<String, Vec<TypeConstraint>>>>,
     errors: RefCell<Vec<ModuleTypeError>>,
     control: &'a AnalysisControl,
 }
@@ -2108,14 +2923,18 @@ struct SignatureValidator<'a> {
 impl<'a> SignatureValidator<'a> {
     fn new(
         entry: &'a RegisteredModuleSource,
+        aliases: &'a ModuleAliasRegistry,
         names: &'a ModuleNameRegistry,
         types: &'a ModuleTypeRegistry,
         control: &'a AnalysisControl,
     ) -> Self {
         Self {
             entry,
+            aliases,
             names,
             types,
+            inferred_bindings: RefCell::new(BTreeMap::new()),
+            type_parameter_scopes: RefCell::new(Vec::new()),
             errors: RefCell::new(Vec::new()),
             control,
         }
@@ -2148,16 +2967,44 @@ impl<'a> SignatureValidator<'a> {
             .types
             .function(self.entry.module(), function.name.span())
             .expect("every collected named function has one resolved signature");
-        self.function_statements(&function.body.statements, signature)?;
+        self.type_parameter_scopes.borrow_mut().push(
+            signature
+                .type_parameters()
+                .iter()
+                .map(|parameter| {
+                    (
+                        parameter.name().to_owned(),
+                        parameter.constraints().to_vec(),
+                    )
+                })
+                .collect(),
+        );
+        let result = (|| {
+            if self.entry.module().language() == LanguageMajor::V2 {
+                for (parameter, resolved) in function.parameters.iter().zip(signature.parameters())
+                {
+                    self.validate_pattern(&parameter.pattern, resolved.value_type());
+                }
+            }
+            self.function_statements(&function.body.statements, signature)?;
 
-        let Some(StatementKind::Job(job)) = function.body.statements.last().map(Statement::kind)
-        else {
-            return Ok(());
-        };
-        let Some((span, actual)) = self.chain_value(&job.chain)? else {
-            return Ok(());
-        };
-        self.check_result(signature, span, Some(actual))
+            let Some(StatementKind::Job(job)) =
+                function.body.statements.last().map(Statement::kind)
+            else {
+                return Ok(());
+            };
+            let Some((span, actual)) =
+                self.chain_value_with_expected(&job.chain, Some(signature.result()))?
+            else {
+                return Ok(());
+            };
+            self.check_result(signature, span, Some(actual))
+        })();
+        self.type_parameter_scopes
+            .borrow_mut()
+            .pop()
+            .expect("function validation pushes one type-parameter scope");
+        result
     }
 
     fn function_statements(
@@ -2186,7 +3033,10 @@ impl<'a> SignatureValidator<'a> {
             StatementKind::Function(function) => self.function(function),
             StatementKind::Control(ControlTransfer::Return(value)) => {
                 let (span, actual) = match value {
-                    Some(expression) => (expression.span(), self.expression(expression)?),
+                    Some(expression) => (
+                        expression.span(),
+                        self.expression_with_expected(expression, Some(signature.result()))?,
+                    ),
                     None => (statement.span(), Some(ValueType::Null)),
                 };
                 self.check_result(signature, span, actual)
@@ -2213,13 +3063,25 @@ impl<'a> SignatureValidator<'a> {
                 self.function_statements(&statement.body.statements, signature)
             }
             StatementKind::Match(statement) => {
-                self.expression(&statement.value)?;
+                let subject_type = self.expression(&statement.value)?;
+                if self.entry.module().language() == LanguageMajor::V2 {
+                    self.validate_match(statement, subject_type.as_ref())?;
+                }
                 for arm in &statement.arms {
+                    if self.entry.module().language() == LanguageMajor::V2
+                        && let Some(subject_type) = &subject_type
+                    {
+                        self.infer_pattern_bindings(&arm.pattern, subject_type);
+                    }
                     if let Pattern::Literal(literal) = &arm.pattern {
                         self.literal(literal)?;
                     }
                     if let Some(guard) = &arm.guard {
-                        self.expression(guard)?;
+                        if self.entry.module().language() == LanguageMajor::V2 {
+                            self.validate_guard(guard)?;
+                        } else {
+                            self.expression(guard)?;
+                        }
                     }
                     self.function_statements(&arm.body.statements, signature)?;
                 }
@@ -2284,9 +3146,41 @@ impl<'a> SignatureValidator<'a> {
             StatementKind::Import(_)
             | StatementKind::ModuleImport(_)
             | StatementKind::ModuleExport(_)
-            | StatementKind::NominalType(_) => Ok(()),
+            | StatementKind::NominalType(_)
+            | StatementKind::VariantType(_) => Ok(()),
             StatementKind::Declaration(declaration) => {
-                self.expression(&declaration.value).map(|_| ())
+                let expected = declaration.type_annotation.as_ref().and_then(|annotation| {
+                    self.types
+                        .annotation(self.entry.module(), annotation.span)
+                        .map(ResolvedTypeAnnotation::value_type)
+                });
+                let actual = self.expression_with_expected(&declaration.value, expected)?;
+                if self.entry.module().language() == LanguageMajor::V2
+                    && let Some(actual) = actual
+                {
+                    if actual != ValueType::Any
+                        && let Some(expected) = expected
+                        && !expected.accepts_type(&actual)
+                    {
+                        self.errors
+                            .borrow_mut()
+                            .push(ModuleTypeError::BindingMismatch {
+                                module: self.entry.module().clone(),
+                                name: self.text(declaration.name.span()).to_owned(),
+                                value_span: declaration.value.span(),
+                                expected: expected.clone(),
+                                actual: actual.clone(),
+                                annotation_span: declaration
+                                    .type_annotation
+                                    .as_ref()
+                                    .expect("an expected declaration type has an annotation")
+                                    .span,
+                            });
+                    }
+                    self.validate_pattern(&declaration.pattern, &actual);
+                    self.infer_pattern_bindings(&declaration.pattern, &actual);
+                }
+                Ok(())
             }
             StatementKind::Assignment(assignment) => self.assignment(assignment),
             StatementKind::Environment(environment) => match environment {
@@ -2314,13 +3208,25 @@ impl<'a> SignatureValidator<'a> {
                 self.statements(&statement.body.statements)
             }
             StatementKind::Match(statement) => {
-                self.expression(&statement.value)?;
+                let subject_type = self.expression(&statement.value)?;
+                if self.entry.module().language() == LanguageMajor::V2 {
+                    self.validate_match(statement, subject_type.as_ref())?;
+                }
                 for arm in &statement.arms {
+                    if self.entry.module().language() == LanguageMajor::V2
+                        && let Some(subject_type) = &subject_type
+                    {
+                        self.infer_pattern_bindings(&arm.pattern, subject_type);
+                    }
                     if let Pattern::Literal(literal) = &arm.pattern {
                         self.literal(literal)?;
                     }
                     if let Some(guard) = &arm.guard {
-                        self.expression(guard)?;
+                        if self.entry.module().language() == LanguageMajor::V2 {
+                            self.validate_guard(guard)?;
+                        } else {
+                            self.expression(guard)?;
+                        }
                     }
                     self.statements(&arm.body.statements)?;
                 }
@@ -2455,9 +3361,10 @@ impl<'a> SignatureValidator<'a> {
         Ok(())
     }
 
-    fn chain_value(
+    fn chain_value_with_expected(
         &self,
         chain: &ConditionalChain,
+        expected: Option<&ValueType>,
     ) -> Result<Option<(Span, ValueType)>, Box<ModuleTypeError>> {
         if self.control.is_cancelled() {
             return Ok(None);
@@ -2473,13 +3380,21 @@ impl<'a> SignatureValidator<'a> {
             return Ok(None);
         };
         Ok(self
-            .expression(expression)?
+            .expression_with_expected(expression, expected)?
             .map(|value_type| (expression.span(), value_type)))
     }
 
     fn expression(
         &self,
         expression: &Expression,
+    ) -> Result<Option<ValueType>, Box<ModuleTypeError>> {
+        self.expression_with_expected(expression, None)
+    }
+
+    fn expression_with_expected(
+        &self,
+        expression: &Expression,
+        expected: Option<&ValueType>,
     ) -> Result<Option<ValueType>, Box<ModuleTypeError>> {
         if self.control.is_cancelled() {
             return Ok(None);
@@ -2491,10 +3406,16 @@ impl<'a> SignatureValidator<'a> {
                 .reference(self.entry.module(), expression.span())
                 .and_then(|reference| self.reference_type(reference.target()))),
             ExpressionKind::Symbol(_) => Ok(None),
+            ExpressionKind::Qualified(name) => Ok(self.qualified_value_type(name, expected)),
             ExpressionKind::List(elements) => {
                 let mut element_type = None;
+                let expected_element = match expected {
+                    Some(ValueType::List(element)) => Some(element.as_ref()),
+                    _ => None,
+                };
                 for element in elements {
-                    let Some(current) = self.expression(element)? else {
+                    let Some(current) = self.expression_with_expected(element, expected_element)?
+                    else {
                         return Ok(None);
                     };
                     if let Some(previous) = &element_type {
@@ -2516,8 +3437,39 @@ impl<'a> SignatureValidator<'a> {
                 }
                 Ok(Some(ValueType::Record))
             }
+            ExpressionKind::NominalRecord(record) => self.nominal_record_type(record, expected),
             ExpressionKind::Closure(closure) => {
-                self.chain(&closure.body)?;
+                let expected = closure.result_type.as_ref().and_then(|annotation| {
+                    self.types
+                        .annotation(self.entry.module(), annotation.span)
+                        .map(ResolvedTypeAnnotation::value_type)
+                });
+                let actual = self.chain_value_with_expected(&closure.body, expected)?;
+                if actual.is_none() {
+                    self.chain(&closure.body)?;
+                }
+                if self.entry.module().language() == LanguageMajor::V2
+                    && let Some(annotation) = &closure.result_type
+                    && let Some((result_span, actual)) = actual
+                    && actual != ValueType::Any
+                {
+                    let expected = self
+                        .types
+                        .annotation(self.entry.module(), annotation.span)
+                        .map_or(ValueType::Any, |annotation| annotation.value_type().clone());
+                    if !expected.accepts_type(&actual) {
+                        self.errors
+                            .borrow_mut()
+                            .push(ModuleTypeError::ResultMismatch {
+                                module: self.entry.module().clone(),
+                                name: "closure".to_owned(),
+                                result_span,
+                                expected,
+                                actual,
+                                annotation_span: annotation.span,
+                            });
+                    }
+                }
                 Ok(Some(ValueType::Closure))
             }
             ExpressionKind::CommandSubstitution(substitution) => {
@@ -2531,7 +3483,7 @@ impl<'a> SignatureValidator<'a> {
                 self.chain(chain)?;
                 Ok(None)
             }
-            ExpressionKind::Call(call) => self.call(expression.span(), call),
+            ExpressionKind::Call(call) => self.call(expression.span(), call, expected),
             ExpressionKind::Index(index) => {
                 let target = self.expression(&index.target)?;
                 let index_type = self.expression(&index.index)?;
@@ -2596,10 +3548,541 @@ impl<'a> SignatureValidator<'a> {
     }
 
     fn declaration_type(&self, module: &ModuleId, declaration_span: Span) -> Option<ValueType> {
+        if let Some(value_type) = self
+            .inferred_bindings
+            .borrow()
+            .get(&(module.clone(), declaration_span.start()))
+        {
+            return Some(value_type.clone());
+        }
         if self.types.function(module, declaration_span).is_some() {
             return Some(ValueType::Function);
         }
         self.types.binding_type(module, declaration_span).cloned()
+    }
+
+    fn qualified_value_type(
+        &self,
+        name: &flash_syntax::QualifiedName,
+        expected: Option<&ValueType>,
+    ) -> Option<ValueType> {
+        if let Some((value_name, modules)) = name.segments.split_last()
+            && !modules.is_empty()
+        {
+            let modules = modules
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>();
+            if let Some(owner) = self.aliases.resolve(self.entry.module(), &modules) {
+                let value_name = self.text(value_name.span());
+                if let Some(export) = self.names.export(owner, value_name) {
+                    return self.declaration_type(owner, export.declaration_span());
+                }
+            }
+        }
+        let nominal = self.nominal_for_qualified_prefix(name)?;
+        let constructor = self.text(name.segments.last()?.span());
+        if nominal.kind() != NominalTypeKind::Variant
+            || !nominal
+                .variants()
+                .iter()
+                .any(|variant| variant.name() == constructor && variant.payload().is_empty())
+        {
+            return None;
+        }
+        let arguments = if nominal.type_parameters().is_empty() {
+            Vec::new()
+        } else if let Some(ValueType::Nominal { id, arguments }) = expected
+            && id.as_ref() == nominal.id()
+            && arguments.len() == nominal.type_parameters().len()
+        {
+            arguments.clone()
+        } else {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::AmbiguousGeneric {
+                    module: self.entry.module().clone(),
+                    name: nominal.id().name().to_owned(),
+                    parameter: nominal.type_parameters()[0].name().to_owned(),
+                    call_span: name.span,
+                    parameter_span: nominal.type_parameters()[0].span(),
+                });
+            return Some(ValueType::Any);
+        };
+        if !self.validate_nominal_constraints(nominal, &arguments, name.span) {
+            return Some(ValueType::Any);
+        }
+        Some(ValueType::Nominal {
+            id: Box::new(nominal.id().clone()),
+            arguments,
+        })
+    }
+
+    fn nominal_record_type(
+        &self,
+        record: &flash_syntax::NominalRecordExpression,
+        expected_result: Option<&ValueType>,
+    ) -> Result<Option<ValueType>, Box<ModuleTypeError>> {
+        let Some(nominal) = self.nominal_for_qualified(&record.name) else {
+            for field in &record.fields {
+                self.expression(&field.value)?;
+            }
+            let name = record
+                .name
+                .segments
+                .last()
+                .map(|segment| self.text(segment.span()))
+                .unwrap_or("<unknown>")
+                .to_owned();
+            self.errors.borrow_mut().push(ModuleTypeError::UnknownType {
+                module: self.entry.module().clone(),
+                name,
+                span: record.name.span,
+            });
+            return Ok(Some(ValueType::Any));
+        };
+        let mut substitutions = BTreeMap::new();
+        if let Some(ValueType::Nominal { id, arguments }) = expected_result
+            && id.as_ref() == nominal.id()
+            && arguments.len() == nominal.type_parameters().len()
+        {
+            substitutions.extend(
+                nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone())),
+            );
+        }
+        let mut actual_fields = Vec::with_capacity(record.fields.len());
+        let mut supplied = BTreeSet::new();
+        let mut first_spans = BTreeMap::new();
+        let mut invalid = false;
+        for field in &record.fields {
+            let field_name = self.text(field.name.span());
+            if let Some(first_span) = first_spans.get(field_name).copied() {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::DuplicateNominalField {
+                        module: self.entry.module().clone(),
+                        name: nominal.id().name().to_owned(),
+                        field: field_name.to_owned(),
+                        first_span,
+                        duplicate_span: field.name.span(),
+                    });
+                invalid = true;
+            } else {
+                first_spans.insert(field_name.to_owned(), field.name.span());
+            }
+            let expected = nominal
+                .fields()
+                .iter()
+                .find(|item| item.name() == field_name);
+            let expected_value =
+                expected.map(|field| substitute_type(field.value_type(), &substitutions));
+            let actual = self.expression_with_expected(&field.value, expected_value.as_ref())?;
+            if expected.is_some() {
+                supplied.insert(field_name.to_owned());
+            } else {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::UnknownNominalField {
+                        module: self.entry.module().clone(),
+                        name: nominal.id().name().to_owned(),
+                        field: field_name.to_owned(),
+                        field_span: field.name.span(),
+                        declaration_span: nominal.declaration_span(),
+                    });
+                invalid = true;
+            }
+            if let (Some(expected), Some(actual)) = (expected, actual.as_ref()) {
+                unify_type(expected.value_type(), actual, &mut substitutions);
+            }
+            actual_fields.push((field, actual));
+        }
+        for expected in nominal.fields() {
+            if !supplied.contains(expected.name()) {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::MissingNominalField {
+                        module: self.entry.module().clone(),
+                        name: nominal.id().name().to_owned(),
+                        field: expected.name().to_owned(),
+                        construction_span: record.name.span,
+                        field_span: expected.span(),
+                    });
+                invalid = true;
+            }
+        }
+        for (field, actual) in &actual_fields {
+            let Some(actual) = actual else {
+                continue;
+            };
+            if actual == &ValueType::Any {
+                continue;
+            }
+            let field_name = self.text(field.name.span());
+            let Some(expected_field) = nominal
+                .fields()
+                .iter()
+                .find(|item| item.name() == field_name)
+            else {
+                continue;
+            };
+            let expected = substitute_type(expected_field.value_type(), &substitutions);
+            if !expected.accepts_type(actual) {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::ArgumentMismatch {
+                        module: self.entry.module().clone(),
+                        name: nominal.id().name().to_owned(),
+                        parameter: field_name.to_owned(),
+                        argument_span: field.value.span(),
+                        expected,
+                        actual: actual.clone(),
+                        parameter_span: expected_field.span(),
+                    });
+                invalid = true;
+            }
+        }
+        if let Some(parameter) = nominal
+            .type_parameters()
+            .iter()
+            .find(|parameter| !substitutions.contains_key(parameter.name()))
+        {
+            if actual_fields.iter().any(|(_, actual)| {
+                actual
+                    .as_ref()
+                    .is_none_or(|actual| actual == &ValueType::Any)
+            }) {
+                return Ok(Some(ValueType::Any));
+            }
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::AmbiguousGeneric {
+                    module: self.entry.module().clone(),
+                    name: nominal.id().name().to_owned(),
+                    parameter: parameter.name().to_owned(),
+                    call_span: record.name.span,
+                    parameter_span: parameter.span(),
+                });
+            return Ok(Some(ValueType::Any));
+        }
+        for parameter in nominal.type_parameters() {
+            let actual = substitutions[parameter.name()].clone();
+            for constraint in parameter.constraints() {
+                if !self.type_satisfies_constraint(&actual, *constraint) {
+                    self.errors
+                        .borrow_mut()
+                        .push(ModuleTypeError::UnsatisfiedConstraint {
+                            module: self.entry.module().clone(),
+                            name: nominal.id().name().to_owned(),
+                            parameter: parameter.name().to_owned(),
+                            constraint: *constraint,
+                            actual: actual.clone(),
+                            call_span: record.name.span,
+                            parameter_span: parameter.span(),
+                        });
+                    invalid = true;
+                }
+            }
+        }
+        if invalid {
+            return Ok(Some(ValueType::Any));
+        }
+        Ok(Some(ValueType::Nominal {
+            id: Box::new(nominal.id().clone()),
+            arguments: nominal
+                .type_parameters()
+                .iter()
+                .map(|parameter| substitutions[parameter.name()].clone())
+                .collect(),
+        }))
+    }
+
+    fn infer_pattern_bindings(&self, pattern: &Pattern, value_type: &ValueType) {
+        match pattern {
+            Pattern::Binding(identifier) => {
+                self.inferred_bindings.borrow_mut().insert(
+                    (self.entry.module().clone(), identifier.span().start()),
+                    value_type.clone(),
+                );
+            }
+            Pattern::List(pattern) => {
+                let element = match value_type {
+                    ValueType::List(element) => element.as_ref().clone(),
+                    _ => ValueType::Any,
+                };
+                for item in &pattern.elements {
+                    self.infer_pattern_bindings(item, &element);
+                }
+                if let Some(rest) = pattern.rest {
+                    self.inferred_bindings.borrow_mut().insert(
+                        (self.entry.module().clone(), rest.span().start()),
+                        ValueType::List(Box::new(element)),
+                    );
+                }
+            }
+            Pattern::NominalRecord(pattern) => {
+                let ValueType::Nominal { id, arguments } = value_type else {
+                    return;
+                };
+                let Some(nominal) = self.types.nominal(id.module(), id.name()) else {
+                    return;
+                };
+                let substitutions = nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone()))
+                    .collect();
+                for field in &pattern.fields {
+                    let name = self.text(field.name.span());
+                    if let Some(schema) = nominal.fields().iter().find(|item| item.name() == name) {
+                        self.infer_pattern_bindings(
+                            &field.pattern,
+                            &substitute_type(schema.value_type(), &substitutions),
+                        );
+                    }
+                }
+            }
+            Pattern::Variant(pattern) => {
+                let ValueType::Nominal { id, arguments } = value_type else {
+                    return;
+                };
+                let Some(nominal) = self.types.nominal(id.module(), id.name()) else {
+                    return;
+                };
+                let Some(constructor) = pattern.constructor.segments.last() else {
+                    return;
+                };
+                let Some(variant) = nominal
+                    .variants()
+                    .iter()
+                    .find(|variant| variant.name() == self.text(constructor.span()))
+                else {
+                    return;
+                };
+                let substitutions = nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone()))
+                    .collect();
+                for (pattern, payload) in pattern.payload.iter().zip(variant.payload()) {
+                    self.infer_pattern_bindings(pattern, &substitute_type(payload, &substitutions));
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_) => {}
+        }
+    }
+
+    fn validate_guard(&self, guard: &Expression) -> Result<(), Box<ModuleTypeError>> {
+        if let Some(actual) = self.expression(guard)?
+            && !matches!(actual, ValueType::Any | ValueType::Bool)
+        {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::GuardMismatch {
+                    module: self.entry.module().clone(),
+                    guard_span: guard.span(),
+                    actual,
+                });
+        }
+        Ok(())
+    }
+
+    fn validate_pattern(&self, pattern: &Pattern, value_type: &ValueType) -> bool {
+        let valid = self.pattern_accepts_type(pattern, value_type);
+        if !valid {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::PatternTypeMismatch {
+                    module: self.entry.module().clone(),
+                    pattern_span: pattern_span(pattern),
+                    value_type: value_type.clone(),
+                });
+        }
+        valid
+    }
+
+    fn pattern_accepts_type(&self, pattern: &Pattern, value_type: &ValueType) -> bool {
+        if value_type == &ValueType::Any {
+            return true;
+        }
+        match pattern {
+            Pattern::Binding(_) | Pattern::Wildcard(_) => true,
+            Pattern::Literal(literal) => {
+                let literal_type = match literal.kind() {
+                    LiteralKind::Null => ValueType::Null,
+                    LiteralKind::Boolean(_) => ValueType::Bool,
+                    LiteralKind::Integer => ValueType::Int,
+                    LiteralKind::Float => ValueType::Float,
+                    LiteralKind::SingleQuoted | LiteralKind::DoubleQuoted(_) => ValueType::String,
+                };
+                value_type.accepts_type(&literal_type)
+            }
+            Pattern::List(pattern) => {
+                let ValueType::List(element) = value_type else {
+                    return false;
+                };
+                pattern
+                    .elements
+                    .iter()
+                    .all(|pattern| self.pattern_accepts_type(pattern, element))
+            }
+            Pattern::NominalRecord(pattern) => {
+                let ValueType::Nominal { id, arguments } = value_type else {
+                    return false;
+                };
+                let Some(nominal) = self.nominal_for_qualified(&pattern.name) else {
+                    return false;
+                };
+                if nominal.kind() != NominalTypeKind::Record
+                    || nominal.id() != id.as_ref()
+                    || nominal.type_parameters().len() != arguments.len()
+                {
+                    return false;
+                }
+                let substitutions = nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                pattern.fields.iter().all(|field| {
+                    nominal
+                        .fields()
+                        .iter()
+                        .find(|schema| schema.name() == self.text(field.name.span()))
+                        .is_some_and(|schema| {
+                            self.pattern_accepts_type(
+                                &field.pattern,
+                                &substitute_type(schema.value_type(), &substitutions),
+                            )
+                        })
+                })
+            }
+            Pattern::Variant(pattern) => {
+                let ValueType::Nominal { id, arguments } = value_type else {
+                    return false;
+                };
+                let Some(nominal) = self.nominal_for_qualified_prefix(&pattern.constructor) else {
+                    return false;
+                };
+                if nominal.kind() != NominalTypeKind::Variant
+                    || nominal.id() != id.as_ref()
+                    || nominal.type_parameters().len() != arguments.len()
+                {
+                    return false;
+                }
+                let Some(constructor) = pattern.constructor.segments.last() else {
+                    return false;
+                };
+                let Some(variant) = nominal
+                    .variants()
+                    .iter()
+                    .find(|variant| variant.name() == self.text(constructor.span()))
+                else {
+                    return false;
+                };
+                if variant.payload().len() != pattern.payload.len() {
+                    return false;
+                }
+                let substitutions = nominal
+                    .type_parameters()
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name().to_owned(), argument.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                pattern
+                    .payload
+                    .iter()
+                    .zip(variant.payload())
+                    .all(|(pattern, payload)| {
+                        self.pattern_accepts_type(
+                            pattern,
+                            &substitute_type(payload, &substitutions),
+                        )
+                    })
+            }
+        }
+    }
+
+    fn validate_match(
+        &self,
+        statement: &flash_syntax::MatchStatement,
+        subject_type: Option<&ValueType>,
+    ) -> Result<(), Box<ModuleTypeError>> {
+        let nominal = subject_type
+            .and_then(|value_type| match value_type {
+                ValueType::Nominal { id, .. } => self.types.nominal(id.module(), id.name()),
+                _ => None,
+            })
+            .filter(|nominal| nominal.kind() == NominalTypeKind::Variant);
+        let mut covered = BTreeMap::<String, Span>::new();
+        let mut covers_all = None;
+        for arm in &statement.arms {
+            let compatible = subject_type
+                .is_none_or(|value_type| self.validate_pattern(&arm.pattern, value_type));
+            let constructor = match &arm.pattern {
+                Pattern::Variant(pattern) => pattern
+                    .constructor
+                    .segments
+                    .last()
+                    .map(|constructor| self.text(constructor.span()).to_owned()),
+                _ => None,
+            };
+            let covering_span = covers_all.or_else(|| {
+                constructor
+                    .as_ref()
+                    .and_then(|constructor| covered.get(constructor).copied())
+            });
+            if let Some(covering_span) = covering_span {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::UnreachableMatchArm {
+                        module: self.entry.module().clone(),
+                        arm_span: arm.span,
+                        covering_span,
+                    });
+            }
+            if compatible && arm.guard.is_none() {
+                match &arm.pattern {
+                    Pattern::Wildcard(_) | Pattern::Binding(_) => covers_all = Some(arm.span),
+                    Pattern::Variant(_) => {
+                        if let Some(constructor) = constructor {
+                            covered.entry(constructor).or_insert(arm.span);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let Some(nominal) = nominal else {
+            return Ok(());
+        };
+        if covers_all.is_some() {
+            return Ok(());
+        }
+        let missing = nominal
+            .variants()
+            .iter()
+            .map(|variant| variant.name().to_owned())
+            .filter(|name| !covered.contains_key(name))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::NonExhaustiveMatch {
+                    module: self.entry.module().clone(),
+                    match_span: statement.value.span(),
+                    nominal: nominal.id().clone(),
+                    missing,
+                    declaration_span: nominal.declaration_span(),
+                });
+        }
+        Ok(())
     }
 
     fn binary_type(
@@ -2672,51 +4155,116 @@ impl<'a> SignatureValidator<'a> {
         &self,
         call_span: Span,
         call: &flash_syntax::CallExpression,
+        expected_result: Option<&ValueType>,
     ) -> Result<Option<ValueType>, Box<ModuleTypeError>> {
         if self.control.is_cancelled() {
             return Ok(None);
         }
-        if !matches!(call.callee.kind(), ExpressionKind::Symbol(_)) {
+        if !matches!(
+            call.callee.kind(),
+            ExpressionKind::Symbol(_) | ExpressionKind::Qualified(_)
+        ) {
             self.expression(&call.callee)?;
         }
-        let mut argument_types = Vec::with_capacity(call.arguments.len());
-        for argument in &call.arguments {
-            argument_types.push(self.expression(argument)?);
+        if let ExpressionKind::Qualified(name) = call.callee.kind()
+            && let Some(value_type) =
+                self.variant_call_type(name, call_span, call, expected_result)?
+        {
+            return Ok(Some(value_type));
         }
 
-        let Some(reference) = self
-            .names
-            .reference(self.entry.module(), call.callee.span())
-        else {
-            if let ExpressionKind::Symbol(identifier) = call.callee.kind()
-                && let Some(intrinsic) = ExpressionIntrinsic::lookup(self.text(identifier.span()))
-            {
-                return Ok(Some(self.validate_intrinsic_call(
-                    intrinsic,
-                    call_span,
-                    call,
-                    &argument_types,
-                )));
-            }
-            return Ok(None);
-        };
-        let (target_module, declaration_span) = match reference.target() {
-            ModuleReferenceTarget::DynamicStatus | ModuleReferenceTarget::ScriptArguments => {
+        let signature = if let ExpressionKind::Qualified(name) = call.callee.kind() {
+            self.function_for_qualified(name)
+        } else {
+            let Some(reference) = self
+                .names
+                .reference(self.entry.module(), call.callee.span())
+            else {
+                if let ExpressionKind::Symbol(identifier) = call.callee.kind()
+                    && let Some(intrinsic) =
+                        ExpressionIntrinsic::lookup(self.text(identifier.span()))
+                {
+                    let mut argument_types = Vec::with_capacity(call.arguments.len());
+                    for argument in &call.arguments {
+                        argument_types.push(self.expression(argument)?);
+                    }
+                    return Ok(Some(self.validate_intrinsic_call(
+                        intrinsic,
+                        call_span,
+                        call,
+                        &argument_types,
+                    )));
+                }
                 return Ok(None);
-            }
-            ModuleReferenceTarget::Local {
-                module,
-                declaration_span,
-            } => (module, *declaration_span),
-            ModuleReferenceTarget::Imported {
-                target_module,
-                declaration_span,
-                ..
-            } => (target_module, *declaration_span),
+            };
+            let (target_module, declaration_span) = match reference.target() {
+                ModuleReferenceTarget::DynamicStatus | ModuleReferenceTarget::ScriptArguments => {
+                    return Ok(None);
+                }
+                ModuleReferenceTarget::Local {
+                    module,
+                    declaration_span,
+                } => (module, *declaration_span),
+                ModuleReferenceTarget::Imported {
+                    target_module,
+                    declaration_span,
+                    ..
+                } => (target_module, *declaration_span),
+            };
+            self.types.function(target_module, declaration_span)
         };
-        let Some(signature) = self.types.function(target_module, declaration_span) else {
+        let Some(signature) = signature else {
+            for argument in &call.arguments {
+                self.expression(argument)?;
+            }
             return Ok(None);
         };
+        if !call.type_arguments.is_empty()
+            && call.type_arguments.len() != signature.type_parameters().len()
+        {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::GenericArity {
+                    module: self.entry.module().clone(),
+                    name: signature.name().to_owned(),
+                    call_span,
+                    expected: signature.type_parameters().len(),
+                    actual: call.type_arguments.len(),
+                    declaration_span: signature.declaration_span(),
+                });
+            return Ok(Some(ValueType::Any));
+        }
+        let mut substitutions = BTreeMap::new();
+        if call.type_arguments.is_empty() {
+            if let Some(expected_result) = expected_result {
+                unify_type(signature.result(), expected_result, &mut substitutions);
+            }
+        } else {
+            for (parameter, argument) in
+                signature.type_parameters().iter().zip(&call.type_arguments)
+            {
+                let actual = self
+                    .types
+                    .annotation(self.entry.module(), argument.span)
+                    .map_or(ValueType::Any, |annotation| annotation.value_type().clone());
+                substitutions.insert(parameter.name().to_owned(), actual);
+            }
+        }
+        let mut argument_types = Vec::with_capacity(call.arguments.len());
+        for (index, argument) in call.arguments.iter().enumerate() {
+            let expected = signature
+                .parameters()
+                .get(index)
+                .map(|parameter| substitute_type(parameter.value_type(), &substitutions));
+            let actual = self.expression_with_expected(argument, expected.as_ref())?;
+            if call.type_arguments.is_empty()
+                && let (Some(actual), Some(parameter)) =
+                    (actual.as_ref(), signature.parameters().get(index))
+            {
+                unify_type(parameter.value_type(), actual, &mut substitutions);
+            }
+            argument_types.push(actual);
+        }
         if call.arguments.len() != signature.parameters().len() {
             self.errors.borrow_mut().push(ModuleTypeError::CallArity {
                 module: self.entry.module().clone(),
@@ -2727,6 +4275,36 @@ impl<'a> SignatureValidator<'a> {
                 declaration_span: signature.declaration_span(),
             });
             return Ok(Some(ValueType::Any));
+        }
+        for parameter in signature.type_parameters() {
+            let Some(actual) = substitutions.get(parameter.name()).cloned() else {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::AmbiguousGeneric {
+                        module: self.entry.module().clone(),
+                        name: signature.name().to_owned(),
+                        parameter: parameter.name().to_owned(),
+                        call_span,
+                        parameter_span: parameter.span(),
+                    });
+                return Ok(Some(ValueType::Any));
+            };
+            for constraint in parameter.constraints() {
+                if !self.type_satisfies_constraint(&actual, *constraint) {
+                    self.errors
+                        .borrow_mut()
+                        .push(ModuleTypeError::UnsatisfiedConstraint {
+                            module: self.entry.module().clone(),
+                            name: signature.name().to_owned(),
+                            parameter: parameter.name().to_owned(),
+                            constraint: *constraint,
+                            actual: actual.clone(),
+                            call_span,
+                            parameter_span: parameter.span(),
+                        });
+                    return Ok(Some(ValueType::Any));
+                }
+            }
         }
         let mut invalid = false;
         for ((argument, actual), parameter) in call
@@ -2741,7 +4319,8 @@ impl<'a> SignatureValidator<'a> {
             if actual == ValueType::Any {
                 continue;
             }
-            if !parameter.value_type().accepts_type(&actual) {
+            let expected = substitute_type(parameter.value_type(), &substitutions);
+            if !expected.accepts_type(&actual) {
                 self.errors
                     .borrow_mut()
                     .push(ModuleTypeError::ArgumentMismatch {
@@ -2749,7 +4328,7 @@ impl<'a> SignatureValidator<'a> {
                         name: signature.name().to_owned(),
                         parameter: parameter.name().to_owned(),
                         argument_span: argument.span(),
-                        expected: parameter.value_type().clone(),
+                        expected,
                         actual,
                         parameter_span: parameter
                             .annotation_span()
@@ -2761,8 +4340,390 @@ impl<'a> SignatureValidator<'a> {
         Ok(Some(if invalid {
             ValueType::Any
         } else {
-            signature.result().clone()
+            substitute_type(signature.result(), &substitutions)
         }))
+    }
+
+    fn variant_call_type(
+        &self,
+        name: &flash_syntax::QualifiedName,
+        call_span: Span,
+        call: &flash_syntax::CallExpression,
+        expected_result: Option<&ValueType>,
+    ) -> Result<Option<ValueType>, Box<ModuleTypeError>> {
+        if name.segments.len() < 2 {
+            return Ok(None);
+        }
+        let type_name = self.text(name.segments[name.segments.len() - 2].span());
+        let constructor = self.text(name.segments[name.segments.len() - 1].span());
+        let type_path = &name.segments[..name.segments.len() - 1];
+        let type_segment = &type_path[type_path.len() - 1];
+        let modules = &type_path[..type_path.len() - 1];
+        if !modules.is_empty() {
+            let module_names = modules
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>();
+            if let Some(owner) = self.aliases.resolve(self.entry.module(), &module_names)
+                && self
+                    .types
+                    .nominal(owner, self.text(type_segment.span()))
+                    .is_some()
+                && self
+                    .names
+                    .export(owner, self.text(type_segment.span()))
+                    .is_none()
+            {
+                self.errors.borrow_mut().push(ModuleTypeError::UnknownType {
+                    module: self.entry.module().clone(),
+                    name: self.text(type_segment.span()).to_owned(),
+                    span: type_segment.span(),
+                });
+                return Ok(Some(ValueType::Any));
+            }
+        }
+        let Some(nominal) = self.nominal_for_qualified_prefix(name) else {
+            return Ok(None);
+        };
+        let Some(variant) = nominal
+            .variants()
+            .iter()
+            .find(|variant| variant.name() == constructor)
+        else {
+            return Ok(None);
+        };
+        if !call.type_arguments.is_empty()
+            && call.type_arguments.len() != nominal.type_parameters().len()
+        {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::GenericArity {
+                    module: self.entry.module().clone(),
+                    name: nominal.id().name().to_owned(),
+                    call_span,
+                    expected: nominal.type_parameters().len(),
+                    actual: call.type_arguments.len(),
+                    declaration_span: nominal.declaration_span(),
+                });
+            return Ok(Some(ValueType::Any));
+        }
+        let mut substitutions = BTreeMap::new();
+        if call.type_arguments.is_empty() {
+            if let Some(ValueType::Nominal { id, arguments }) = expected_result
+                && id.as_ref() == nominal.id()
+                && arguments.len() == nominal.type_parameters().len()
+            {
+                for (parameter, argument) in nominal.type_parameters().iter().zip(arguments) {
+                    substitutions
+                        .entry(parameter.name().to_owned())
+                        .or_insert_with(|| argument.clone());
+                }
+            }
+        } else {
+            for (parameter, argument) in nominal.type_parameters().iter().zip(&call.type_arguments)
+            {
+                let actual = self
+                    .types
+                    .annotation(self.entry.module(), argument.span)
+                    .map_or(ValueType::Any, |annotation| annotation.value_type().clone());
+                substitutions.insert(parameter.name().to_owned(), actual);
+            }
+        }
+        let mut argument_types = Vec::with_capacity(call.arguments.len());
+        for (index, argument) in call.arguments.iter().enumerate() {
+            let expected = variant
+                .payload()
+                .get(index)
+                .map(|payload| substitute_type(payload, &substitutions));
+            let actual = self.expression_with_expected(argument, expected.as_ref())?;
+            if call.type_arguments.is_empty()
+                && let (Some(actual), Some(payload)) =
+                    (actual.as_ref(), variant.payload().get(index))
+            {
+                unify_type(payload, actual, &mut substitutions);
+            }
+            argument_types.push(actual);
+        }
+        if call.arguments.len() != variant.payload().len() {
+            self.errors.borrow_mut().push(ModuleTypeError::CallArity {
+                module: self.entry.module().clone(),
+                name: format!("{type_name}::{constructor}"),
+                call_span,
+                expected: variant.payload().len(),
+                actual: call.arguments.len(),
+                declaration_span: variant.span(),
+            });
+            return Ok(Some(ValueType::Any));
+        }
+        let mut invalid = false;
+        for ((argument, actual), expected) in call
+            .arguments
+            .iter()
+            .zip(argument_types.iter())
+            .zip(variant.payload())
+        {
+            let Some(actual) = actual else {
+                continue;
+            };
+            if actual == &ValueType::Any {
+                continue;
+            }
+            let expected = substitute_type(expected, &substitutions);
+            if !expected.accepts_type(actual) {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::ArgumentMismatch {
+                        module: self.entry.module().clone(),
+                        name: format!("{type_name}::{constructor}"),
+                        parameter: "payload".to_owned(),
+                        argument_span: argument.span(),
+                        expected,
+                        actual: actual.clone(),
+                        parameter_span: variant.span(),
+                    });
+                invalid = true;
+            }
+        }
+        if let Some(parameter) = nominal
+            .type_parameters()
+            .iter()
+            .find(|parameter| !substitutions.contains_key(parameter.name()))
+        {
+            if argument_types.iter().any(|actual| {
+                actual
+                    .as_ref()
+                    .is_none_or(|actual| actual == &ValueType::Any)
+            }) {
+                return Ok(Some(ValueType::Any));
+            }
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::AmbiguousGeneric {
+                    module: self.entry.module().clone(),
+                    name: nominal.id().name().to_owned(),
+                    parameter: parameter.name().to_owned(),
+                    call_span,
+                    parameter_span: parameter.span(),
+                });
+            return Ok(Some(ValueType::Any));
+        }
+        for parameter in nominal.type_parameters() {
+            let actual = substitutions[parameter.name()].clone();
+            for constraint in parameter.constraints() {
+                if !self.type_satisfies_constraint(&actual, *constraint) {
+                    self.errors
+                        .borrow_mut()
+                        .push(ModuleTypeError::UnsatisfiedConstraint {
+                            module: self.entry.module().clone(),
+                            name: nominal.id().name().to_owned(),
+                            parameter: parameter.name().to_owned(),
+                            constraint: *constraint,
+                            actual: actual.clone(),
+                            call_span,
+                            parameter_span: parameter.span(),
+                        });
+                    invalid = true;
+                }
+            }
+        }
+        if invalid {
+            return Ok(Some(ValueType::Any));
+        }
+        Ok(Some(ValueType::Nominal {
+            id: Box::new(nominal.id().clone()),
+            arguments: nominal
+                .type_parameters()
+                .iter()
+                .map(|parameter| substitutions[parameter.name()].clone())
+                .collect(),
+        }))
+    }
+
+    fn nominal_for_qualified(&self, name: &flash_syntax::QualifiedName) -> Option<&NominalType> {
+        let (last, modules) = name.segments.split_last()?;
+        let nominal_name = self.text(last.span());
+        let owner = if modules.is_empty() {
+            self.entry.module()
+        } else {
+            let modules = modules
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>();
+            self.aliases.resolve(self.entry.module(), &modules)?
+        };
+        if !modules.is_empty() && self.names.export(owner, nominal_name).is_none() {
+            return None;
+        }
+        self.types.nominal(owner, nominal_name)
+    }
+
+    fn function_for_qualified(
+        &self,
+        name: &flash_syntax::QualifiedName,
+    ) -> Option<&FunctionSignature> {
+        let (function, modules) = name.segments.split_last()?;
+        if modules.is_empty() {
+            return None;
+        }
+        let modules = modules
+            .iter()
+            .map(|segment| self.text(segment.span()))
+            .collect::<Vec<_>>();
+        let owner = self.aliases.resolve(self.entry.module(), &modules)?;
+        let function = self.text(function.span());
+        self.names.export(owner, function)?;
+        self.types
+            .functions(owner)
+            .iter()
+            .find(|signature| signature.name() == function)
+    }
+
+    fn nominal_for_qualified_prefix(
+        &self,
+        constructor: &flash_syntax::QualifiedName,
+    ) -> Option<&NominalType> {
+        let (_, type_path) = constructor.segments.split_last()?;
+        let (type_name, modules) = type_path.split_last()?;
+        let owner = if modules.is_empty() {
+            self.entry.module()
+        } else {
+            let modules = modules
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>();
+            self.aliases.resolve(self.entry.module(), &modules)?
+        };
+        let type_name = self.text(type_name.span());
+        if !modules.is_empty() && self.names.export(owner, type_name).is_none() {
+            return None;
+        }
+        self.types.nominal(owner, type_name)
+    }
+
+    fn type_satisfies_constraint(
+        &self,
+        value_type: &ValueType,
+        constraint: TypeConstraint,
+    ) -> bool {
+        self.type_satisfies_constraint_inner(value_type, constraint, &mut BTreeSet::new())
+    }
+
+    fn validate_nominal_constraints(
+        &self,
+        nominal: &NominalType,
+        arguments: &[ValueType],
+        span: Span,
+    ) -> bool {
+        let mut valid = true;
+        for (parameter, actual) in nominal.type_parameters().iter().zip(arguments) {
+            for constraint in parameter.constraints() {
+                if !self.type_satisfies_constraint(actual, *constraint) {
+                    self.errors
+                        .borrow_mut()
+                        .push(ModuleTypeError::UnsatisfiedConstraint {
+                            module: self.entry.module().clone(),
+                            name: nominal.id().name().to_owned(),
+                            parameter: parameter.name().to_owned(),
+                            constraint: *constraint,
+                            actual: actual.clone(),
+                            call_span: span,
+                            parameter_span: parameter.span(),
+                        });
+                    valid = false;
+                }
+            }
+        }
+        valid
+    }
+
+    fn type_satisfies_constraint_inner(
+        &self,
+        value_type: &ValueType,
+        constraint: TypeConstraint,
+        visiting: &mut BTreeSet<NominalTypeId>,
+    ) -> bool {
+        match constraint {
+            TypeConstraint::Equal => match value_type {
+                ValueType::Any | ValueType::Function | ValueType::Closure => false,
+                ValueType::TypeParameter(name) => {
+                    self.type_parameter_satisfies_constraint(name, constraint)
+                }
+                ValueType::List(element) => {
+                    self.type_satisfies_constraint_inner(element, constraint, visiting)
+                }
+                ValueType::Nominal { id, arguments } => {
+                    if !arguments.iter().all(|argument| {
+                        self.type_satisfies_constraint_inner(argument, constraint, visiting)
+                    }) {
+                        return false;
+                    }
+                    if !visiting.insert(id.as_ref().clone()) {
+                        return true;
+                    }
+                    let result = self
+                        .types
+                        .nominal(id.module(), id.name())
+                        .filter(|nominal| nominal.type_parameters().len() == arguments.len())
+                        .is_some_and(|nominal| {
+                            let substitutions = nominal
+                                .type_parameters()
+                                .iter()
+                                .zip(arguments)
+                                .map(|(parameter, argument)| {
+                                    (parameter.name().to_owned(), argument.clone())
+                                })
+                                .collect::<BTreeMap<_, _>>();
+                            nominal.fields().iter().all(|field| {
+                                self.type_satisfies_constraint_inner(
+                                    &substitute_type(field.value_type(), &substitutions),
+                                    constraint,
+                                    visiting,
+                                )
+                            }) && nominal.variants().iter().all(|variant| {
+                                variant.payload().iter().all(|payload| {
+                                    self.type_satisfies_constraint_inner(
+                                        &substitute_type(payload, &substitutions),
+                                        constraint,
+                                        visiting,
+                                    )
+                                })
+                            })
+                        });
+                    visiting.remove(id.as_ref());
+                    result
+                }
+                _ => true,
+            },
+            TypeConstraint::Ordered => match value_type {
+                ValueType::Int
+                | ValueType::Float
+                | ValueType::String
+                | ValueType::Bytes
+                | ValueType::Path
+                | ValueType::Duration
+                | ValueType::ByteSize => true,
+                ValueType::List(element) => {
+                    self.type_satisfies_constraint_inner(element, constraint, visiting)
+                }
+                ValueType::TypeParameter(name) => {
+                    self.type_parameter_satisfies_constraint(name, constraint)
+                }
+                _ => false,
+            },
+        }
+    }
+
+    fn type_parameter_satisfies_constraint(&self, name: &str, constraint: TypeConstraint) -> bool {
+        self.type_parameter_scopes
+            .borrow()
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name))
+            .is_some_and(|constraints| {
+                constraints.contains(&constraint)
+                    || (constraint == TypeConstraint::Equal
+                        && constraints.contains(&TypeConstraint::Ordered))
+            })
     }
 
     fn validate_intrinsic_call(
@@ -3031,11 +4992,12 @@ impl<'a> ReferenceResolver<'a> {
             StatementKind::Import(_)
             | StatementKind::ModuleImport(_)
             | StatementKind::ModuleExport(_)
-            | StatementKind::NominalType(_) => Ok(()),
+            | StatementKind::NominalType(_)
+            | StatementKind::VariantType(_) => Ok(()),
             StatementKind::Declaration(declaration) => {
                 self.expression(&declaration.value)?;
-                self.declare(
-                    declaration.name.span(),
+                self.pattern(
+                    &declaration.pattern,
                     statement.span().end(),
                     declaration.mutable,
                 )
@@ -3056,7 +5018,7 @@ impl<'a> ReferenceResolver<'a> {
                 self.push_scope(function.body.span);
                 let result = (|| {
                     for parameter in &function.parameters {
-                        self.declare(parameter.name.span(), function.body.span.start(), false)?;
+                        self.pattern(&parameter.pattern, function.body.span.start(), false)?;
                     }
                     self.block(&function.body)
                 })();
@@ -3138,13 +5100,7 @@ impl<'a> ReferenceResolver<'a> {
         }
         self.push_scope(arm.span);
         let result = (|| {
-            match &arm.pattern {
-                Pattern::Binding(identifier) => {
-                    self.declare(identifier.span(), identifier.span().end(), false)?
-                }
-                Pattern::Literal(literal) => self.literal(literal)?,
-                Pattern::Wildcard(_) => {}
-            }
+            self.pattern(&arm.pattern, arm.span.start(), false)?;
             if let Some(guard) = &arm.guard {
                 self.expression(guard)?;
             }
@@ -3162,6 +5118,40 @@ impl<'a> ReferenceResolver<'a> {
         let result = self.statements(&block.statements);
         self.pop_scope();
         result
+    }
+
+    fn pattern(
+        &mut self,
+        pattern: &Pattern,
+        visible_from: usize,
+        mutable: bool,
+    ) -> Result<(), Box<ModuleNameError>> {
+        match pattern {
+            Pattern::Binding(identifier) => self.declare(identifier.span(), visible_from, mutable),
+            Pattern::Literal(literal) => self.literal(literal),
+            Pattern::Wildcard(_) => Ok(()),
+            Pattern::List(pattern) => {
+                for element in &pattern.elements {
+                    self.pattern(element, visible_from, mutable)?;
+                }
+                if let Some(rest) = pattern.rest {
+                    self.declare(rest.span(), visible_from, mutable)?;
+                }
+                Ok(())
+            }
+            Pattern::NominalRecord(pattern) => {
+                for field in &pattern.fields {
+                    self.pattern(&field.pattern, visible_from, mutable)?;
+                }
+                Ok(())
+            }
+            Pattern::Variant(pattern) => {
+                for payload in &pattern.payload {
+                    self.pattern(payload, visible_from, mutable)?;
+                }
+                Ok(())
+            }
+        }
     }
 
     fn chain(&mut self, chain: &ConditionalChain) -> Result<(), Box<ModuleNameError>> {
@@ -3212,7 +5202,7 @@ impl<'a> ReferenceResolver<'a> {
             ExpressionKind::Variable(variable) => {
                 self.variable(variable.name.span(), variable.span)
             }
-            ExpressionKind::Symbol(_) => Ok(()),
+            ExpressionKind::Symbol(_) | ExpressionKind::Qualified(_) => Ok(()),
             ExpressionKind::List(elements) => {
                 for element in elements {
                     self.expression(element)?;
@@ -3225,6 +5215,12 @@ impl<'a> ReferenceResolver<'a> {
                         self.word_part(part)?;
                     }
                     self.expression(&entry.value)?;
+                }
+                Ok(())
+            }
+            ExpressionKind::NominalRecord(record) => {
+                for field in &record.fields {
+                    self.expression(&field.value)?;
                 }
                 Ok(())
             }
@@ -3268,7 +5264,7 @@ impl<'a> ReferenceResolver<'a> {
         self.callable_depth += 1;
         let result = (|| {
             for parameter in &closure.parameters {
-                self.declare(parameter.name.span(), closure.body.span().start(), false)?;
+                self.pattern(&parameter.pattern, closure.body.span().start(), false)?;
             }
             self.chain(&closure.body)
         })();
@@ -3822,6 +5818,7 @@ impl<'a> StaticEffectAnalyzer<'a> {
             | StatementKind::ModuleImport(_)
             | StatementKind::ModuleExport(_)
             | StatementKind::NominalType(_)
+            | StatementKind::VariantType(_)
             | StatementKind::Function(_) => {}
             StatementKind::Declaration(declaration) => self.expression(&declaration.value),
             StatementKind::Assignment(assignment) => self.expression(&assignment.value),
@@ -4065,7 +6062,7 @@ impl<'a> StaticEffectAnalyzer<'a> {
                     self.summary.push(ModuleEffect::Status, expression.span());
                 }
             }
-            ExpressionKind::Symbol(_) => {}
+            ExpressionKind::Symbol(_) | ExpressionKind::Qualified(_) => {}
             ExpressionKind::List(items) => {
                 for item in items {
                     self.expression(item);
@@ -4077,6 +6074,11 @@ impl<'a> StaticEffectAnalyzer<'a> {
                         self.word_part(part);
                     }
                     self.expression(&entry.value);
+                }
+            }
+            ExpressionKind::NominalRecord(record) => {
+                for field in &record.fields {
+                    self.expression(&field.value);
                 }
             }
             ExpressionKind::Closure(_) => {}
@@ -4311,7 +6313,8 @@ impl<'a> StaticPipelineAnalyzer<'a> {
             StatementKind::Import(_)
             | StatementKind::ModuleImport(_)
             | StatementKind::ModuleExport(_)
-            | StatementKind::NominalType(_) => {}
+            | StatementKind::NominalType(_)
+            | StatementKind::VariantType(_) => {}
             StatementKind::Declaration(declaration) => self.expression(&declaration.value),
             StatementKind::Assignment(assignment) => self.expression(&assignment.value),
             StatementKind::Environment(environment) => {
@@ -4742,7 +6745,9 @@ impl<'a> StaticPipelineAnalyzer<'a> {
         }
         match expression.kind() {
             ExpressionKind::Literal(literal) => self.literal(literal),
-            ExpressionKind::Variable(_) | ExpressionKind::Symbol(_) => {}
+            ExpressionKind::Variable(_)
+            | ExpressionKind::Symbol(_)
+            | ExpressionKind::Qualified(_) => {}
             ExpressionKind::List(elements) => {
                 for element in elements {
                     self.expression(element);
@@ -4754,6 +6759,11 @@ impl<'a> StaticPipelineAnalyzer<'a> {
                         self.word_part(part);
                     }
                     self.expression(&entry.value);
+                }
+            }
+            ExpressionKind::NominalRecord(record) => {
+                for field in &record.fields {
+                    self.expression(&field.value);
                 }
             }
             ExpressionKind::Closure(closure) => self.closure(closure),
@@ -5115,12 +7125,17 @@ impl ModuleProgram {
         } else {
             self.aliases.resolve(module, modules)?
         };
+        if !modules.is_empty() && self.names.export(owner, name).is_none() {
+            return None;
+        }
         self.types.nominal(owner, name)
     }
 
     pub(crate) fn runtime_binding_types(&self) -> RuntimeBindingTypes {
         let mut by_source = BTreeMap::new();
         let mut functions_by_source = BTreeMap::new();
+        let mut annotations_by_source = BTreeMap::new();
+        let mut modules_by_source = BTreeMap::new();
         for entry in self.sources.entries() {
             let types = self.types.by_module.get(entry.module());
             by_source.insert(
@@ -5131,10 +7146,24 @@ impl ModuleProgram {
                 entry.source().id(),
                 types.map_or_else(Vec::new, |types| types.functions.clone()),
             );
+            annotations_by_source.insert(
+                entry.source().id(),
+                types.map_or_else(Vec::new, |types| types.annotations.clone()),
+            );
+            modules_by_source.insert(entry.source().id(), entry.module().clone());
         }
         RuntimeBindingTypes {
             by_source,
             functions_by_source,
+            annotations_by_source,
+            modules_by_source,
+            nominals_by_module: self
+                .types
+                .by_module
+                .iter()
+                .map(|(module, types)| (module.clone(), types.nominals.clone()))
+                .collect(),
+            aliases: self.aliases.clone(),
         }
     }
 }
@@ -5406,7 +7435,7 @@ impl<'a> ModuleProgramLoader<'a> {
         if control.is_cancelled() {
             return ModuleAnalysisOutcome::Cancelled;
         }
-        let types_result = ModuleTypeRegistry::analyze(&sources, &names, control);
+        let types_result = ModuleTypeRegistry::analyze(&sources, &aliases, &names, control);
         if control.is_cancelled() {
             return ModuleAnalysisOutcome::Cancelled;
         }
@@ -6073,6 +8102,27 @@ pub enum ModuleTypeError {
         actual: ValueType,
         parameter_span: Span,
     },
+    DuplicateNominalField {
+        module: ModuleId,
+        name: String,
+        field: String,
+        first_span: Span,
+        duplicate_span: Span,
+    },
+    UnknownNominalField {
+        module: ModuleId,
+        name: String,
+        field: String,
+        field_span: Span,
+        declaration_span: Span,
+    },
+    MissingNominalField {
+        module: ModuleId,
+        name: String,
+        field: String,
+        construction_span: Span,
+        field_span: Span,
+    },
     IntrinsicArgumentMismatch {
         module: ModuleId,
         name: &'static str,
@@ -6105,6 +8155,60 @@ pub enum ModuleTypeError {
         actual: ValueType,
         declaration_span: Span,
     },
+    BindingMismatch {
+        module: ModuleId,
+        name: String,
+        value_span: Span,
+        expected: ValueType,
+        actual: ValueType,
+        annotation_span: Span,
+    },
+    GenericArity {
+        module: ModuleId,
+        name: String,
+        call_span: Span,
+        expected: usize,
+        actual: usize,
+        declaration_span: Span,
+    },
+    AmbiguousGeneric {
+        module: ModuleId,
+        name: String,
+        parameter: String,
+        call_span: Span,
+        parameter_span: Span,
+    },
+    UnsatisfiedConstraint {
+        module: ModuleId,
+        name: String,
+        parameter: String,
+        constraint: TypeConstraint,
+        actual: ValueType,
+        call_span: Span,
+        parameter_span: Span,
+    },
+    GuardMismatch {
+        module: ModuleId,
+        guard_span: Span,
+        actual: ValueType,
+    },
+    PatternTypeMismatch {
+        module: ModuleId,
+        pattern_span: Span,
+        value_type: ValueType,
+    },
+    UnreachableMatchArm {
+        module: ModuleId,
+        arm_span: Span,
+        covering_span: Span,
+    },
+    NonExhaustiveMatch {
+        module: ModuleId,
+        match_span: Span,
+        nominal: NominalTypeId,
+        missing: Vec<String>,
+        declaration_span: Span,
+    },
 }
 
 impl ModuleTypeError {
@@ -6116,11 +8220,22 @@ impl ModuleTypeError {
             | Self::CallArity { module, .. }
             | Self::IntrinsicCallArity { module, .. }
             | Self::ArgumentMismatch { module, .. }
+            | Self::DuplicateNominalField { module, .. }
+            | Self::UnknownNominalField { module, .. }
+            | Self::MissingNominalField { module, .. }
             | Self::IntrinsicArgumentMismatch { module, .. }
             | Self::ResultMismatch { module, .. }
             | Self::ByteCaptureInWord { module, .. }
             | Self::ThrowMismatch { module, .. }
-            | Self::AssignmentMismatch { module, .. } => module,
+            | Self::AssignmentMismatch { module, .. }
+            | Self::BindingMismatch { module, .. }
+            | Self::GenericArity { module, .. }
+            | Self::AmbiguousGeneric { module, .. }
+            | Self::UnsatisfiedConstraint { module, .. }
+            | Self::GuardMismatch { module, .. }
+            | Self::PatternTypeMismatch { module, .. }
+            | Self::UnreachableMatchArm { module, .. }
+            | Self::NonExhaustiveMatch { module, .. } => module,
         }
     }
 
@@ -6132,11 +8247,24 @@ impl ModuleTypeError {
             }
             Self::ArgumentMismatch { argument_span, .. }
             | Self::IntrinsicArgumentMismatch { argument_span, .. } => *argument_span,
+            Self::DuplicateNominalField { duplicate_span, .. } => *duplicate_span,
+            Self::UnknownNominalField { field_span, .. } => *field_span,
+            Self::MissingNominalField {
+                construction_span, ..
+            } => *construction_span,
             Self::ResultMismatch { result_span, .. } => *result_span,
             Self::ByteCaptureInWord { span, .. } | Self::ThrowMismatch { span, .. } => *span,
             Self::AssignmentMismatch {
                 assignment_span, ..
             } => *assignment_span,
+            Self::BindingMismatch { value_span, .. } => *value_span,
+            Self::GenericArity { call_span, .. }
+            | Self::AmbiguousGeneric { call_span, .. }
+            | Self::UnsatisfiedConstraint { call_span, .. } => *call_span,
+            Self::GuardMismatch { guard_span, .. } => *guard_span,
+            Self::PatternTypeMismatch { pattern_span, .. } => *pattern_span,
+            Self::UnreachableMatchArm { arm_span, .. } => *arm_span,
+            Self::NonExhaustiveMatch { match_span, .. } => *match_span,
         }
     }
 
@@ -6189,6 +8317,33 @@ impl ModuleTypeError {
                     format!("this argument is `{actual}`, expected `{expected}`"),
                 )
                 .with_secondary(*parameter_span, "parameter type declared here"),
+            Self::DuplicateNominalField {
+                duplicate_span,
+                first_span,
+                field,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG014", self.to_string())
+                .with_primary(*duplicate_span, format!("field `{field}` is repeated"))
+                .with_secondary(*first_span, "field first supplied here"),
+            Self::UnknownNominalField {
+                field_span,
+                declaration_span,
+                field,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG015", self.to_string())
+                .with_primary(*field_span, format!("unknown field `{field}`"))
+                .with_secondary(*declaration_span, "nominal record declared here"),
+            Self::MissingNominalField {
+                construction_span,
+                field_span,
+                field,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG016", self.to_string())
+                .with_primary(
+                    *construction_span,
+                    format!("required field `{field}` is missing"),
+                )
+                .with_secondary(*field_span, "field declared here"),
             Self::IntrinsicArgumentMismatch {
                 argument_span,
                 expected,
@@ -6234,6 +8389,85 @@ impl ModuleTypeError {
                     format!("this value is `{actual}`, expected `{expected}`"),
                 )
                 .with_secondary(*declaration_span, "binding type declared here"),
+            Self::BindingMismatch {
+                value_span,
+                expected,
+                actual,
+                annotation_span,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG019", self.to_string())
+                .with_primary(
+                    *value_span,
+                    format!("this value is `{actual}`, expected `{expected}`"),
+                )
+                .with_secondary(*annotation_span, "binding type declared here"),
+            Self::GenericArity {
+                call_span,
+                expected,
+                actual,
+                declaration_span,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG009", self.to_string())
+                .with_primary(
+                    *call_span,
+                    format!("expected {expected} type arguments, found {actual}"),
+                )
+                .with_secondary(*declaration_span, "generic callable declared here"),
+            Self::AmbiguousGeneric {
+                call_span,
+                parameter,
+                parameter_span,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG010", self.to_string())
+                .with_primary(
+                    *call_span,
+                    format!("type parameter `{parameter}` is not uniquely inferred"),
+                )
+                .with_secondary(*parameter_span, "type parameter declared here"),
+            Self::UnsatisfiedConstraint {
+                call_span,
+                constraint,
+                actual,
+                parameter_span,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG011", self.to_string())
+                .with_primary(
+                    *call_span,
+                    format!("type `{actual}` does not satisfy `{constraint:?}`"),
+                )
+                .with_secondary(*parameter_span, "constraint declared here"),
+            Self::GuardMismatch {
+                guard_span, actual, ..
+            } => Diagnostic::new(Severity::Error, "SIG012", self.to_string()).with_primary(
+                *guard_span,
+                format!("match guard is `{actual}`; expected `Bool`"),
+            ),
+            Self::PatternTypeMismatch {
+                pattern_span,
+                value_type,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG017", self.to_string()).with_primary(
+                *pattern_span,
+                format!("this pattern cannot match `{value_type}`"),
+            ),
+            Self::UnreachableMatchArm {
+                arm_span,
+                covering_span,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG018", self.to_string())
+                .with_primary(*arm_span, "this match arm is unreachable")
+                .with_secondary(*covering_span, "an earlier unguarded arm covers it"),
+            Self::NonExhaustiveMatch {
+                match_span,
+                missing,
+                declaration_span,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG013", self.to_string())
+                .with_primary(
+                    *match_span,
+                    format!("missing unguarded variants: {}", missing.join(", ")),
+                )
+                .with_secondary(*declaration_span, "closed variant type declared here"),
         }
     }
 }
@@ -6291,6 +8525,36 @@ impl fmt::Display for ModuleTypeError {
                 "module `{}` passes `{actual}` to `{name}` parameter `{parameter}`; expected `{expected}`",
                 module.path().display()
             ),
+            Self::DuplicateNominalField {
+                module,
+                name,
+                field,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` repeats field `{field}` while constructing `{name}`",
+                module.path().display()
+            ),
+            Self::UnknownNominalField {
+                module,
+                name,
+                field,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` supplies unknown field `{field}` while constructing `{name}`",
+                module.path().display()
+            ),
+            Self::MissingNominalField {
+                module,
+                name,
+                field,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` omits required field `{field}` while constructing `{name}`",
+                module.path().display()
+            ),
             Self::IntrinsicArgumentMismatch {
                 module,
                 name,
@@ -6333,6 +8597,79 @@ impl fmt::Display for ModuleTypeError {
                 formatter,
                 "module `{}` assigns `{actual}` to `{name}`; expected `{expected}`",
                 module.path().display()
+            ),
+            Self::BindingMismatch {
+                module,
+                name,
+                expected,
+                actual,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` binds `{actual}` to `{name}`; expected `{expected}`",
+                module.path().display()
+            ),
+            Self::GenericArity {
+                module,
+                name,
+                expected,
+                actual,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` calls generic `{name}` with {actual} type arguments; expected {expected}",
+                module.path().display()
+            ),
+            Self::AmbiguousGeneric {
+                module,
+                name,
+                parameter,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` cannot infer generic `{name}` parameter `{parameter}` exactly",
+                module.path().display()
+            ),
+            Self::UnsatisfiedConstraint {
+                module,
+                name,
+                parameter,
+                constraint,
+                actual,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` instantiates `{name}` parameter `{parameter}` as `{actual}`, which does not satisfy `{constraint:?}`",
+                module.path().display()
+            ),
+            Self::GuardMismatch { module, actual, .. } => write!(
+                formatter,
+                "module `{}` uses `{actual}` as a match guard; expected `Bool`",
+                module.path().display()
+            ),
+            Self::PatternTypeMismatch {
+                module, value_type, ..
+            } => write!(
+                formatter,
+                "module `{}` uses a pattern that cannot match `{value_type}`",
+                module.path().display()
+            ),
+            Self::UnreachableMatchArm { module, .. } => write!(
+                formatter,
+                "module `{}` contains an unreachable match arm",
+                module.path().display()
+            ),
+            Self::NonExhaustiveMatch {
+                module,
+                nominal,
+                missing,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` has a non-exhaustive match on `{}`; missing {}",
+                module.path().display(),
+                nominal.name(),
+                missing.join(", ")
             ),
         }
     }

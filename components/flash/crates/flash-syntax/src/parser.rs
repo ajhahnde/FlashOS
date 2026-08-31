@@ -8,12 +8,14 @@ use crate::{
     EnvironmentStatement, Expression, ExpressionKind, FileRedirection, ForStatement,
     FunctionDefinition, Identifier, IfStatement, ImportStatement, IncompleteInput,
     IncompleteReason, IndexExpression, IoNumber, JobStatement, Keyword, LanguageDetection,
-    LanguageMajor, Literal, LiteralKind, MatchArm, MatchStatement, MemberExpression,
-    ModuleAliasImport, ModuleExportStatement, ModuleImportSource, NominalTypeDeclaration,
-    NominalTypeField, NumberKind, Operator, OutputMode, Parameter, Pattern, PipeOperator, Pipeline,
-    RecordEntry, RecordKey, Redirection, RedirectionKind, Script, Severity, SourceFile, Span,
-    Stage, StageKind, Statement, StatementKind, SyntaxClassification, Token, TokenKind,
-    TryStatement, TypeReference, UnaryExpression, UnaryOperator, VariableReference,
+    LanguageMajor, ListPattern, Literal, LiteralKind, MatchArm, MatchStatement, MemberExpression,
+    ModuleAliasImport, ModuleExportStatement, ModuleImportSource, NominalRecordExpression,
+    NominalRecordFieldExpression, NominalRecordPattern, NominalTypeDeclaration, NominalTypeField,
+    NumberKind, Operator, OutputMode, Parameter, Pattern, PatternField, PipeOperator, Pipeline,
+    QualifiedName, RecordEntry, RecordKey, Redirection, RedirectionKind, Script, Severity,
+    SourceFile, Span, Stage, StageKind, Statement, StatementKind, SyntaxClassification, Token,
+    TokenKind, TryStatement, TypeConstraint, TypeParameter, TypeReference, UnaryExpression,
+    UnaryOperator, VariableReference, VariantDeclaration, VariantPattern, VariantTypeDeclaration,
     VersionedScript, WhileStatement, Word, WordPart, WordPartKind, classify_tokens,
 };
 
@@ -340,6 +342,9 @@ impl<'source, 'control> Parser<'source, 'control> {
             Some(TokenKind::Keyword(Keyword::Type)) if self.language == LanguageMajor::V2 => {
                 self.parse_nominal_type(top_level)
             }
+            Some(TokenKind::Keyword(Keyword::Enum)) if self.language == LanguageMajor::V2 => {
+                self.parse_variant_type(top_level)
+            }
             Some(TokenKind::Keyword(Keyword::If)) => {
                 let node = self.parse_if_node()?;
                 let span = node.span();
@@ -450,6 +455,7 @@ impl<'source, 'control> Parser<'source, 'control> {
         let start = self.take().expect("type keyword is current").span();
         self.skip_inline();
         let name = self.parse_identifier()?;
+        let type_parameters = self.parse_type_parameters()?;
         self.skip_inline();
         self.expect_operator(Operator::Assign, "type declaration requires `=`")?;
         self.skip_layout();
@@ -484,15 +490,89 @@ impl<'source, 'control> Parser<'source, 'control> {
         )?;
         let span = self.span(start.start(), close.span().end());
         Ok(Statement::new(
-            StatementKind::NominalType(NominalTypeDeclaration { name, fields }),
+            StatementKind::NominalType(NominalTypeDeclaration {
+                name,
+                type_parameters,
+                fields,
+            }),
             span,
+        ))
+    }
+
+    fn parse_variant_type(&mut self, top_level: bool) -> ParseResult<Statement> {
+        if !top_level {
+            return Err(self.invalid_here("variant types are allowed only at module top level"));
+        }
+        let start = self.take().expect("enum keyword is current").span();
+        self.skip_inline();
+        let name = self.parse_identifier()?;
+        let type_parameters = self.parse_type_parameters()?;
+        self.skip_layout();
+        self.expect_delimiter(Delimiter::LeftBrace, "variant declaration requires `{`")?;
+        self.skip_layout();
+        let mut variants = Vec::new();
+        while !self.at_delimiter(Some(Delimiter::RightBrace)) {
+            let variant_name = self.parse_identifier()?;
+            let variant_start = variant_name.span().start();
+            self.skip_inline();
+            let mut payload = Vec::new();
+            let mut end = variant_name.span().end();
+            if self.take_delimiter(Delimiter::LeftParenthesis).is_some() {
+                self.skip_layout();
+                while !self.at_delimiter(Some(Delimiter::RightParenthesis)) {
+                    payload.push(self.parse_type_reference()?);
+                    self.skip_layout();
+                    if self.take_operator(Operator::Comma).is_none() {
+                        break;
+                    }
+                    self.skip_layout();
+                }
+                let close = self.expect_delimiter(
+                    Delimiter::RightParenthesis,
+                    "variant payload is not closed",
+                )?;
+                end = close.span().end();
+            }
+            variants.push(VariantDeclaration {
+                name: variant_name,
+                payload,
+                span: self.span(variant_start, end),
+            });
+            self.skip_layout();
+            if self.take_operator(Operator::Comma).is_none() {
+                break;
+            }
+            self.skip_layout();
+        }
+        if variants.is_empty() {
+            return Err(self.invalid_here("variant declaration cannot be empty"));
+        }
+        let close =
+            self.expect_delimiter(Delimiter::RightBrace, "variant declaration is not closed")?;
+        Ok(Statement::new(
+            StatementKind::VariantType(VariantTypeDeclaration {
+                name,
+                type_parameters,
+                variants,
+            }),
+            self.span(start.start(), close.span().end()),
         ))
     }
 
     fn parse_declaration(&mut self, mutable: bool) -> ParseResult<Statement> {
         let start = self.take().expect("declaration starts on a keyword").span();
         self.skip_inline();
-        let name = self.parse_identifier()?;
+        let pattern = if self.language == LanguageMajor::V2 {
+            self.parse_pattern()?
+        } else {
+            Pattern::Binding(self.parse_identifier()?)
+        };
+        let name = self.pattern_primary_binding(&pattern).ok_or_else(|| {
+            self.invalid_at(
+                self.pattern_span(&pattern),
+                "declaration pattern must bind a name",
+            )
+        })?;
         self.skip_inline();
         let type_annotation = if self.take_operator(Operator::Colon).is_some() {
             self.skip_inline();
@@ -508,6 +588,7 @@ impl<'source, 'control> Parser<'source, 'control> {
         Ok(Statement::new(
             StatementKind::Declaration(Declaration {
                 mutable,
+                pattern,
                 name,
                 type_annotation,
                 value,
@@ -603,6 +684,7 @@ impl<'source, 'control> Parser<'source, 'control> {
         let start = self.take().expect("def keyword is current").span();
         self.skip_inline();
         let name = self.parse_identifier()?;
+        let type_parameters = self.parse_type_parameters()?;
         self.skip_inline();
         self.expect_delimiter(Delimiter::LeftParenthesis, "function requires parameters")?;
         let parameters = self.parse_parameters(Delimiter::RightParenthesis)?;
@@ -624,6 +706,7 @@ impl<'source, 'control> Parser<'source, 'control> {
             StatementKind::Function(FunctionDefinition {
                 documentation,
                 name,
+                type_parameters,
                 parameters,
                 return_type,
                 body,
@@ -796,13 +879,78 @@ impl<'source, 'control> Parser<'source, 'control> {
     fn parse_pattern(&mut self) -> ParseResult<Pattern> {
         match self.current_kind() {
             Some(TokenKind::Identifier) => {
-                let identifier = self.parse_identifier()?;
-                if self.source.slice(identifier.span()).ok() == Some("_") {
-                    Ok(Pattern::Wildcard(identifier.span()))
-                } else {
-                    Ok(Pattern::Binding(identifier))
+                let name = self.parse_qualified_name()?;
+                self.skip_inline();
+                if name.segments.len() == 1
+                    && self.source.slice(name.segments[0].span()).ok() == Some("_")
+                {
+                    return Ok(Pattern::Wildcard(name.span));
                 }
+                if self.at_delimiter(Some(Delimiter::LeftBrace)) {
+                    let start = name.span.start();
+                    self.take();
+                    self.skip_layout();
+                    let mut fields = Vec::new();
+                    while !self.at_delimiter(Some(Delimiter::RightBrace)) {
+                        let field = self.parse_identifier()?;
+                        let field_start = field.span().start();
+                        self.skip_inline();
+                        self.expect_operator(Operator::Colon, "record pattern field requires `:`")?;
+                        self.skip_layout();
+                        let pattern = self.parse_pattern()?;
+                        let span = self.span(field_start, self.pattern_span(&pattern).end());
+                        fields.push(PatternField {
+                            name: field,
+                            pattern,
+                            span,
+                        });
+                        self.skip_layout();
+                        if self.take_operator(Operator::Comma).is_none() {
+                            break;
+                        }
+                        self.skip_layout();
+                    }
+                    let close = self
+                        .expect_delimiter(Delimiter::RightBrace, "record pattern is not closed")?;
+                    return Ok(Pattern::NominalRecord(NominalRecordPattern {
+                        name,
+                        fields,
+                        span: self.span(start, close.span().end()),
+                    }));
+                }
+                if self.at_delimiter(Some(Delimiter::LeftParenthesis)) {
+                    let start = name.span.start();
+                    self.take();
+                    self.skip_layout();
+                    let mut payload = Vec::new();
+                    while !self.at_delimiter(Some(Delimiter::RightParenthesis)) {
+                        payload.push(self.parse_pattern()?);
+                        self.skip_layout();
+                        if self.take_operator(Operator::Comma).is_none() {
+                            break;
+                        }
+                        self.skip_layout();
+                    }
+                    let close = self.expect_delimiter(
+                        Delimiter::RightParenthesis,
+                        "variant pattern is not closed",
+                    )?;
+                    return Ok(Pattern::Variant(VariantPattern {
+                        constructor: name,
+                        payload,
+                        span: self.span(start, close.span().end()),
+                    }));
+                }
+                if name.segments.len() > 1 {
+                    return Ok(Pattern::Variant(VariantPattern {
+                        span: name.span,
+                        constructor: name,
+                        payload: Vec::new(),
+                    }));
+                }
+                Ok(Pattern::Binding(name.segments[0]))
             }
+            Some(TokenKind::Delimiter(Delimiter::LeftBracket)) => self.parse_list_pattern(),
             Some(TokenKind::Keyword(Keyword::Null | Keyword::True | Keyword::False))
             | Some(TokenKind::Number(_))
             | Some(TokenKind::SingleQuoted)
@@ -810,6 +958,38 @@ impl<'source, 'control> Parser<'source, 'control> {
             Some(_) => Err(self.invalid_here("expected a match pattern")),
             None => Err(self.incomplete_here(IncompleteReason::Expression)),
         }
+    }
+
+    fn parse_list_pattern(&mut self) -> ParseResult<Pattern> {
+        let open = self.take().expect("list-pattern opener is current");
+        self.skip_layout();
+        let mut elements = Vec::new();
+        let mut rest = None;
+        while !self.at_delimiter(Some(Delimiter::RightBracket)) {
+            if self.take_operator(Operator::Spread).is_some() {
+                if rest.is_some() {
+                    return Err(self.invalid_here("list pattern has more than one rest binding"));
+                }
+                rest = Some(self.parse_identifier()?);
+                self.skip_layout();
+                if !self.at_delimiter(Some(Delimiter::RightBracket)) {
+                    return Err(self.invalid_here("list rest binding must be last"));
+                }
+                break;
+            }
+            elements.push(self.parse_pattern()?);
+            self.skip_layout();
+            if self.take_operator(Operator::Comma).is_none() {
+                break;
+            }
+            self.skip_layout();
+        }
+        let close = self.expect_delimiter(Delimiter::RightBracket, "list pattern is not closed")?;
+        Ok(Pattern::List(ListPattern {
+            elements,
+            rest,
+            span: self.span(open.span().start(), close.span().end()),
+        }))
     }
 
     fn parse_control(&mut self, transfer: ControlTransfer) -> ParseResult<Statement> {
@@ -866,7 +1046,17 @@ impl<'source, 'control> Parser<'source, 'control> {
         let mut parameters = Vec::new();
         while !self.at_delimiter(Some(closing)) {
             let start = self.current_span()?;
-            let name = self.parse_identifier()?;
+            let pattern = if self.language == LanguageMajor::V2 {
+                self.parse_pattern()?
+            } else {
+                Pattern::Binding(self.parse_identifier()?)
+            };
+            let name = self.pattern_primary_binding(&pattern).ok_or_else(|| {
+                self.invalid_at(
+                    self.pattern_span(&pattern),
+                    "parameter pattern must bind a name",
+                )
+            })?;
             self.skip_inline();
             let type_annotation = if self.take_operator(Operator::Colon).is_some() {
                 self.skip_layout();
@@ -878,6 +1068,7 @@ impl<'source, 'control> Parser<'source, 'control> {
                 .as_ref()
                 .map_or(name.span().end(), |reference| reference.span.end());
             parameters.push(Parameter {
+                pattern,
                 name,
                 type_annotation,
                 span: self.span(start.start(), end),
@@ -894,12 +1085,78 @@ impl<'source, 'control> Parser<'source, 'control> {
         Ok(parameters)
     }
 
+    fn parse_type_parameters(&mut self) -> ParseResult<Vec<TypeParameter>> {
+        self.skip_inline();
+        if self.take_delimiter(Delimiter::LeftBracket).is_none() {
+            return Ok(Vec::new());
+        }
+        self.skip_layout();
+        if self.at_delimiter(Some(Delimiter::RightBracket)) {
+            return Err(self.invalid_here("generic parameter list cannot be empty"));
+        }
+        let mut parameters = Vec::new();
+        while !self.at_delimiter(Some(Delimiter::RightBracket)) {
+            let name = self.parse_identifier()?;
+            let start = name.span().start();
+            self.skip_inline();
+            let mut constraints = Vec::new();
+            let mut end = name.span().end();
+            if self.take_operator(Operator::Colon).is_some() {
+                loop {
+                    self.skip_inline();
+                    let constraint = self.parse_identifier()?;
+                    end = constraint.span().end();
+                    let value = match self.source.slice(constraint.span()).ok() {
+                        Some("Equal") => TypeConstraint::Equal,
+                        Some("Ordered") => TypeConstraint::Ordered,
+                        _ => {
+                            return Err(self.invalid_at(
+                                constraint.span(),
+                                "generic constraints are `Equal` or `Ordered`",
+                            ));
+                        }
+                    };
+                    if constraints.contains(&value) {
+                        return Err(self.invalid_at(
+                            constraint.span(),
+                            "generic constraint cannot be repeated",
+                        ));
+                    }
+                    constraints.push(value);
+                    self.skip_inline();
+                    if self.take_operator(Operator::Plus).is_none() {
+                        break;
+                    }
+                }
+            }
+            parameters.push(TypeParameter {
+                name,
+                constraints,
+                span: self.span(start, end),
+            });
+            self.skip_layout();
+            if self.take_operator(Operator::Comma).is_none() {
+                break;
+            }
+            self.skip_layout();
+        }
+        self.expect_delimiter(
+            Delimiter::RightBracket,
+            "generic parameter list is not closed",
+        )?;
+        Ok(parameters)
+    }
+
     fn parse_type_reference(&mut self) -> ParseResult<TypeReference> {
         if self.is_end() {
             return Err(self.incomplete_here(IncompleteReason::TypeReference));
         }
-        let name = self.parse_identifier()?;
-        let start = name.span();
+        let qualified = self.parse_qualified_name()?;
+        let name = *qualified
+            .segments
+            .last()
+            .expect("a qualified type name has at least one segment");
+        let start = qualified.span;
         self.skip_inline();
         let mut arguments = Vec::new();
         let mut end = name.span().end();
@@ -925,6 +1182,62 @@ impl<'source, 'control> Parser<'source, 'control> {
             arguments,
             span: self.span(start.start(), end),
         })
+    }
+
+    fn parse_qualified_name(&mut self) -> ParseResult<QualifiedName> {
+        let first = self.parse_identifier()?;
+        let start = first.span().start();
+        let mut end = first.span().end();
+        let mut segments = vec![first];
+        loop {
+            let checkpoint = self.position;
+            self.skip_inline();
+            if self.take_operator(Operator::Colon).is_none()
+                || self.take_operator(Operator::Colon).is_none()
+            {
+                self.position = checkpoint;
+                break;
+            }
+            self.skip_inline();
+            let segment = self.parse_identifier()?;
+            end = segment.span().end();
+            segments.push(segment);
+        }
+        Ok(QualifiedName {
+            segments,
+            span: self.span(start, end),
+        })
+    }
+
+    fn pattern_span(&self, pattern: &Pattern) -> Span {
+        match pattern {
+            Pattern::Wildcard(span) => *span,
+            Pattern::Literal(literal) => literal.span(),
+            Pattern::Binding(identifier) => identifier.span(),
+            Pattern::List(pattern) => pattern.span,
+            Pattern::NominalRecord(pattern) => pattern.span,
+            Pattern::Variant(pattern) => pattern.span,
+        }
+    }
+
+    fn pattern_primary_binding(&self, pattern: &Pattern) -> Option<Identifier> {
+        match pattern {
+            Pattern::Binding(identifier) => Some(*identifier),
+            Pattern::List(pattern) => pattern
+                .elements
+                .iter()
+                .find_map(|pattern| self.pattern_primary_binding(pattern))
+                .or(pattern.rest),
+            Pattern::NominalRecord(pattern) => pattern
+                .fields
+                .iter()
+                .find_map(|field| self.pattern_primary_binding(&field.pattern)),
+            Pattern::Variant(pattern) => pattern
+                .payload
+                .iter()
+                .find_map(|pattern| self.pattern_primary_binding(pattern)),
+            Pattern::Wildcard(_) | Pattern::Literal(_) => None,
+        }
     }
 
     fn parse_conditional_chain(&mut self) -> ParseResult<ConditionalChain> {
@@ -1403,12 +1716,20 @@ impl<'source, 'control> Parser<'source, 'control> {
             parameters
         };
         self.skip_layout();
+        let result_type = if self.take_operator(Operator::Arrow).is_some() {
+            self.skip_layout();
+            Some(self.parse_type_reference()?)
+        } else {
+            None
+        };
+        self.skip_layout();
         let body = self.parse_conditional_chain()?;
         self.skip_layout();
         let close = self.expect_delimiter(Delimiter::RightBrace, "closure body is not closed")?;
         self.continuation_depth -= 1;
         Ok(Closure {
             parameters,
+            result_type,
             body: Box::new(body),
             span: self.span(open.span().start(), close.span().end()),
         })
@@ -1419,7 +1740,17 @@ impl<'source, 'control> Parser<'source, 'control> {
         let mut parameters = Vec::new();
         while self.current_kind() != Some(TokenKind::Operator(Operator::Pipe)) {
             let start = self.current_span()?;
-            let name = self.parse_identifier()?;
+            let pattern = if self.language == LanguageMajor::V2 {
+                self.parse_pattern()?
+            } else {
+                Pattern::Binding(self.parse_identifier()?)
+            };
+            let name = self.pattern_primary_binding(&pattern).ok_or_else(|| {
+                self.invalid_at(
+                    self.pattern_span(&pattern),
+                    "parameter pattern must bind a name",
+                )
+            })?;
             self.skip_inline();
             let type_annotation = if self.take_operator(Operator::Colon).is_some() {
                 self.skip_layout();
@@ -1431,6 +1762,7 @@ impl<'source, 'control> Parser<'source, 'control> {
                 .as_ref()
                 .map_or(name.span().end(), |reference| reference.span.end());
             parameters.push(Parameter {
+                pattern,
                 name,
                 type_annotation,
                 span: self.span(start.start(), end),
@@ -1587,6 +1919,83 @@ impl<'source, 'control> Parser<'source, 'control> {
             self.check_cancelled()?;
             self.skip_inline();
             match self.current_kind() {
+                Some(TokenKind::Operator(Operator::Colon))
+                    if matches!(
+                        expression.kind(),
+                        ExpressionKind::Symbol(_) | ExpressionKind::Qualified(_)
+                    ) =>
+                {
+                    let checkpoint = self.position;
+                    self.position += 1;
+                    if self.take_operator(Operator::Colon).is_none() {
+                        self.position = checkpoint;
+                        break;
+                    }
+                    self.skip_inline();
+                    let segment = self.parse_identifier()?;
+                    let mut segments = match expression.into_kind() {
+                        ExpressionKind::Symbol(identifier) => vec![identifier],
+                        ExpressionKind::Qualified(name) => name.segments,
+                        _ => unreachable!("qualified postfix starts from a name"),
+                    };
+                    let start = segments[0].span().start();
+                    let end = segment.span().end();
+                    segments.push(segment);
+                    let name = QualifiedName {
+                        segments,
+                        span: self.span(start, end),
+                    };
+                    expression =
+                        Expression::new(ExpressionKind::Qualified(name.clone()), name.span);
+                }
+                Some(TokenKind::Delimiter(Delimiter::LeftBrace))
+                    if matches!(
+                        expression.kind(),
+                        ExpressionKind::Symbol(_) | ExpressionKind::Qualified(_)
+                    ) =>
+                {
+                    let name = match expression.into_kind() {
+                        ExpressionKind::Symbol(identifier) => QualifiedName {
+                            segments: vec![identifier],
+                            span: identifier.span(),
+                        },
+                        ExpressionKind::Qualified(name) => name,
+                        _ => unreachable!("record construction starts from a name"),
+                    };
+                    let start = name.span.start();
+                    self.position += 1;
+                    self.continuation_depth += 1;
+                    self.skip_layout();
+                    let mut fields = Vec::new();
+                    while !self.at_delimiter(Some(Delimiter::RightBrace)) {
+                        let field = self.parse_identifier()?;
+                        let field_start = field.span().start();
+                        self.skip_inline();
+                        self.expect_operator(Operator::Colon, "nominal field requires `:`")?;
+                        self.skip_layout();
+                        let value = self.parse_expression()?;
+                        fields.push(NominalRecordFieldExpression {
+                            name: field,
+                            span: self.span(field_start, value.span().end()),
+                            value,
+                        });
+                        self.skip_layout();
+                        if self.take_operator(Operator::Comma).is_none() {
+                            break;
+                        }
+                        self.skip_layout();
+                    }
+                    let close = self.expect_delimiter(
+                        Delimiter::RightBrace,
+                        "nominal record construction is not closed",
+                    )?;
+                    self.continuation_depth -= 1;
+                    let span = self.span(start, close.span().end());
+                    expression = Expression::new(
+                        ExpressionKind::NominalRecord(NominalRecordExpression { name, fields }),
+                        span,
+                    );
+                }
                 Some(TokenKind::Delimiter(Delimiter::LeftParenthesis)) => {
                     self.position += 1;
                     self.continuation_depth += 1;
@@ -1610,12 +2019,66 @@ impl<'source, 'control> Parser<'source, 'control> {
                     expression = Expression::new(
                         ExpressionKind::Call(CallExpression {
                             callee: Box::new(expression),
+                            type_arguments: Vec::new(),
                             arguments,
                         }),
                         span,
                     );
                 }
                 Some(TokenKind::Delimiter(Delimiter::LeftBracket)) => {
+                    let can_have_type_arguments = matches!(
+                        expression.kind(),
+                        ExpressionKind::Symbol(_) | ExpressionKind::Qualified(_)
+                    ) && self.bracket_is_followed_by_call();
+                    if can_have_type_arguments {
+                        self.position += 1;
+                        self.continuation_depth += 1;
+                        self.skip_layout();
+                        let mut type_arguments = Vec::new();
+                        while !self.at_delimiter(Some(Delimiter::RightBracket)) {
+                            type_arguments.push(self.parse_type_reference()?);
+                            self.skip_layout();
+                            if self.take_operator(Operator::Comma).is_none() {
+                                break;
+                            }
+                            self.skip_layout();
+                        }
+                        self.expect_delimiter(
+                            Delimiter::RightBracket,
+                            "explicit type arguments are not closed",
+                        )?;
+                        self.continuation_depth -= 1;
+                        self.skip_inline();
+                        if self.at_delimiter(Some(Delimiter::LeftParenthesis)) {
+                            self.position += 1;
+                            self.continuation_depth += 1;
+                            self.skip_layout();
+                            let mut arguments = Vec::new();
+                            while !self.at_delimiter(Some(Delimiter::RightParenthesis)) {
+                                arguments.push(self.parse_expression()?);
+                                self.skip_layout();
+                                if self.take_operator(Operator::Comma).is_none() {
+                                    break;
+                                }
+                                self.skip_layout();
+                            }
+                            let close = self.expect_delimiter(
+                                Delimiter::RightParenthesis,
+                                "call is not closed",
+                            )?;
+                            self.continuation_depth -= 1;
+                            let span = self.span(expression.span().start(), close.span().end());
+                            expression = Expression::new(
+                                ExpressionKind::Call(CallExpression {
+                                    callee: Box::new(expression),
+                                    type_arguments,
+                                    arguments,
+                                }),
+                                span,
+                            );
+                            continue;
+                        }
+                    }
                     self.position += 1;
                     self.continuation_depth += 1;
                     self.skip_layout();
@@ -2229,6 +2692,43 @@ impl<'source, 'control> Parser<'source, 'control> {
             position += 1;
         }
         None
+    }
+
+    fn bracket_is_followed_by_call(&self) -> bool {
+        let mut position = self.position;
+        let mut depth = 0usize;
+        while let Some(token) = self.tokens.get(position) {
+            match token.kind() {
+                TokenKind::Delimiter(Delimiter::LeftBracket) => depth += 1,
+                TokenKind::Delimiter(Delimiter::RightBracket) => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        position += 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            position += 1;
+        }
+        if depth != 0 {
+            return false;
+        }
+        while let Some(token) = self.tokens.get(position) {
+            if matches!(
+                token.kind(),
+                TokenKind::Whitespace
+                    | TokenKind::Comment
+                    | TokenKind::DocumentationComment
+                    | TokenKind::LineContinuation
+            ) || (self.continuation_depth > 0 && token.kind() == TokenKind::Newline)
+            {
+                position += 1;
+                continue;
+            }
+            return token.kind() == TokenKind::Delimiter(Delimiter::LeftParenthesis);
+        }
+        false
     }
 
     fn current(&self) -> Option<&Token> {

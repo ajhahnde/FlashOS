@@ -200,6 +200,15 @@ pub fn execute_module_program(
                 .declare(import.name(), BindingMutability::Immutable, value)
                 .expect("module name analysis rejects import binding collisions");
         }
+        for alias in program.aliases().aliases(&module) {
+            declare_qualified_alias_values(
+                &mut scope,
+                program,
+                &instances,
+                alias.name(),
+                alias.target(),
+            );
+        }
 
         let source = program
             .sources()
@@ -223,12 +232,11 @@ pub fn execute_module_program(
                 let exports = program
                     .names()
                     .exports(&module)
-                    .map(|export| {
-                        let value = completed_scope
+                    .filter_map(|export| {
+                        completed_scope
                             .get(export.name())
-                            .expect("an analyzed export names a completed root binding")
-                            .clone();
-                        (export.name().to_owned(), value)
+                            .cloned()
+                            .map(|value| (export.name().to_owned(), value))
                     })
                     .collect();
                 instances.insert(module, exports);
@@ -247,6 +255,35 @@ pub fn execute_module_program(
     finish_script_session(&mut session, environment, platform, outcome)
 }
 
+fn declare_qualified_alias_values(
+    scope: &mut ScopeStack,
+    program: &ModuleProgram,
+    instances: &BTreeMap<ModuleId, BTreeMap<String, Value>>,
+    prefix: &str,
+    target: &ModuleId,
+) {
+    if let Some(exports) = instances.get(target) {
+        for (name, value) in exports {
+            scope
+                .declare(
+                    format!("{prefix}::{name}"),
+                    BindingMutability::Immutable,
+                    value.clone(),
+                )
+                .expect("module alias analysis rejects qualified binding collisions");
+        }
+    }
+    for alias in program.aliases().exports(target) {
+        declare_qualified_alias_values(
+            scope,
+            program,
+            instances,
+            &format!("{prefix}::{}", alias.name()),
+            alias.target(),
+        );
+    }
+}
+
 fn module_initialization_order(program: &ModuleProgram) -> Vec<ModuleId> {
     fn visit(
         program: &ModuleProgram,
@@ -259,6 +296,9 @@ fn module_initialization_order(program: &ModuleProgram) -> Vec<ModuleId> {
         }
         for import in program.names().imports(module) {
             visit(program, import.target(), initialized, order);
+        }
+        for alias in program.aliases().aliases(module) {
+            visit(program, alias.target(), initialized, order);
         }
         if initialized.insert(module.clone()) {
             order.push(module.clone());
