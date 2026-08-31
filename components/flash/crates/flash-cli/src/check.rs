@@ -9,25 +9,38 @@ use flash_runtime::module::{
     ModuleCanonicalizer, ModuleId, ModulePathError, ModuleProgramError, ModuleProgramLoader,
     ModuleSourceError, ModuleSourceLoader,
 };
-use flash_syntax::render_diagnostic_sources;
+use flash_syntax::{LanguageMajor, render_diagnostic_sources};
 
 /// One explicit source-check request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CheckRequest {
     source: PathBuf,
+    language: LanguageMajor,
 }
 
 impl CheckRequest {
     /// Creates a request for one root source and its canonical import closure.
     #[must_use]
     pub const fn new(source: PathBuf) -> Self {
-        Self { source }
+        Self::for_language(source, LanguageMajor::V1)
+    }
+
+    /// Creates a request for one explicitly selected language major.
+    #[must_use]
+    pub const fn for_language(source: PathBuf, language: LanguageMajor) -> Self {
+        Self { source, language }
     }
 
     /// The native root path supplied by the caller.
     #[must_use]
     pub fn source(&self) -> &Path {
         &self.source
+    }
+
+    /// The language major selected before loading the root or its imports.
+    #[must_use]
+    pub const fn language(&self) -> LanguageMajor {
+        self.language
     }
 }
 
@@ -113,7 +126,7 @@ where
     F: CheckFilesystem,
 {
     let commands = standard_registry();
-    let report = ModuleProgramLoader::new(filesystem, filesystem)
+    let report = ModuleProgramLoader::for_language(filesystem, filesystem, request.language())
         .analyze_with_commands(request.source(), &commands);
     let sources = report
         .sources()

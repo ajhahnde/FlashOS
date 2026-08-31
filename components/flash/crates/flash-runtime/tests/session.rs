@@ -43,6 +43,7 @@ use flash_runtime::session::{
     BackgroundFailureReason, JobNoticeKind, LiveJobState, Session, SubmitOutcome,
 };
 use flash_runtime::{Duration, Environment, ScopeStack, Status, Value};
+use flash_syntax::LanguageMajor;
 
 #[derive(Default)]
 struct Probe {
@@ -74,6 +75,37 @@ fn environment() -> Environment {
 
 fn session() -> Session {
     Session::new("/work", environment(), SessionOptions::default())
+}
+
+#[test]
+fn a_v2_session_preselects_its_submission_grammar_without_a_directive() {
+    let mut session = Session::for_language(
+        LanguageMajor::V2,
+        "/work",
+        Environment::new(),
+        SessionOptions::default(),
+    );
+    assert_eq!(session.language(), LanguageMajor::V2);
+
+    assert_eq!(
+        submit(&mut session, "let answer = 42", &Probe::default()),
+        SubmitOutcome::Continued
+    );
+    assert_eq!(session.scope().get("answer"), Some(&Value::Int(42)));
+
+    let mut sink = Vec::new();
+    let error = session
+        .submit(
+            "<interactive>",
+            "let language = 2",
+            &Probe::default(),
+            &terminal_platform(),
+            &FakeClock::new(),
+            &mut sink,
+        )
+        .expect_err("a v2 reserved word must be rejected by the selected grammar");
+    assert!(error.render().starts_with("error[FS1000]"));
+    assert_eq!(session.scope().get("answer"), Some(&Value::Int(42)));
 }
 
 fn terminal_platform() -> FakePlatform {

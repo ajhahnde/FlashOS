@@ -19,10 +19,11 @@ use std::sync::Arc;
 
 use flash_syntax::{
     BinaryOperator, Block, Closure, CommandHeadKind, CommandItemKind, ConditionalChain,
-    ControlTransfer, ControlledParseOutcome, Diagnostic, ElseBranch, Expression, ExpressionKind,
-    LiteralKind, MatchArm, ParseOutcome, Pattern, Pipeline, RecordKey, RedirectionKind, Script,
-    Severity, SourceFile, SourceId, Span, StageKind, Statement, StatementKind, TypeReference,
-    UnaryOperator, Word, WordPart, WordPartKind, parse_with_control, render_diagnostic_sources,
+    ControlTransfer, ControlledParseOutcome, ControlledVersionedParseOutcome, Diagnostic,
+    ElseBranch, Expression, ExpressionKind, LanguageMajor, LiteralKind, MatchArm, ParseOutcome,
+    Pattern, Pipeline, RecordKey, RedirectionKind, Script, Severity, SourceFile, SourceId, Span,
+    StageKind, Statement, StatementKind, TypeReference, UnaryOperator, VersionedParseOutcome, Word,
+    WordPart, WordPartKind, parse_v2_with_control, parse_with_control, render_diagnostic_sources,
 };
 
 use crate::Value;
@@ -146,15 +147,52 @@ impl fmt::Display for ModuleSourceError {
 
 impl std::error::Error for ModuleSourceError {}
 
-/// The canonical native path that uniquely identifies one source module.
+/// One canonical local or compiled-standard module identity and language major.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ModuleId(PathBuf);
+pub struct ModuleId {
+    path: PathBuf,
+    language: LanguageMajor,
+    origin: ModuleOrigin,
+}
+
+/// The closed module-origin set admitted by the Flash 2 foundation.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ModuleOrigin {
+    /// A source module resolved by the injected native-path canonicalizer.
+    Local,
+    /// A compiled descriptor in the standard namespace.
+    Standard { namespace: String, module: String },
+}
 
 impl ModuleId {
-    /// The canonical native path for this module.
+    /// The canonical native path for a local module, or `std::name` identity
+    /// spelling for a compiled standard module.
     #[must_use]
     pub fn path(&self) -> &Path {
-        &self.0
+        &self.path
+    }
+
+    /// The explicitly selected language major for this module identity.
+    #[must_use]
+    pub const fn language(&self) -> LanguageMajor {
+        self.language
+    }
+
+    /// The canonical provenance class retained by this identity.
+    #[must_use]
+    pub const fn origin(&self) -> &ModuleOrigin {
+        &self.origin
+    }
+
+    fn standard(namespace: &str, module: &str, language: LanguageMajor) -> Self {
+        Self {
+            path: PathBuf::from(format!("{namespace}::{module}")),
+            language,
+            origin: ModuleOrigin::Standard {
+                namespace: namespace.to_owned(),
+                module: module.to_owned(),
+            },
+        }
     }
 }
 
@@ -196,13 +234,32 @@ impl ModuleImport {
 /// Resolves root and imported module paths through one injected canonicalizer.
 pub struct ModuleResolver<'a> {
     canonicalizer: &'a dyn ModuleCanonicalizer,
+    language: LanguageMajor,
 }
 
 impl<'a> ModuleResolver<'a> {
     /// Creates a resolver over `canonicalizer`.
     #[must_use]
     pub const fn new(canonicalizer: &'a dyn ModuleCanonicalizer) -> Self {
-        Self { canonicalizer }
+        Self::for_language(canonicalizer, LanguageMajor::V1)
+    }
+
+    /// Creates a resolver whose canonical identities include `language`.
+    #[must_use]
+    pub const fn for_language(
+        canonicalizer: &'a dyn ModuleCanonicalizer,
+        language: LanguageMajor,
+    ) -> Self {
+        Self {
+            canonicalizer,
+            language,
+        }
+    }
+
+    /// The language major retained by every identity this resolver creates.
+    #[must_use]
+    pub const fn language(&self) -> LanguageMajor {
+        self.language
     }
 
     /// Resolves a root source path without an importing source span.
@@ -273,7 +330,11 @@ impl<'a> ModuleResolver<'a> {
             });
         }
 
-        Ok(ModuleId(canonical))
+        Ok(ModuleId {
+            path: canonical,
+            language: self.language,
+            origin: ModuleOrigin::Local,
+        })
     }
 }
 
@@ -396,6 +457,265 @@ pub struct ModuleSourceRegistry {
     by_module: BTreeMap<ModuleId, usize>,
     by_source: BTreeMap<SourceId, usize>,
     entries: Vec<RegisteredModuleSource>,
+}
+
+/// One required Flash 2 alias bound to a singular canonical module identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleAlias {
+    name: String,
+    importer: ModuleId,
+    target: ModuleId,
+    requested: Option<PathBuf>,
+    declaration_span: Span,
+}
+
+impl ModuleAlias {
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn importer(&self) -> &ModuleId {
+        &self.importer
+    }
+
+    #[must_use]
+    pub const fn target(&self) -> &ModuleId {
+        &self.target
+    }
+
+    /// The exact local path request, absent for compiled standard modules.
+    #[must_use]
+    pub fn requested(&self) -> Option<&Path> {
+        self.requested.as_deref()
+    }
+
+    #[must_use]
+    pub const fn declaration_span(&self) -> Span {
+        self.declaration_span
+    }
+}
+
+/// One explicit alias re-export retaining its original target identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleAliasExport {
+    name: String,
+    target: ModuleId,
+    declaration_span: Span,
+    export_span: Span,
+}
+
+impl ModuleAliasExport {
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn target(&self) -> &ModuleId {
+        &self.target
+    }
+
+    #[must_use]
+    pub const fn declaration_span(&self) -> Span {
+        self.declaration_span
+    }
+
+    #[must_use]
+    pub const fn export_span(&self) -> Span {
+        self.export_span
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ModuleAliases {
+    aliases: BTreeMap<String, ModuleAlias>,
+    exports: BTreeMap<String, ModuleAliasExport>,
+}
+
+/// Canonical alias and explicit re-export tables for a complete v2 program.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModuleAliasRegistry {
+    by_module: BTreeMap<ModuleId, ModuleAliases>,
+}
+
+impl ModuleAliasRegistry {
+    #[must_use]
+    pub fn alias(&self, module: &ModuleId, name: &str) -> Option<&ModuleAlias> {
+        self.by_module
+            .get(module)
+            .and_then(|aliases| aliases.aliases.get(name))
+    }
+
+    #[must_use]
+    pub fn export(&self, module: &ModuleId, name: &str) -> Option<&ModuleAliasExport> {
+        self.by_module
+            .get(module)
+            .and_then(|aliases| aliases.exports.get(name))
+    }
+
+    /// Resolves a local alias followed only by explicitly re-exported aliases.
+    #[must_use]
+    pub fn resolve(&self, module: &ModuleId, segments: &[&str]) -> Option<&ModuleId> {
+        let (first, remainder) = segments.split_first()?;
+        let mut target = self.alias(module, first)?.target();
+        for segment in remainder {
+            target = self.export(target, segment)?.target();
+        }
+        Some(target)
+    }
+
+    pub(crate) fn target_at(&self, module: &ModuleId, offset: usize) -> Option<&ModuleAlias> {
+        let aliases = self.by_module.get(module)?;
+        if let Some(alias) = aliases
+            .aliases
+            .values()
+            .find(|alias| span_contains(alias.declaration_span(), offset))
+        {
+            return Some(alias);
+        }
+        aliases
+            .exports
+            .values()
+            .find(|export| span_contains(export.export_span(), offset))
+            .and_then(|export| aliases.aliases.get(export.name()))
+    }
+
+    fn analyze(
+        graph: &ModuleGraph,
+        sources: &ModuleSourceRegistry,
+        control: &AnalysisControl,
+    ) -> Result<Self, Vec<ModuleAliasError>> {
+        let mut registry = Self::default();
+        let mut errors = Vec::new();
+        for entry in sources.entries() {
+            registry
+                .by_module
+                .insert(entry.module().clone(), ModuleAliases::default());
+        }
+
+        for entry in sources.entries() {
+            if control.is_cancelled() {
+                return Ok(registry);
+            }
+            let mut occupied = BTreeMap::<String, Span>::new();
+            for statement in entry.script().statements() {
+                let identifier = match statement.kind() {
+                    StatementKind::Declaration(declaration) => Some(declaration.name),
+                    StatementKind::Function(function) => Some(function.name),
+                    StatementKind::NominalType(declaration) => Some(declaration.name),
+                    _ => None,
+                };
+                if let Some(identifier) = identifier {
+                    let name = entry
+                        .source()
+                        .slice(identifier.span())
+                        .expect("parsed identifiers belong to their source")
+                        .to_owned();
+                    occupied.entry(name).or_insert(identifier.span());
+                }
+            }
+            for statement in entry.script().statements() {
+                let StatementKind::ModuleImport(import) = statement.kind() else {
+                    continue;
+                };
+                let name = entry
+                    .source()
+                    .slice(import.alias.span())
+                    .expect("parsed aliases belong to their source")
+                    .to_owned();
+                if let Some(first_span) = occupied.get(&name).copied() {
+                    errors.push(ModuleAliasError::Conflict {
+                        module: entry.module().clone(),
+                        name,
+                        first_span,
+                        duplicate_span: import.alias.span(),
+                    });
+                    continue;
+                }
+                occupied.insert(name.clone(), import.alias.span());
+                let edge = graph
+                    .imports()
+                    .iter()
+                    .find(|edge| {
+                        edge.importer() == entry.module() && edge.span() == import.source.span()
+                    })
+                    .expect("each validated module alias has one graph edge");
+                let requested = match import.source {
+                    flash_syntax::ModuleImportSource::Local { path } => {
+                        let quoted = entry
+                            .source()
+                            .slice(path)
+                            .expect("local import paths belong to their source");
+                        Some(PathBuf::from(&quoted[1..quoted.len() - 1]))
+                    }
+                    flash_syntax::ModuleImportSource::Standard { .. } => None,
+                };
+                registry
+                    .by_module
+                    .get_mut(entry.module())
+                    .expect("each source has an alias table")
+                    .aliases
+                    .insert(
+                        name.clone(),
+                        ModuleAlias {
+                            name,
+                            importer: entry.module().clone(),
+                            target: edge.target().clone(),
+                            requested,
+                            declaration_span: import.alias.span(),
+                        },
+                    );
+            }
+        }
+
+        for entry in sources.entries() {
+            for statement in entry.script().statements() {
+                let StatementKind::ModuleExport(export) = statement.kind() else {
+                    continue;
+                };
+                for identifier in &export.names {
+                    let name = entry
+                        .source()
+                        .slice(identifier.span())
+                        .expect("parsed export names belong to their source")
+                        .to_owned();
+                    let aliases = registry
+                        .by_module
+                        .get_mut(entry.module())
+                        .expect("each source has an alias table");
+                    let Some(alias) = aliases.aliases.get(&name) else {
+                        continue;
+                    };
+                    if let Some(first) = aliases.exports.get(&name) {
+                        errors.push(ModuleAliasError::DuplicateExport {
+                            module: entry.module().clone(),
+                            name,
+                            first_span: first.export_span(),
+                            duplicate_span: identifier.span(),
+                        });
+                        continue;
+                    }
+                    aliases.exports.insert(
+                        name.clone(),
+                        ModuleAliasExport {
+                            name,
+                            target: alias.target().clone(),
+                            declaration_span: alias.declaration_span(),
+                            export_span: identifier.span(),
+                        },
+                    );
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(registry)
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 /// One top-level name made visible by a module export list.
@@ -693,6 +1013,7 @@ impl ModuleNameRegistry {
     fn analyze(
         graph: &ModuleGraph,
         sources: &ModuleSourceRegistry,
+        aliases: &ModuleAliasRegistry,
         control: &AnalysisControl,
     ) -> Result<Self, Vec<ModuleNameError>> {
         let mut registry = Self::default();
@@ -751,6 +1072,9 @@ impl ModuleNameRegistry {
                         .get_mut(entry.module())
                         .expect("every registered source has a name table");
                     let Some(declaration_span) = names.locals.get(&name).copied() else {
+                        if aliases.export(entry.module(), &name).is_some() {
+                            continue;
+                        }
                         poisoned_exports
                             .entry(entry.module().clone())
                             .or_default()
@@ -986,6 +1310,75 @@ impl fmt::Display for ValueType {
     }
 }
 
+/// Singular nominal identity: defining canonical module plus declared name.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct NominalTypeId {
+    module: ModuleId,
+    name: String,
+}
+
+impl NominalTypeId {
+    #[must_use]
+    pub const fn module(&self) -> &ModuleId {
+        &self.module
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// One checked field in a nominal record declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NominalTypeField {
+    name: String,
+    value_type: ValueType,
+    span: Span,
+}
+
+impl NominalTypeField {
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn value_type(&self) -> &ValueType {
+        &self.value_type
+    }
+
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// Immutable declaration metadata shared by checker, help, and editor queries.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NominalType {
+    id: NominalTypeId,
+    declaration_span: Span,
+    fields: Vec<NominalTypeField>,
+}
+
+impl NominalType {
+    #[must_use]
+    pub const fn id(&self) -> &NominalTypeId {
+        &self.id
+    }
+
+    #[must_use]
+    pub const fn declaration_span(&self) -> Span {
+        self.declaration_span
+    }
+
+    #[must_use]
+    pub fn fields(&self) -> &[NominalTypeField] {
+        &self.fields
+    }
+}
+
 /// One source annotation resolved to a built-in value type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedTypeAnnotation {
@@ -1085,6 +1478,7 @@ struct ModuleTypes {
     annotations: Vec<ResolvedTypeAnnotation>,
     functions: Vec<FunctionSignature>,
     bindings: Vec<ResolvedBindingType>,
+    nominals: BTreeMap<String, NominalType>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1147,7 +1541,11 @@ impl RuntimeBindingTypes {
         script: &Script,
     ) -> Result<Self, Box<ModuleTypeError>> {
         let entry = RegisteredModuleSource {
-            module: ModuleId(PathBuf::from(source.name())),
+            module: ModuleId {
+                path: PathBuf::from(source.name()),
+                language: LanguageMajor::V1,
+                origin: ModuleOrigin::Local,
+            },
             source: source.clone(),
             script: script.clone(),
         };
@@ -1169,6 +1567,22 @@ pub struct ModuleTypeRegistry {
 }
 
 impl ModuleTypeRegistry {
+    /// Looks up one nominal declaration by its canonical defining module/name ID.
+    #[must_use]
+    pub fn nominal(&self, module: &ModuleId, name: &str) -> Option<&NominalType> {
+        self.by_module
+            .get(module)
+            .and_then(|types| types.nominals.get(name))
+    }
+
+    pub(crate) fn nominal_at(&self, module: &ModuleId, offset: usize) -> Option<&NominalType> {
+        self.by_module
+            .get(module)?
+            .nominals
+            .values()
+            .find(|nominal| span_contains(nominal.declaration_span(), offset))
+    }
+
     /// Resolved annotations in deterministic source traversal order.
     #[must_use]
     pub fn annotations(&self, module: &ModuleId) -> &[ResolvedTypeAnnotation] {
@@ -1299,7 +1713,33 @@ impl<'a> TypeCollector<'a> {
             return Ok(());
         }
         match statement.kind() {
-            StatementKind::Import(_) | StatementKind::ModuleExport(_) => Ok(()),
+            StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
+            | StatementKind::ModuleExport(_) => Ok(()),
+            StatementKind::NominalType(declaration) => {
+                let name = self.text(declaration.name.span()).to_owned();
+                let fields = declaration
+                    .fields
+                    .iter()
+                    .map(|field| NominalTypeField {
+                        name: self.text(field.name.span()).to_owned(),
+                        value_type: self.resolve_type(&field.value_type),
+                        span: field.span,
+                    })
+                    .collect();
+                self.types
+                    .nominals
+                    .entry(name.clone())
+                    .or_insert_with(|| NominalType {
+                        id: NominalTypeId {
+                            module: self.entry.module().clone(),
+                            name,
+                        },
+                        declaration_span: declaration.name.span(),
+                        fields,
+                    });
+                Ok(())
+            }
             StatementKind::Declaration(declaration) => {
                 let value_type = declaration
                     .type_annotation
@@ -1841,7 +2281,10 @@ impl<'a> SignatureValidator<'a> {
             return Ok(());
         }
         match statement.kind() {
-            StatementKind::Import(_) | StatementKind::ModuleExport(_) => Ok(()),
+            StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
+            | StatementKind::ModuleExport(_)
+            | StatementKind::NominalType(_) => Ok(()),
             StatementKind::Declaration(declaration) => {
                 self.expression(&declaration.value).map(|_| ())
             }
@@ -2585,7 +3028,10 @@ impl<'a> ReferenceResolver<'a> {
             return Ok(());
         }
         match statement.kind() {
-            StatementKind::Import(_) | StatementKind::ModuleExport(_) => Ok(()),
+            StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
+            | StatementKind::ModuleExport(_)
+            | StatementKind::NominalType(_) => Ok(()),
             StatementKind::Declaration(declaration) => {
                 self.expression(&declaration.value)?;
                 self.declare(
@@ -3373,7 +3819,9 @@ impl<'a> StaticEffectAnalyzer<'a> {
         }
         match statement.kind() {
             StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
             | StatementKind::ModuleExport(_)
+            | StatementKind::NominalType(_)
             | StatementKind::Function(_) => {}
             StatementKind::Declaration(declaration) => self.expression(&declaration.value),
             StatementKind::Assignment(assignment) => self.expression(&assignment.value),
@@ -3772,6 +4220,7 @@ impl<'a> StaticEffectAnalyzer<'a> {
 pub struct ModuleProgram {
     graph: ModuleGraph,
     sources: ModuleSourceRegistry,
+    aliases: ModuleAliasRegistry,
     names: ModuleNameRegistry,
     types: ModuleTypeRegistry,
     effects: ModuleEffectRegistry,
@@ -3859,7 +4308,10 @@ impl<'a> StaticPipelineAnalyzer<'a> {
             return;
         }
         match statement.kind() {
-            StatementKind::Import(_) | StatementKind::ModuleExport(_) => {}
+            StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
+            | StatementKind::ModuleExport(_)
+            | StatementKind::NominalType(_) => {}
             StatementKind::Declaration(declaration) => self.expression(&declaration.value),
             StatementKind::Assignment(assignment) => self.expression(&assignment.value),
             StatementKind::Environment(environment) => {
@@ -4626,6 +5078,12 @@ impl ModuleProgram {
         &self.sources
     }
 
+    /// Qualified module aliases and explicit alias re-exports.
+    #[must_use]
+    pub const fn aliases(&self) -> &ModuleAliasRegistry {
+        &self.aliases
+    }
+
     /// Static local, export, explicit-import, and lexical-reference tables.
     #[must_use]
     pub const fn names(&self) -> &ModuleNameRegistry {
@@ -4642,6 +5100,22 @@ impl ModuleProgram {
     #[must_use]
     pub const fn effects(&self) -> &ModuleEffectRegistry {
         &self.effects
+    }
+
+    /// Resolves a qualified module path and its terminal nominal type name.
+    #[must_use]
+    pub fn resolve_nominal_type(
+        &self,
+        module: &ModuleId,
+        qualified: &[&str],
+    ) -> Option<&NominalType> {
+        let (name, modules) = qualified.split_last()?;
+        let owner = if modules.is_empty() {
+            module
+        } else {
+            self.aliases.resolve(module, modules)?
+        };
+        self.types.nominal(owner, name)
     }
 
     pub(crate) fn runtime_binding_types(&self) -> RuntimeBindingTypes {
@@ -4671,6 +5145,18 @@ pub struct ModuleProgramLoader<'a> {
     source_loader: &'a dyn ModuleSourceLoader,
 }
 
+enum PendingModuleImport {
+    Local {
+        requested: PathBuf,
+        span: Span,
+    },
+    Standard {
+        namespace: String,
+        module: String,
+        span: Span,
+    },
+}
+
 impl<'a> ModuleProgramLoader<'a> {
     /// Creates a program loader over injected path and source capabilities.
     #[must_use]
@@ -4678,8 +5164,19 @@ impl<'a> ModuleProgramLoader<'a> {
         canonicalizer: &'a dyn ModuleCanonicalizer,
         source_loader: &'a dyn ModuleSourceLoader,
     ) -> Self {
+        Self::for_language(canonicalizer, source_loader, LanguageMajor::V1)
+    }
+
+    /// Creates a loader that requires every source in the closure to match the
+    /// explicitly selected language major.
+    #[must_use]
+    pub const fn for_language(
+        canonicalizer: &'a dyn ModuleCanonicalizer,
+        source_loader: &'a dyn ModuleSourceLoader,
+        language: LanguageMajor,
+    ) -> Self {
         Self {
-            resolver: ModuleResolver::new(canonicalizer),
+            resolver: ModuleResolver::for_language(canonicalizer, language),
             source_loader,
         }
     }
@@ -4864,7 +5361,28 @@ impl<'a> ModuleProgramLoader<'a> {
             }));
         }
 
-        let names_result = ModuleNameRegistry::analyze(&graph, &sources, control);
+        let aliases_result = ModuleAliasRegistry::analyze(&graph, &sources, control);
+        if control.is_cancelled() {
+            return ModuleAnalysisOutcome::Cancelled;
+        }
+        let aliases = match aliases_result {
+            Ok(aliases) => aliases,
+            Err(errors) => {
+                let mut issues = errors
+                    .into_iter()
+                    .map(|error| {
+                        ModuleAnalysisIssue::new(ModuleProgramError::Aliases(Box::new(error)))
+                    })
+                    .collect::<Vec<_>>();
+                issues.extend(pipeline_issues);
+                return ModuleAnalysisOutcome::Complete(Box::new(ModuleAnalysisReport {
+                    sources: retained,
+                    issues,
+                    program: None,
+                }));
+            }
+        };
+        let names_result = ModuleNameRegistry::analyze(&graph, &sources, &aliases, control);
         if control.is_cancelled() {
             return ModuleAnalysisOutcome::Cancelled;
         }
@@ -4934,6 +5452,7 @@ impl<'a> ModuleProgramLoader<'a> {
             program: Some(ModuleProgram {
                 graph,
                 sources,
+                aliases,
                 names,
                 types,
                 effects,
@@ -4998,7 +5517,9 @@ impl<'a> ModuleProgramLoader<'a> {
                 return;
             }
         };
-        let script = match parse_with_control(&source, &|| control.is_cancelled()) {
+        let script = match parse_source_for_language(&source, self.resolver.language(), &|| {
+            control.is_cancelled()
+        }) {
             ControlledParseOutcome::Cancelled => return,
             ControlledParseOutcome::Parsed(ParseOutcome::Complete(script)) => script,
             ControlledParseOutcome::Parsed(ParseOutcome::Incomplete(incomplete)) => {
@@ -5045,14 +5566,42 @@ impl<'a> ModuleProgramLoader<'a> {
             .statements()
             .iter()
             .filter_map(|statement| match statement.kind() {
-                StatementKind::Import(import) => Some(import.path),
+                StatementKind::Import(import) => Some(PendingModuleImport::Local {
+                    requested: {
+                        let quoted = source
+                            .slice(import.path)
+                            .expect("parsed import spans belong to their source");
+                        PathBuf::from(&quoted[1..quoted.len() - 1])
+                    },
+                    span: import.path,
+                }),
+                StatementKind::ModuleImport(import) => match import.source {
+                    flash_syntax::ModuleImportSource::Local { path } => {
+                        let quoted = source
+                            .slice(path)
+                            .expect("parsed import spans belong to their source");
+                        Some(PendingModuleImport::Local {
+                            requested: PathBuf::from(&quoted[1..quoted.len() - 1]),
+                            span: path,
+                        })
+                    }
+                    flash_syntax::ModuleImportSource::Standard {
+                        namespace,
+                        module: standard,
+                        span,
+                    } => Some(PendingModuleImport::Standard {
+                        namespace: source
+                            .slice(namespace.span())
+                            .expect("standard namespace belongs to its source")
+                            .to_owned(),
+                        module: source
+                            .slice(standard.span())
+                            .expect("standard module belongs to its source")
+                            .to_owned(),
+                        span,
+                    }),
+                },
                 _ => None,
-            })
-            .map(|span| {
-                let quoted = source
-                    .slice(span)
-                    .expect("parsed import spans belong to their source");
-                (PathBuf::from(&quoted[1..quoted.len() - 1]), span)
             })
             .collect::<Vec<_>>();
         sources.register(module.clone(), source.clone(), script.clone());
@@ -5062,36 +5611,176 @@ impl<'a> ModuleProgramLoader<'a> {
             script: Some(script),
         });
 
-        for (requested, span) in imports {
+        for pending in imports {
             if control.is_cancelled() {
                 return;
             }
-            let import = match self.resolver.resolve_import(&module, &requested, span) {
-                Ok(import) => import,
-                Err(error) => {
-                    issues.push(ModuleAnalysisIssue::new(ModuleProgramError::Resolution(
-                        error,
-                    )));
-                    continue;
+            let (import, recurse) = match pending {
+                PendingModuleImport::Local { requested, span } => {
+                    let import = match self.resolver.resolve_import(&module, &requested, span) {
+                        Ok(import) => import,
+                        Err(error) => {
+                            issues.push(ModuleAnalysisIssue::new(ModuleProgramError::Resolution(
+                                error,
+                            )));
+                            continue;
+                        }
+                    };
+                    (import, true)
+                }
+                PendingModuleImport::Standard {
+                    namespace,
+                    module: standard,
+                    span,
+                } => {
+                    if !is_standard_module(&namespace, &standard) {
+                        issues.push(ModuleAnalysisIssue::new(ModuleProgramError::Aliases(
+                            Box::new(ModuleAliasError::UnknownStandard {
+                                module: module.clone(),
+                                name: standard,
+                                span,
+                            }),
+                        )));
+                        continue;
+                    }
+                    (
+                        ModuleImport {
+                            importer: module.clone(),
+                            requested: PathBuf::from(format!("{namespace}::{standard}")),
+                            target: ModuleId::standard(
+                                &namespace,
+                                &standard,
+                                self.resolver.language(),
+                            ),
+                            span,
+                        },
+                        false,
+                    )
                 }
             };
             if let Err(error) = graph.add_import(import.clone()) {
                 issues.push(ModuleAnalysisIssue::new(ModuleProgramError::Graph(error)));
                 continue;
             }
-            self.discover_module(
-                import.target().clone(),
-                Some(import),
-                graph,
-                sources,
-                retained,
-                attempted,
-                issues,
-                control,
-            );
+            if recurse {
+                self.discover_module(
+                    import.target().clone(),
+                    Some(import),
+                    graph,
+                    sources,
+                    retained,
+                    attempted,
+                    issues,
+                    control,
+                );
+            }
         }
     }
 }
+
+fn is_standard_module(namespace: &str, module: &str) -> bool {
+    namespace == "std" && module == "value"
+}
+
+fn parse_source_for_language(
+    source: &SourceFile,
+    language: LanguageMajor,
+    is_cancelled: &dyn Fn() -> bool,
+) -> ControlledParseOutcome {
+    match language {
+        LanguageMajor::V1 => parse_with_control(source, is_cancelled),
+        LanguageMajor::V2 => match parse_v2_with_control(source, is_cancelled) {
+            ControlledVersionedParseOutcome::Cancelled => ControlledParseOutcome::Cancelled,
+            ControlledVersionedParseOutcome::Parsed(VersionedParseOutcome::Complete(script)) => {
+                ControlledParseOutcome::Parsed(ParseOutcome::Complete(script.into_script()))
+            }
+            ControlledVersionedParseOutcome::Parsed(VersionedParseOutcome::Incomplete(input)) => {
+                ControlledParseOutcome::Parsed(ParseOutcome::Incomplete(input))
+            }
+            ControlledVersionedParseOutcome::Parsed(VersionedParseOutcome::Invalid(
+                diagnostics,
+            )) => ControlledParseOutcome::Parsed(ParseOutcome::Invalid(diagnostics)),
+        },
+    }
+}
+
+/// A failure in the closed v2 module-alias and re-export namespace.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ModuleAliasError {
+    UnknownStandard {
+        module: ModuleId,
+        name: String,
+        span: Span,
+    },
+    Conflict {
+        module: ModuleId,
+        name: String,
+        first_span: Span,
+        duplicate_span: Span,
+    },
+    DuplicateExport {
+        module: ModuleId,
+        name: String,
+        first_span: Span,
+        duplicate_span: Span,
+    },
+}
+
+impl ModuleAliasError {
+    #[must_use]
+    pub const fn module(&self) -> &ModuleId {
+        match self {
+            Self::UnknownStandard { module, .. }
+            | Self::Conflict { module, .. }
+            | Self::DuplicateExport { module, .. } => module,
+        }
+    }
+
+    #[must_use]
+    pub fn diagnostic(&self) -> Diagnostic {
+        match self {
+            Self::UnknownStandard { span, .. } => {
+                Diagnostic::new(Severity::Error, "MOD010", self.to_string()).with_primary(
+                    *span,
+                    "this standard module is not in the compiled manifest",
+                )
+            }
+            Self::Conflict {
+                first_span,
+                duplicate_span,
+                ..
+            } => Diagnostic::new(Severity::Error, "MOD011", self.to_string())
+                .with_primary(*duplicate_span, "this alias conflicts")
+                .with_secondary(*first_span, "the name is first declared here"),
+            Self::DuplicateExport {
+                first_span,
+                duplicate_span,
+                ..
+            } => Diagnostic::new(Severity::Error, "MOD012", self.to_string())
+                .with_primary(*duplicate_span, "this alias is exported again")
+                .with_secondary(*first_span, "the alias is first exported here"),
+        }
+    }
+}
+
+impl fmt::Display for ModuleAliasError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownStandard { name, .. } => {
+                write!(formatter, "unknown standard module `std::{name}`")
+            }
+            Self::Conflict { name, .. } => write!(formatter, "module alias `{name}` conflicts"),
+            Self::DuplicateExport { name, .. } => {
+                write!(
+                    formatter,
+                    "module alias `{name}` is exported more than once"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ModuleAliasError {}
 
 /// A failure while building explicit module export/import-name tables.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -5676,6 +6365,8 @@ pub enum ModuleProgramError {
     },
     /// An import violated the canonical graph contract.
     Graph(ModuleGraphError),
+    /// A v2 alias, standard module, or explicit alias re-export was invalid.
+    Aliases(Box<ModuleAliasError>),
     /// Static module export/import-name analysis failed.
     Names(Box<ModuleNameError>),
     /// Static type resolution or known-call validation failed.
@@ -5710,6 +6401,7 @@ impl ModuleProgramError {
                 .collect(),
             Self::Syntax { diagnostics, .. } => diagnostics.clone(),
             Self::Graph(ModuleGraphError::Cycle(cycle)) => vec![cycle.diagnostic()],
+            Self::Aliases(error) => vec![error.diagnostic()],
             Self::Names(error) => vec![error.diagnostic()],
             Self::Signatures(error) => vec![error.diagnostic()],
             Self::Pipelines(error) => vec![error.diagnostic().clone()],
@@ -5727,6 +6419,7 @@ impl ModuleProgramError {
             Self::SourceRead { module, .. }
             | Self::InvalidUtf8 { module, .. }
             | Self::Syntax { module, .. } => Some(module),
+            Self::Aliases(error) => Some(error.module()),
             Self::Names(error) => Some(error.module()),
             Self::Signatures(error) => Some(error.module()),
             Self::Pipelines(error) => Some(error.module()),
@@ -5759,6 +6452,7 @@ impl fmt::Display for ModuleProgramError {
                 module.path().display()
             ),
             Self::Graph(error) => error.fmt(formatter),
+            Self::Aliases(error) => error.fmt(formatter),
             Self::Names(error) => error.fmt(formatter),
             Self::Signatures(error) => error.fmt(formatter),
             Self::Pipelines(error) => error.fmt(formatter),
@@ -5775,6 +6469,7 @@ impl std::error::Error for ModuleProgramError {
             Self::Resolution(error) => Some(error),
             Self::SourceRead { cause, .. } => Some(cause),
             Self::Graph(error) => Some(error),
+            Self::Aliases(error) => Some(error.as_ref()),
             Self::Names(error) => Some(error),
             Self::Signatures(error) => Some(error),
             Self::Pipelines(error) => Some(error),
@@ -5810,7 +6505,7 @@ impl ModuleGraph {
         &self.root
     }
 
-    /// Every unique canonical module in native-path order.
+    /// Every unique canonical module in stable identity order.
     pub fn modules(&self) -> impl ExactSizeIterator<Item = &ModuleId> {
         self.modules.iter()
     }

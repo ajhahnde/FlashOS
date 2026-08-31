@@ -102,6 +102,13 @@ for target in ['lexer', 'parser', 'expander'] {
     "$root/tests/golden/lexical/complete" \
     "$root/tests/golden/lexical/incomplete" \
     "$root/tests/golden/lexical/invalid" \
+    "$root/tests/v2-foundation/language/grammar/complete" \
+    "$root/tests/v2-foundation/language/grammar/incomplete" \
+    "$root/tests/v2-foundation/language/grammar/invalid" \
+    "$root/tests/v2-foundation/language/grammar/repl" \
+    "$root/tests/v2-foundation/language/lexical" \
+    "$root/tests/v2-foundation/language/modules/complete" \
+    "$root/tests/v2-foundation/language/modules/invalid" \
     -- \
     "-max_total_time=$seconds" \
     -max_len=4096 \

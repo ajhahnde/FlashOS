@@ -100,6 +100,7 @@ fn the_help_text_does_not_advertise_the_reserved_capsule_mode() {
     let rendered = String::from_utf8(output.stdout).expect("help output should be UTF-8");
     assert!(!rendered.contains("async-capsule"));
     assert!(!rendered.contains("async-completion"));
+    assert!(!rendered.contains("flash-v2-repl-fixture"));
 }
 
 #[test]

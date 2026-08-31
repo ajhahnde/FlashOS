@@ -28,14 +28,13 @@ use flash_cli::config::{
     ConfigDefaults, ConfigFatalError, ConfigInvocation, ConfigLimits, ConfigPlatform,
     ConfigRequest, HostConfigSource, initialize_config,
 };
+use flash_cli::editor::EditorPrompt;
 use flash_cli::format::{FormatRequest, HostFormatFilesystem, format_files};
-#[cfg(target_os = "redox")]
-use flash_cli::history::EditorHistory;
-#[cfg(target_os = "redox")]
-use flash_cli::history::HistoryEnvironment;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use flash_cli::history::ProcessHistoryEnvironment;
-use flash_cli::history::{HistoryPlatform, select_history};
+#[cfg(target_os = "redox")]
+use flash_cli::history::{EditorHistory, HistoryEnvironment};
+use flash_cli::history::{HistoryPlatform, HistorySelection, select_history};
 use flash_cli::interactive::{
     EvaluationControl, ExitDecision, InteractiveDiagnostic, InteractiveEvaluationError,
     InteractiveEvaluator, InteractiveNotice, InteractiveNoticeError, InteractiveNoticeId,
@@ -65,6 +64,7 @@ use flash_runtime::script::{
 };
 use flash_runtime::session::{BackgroundFailure, JobNoticeId, Session, SubmitError, SubmitOutcome};
 use flash_runtime::{Environment, ScopeStack};
+use flash_syntax::LanguageMajor;
 
 #[cfg(target_os = "redox")]
 type NativePlatform = FlashOsPlatform;
@@ -197,7 +197,8 @@ fn main() -> ExitCode {
             descriptor,
             completion_descriptor,
         } => run_async_capsule(descriptor, completion_descriptor),
-        Mode::Interactive => run_interactive(invocation.no_config, invocation.no_history),
+        Mode::V2ReplFixture => run_interactive_v2(),
+        Mode::Interactive => run_interactive_v1(invocation.no_config, invocation.no_history),
     }
 }
 
@@ -313,7 +314,7 @@ impl HistoryEnvironment for FlashOsDirectoryEnvironment {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
+fn run_interactive_v1(no_config: bool, no_history: bool) -> ExitCode {
     let cwd = match env::current_dir() {
         Ok(cwd) => cwd,
         Err(error) => {
@@ -322,14 +323,6 @@ fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
         }
     };
 
-    // Only a shell holding the keyboard arranges anything. A shell reading a
-    // redirected input is still interrupted along with the terminal's foreground
-    // group, and that is what should happen to it: one that ignored the
-    // interrupt could not be stopped from the keyboard that started it. Where it
-    // is installed the arrangement lasts the whole session, and the guard puts
-    // the previous handling back on every exit path including a panic. A
-    // platform without the capability delivers no terminal signals either, so an
-    // unsupported result is not a startup failure.
     let platform = native_platform();
     let _signals = if platform.is_terminal() {
         match platform.install_job_control_signals() {
@@ -344,7 +337,6 @@ fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
         None
     };
 
-    // Consider configuration exactly once, before any editor or prompt work.
     let defaults = ConfigDefaults::new(ScopeStack::new(), process_environment());
     let request = ConfigRequest::new(
         ConfigInvocation::Interactive,
@@ -368,8 +360,6 @@ fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    // A safe-mode diagnostic is written before the first prompt is ever drawn.
     if let Some(diagnostic) = startup.diagnostic() {
         eprint!("{diagnostic}");
     }
@@ -392,7 +382,6 @@ fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
     let session = Session::with_scope(
         startup.scope().clone(),
         cwd,
@@ -416,7 +405,7 @@ fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
 }
 
 #[cfg(target_os = "redox")]
-fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
+fn run_interactive_v1(no_config: bool, no_history: bool) -> ExitCode {
     let cwd = match env::current_dir() {
         Ok(cwd) => cwd,
         Err(error) => {
@@ -424,15 +413,6 @@ fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    // Only a shell holding the keyboard arranges anything. A shell reading a
-    // redirected input is still interrupted along with the terminal's foreground
-    // group, and that is what should happen to it: one that ignored the
-    // interrupt could not be stopped from the keyboard that started it. Where it
-    // is installed the arrangement lasts the whole session, and the guard puts
-    // the previous handling back on every exit path including a panic. A
-    // platform without the capability delivers no terminal signals either, so an
-    // unsupported result is not a startup failure.
     let platform = native_platform();
     let _signals = if platform.is_terminal() {
         match platform.install_job_control_signals() {
@@ -491,11 +471,6 @@ fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
     let mut evaluator = SessionEvaluator::new(session, startup.interactive_settings().completion());
     let mut output = io::stdout();
     let mut diagnostics = io::stderr();
-
-    // A real terminal gets the raw-mode editor; a pipe or an uncooperative
-    // console falls back to canonical line reading. Both ends are checked: the
-    // editor redraws its row with cursor escapes, and a session typed at from
-    // a keyboard but redirected to a file must not have them written into it.
     let outcome = if platform.is_terminal() && platform.is_output_terminal() {
         let selection = match select_history(
             no_history || !startup.interactive_settings().history(),
@@ -540,6 +515,134 @@ fn run_interactive(no_config: bool, no_history: bool) -> ExitCode {
             &mut editor,
             &mut evaluator,
             startup.prompt(),
+            &mut output,
+            &mut diagnostics,
+        )
+    };
+    ExitCode::from(outcome.code())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn run_interactive_v2() -> ExitCode {
+    let cwd = match env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(error) => {
+            eprintln!("fsh: cannot read the current directory: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Only a shell holding the keyboard arranges anything. A shell reading a
+    // redirected input is still interrupted along with the terminal's foreground
+    // group, and that is what should happen to it: one that ignored the
+    // interrupt could not be stopped from the keyboard that started it. Where it
+    // is installed the arrangement lasts the whole session, and the guard puts
+    // the previous handling back on every exit path including a panic. A
+    // platform without the capability delivers no terminal signals either, so an
+    // unsupported result is not a startup failure.
+    let platform = native_platform();
+    let _signals = if platform.is_terminal() {
+        match platform.install_job_control_signals() {
+            Ok(guard) => Some(guard),
+            Err(PlatformError::Unsupported { .. }) => None,
+            Err(error) => {
+                eprintln!("fsh: cannot arrange terminal signals: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+
+    let language = LanguageMajor::V2;
+    let mut editor =
+        match ReedlineEditor::with_history_for_language(HistorySelection::Disabled, language) {
+            Ok(editor) => editor,
+            Err(error) => {
+                eprintln!("fsh: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+
+    let session =
+        Session::for_language(language, cwd, Environment::new(), SessionOptions::default());
+    let mut evaluator = SessionEvaluator::new(session, true);
+    let mut output = io::stdout();
+    let mut diagnostics = io::stderr();
+    let prompt = EditorPrompt::default();
+
+    ExitCode::from(
+        run_interactive_driver(
+            &mut editor,
+            &mut evaluator,
+            &prompt,
+            &mut output,
+            &mut diagnostics,
+        )
+        .code(),
+    )
+}
+
+#[cfg(target_os = "redox")]
+fn run_interactive_v2() -> ExitCode {
+    let cwd = match env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(error) => {
+            eprintln!("fsh: cannot read the current directory: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Only a shell holding the keyboard arranges anything. A shell reading a
+    // redirected input is still interrupted along with the terminal's foreground
+    // group, and that is what should happen to it: one that ignored the
+    // interrupt could not be stopped from the keyboard that started it. Where it
+    // is installed the arrangement lasts the whole session, and the guard puts
+    // the previous handling back on every exit path including a panic. A
+    // platform without the capability delivers no terminal signals either, so an
+    // unsupported result is not a startup failure.
+    let platform = native_platform();
+    let _signals = if platform.is_terminal() {
+        match platform.install_job_control_signals() {
+            Ok(guard) => Some(guard),
+            Err(PlatformError::Unsupported { .. }) => None,
+            Err(error) => {
+                eprintln!("fsh: cannot arrange terminal signals: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+
+    let language = LanguageMajor::V2;
+    let session =
+        Session::for_language(language, cwd, Environment::new(), SessionOptions::default());
+    let mut evaluator = SessionEvaluator::new(session, true);
+    let mut output = io::stdout();
+    let mut diagnostics = io::stderr();
+    let prompt = EditorPrompt::default();
+
+    // A real terminal gets the raw-mode editor; a pipe or an uncooperative
+    // console falls back to canonical line reading. Both ends are checked: the
+    // editor redraws its row with cursor escapes, and a session typed at from
+    // a keyboard but redirected to a file must not have them written into it.
+    let outcome = if platform.is_terminal() && platform.is_output_terminal() {
+        let mut editor =
+            TerminalEditor::for_language(platform, io::stdin(), io::stdout(), language);
+        run_interactive_driver(
+            &mut editor,
+            &mut evaluator,
+            &prompt,
+            &mut output,
+            &mut diagnostics,
+        )
+    } else {
+        let mut editor = RawLineEditor::new();
+        run_interactive_driver(
+            &mut editor,
+            &mut evaluator,
+            &prompt,
             &mut output,
             &mut diagnostics,
         )

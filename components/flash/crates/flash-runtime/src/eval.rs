@@ -2073,7 +2073,9 @@ impl Evaluator<'_> {
         let span = statement.span();
         self.charge(span)?;
         match statement.kind() {
-            StatementKind::Import(_) | StatementKind::ModuleExport(_)
+            StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
+            | StatementKind::ModuleExport(_)
                 if self.host.policy() == EvaluationPolicy::Startup =>
             {
                 Err(self.error(
@@ -2083,10 +2085,13 @@ impl Evaluator<'_> {
                     span,
                 ))
             }
-            StatementKind::Import(_) | StatementKind::ModuleExport(_) => {
+            StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
+            | StatementKind::ModuleExport(_) => {
                 // flash-v1-boundary(embedding-refusal): The module-program loader owns import and export execution.
                 Err(self.error(RuntimeErrorKind::ExecutionUnsupported, span))
             }
+            StatementKind::NominalType(_) => Ok(Flow::Fallthrough(None)),
             StatementKind::Declaration(declaration) => {
                 self.declaration(declaration, scope)?;
                 Ok(Flow::Fallthrough(None))
@@ -3581,7 +3586,10 @@ fn find_callable_in_statement(
     snapshot: &CallableSnapshot,
 ) -> Option<CallableBody> {
     match statement.kind() {
-        StatementKind::Import(_) | StatementKind::ModuleExport(_) => None,
+        StatementKind::Import(_)
+        | StatementKind::ModuleImport(_)
+        | StatementKind::ModuleExport(_)
+        | StatementKind::NominalType(_) => None,
         StatementKind::Declaration(declaration) => {
             find_callable_in_expression(&declaration.value, snapshot)
         }

@@ -77,7 +77,9 @@ pub type Statement = AstNode<StatementKind>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StatementKind {
     Import(ImportStatement),
+    ModuleImport(ModuleAliasImport),
     ModuleExport(ModuleExportStatement),
+    NominalType(NominalTypeDeclaration),
     Declaration(Declaration),
     Assignment(Assignment),
     Environment(EnvironmentStatement),
@@ -101,10 +103,54 @@ pub struct ImportStatement {
     pub path: Span,
 }
 
+/// One Flash 2 module imported under a required local alias.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleAliasImport {
+    pub source: ModuleImportSource,
+    pub alias: Identifier,
+}
+
+/// The closed module origins constructible by the Flash 2 foundation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModuleImportSource {
+    /// A statically named source path resolved through the injected canonicalizer.
+    Local { path: Span },
+    /// A compiled standard module descriptor; it is never source-loaded.
+    Standard {
+        namespace: Identifier,
+        module: Identifier,
+        span: Span,
+    },
+}
+
+impl ModuleImportSource {
+    #[must_use]
+    pub const fn span(self) -> Span {
+        match self {
+            Self::Local { path } | Self::Standard { span: path, .. } => path,
+        }
+    }
+}
+
 /// One explicit module export list.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModuleExportStatement {
     pub names: Vec<Identifier>,
+}
+
+/// The first nominal Flash 2 record type form.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NominalTypeDeclaration {
+    pub name: Identifier,
+    pub fields: Vec<NominalTypeField>,
+}
+
+/// One exact field in a nominal record declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NominalTypeField {
+    pub name: Identifier,
+    pub value_type: TypeReference,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

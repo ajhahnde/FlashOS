@@ -30,8 +30,9 @@ use flash_platform::{
     DirectoryStream, FileOpenMode, FileOpenRequest, JobSignal, Platform, ProcessGroupId,
 };
 use flash_syntax::{
-    CommandHeadKind, ConditionalChain, Diagnostic, OutputMode, ParseOutcome, Script, Severity,
-    SourceFile, SourceId, Span, StageKind, StatementKind, parse, render_diagnostic,
+    CommandHeadKind, ConditionalChain, Diagnostic, LanguageMajor, OutputMode, ParseOutcome, Script,
+    Severity, SourceFile, SourceId, Span, StageKind, StatementKind, parse, parse_v2_submission,
+    render_diagnostic,
 };
 
 use crate::background::{BackgroundJobs, ForegroundJobOutcome, QuarantinePolicy, escape_job_label};
@@ -118,6 +119,7 @@ impl SubmitError {
 
 /// Persistent interactive session state and standard command registry.
 pub struct Session {
+    language: LanguageMajor,
     scope: ScopeStack,
     state: SessionState,
     options: SessionOptions,
@@ -130,7 +132,19 @@ impl Session {
     /// Build a session from its initial logical cwd, environment, and options.
     #[must_use]
     pub fn new(cwd: impl Into<PathBuf>, environment: Environment, options: SessionOptions) -> Self {
-        Self::with_scope(ScopeStack::new(), cwd, environment, options)
+        Self::for_language(LanguageMajor::V1, cwd, environment, options)
+    }
+
+    /// Build a session whose submission grammar is selected before any user
+    /// source or retained state is handled.
+    #[must_use]
+    pub fn for_language(
+        language: LanguageMajor,
+        cwd: impl Into<PathBuf>,
+        environment: Environment,
+        options: SessionOptions,
+    ) -> Self {
+        Self::with_scope_for_language(language, ScopeStack::new(), cwd, environment, options)
     }
 
     /// Build a session seeded with an already-established scope.
@@ -144,7 +158,26 @@ impl Session {
         environment: Environment,
         options: SessionOptions,
     ) -> Self {
-        Self::with_scope_and_registry(scope, cwd, environment, options, standard_registry())
+        Self::with_scope_for_language(LanguageMajor::V1, scope, cwd, environment, options)
+    }
+
+    /// Build a language-selected session seeded with an established scope.
+    #[must_use]
+    pub fn with_scope_for_language(
+        language: LanguageMajor,
+        scope: ScopeStack,
+        cwd: impl Into<PathBuf>,
+        environment: Environment,
+        options: SessionOptions,
+    ) -> Self {
+        Self::with_scope_and_registry_for_language(
+            language,
+            scope,
+            cwd,
+            environment,
+            options,
+            standard_registry(),
+        )
     }
 
     /// Build a session with an explicit command registry.
@@ -159,7 +192,28 @@ impl Session {
         options: SessionOptions,
         registry: CommandRegistry,
     ) -> Self {
+        Self::with_scope_and_registry_for_language(
+            LanguageMajor::V1,
+            scope,
+            cwd,
+            environment,
+            options,
+            registry,
+        )
+    }
+
+    /// Build a language-selected session with an explicit command registry.
+    #[must_use]
+    pub fn with_scope_and_registry_for_language(
+        language: LanguageMajor,
+        scope: ScopeStack,
+        cwd: impl Into<PathBuf>,
+        environment: Environment,
+        options: SessionOptions,
+        registry: CommandRegistry,
+    ) -> Self {
         Self {
+            language,
             scope,
             state: SessionState::new(cwd, environment),
             options,
@@ -167,6 +221,12 @@ impl Session {
             next_source: 1,
             jobs: None,
         }
+    }
+
+    /// The submission grammar fixed before this session accepted user state.
+    #[must_use]
+    pub const fn language(&self) -> LanguageMajor {
+        self.language
     }
 
     /// The retained logical working directory.
@@ -318,7 +378,11 @@ impl Session {
         let source = Arc::new(SourceFile::new(SourceId::new(self.next_source), name, text));
         self.next_source = self.next_source.wrapping_add(1);
 
-        let script = match parse(&source) {
+        let parsed = match self.language {
+            LanguageMajor::V1 => parse(&source),
+            LanguageMajor::V2 => parse_v2_submission(&source),
+        };
+        let script = match parsed {
             ParseOutcome::Complete(script) => script,
             ParseOutcome::Incomplete(input) => {
                 let diagnostic = Diagnostic::new(
@@ -392,6 +456,7 @@ impl Session {
         let binding_types =
             binding_types.unwrap_or_else(|| Arc::new(RuntimeBindingTypes::default()));
         let Session {
+            language: _,
             scope,
             state,
             options,

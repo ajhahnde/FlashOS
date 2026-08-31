@@ -8,7 +8,87 @@ use crate::command::{
     CommandSignature,
 };
 pub use crate::documentation::{CommandDocumentation, Documentation};
-use crate::module::FunctionSignature;
+use crate::module::{FunctionSignature, ModuleId, ModuleProgram, NominalType};
+
+/// The semantic class returned by qualified v2 module/type help.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModuleHelpKind {
+    Module,
+    NominalType,
+}
+
+/// One immutable v2 module/type help result backed by canonical program data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleHelpEntry {
+    kind: ModuleHelpKind,
+    module: Option<ModuleId>,
+    nominal_type: Option<NominalType>,
+}
+
+impl ModuleHelpEntry {
+    #[must_use]
+    pub const fn kind(&self) -> ModuleHelpKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub const fn module(&self) -> Option<&ModuleId> {
+        self.module.as_ref()
+    }
+
+    #[must_use]
+    pub const fn nominal_type(&self) -> Option<&NominalType> {
+        self.nominal_type.as_ref()
+    }
+}
+
+/// Host-free semantic help over one immutable module-program snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleHelpCatalog {
+    program: ModuleProgram,
+}
+
+impl ModuleHelpCatalog {
+    #[must_use]
+    pub fn snapshot(program: &ModuleProgram) -> Self {
+        Self {
+            program: program.clone(),
+        }
+    }
+
+    /// Resolves one exact case-sensitive alias or qualified nominal type.
+    #[must_use]
+    pub fn query(&self, module: &ModuleId, qualified: &str) -> Option<ModuleHelpEntry> {
+        let segments = qualified.split("::").collect::<Vec<_>>();
+        if segments.iter().any(|segment| segment.is_empty()) {
+            return None;
+        }
+        if segments.len() == 1 {
+            if let Some(target) = self.program.aliases().resolve(module, &segments) {
+                return Some(ModuleHelpEntry {
+                    kind: ModuleHelpKind::Module,
+                    module: Some(target.clone()),
+                    nominal_type: None,
+                });
+            }
+            let nominal = self.program.types().nominal(module, segments[0])?.clone();
+            return Some(ModuleHelpEntry {
+                kind: ModuleHelpKind::NominalType,
+                module: None,
+                nominal_type: Some(nominal),
+            });
+        }
+        let nominal = self
+            .program
+            .resolve_nominal_type(module, &segments)?
+            .clone();
+        Some(ModuleHelpEntry {
+            kind: ModuleHelpKind::NominalType,
+            module: None,
+            nominal_type: Some(nominal),
+        })
+    }
+}
 
 /// A named callable's immutable defining metadata.
 #[derive(Clone, Debug, Eq, PartialEq)]

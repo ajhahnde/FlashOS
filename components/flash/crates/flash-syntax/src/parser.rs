@@ -1,4 +1,5 @@
-use crate::lexer::lex_with_control;
+use crate::language::detect_source_language_tokens;
+use crate::lexer::{lex_v2_with_control, lex_with_control};
 use crate::{
     AndChain, AndOperator, Assignment, AstNode, BinaryExpression, BinaryOperator, Block,
     CallExpression, Closure, CommandCaptureKind, CommandHead, CommandHeadKind, CommandItem,
@@ -6,13 +7,14 @@ use crate::{
     ControlTransfer, Declaration, Delimiter, Diagnostic, DocumentationBlock, ElseBranch,
     EnvironmentStatement, Expression, ExpressionKind, FileRedirection, ForStatement,
     FunctionDefinition, Identifier, IfStatement, ImportStatement, IncompleteInput,
-    IncompleteReason, IndexExpression, IoNumber, JobStatement, Keyword, Literal, LiteralKind,
-    MatchArm, MatchStatement, MemberExpression, ModuleExportStatement, NumberKind, Operator,
-    OutputMode, Parameter, Pattern, PipeOperator, Pipeline, RecordEntry, RecordKey, Redirection,
-    RedirectionKind, Script, Severity, SourceFile, Span, Stage, StageKind, Statement,
-    StatementKind, SyntaxClassification, Token, TokenKind, TryStatement, TypeReference,
-    UnaryExpression, UnaryOperator, VariableReference, WhileStatement, Word, WordPart,
-    WordPartKind, classify_tokens,
+    IncompleteReason, IndexExpression, IoNumber, JobStatement, Keyword, LanguageDetection,
+    LanguageMajor, Literal, LiteralKind, MatchArm, MatchStatement, MemberExpression,
+    ModuleAliasImport, ModuleExportStatement, ModuleImportSource, NominalTypeDeclaration,
+    NominalTypeField, NumberKind, Operator, OutputMode, Parameter, Pattern, PipeOperator, Pipeline,
+    RecordEntry, RecordKey, Redirection, RedirectionKind, Script, Severity, SourceFile, Span,
+    Stage, StageKind, Statement, StatementKind, SyntaxClassification, Token, TokenKind,
+    TryStatement, TypeReference, UnaryExpression, UnaryOperator, VariableReference,
+    VersionedScript, WhileStatement, Word, WordPart, WordPartKind, classify_tokens,
 };
 
 /// The result of parsing one source file.
@@ -31,6 +33,22 @@ pub enum ControlledParseOutcome {
     Cancelled,
 }
 
+/// The result of parsing one explicitly versioned Flash 2 source file.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VersionedParseOutcome {
+    Complete(VersionedScript),
+    Incomplete(IncompleteInput),
+    Invalid(Vec<Diagnostic>),
+}
+
+/// A controlled Flash 2 parse either completes with the versioned result or is
+/// cancelled without exposing partial syntax or diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ControlledVersionedParseOutcome {
+    Parsed(VersionedParseOutcome),
+    Cancelled,
+}
+
 /// Parses a source file through the shared lexer and structural classifier.
 #[must_use]
 pub fn parse(source: &SourceFile) -> ParseOutcome {
@@ -38,6 +56,87 @@ pub fn parse(source: &SourceFile) -> ParseOutcome {
         ControlledParseOutcome::Parsed(outcome) => outcome,
         ControlledParseOutcome::Cancelled => unreachable!("the default parser never cancels"),
     }
+}
+
+/// Parses one Flash 2 source file after validating and retaining its required
+/// leading language directive. The frozen [`parse`] entry point remains Flash
+/// 1 syntax and does not infer or switch language modes.
+#[must_use]
+pub fn parse_v2(source: &SourceFile) -> VersionedParseOutcome {
+    match parse_v2_with_control(source, &|| false) {
+        ControlledVersionedParseOutcome::Parsed(outcome) => outcome,
+        ControlledVersionedParseOutcome::Cancelled => {
+            unreachable!("the default v2 parser never cancels")
+        }
+    }
+}
+
+/// Parses one interactive Flash 2 submission under a language major selected
+/// by the REPL before user input is read.
+///
+/// Unlike a source module, an edit buffer carries no `language 2` directive;
+/// it still uses the exact Flash 2 lexer and grammar vocabulary.
+#[must_use]
+pub fn parse_v2_submission(source: &SourceFile) -> ParseOutcome {
+    let Some(tokens) = lex_v2_with_control(source, &|| false) else {
+        unreachable!("the default v2 submission parser never cancels")
+    };
+    match parse_tokens(source, tokens, LanguageMajor::V2, &|| false) {
+        ControlledParseOutcome::Parsed(outcome) => outcome,
+        ControlledParseOutcome::Cancelled => {
+            unreachable!("the default v2 submission parser never cancels")
+        }
+    }
+}
+
+/// Parses Flash 2 with cooperative cancellation across lexing, directive
+/// validation, and body parsing. The predicate must remain `true` after it
+/// first requests cancellation.
+#[must_use]
+pub fn parse_v2_with_control(
+    source: &SourceFile,
+    is_cancelled: &dyn Fn() -> bool,
+) -> ControlledVersionedParseOutcome {
+    let Some(tokens) = lex_v2_with_control(source, is_cancelled) else {
+        return ControlledVersionedParseOutcome::Cancelled;
+    };
+    if is_cancelled() {
+        return ControlledVersionedParseOutcome::Cancelled;
+    }
+    let directive = match detect_source_language_tokens(source, &tokens) {
+        LanguageDetection::Complete(directive) => directive,
+        LanguageDetection::Invalid(diagnostics) => {
+            return ControlledVersionedParseOutcome::Parsed(VersionedParseOutcome::Invalid(
+                diagnostics,
+            ));
+        }
+    };
+    if is_cancelled() {
+        return ControlledVersionedParseOutcome::Cancelled;
+    }
+    let mut body = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        if is_cancelled() {
+            return ControlledVersionedParseOutcome::Cancelled;
+        }
+        if token.span().start() >= directive.span().end() {
+            body.push(token);
+        }
+    }
+
+    let outcome = match parse_tokens(source, body, LanguageMajor::V2, is_cancelled) {
+        ControlledParseOutcome::Parsed(ParseOutcome::Complete(script)) => {
+            VersionedParseOutcome::Complete(VersionedScript::new(directive, script))
+        }
+        ControlledParseOutcome::Parsed(ParseOutcome::Incomplete(incomplete)) => {
+            VersionedParseOutcome::Incomplete(incomplete)
+        }
+        ControlledParseOutcome::Parsed(ParseOutcome::Invalid(diagnostics)) => {
+            VersionedParseOutcome::Invalid(diagnostics)
+        }
+        ControlledParseOutcome::Cancelled => return ControlledVersionedParseOutcome::Cancelled,
+    };
+    ControlledVersionedParseOutcome::Parsed(outcome)
 }
 
 /// Parses with a cooperative cancellation predicate while preserving the
@@ -51,6 +150,15 @@ pub fn parse_with_control(
     let Some(tokens) = lex_with_control(source, is_cancelled) else {
         return ControlledParseOutcome::Cancelled;
     };
+    parse_tokens(source, tokens, LanguageMajor::V1, is_cancelled)
+}
+
+fn parse_tokens(
+    source: &SourceFile,
+    tokens: Vec<Token>,
+    language: LanguageMajor,
+    is_cancelled: &dyn Fn() -> bool,
+) -> ControlledParseOutcome {
     if is_cancelled() {
         return ControlledParseOutcome::Cancelled;
     }
@@ -68,7 +176,7 @@ pub fn parse_with_control(
         }
         SyntaxClassification::Complete => {}
     }
-    let parsed = Parser::new(source, tokens, is_cancelled).parse_script();
+    let parsed = Parser::new(source, tokens, language, is_cancelled).parse_script();
     if is_cancelled() {
         return ControlledParseOutcome::Cancelled;
     }
@@ -102,6 +210,7 @@ struct Parser<'source, 'control> {
     position: usize,
     continuation_depth: usize,
     diagnostics: Vec<Diagnostic>,
+    language: LanguageMajor,
     is_cancelled: &'control dyn Fn() -> bool,
 }
 
@@ -109,6 +218,7 @@ impl<'source, 'control> Parser<'source, 'control> {
     fn new(
         source: &'source SourceFile,
         tokens: Vec<Token>,
+        language: LanguageMajor,
         is_cancelled: &'control dyn Fn() -> bool,
     ) -> Self {
         Self {
@@ -117,6 +227,7 @@ impl<'source, 'control> Parser<'source, 'control> {
             position: 0,
             continuation_depth: 0,
             diagnostics: Vec::new(),
+            language,
             is_cancelled,
         }
     }
@@ -212,6 +323,11 @@ impl<'source, 'control> Parser<'source, 'control> {
         self.check_cancelled()?;
         self.skip_inline();
         match self.current_kind() {
+            Some(TokenKind::Keyword(Keyword::Import))
+                if top_level && self.language == LanguageMajor::V2 =>
+            {
+                self.parse_module_import()
+            }
             Some(TokenKind::Keyword(Keyword::Import)) if top_level => self.parse_import(),
             Some(TokenKind::Keyword(Keyword::Import)) => {
                 Err(self.invalid_here("imports are allowed only at module top level"))
@@ -221,6 +337,9 @@ impl<'source, 'control> Parser<'source, 'control> {
             Some(TokenKind::Keyword(Keyword::Export)) => self.parse_export(top_level),
             Some(TokenKind::Keyword(Keyword::Unset)) => self.parse_unset(),
             Some(TokenKind::Keyword(Keyword::Def)) => self.parse_function(documentation),
+            Some(TokenKind::Keyword(Keyword::Type)) if self.language == LanguageMajor::V2 => {
+                self.parse_nominal_type(top_level)
+            }
             Some(TokenKind::Keyword(Keyword::If)) => {
                 let node = self.parse_if_node()?;
                 let span = node.span();
@@ -275,6 +394,97 @@ impl<'source, 'control> Parser<'source, 'control> {
         let span = self.span(start.start(), path.end());
         Ok(Statement::new(
             StatementKind::Import(ImportStatement { names, path }),
+            span,
+        ))
+    }
+
+    fn parse_module_import(&mut self) -> ParseResult<Statement> {
+        let start = self.take().expect("import keyword is current").span();
+        self.skip_inline();
+        let source = match self.current_kind() {
+            Some(TokenKind::SingleQuoted) => {
+                let path = self.take().expect("local import path is current").span();
+                if path.len() == 2 {
+                    return Err(self.invalid_at(path, "module import path cannot be empty"));
+                }
+                ModuleImportSource::Local { path }
+            }
+            Some(TokenKind::Identifier) => {
+                let namespace = self.parse_identifier()?;
+                if self.source.slice(namespace.span()).ok() != Some("std") {
+                    return Err(self.invalid_at(
+                        namespace.span(),
+                        "v2 module imports require a local path or `std::name`",
+                    ));
+                }
+                self.expect_operator(Operator::Colon, "standard module requires `::`")?;
+                self.expect_operator(Operator::Colon, "standard module requires `::`")?;
+                let module = self.parse_identifier()?;
+                let span = self.span(namespace.span().start(), module.span().end());
+                ModuleImportSource::Standard {
+                    namespace,
+                    module,
+                    span,
+                }
+            }
+            _ => {
+                return Err(self
+                    .invalid_here("v2 import requires a local path or qualified standard module"));
+            }
+        };
+        self.skip_inline();
+        self.expect_contextual_identifier("as", "v2 module import requires `as alias`")?;
+        self.skip_inline();
+        let alias = self.parse_identifier()?;
+        let span = self.span(start.start(), alias.span().end());
+        Ok(Statement::new(
+            StatementKind::ModuleImport(ModuleAliasImport { source, alias }),
+            span,
+        ))
+    }
+
+    fn parse_nominal_type(&mut self, top_level: bool) -> ParseResult<Statement> {
+        if !top_level {
+            return Err(self.invalid_here("nominal types are allowed only at module top level"));
+        }
+        let start = self.take().expect("type keyword is current").span();
+        self.skip_inline();
+        let name = self.parse_identifier()?;
+        self.skip_inline();
+        self.expect_operator(Operator::Assign, "type declaration requires `=`")?;
+        self.skip_layout();
+        self.expect_delimiter(
+            Delimiter::LeftBrace,
+            "nominal record declaration requires `{`",
+        )?;
+        self.skip_layout();
+        let mut fields = Vec::new();
+        while !self.at_delimiter(Some(Delimiter::RightBrace)) {
+            let field_name = self.parse_identifier()?;
+            let field_start = field_name.span().start();
+            self.skip_inline();
+            self.expect_operator(Operator::Colon, "nominal field requires `:`")?;
+            self.skip_inline();
+            let value_type = self.parse_type_reference()?;
+            let field_span = self.span(field_start, value_type.span.end());
+            fields.push(NominalTypeField {
+                name: field_name,
+                value_type,
+                span: field_span,
+            });
+            self.skip_layout();
+            if self.take_operator(Operator::Comma).is_none() {
+                break;
+            }
+            self.skip_layout();
+        }
+        let close = self.expect_delimiter(
+            Delimiter::RightBrace,
+            "nominal record declaration is not closed",
+        )?;
+        let span = self.span(start.start(), close.span().end());
+        Ok(Statement::new(
+            StatementKind::NominalType(NominalTypeDeclaration { name, fields }),
             span,
         ))
     }

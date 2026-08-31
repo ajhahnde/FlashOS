@@ -13,7 +13,7 @@ use crate::command::{CommandClassification, CommandRegistry, CommandSignature, N
 use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
 use crate::module::{
     FunctionSignature, ModuleEffectSummary, ModuleId, ModuleNameImport, ModuleProgram,
-    ModuleReferenceTarget, ValueType,
+    ModuleReferenceTarget, NominalType, ValueType,
 };
 
 /// One canonical source location without an editor URI or protocol position.
@@ -206,6 +206,50 @@ pub struct NamedImportEffects {
     transitive: ModuleEffectSummary,
 }
 
+/// Shared hover/provenance data for one local or standard module alias.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModuleAliasHover {
+    name: String,
+    target: ModuleId,
+    requested: Option<std::path::PathBuf>,
+    definition: SourceLocation,
+}
+
+impl ModuleAliasHover {
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn target(&self) -> &ModuleId {
+        &self.target
+    }
+
+    #[must_use]
+    pub fn requested(&self) -> Option<&std::path::Path> {
+        self.requested.as_deref()
+    }
+
+    #[must_use]
+    pub const fn definition(&self) -> &SourceLocation {
+        &self.definition
+    }
+}
+
+/// Shared hover data for one singular nominal type declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NominalTypeHover {
+    nominal: NominalType,
+}
+
+impl NominalTypeHover {
+    #[must_use]
+    pub const fn nominal(&self) -> &NominalType {
+        &self.nominal
+    }
+}
+
 impl NamedImportEffects {
     #[must_use]
     pub const fn target(&self) -> &ModuleId {
@@ -226,6 +270,8 @@ impl NamedImportEffects {
 /// The protocol-neutral hover variants owned by shared semantic data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SemanticHover {
+    Module(ModuleAliasHover),
+    NominalType(NominalTypeHover),
     Intrinsic(IntrinsicHover),
     DynamicBinding(DynamicBindingHover),
     Binding(BindingHover),
@@ -358,6 +404,18 @@ impl SemanticQueries<'_> {
     /// Resolves a lexical read, import, export, or declaration to its definition.
     #[must_use]
     pub fn definition_at(&self, module: &ModuleId, offset: usize) -> Option<SourceLocation> {
+        if let Some(alias) = self.program.aliases().target_at(module, offset) {
+            return Some(SourceLocation {
+                module: module.clone(),
+                span: alias.declaration_span(),
+            });
+        }
+        if let Some(nominal) = self.program.types().nominal_at(module, offset) {
+            return Some(SourceLocation {
+                module: module.clone(),
+                span: nominal.declaration_span(),
+            });
+        }
         self.program
             .names()
             .target_at(module, offset)
@@ -424,6 +482,22 @@ impl SemanticQueries<'_> {
     /// Returns shared binding, callable, or command hover data at one byte.
     #[must_use]
     pub fn hover_at(&self, module: &ModuleId, offset: usize) -> Option<SemanticHover> {
+        if let Some(alias) = self.program.aliases().target_at(module, offset) {
+            return Some(SemanticHover::Module(ModuleAliasHover {
+                name: alias.name().to_owned(),
+                target: alias.target().clone(),
+                requested: alias.requested().map(std::path::Path::to_path_buf),
+                definition: SourceLocation {
+                    module: module.clone(),
+                    span: alias.declaration_span(),
+                },
+            }));
+        }
+        if let Some(nominal) = self.program.types().nominal_at(module, offset) {
+            return Some(SemanticHover::NominalType(NominalTypeHover {
+                nominal: nominal.clone(),
+            }));
+        }
         if let Some((name, target)) = self.program.names().target_at(module, offset) {
             if matches!(target, ModuleReferenceTarget::DynamicStatus) {
                 return Some(SemanticHover::DynamicBinding(DynamicBindingHover {
@@ -763,7 +837,10 @@ impl<'a> CallFinder<'a> {
 
     fn statement(&mut self, statement: &'a Statement) {
         match statement.kind() {
-            StatementKind::Import(_) | StatementKind::ModuleExport(_) => {}
+            StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
+            | StatementKind::ModuleExport(_)
+            | StatementKind::NominalType(_) => {}
             StatementKind::Declaration(declaration) => self.expression(&declaration.value),
             StatementKind::Assignment(assignment) => self.expression(&assignment.value),
             StatementKind::Environment(environment) => {

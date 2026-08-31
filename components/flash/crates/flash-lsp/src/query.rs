@@ -10,13 +10,13 @@ use flash_runtime::command::{
     NamespaceClass,
 };
 use flash_runtime::module::{
-    AnalysisControl, FunctionSignature, ModuleAnalysisOutcome, ModuleEffect, ModuleProgram,
-    ModuleProgramLoader,
+    AnalysisControl, FunctionSignature, ModuleAnalysisOutcome, ModuleEffect, ModuleOrigin,
+    ModuleProgram, ModuleProgramLoader,
 };
 use flash_runtime::query::{NameKind, SemanticHover, SourceLocation};
 use flash_syntax::{
-    CompletionContext, FormatOutcome, PositionEncoding, SourceFile, SourceId, TextPosition,
-    TextRange, completion_target, format_source,
+    CompletionContext, FormatOutcome, LanguageMajor, PositionEncoding, SourceFile, SourceId,
+    TextPosition, TextRange, completion_target, format_source, format_source_v2,
 };
 use serde_json::{Value, json};
 
@@ -331,6 +331,39 @@ fn hover(
         render_effects(effects.direct(), effects.transitive())
     } else {
         match queries.hover_at(module, cursor) {
+            Some(SemanticHover::Module(alias)) => {
+                let origin = match alias.target().origin() {
+                    ModuleOrigin::Local => "local".to_owned(),
+                    ModuleOrigin::Standard { namespace, module } => {
+                        format!("standard `{namespace}::{module}`")
+                    }
+                };
+                let mut markdown = format!(
+                    "```flash\nmodule `{}`\n```\n\nOrigin: {origin}\n\nCanonical identity: `{}`\n\nLanguage: {}",
+                    alias.name(),
+                    alias.target().path().display(),
+                    alias.target().language().get(),
+                );
+                if let Some(requested) = alias.requested() {
+                    markdown.push_str(&format!("\n\nRequested as: `{}`", requested.display()));
+                }
+                markdown
+            }
+            Some(SemanticHover::NominalType(hover)) => {
+                let nominal = hover.nominal();
+                let fields = nominal
+                    .fields()
+                    .iter()
+                    .map(|field| format!("{}: {}", field.name(), field.value_type()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "```flash\ntype `{}` = {{ {fields} }}\n```\n\nNominal identity: `{}::{}`",
+                    nominal.id().name(),
+                    nominal.id().module().path().display(),
+                    nominal.id().name(),
+                )
+            }
             Some(SemanticHover::Intrinsic(hover)) => {
                 let intrinsic = hover.intrinsic();
                 format!(
@@ -604,7 +637,11 @@ fn formatting(
         return Err(RequestError::RequestCancelled);
     }
     let source = request_source(document);
-    let FormatOutcome::Complete(formatted) = format_source(&source) else {
+    let outcome = match snapshot.language() {
+        LanguageMajor::V1 => format_source(&source),
+        LanguageMajor::V2 => format_source_v2(&source),
+    };
+    let FormatOutcome::Complete(formatted) = outcome else {
         return Ok(json!([]));
     };
     if control.is_cancelled() {
@@ -686,7 +723,7 @@ fn analyze(
     commands: &flash_runtime::command::CommandRegistry,
     control: &RequestControl,
 ) -> Result<Option<Box<flash_runtime::module::ModuleAnalysisReport>>, RequestError> {
-    let loader = ModuleProgramLoader::new(snapshot, snapshot);
+    let loader = ModuleProgramLoader::for_language(snapshot, snapshot, snapshot.language());
     match loader.analyze_with_commands_controlled(
         document.module_path(),
         commands,
@@ -702,7 +739,7 @@ fn analyze_all(
     commands: &flash_runtime::command::CommandRegistry,
     control: &RequestControl,
 ) -> Result<Vec<flash_runtime::module::ModuleAnalysisReport>, RequestError> {
-    let loader = ModuleProgramLoader::new(snapshot, snapshot);
+    let loader = ModuleProgramLoader::for_language(snapshot, snapshot, snapshot.language());
     let mut reports = Vec::with_capacity(snapshot.roots().len());
     for root in snapshot.roots() {
         match loader.analyze_with_commands_controlled(

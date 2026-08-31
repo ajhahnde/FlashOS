@@ -282,9 +282,28 @@ impl<'source> SpanChecker<'source> {
                 }
                 self.span(import.path);
             }
+            StatementKind::ModuleImport(import) => {
+                self.span(import.source.span());
+                self.identifier(import.alias);
+                if let flash_syntax::ModuleImportSource::Standard {
+                    namespace, module, ..
+                } = import.source
+                {
+                    self.identifier(namespace);
+                    self.identifier(module);
+                }
+            }
             StatementKind::ModuleExport(export) => {
                 for name in &export.names {
                     self.identifier(*name);
+                }
+            }
+            StatementKind::NominalType(declaration) => {
+                self.identifier(declaration.name);
+                for field in &declaration.fields {
+                    self.span(field.span);
+                    self.identifier(field.name);
+                    self.type_reference(&field.value_type);
                 }
             }
             StatementKind::Declaration(declaration) => {

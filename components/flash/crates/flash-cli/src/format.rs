@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use flash_syntax::{
-    Diagnostic, FormatOutcome, Severity, SourceFile, SourceId, format_source, render_diagnostic,
+    Diagnostic, FormatOutcome, LanguageMajor, Severity, SourceFile, SourceId, format_source,
+    format_source_v2, render_diagnostic,
 };
 
 use crate::cli::FormatOperation;
@@ -22,13 +23,24 @@ static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 pub struct FormatRequest {
     operation: FormatOperation,
     paths: Vec<PathBuf>,
+    language: LanguageMajor,
 }
 
 impl FormatRequest {
     pub fn new(operation: FormatOperation, paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        Self::for_language(operation, paths, LanguageMajor::V1)
+    }
+
+    /// Creates a formatter request for one explicitly selected language major.
+    pub fn for_language(
+        operation: FormatOperation,
+        paths: impl IntoIterator<Item = PathBuf>,
+        language: LanguageMajor,
+    ) -> Self {
         Self {
             operation,
             paths: paths.into_iter().collect(),
+            language,
         }
     }
 
@@ -40,6 +52,11 @@ impl FormatRequest {
     #[must_use]
     pub fn paths(&self) -> &[PathBuf] {
         &self.paths
+    }
+
+    #[must_use]
+    pub const fn language(&self) -> LanguageMajor {
+        self.language
     }
 }
 
@@ -148,7 +165,13 @@ pub fn format_files(request: &FormatRequest, filesystem: &mut dyn FormatFilesyst
 
     for (index, path) in request.paths.iter().enumerate() {
         let source_id = SourceId::new(u32::try_from(index + 1).unwrap_or(u32::MAX));
-        preflight.push(prepare_source(filesystem, path, source_id, &mut identities));
+        preflight.push(prepare_source(
+            filesystem,
+            path,
+            source_id,
+            request.language(),
+            &mut identities,
+        ));
     }
 
     match request.operation {
@@ -161,6 +184,7 @@ fn prepare_source(
     filesystem: &mut dyn FormatFilesystem,
     path: &Path,
     source_id: SourceId,
+    language: LanguageMajor,
     identities: &mut HashMap<PathBuf, PathBuf>,
 ) -> Result<PreparedSource, FormatFailure> {
     let inspection = filesystem
@@ -193,7 +217,11 @@ fn prepare_source(
                 format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
             )
         })?;
-    let canonical = match format_source(&source) {
+    let outcome = match language {
+        LanguageMajor::V1 => format_source(&source),
+        LanguageMajor::V2 => format_source_v2(&source),
+    };
+    let canonical = match outcome {
         FormatOutcome::Complete(canonical) => canonical,
         FormatOutcome::Incomplete(incomplete) => {
             let diagnostic = Diagnostic::new(
