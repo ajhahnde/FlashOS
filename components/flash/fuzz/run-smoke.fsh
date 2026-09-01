@@ -88,6 +88,8 @@ for target in ['lexer', 'parser', 'expander'] {
     "$root/tests/v2-foundation/language/modules/invalid" \
     "$root/tests/v2-foundation/language/operations/complete" \
     "$root/tests/v2-foundation/language/operations/invalid" \
+    "$root/tests/v2-foundation/language/rest-spread/complete" \
+    "$root/tests/v2-foundation/language/rest-spread/invalid" \
     "$root/tests/v2-foundation/language/types/complete" \
     "$root/tests/v2-foundation/language/types/invalid" \
     -- \

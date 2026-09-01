@@ -3370,7 +3370,9 @@ impl<'a> SignatureValidator<'a> {
                                     CommandItemKind::Redirection(redirection) => {
                                         self.redirection(redirection.kind())?;
                                     }
-                                    CommandItemKind::Spread(_) => {}
+                                    CommandItemKind::Spread(_) => {
+                                        self.validate_spread(item.span());
+                                    }
                                 }
                             }
                         }
@@ -3379,6 +3381,52 @@ impl<'a> SignatureValidator<'a> {
             }
         }
         Ok(())
+    }
+
+    fn validate_spread(&self, span: Span) {
+        if self.entry.module().language() != LanguageMajor::V2 {
+            return;
+        }
+        let Some(reference) = self.names.reference(self.entry.module(), span) else {
+            return;
+        };
+        let Some(actual) = self.reference_type(reference.target()) else {
+            return;
+        };
+        match actual {
+            ValueType::Any | ValueType::TypeParameter(_) => {}
+            ValueType::List(element) => {
+                if !matches!(
+                    element.as_ref(),
+                    ValueType::Any
+                        | ValueType::Bool
+                        | ValueType::Int
+                        | ValueType::Float
+                        | ValueType::String
+                        | ValueType::Path
+                        | ValueType::Duration
+                        | ValueType::ByteSize
+                        | ValueType::TypeParameter(_)
+                ) {
+                    self.errors
+                        .borrow_mut()
+                        .push(ModuleTypeError::SpreadElementMismatch {
+                            module: self.entry.module().clone(),
+                            span,
+                            actual: *element,
+                        });
+                }
+            }
+            actual => {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::SpreadValueMismatch {
+                        module: self.entry.module().clone(),
+                        span,
+                        actual,
+                    });
+            }
+        }
     }
 
     fn chain_value_with_expected(
@@ -8527,6 +8575,16 @@ pub enum ModuleTypeError {
         module: ModuleId,
         span: Span,
     },
+    SpreadValueMismatch {
+        module: ModuleId,
+        span: Span,
+        actual: ValueType,
+    },
+    SpreadElementMismatch {
+        module: ModuleId,
+        span: Span,
+        actual: ValueType,
+    },
     ThrowMismatch {
         module: ModuleId,
         span: Span,
@@ -8617,6 +8675,8 @@ impl ModuleTypeError {
             | Self::AmbiguousOperationGeneric { module, .. }
             | Self::ResultMismatch { module, .. }
             | Self::ByteCaptureInWord { module, .. }
+            | Self::SpreadValueMismatch { module, .. }
+            | Self::SpreadElementMismatch { module, .. }
             | Self::ThrowMismatch { module, .. }
             | Self::AssignmentMismatch { module, .. }
             | Self::BindingMismatch { module, .. }
@@ -8649,7 +8709,10 @@ impl ModuleTypeError {
                 construction_span, ..
             } => *construction_span,
             Self::ResultMismatch { result_span, .. } => *result_span,
-            Self::ByteCaptureInWord { span, .. } | Self::ThrowMismatch { span, .. } => *span,
+            Self::ByteCaptureInWord { span, .. }
+            | Self::SpreadValueMismatch { span, .. }
+            | Self::SpreadElementMismatch { span, .. }
+            | Self::ThrowMismatch { span, .. } => *span,
             Self::AssignmentMismatch {
                 assignment_span, ..
             } => *assignment_span,
@@ -8812,6 +8875,18 @@ impl ModuleTypeError {
                 Diagnostic::new(Severity::Error, "SIG006", self.to_string()).with_primary(
                     *span,
                     "byte capture is a `Bytes` value and cannot be inserted into a command word",
+                )
+            }
+            Self::SpreadValueMismatch { span, actual, .. } => {
+                Diagnostic::new(Severity::Error, "SIG020", self.to_string()).with_primary(
+                    *span,
+                    format!("this spread is `{actual}`; expected `List[T]`"),
+                )
+            }
+            Self::SpreadElementMismatch { span, actual, .. } => {
+                Diagnostic::new(Severity::Error, "SIG021", self.to_string()).with_primary(
+                    *span,
+                    format!("list elements are `{actual}` and cannot become command arguments"),
                 )
             }
             Self::ThrowMismatch { span, actual, .. } => {
@@ -9076,6 +9151,16 @@ impl fmt::Display for ModuleTypeError {
             Self::ByteCaptureInWord { module, .. } => write!(
                 formatter,
                 "module `{}` inserts a `Bytes` capture into a command word; decode it explicitly or bind it as a value",
+                module.path().display()
+            ),
+            Self::SpreadValueMismatch { module, actual, .. } => write!(
+                formatter,
+                "module `{}` spreads `{actual}` as command arguments; expected `List[T]`",
+                module.path().display()
+            ),
+            Self::SpreadElementMismatch { module, actual, .. } => write!(
+                formatter,
+                "module `{}` spreads `{actual}` list elements that cannot become command arguments",
                 module.path().display()
             ),
             Self::ThrowMismatch { module, actual, .. } => write!(
