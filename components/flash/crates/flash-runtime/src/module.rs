@@ -3400,6 +3400,9 @@ impl<'a> SignatureValidator<'a> {
         pipeline: &Pipeline,
         expected: Option<&ValueType>,
     ) -> Result<Option<(Span, ValueType)>, Box<ModuleTypeError>> {
+        if pipeline.stages().len() > 1 && self.entry.module().language() != LanguageMajor::V2 {
+            return Ok(None);
+        }
         let Some(first) = pipeline.stages().first() else {
             return Ok(None);
         };
@@ -3407,10 +3410,7 @@ impl<'a> SignatureValidator<'a> {
             return Ok(None);
         };
         let first_expected = (pipeline.stages().len() == 1).then_some(expected).flatten();
-        let Some(mut value_type) = self.expression_with_expected(expression, first_expected)?
-        else {
-            return Ok(None);
-        };
+        let mut value_type = self.expression_with_expected(expression, first_expected)?;
         let mut result_span = expression.span();
         for stage in &pipeline.stages()[1..] {
             let StageKind::Expression(stage_expression) = stage.kind() else {
@@ -3443,9 +3443,38 @@ impl<'a> SignatureValidator<'a> {
                 })
                 .expect("a pipeline-eligible standard operation has a value overload");
             let mut substitutions = BTreeMap::new();
-            unify_type(input, &value_type, &mut substitutions);
+            if let Some(actual) = value_type.as_ref()
+                && !unify_type(input, actual, &mut substitutions)
+            {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::OperationArgumentMismatch {
+                        module: self.entry.module().clone(),
+                        name: operation.id().qualified_name(),
+                        argument_span: stage.span(),
+                        expected: input.clone(),
+                        actual: actual.clone(),
+                    });
+                return Ok(Some((stage.span(), ValueType::Any)));
+            }
+            for parameter in operation.type_parameters() {
+                if !substitutions.contains_key(parameter) {
+                    self.errors
+                        .borrow_mut()
+                        .push(ModuleTypeError::AmbiguousOperationGeneric {
+                            module: self.entry.module().clone(),
+                            name: operation.id().qualified_name(),
+                            parameter: parameter.clone(),
+                            call_span: stage.span(),
+                        });
+                    return Ok(Some((stage.span(), ValueType::Any)));
+                }
+            }
             let resolved_input = substitute_type(input, &substitutions);
-            if !resolved_input.accepts_type(&value_type) {
+            if let Some(actual) = value_type
+                && actual != ValueType::Any
+                && !resolved_input.accepts_type(&actual)
+            {
                 self.errors
                     .borrow_mut()
                     .push(ModuleTypeError::OperationArgumentMismatch {
@@ -3453,14 +3482,14 @@ impl<'a> SignatureValidator<'a> {
                         name: operation.id().qualified_name(),
                         argument_span: stage.span(),
                         expected: resolved_input,
-                        actual: value_type,
+                        actual,
                     });
                 return Ok(Some((stage.span(), ValueType::Any)));
             }
-            value_type = substitute_type(result, &substitutions);
+            value_type = Some(substitute_type(result, &substitutions));
             result_span = stage.span();
         }
-        Ok(Some((result_span, value_type)))
+        Ok(value_type.map(|value_type| (result_span, value_type)))
     }
 
     fn expression(
@@ -4736,10 +4765,12 @@ impl<'a> SignatureValidator<'a> {
                 });
             return Ok(Some(ValueType::Any));
         }
-        if call.type_arguments.len() > operation.type_parameters().len() {
+        if !call.type_arguments.is_empty()
+            && call.type_arguments.len() != operation.type_parameters().len()
+        {
             self.errors
                 .borrow_mut()
-                .push(ModuleTypeError::OperationCallArity {
+                .push(ModuleTypeError::OperationGenericArity {
                     module: self.entry.module().clone(),
                     name: operation.id().qualified_name(),
                     call_span,
@@ -8418,6 +8449,13 @@ pub enum ModuleTypeError {
         expected: usize,
         actual: usize,
     },
+    OperationGenericArity {
+        module: ModuleId,
+        name: String,
+        call_span: Span,
+        expected: usize,
+        actual: usize,
+    },
     ArgumentMismatch {
         module: ModuleId,
         name: String,
@@ -8567,6 +8605,7 @@ impl ModuleTypeError {
             | Self::CallArity { module, .. }
             | Self::IntrinsicCallArity { module, .. }
             | Self::OperationCallArity { module, .. }
+            | Self::OperationGenericArity { module, .. }
             | Self::ArgumentMismatch { module, .. }
             | Self::DuplicateNominalField { module, .. }
             | Self::UnknownNominalField { module, .. }
@@ -8596,7 +8635,8 @@ impl ModuleTypeError {
             Self::UnknownType { span, .. } | Self::InvalidTypeArity { span, .. } => *span,
             Self::CallArity { call_span, .. }
             | Self::IntrinsicCallArity { call_span, .. }
-            | Self::OperationCallArity { call_span, .. } => *call_span,
+            | Self::OperationCallArity { call_span, .. }
+            | Self::OperationGenericArity { call_span, .. } => *call_span,
             Self::ArgumentMismatch { argument_span, .. }
             | Self::IntrinsicArgumentMismatch { argument_span, .. }
             | Self::OperationArgumentMismatch { argument_span, .. } => *argument_span,
@@ -8669,6 +8709,15 @@ impl ModuleTypeError {
             } => Diagnostic::new(Severity::Error, "SIG003", self.to_string()).with_primary(
                 *call_span,
                 format!("expected {expected} arguments, found {actual}"),
+            ),
+            Self::OperationGenericArity {
+                call_span,
+                expected,
+                actual,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG009", self.to_string()).with_primary(
+                *call_span,
+                format!("expected {expected} type arguments, found {actual}"),
             ),
             Self::ArgumentMismatch {
                 argument_span,
@@ -8916,6 +8965,17 @@ impl fmt::Display for ModuleTypeError {
             } => write!(
                 formatter,
                 "module `{}` calls operation `{name}` with {actual} arguments; expected {expected}",
+                module.path().display()
+            ),
+            Self::OperationGenericArity {
+                module,
+                name,
+                expected,
+                actual,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` supplies operation `{name}` {actual} type arguments; expected {expected}",
                 module.path().display()
             ),
             Self::ArgumentMismatch {

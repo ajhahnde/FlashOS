@@ -3741,11 +3741,13 @@ impl Evaluator<'_> {
                         span,
                     ));
                 }
-                if call.type_arguments.len() > operation.type_parameters().len() {
+                if !call.type_arguments.is_empty()
+                    && call.type_arguments.len() != operation.type_parameters().len()
+                {
                     return Err(self.error(
                         RuntimeErrorKind::GenericInstantiation {
                             message: format!(
-                                "expected at most {} type arguments, found {}",
+                                "expected {} type arguments, found {}",
                                 operation.type_parameters().len(),
                                 call.type_arguments.len()
                             ),
