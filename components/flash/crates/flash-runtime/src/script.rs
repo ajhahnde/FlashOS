@@ -294,6 +294,10 @@ fn module_initialization_order(program: &ModuleProgram) -> Vec<ModuleId> {
         if initialized.contains(module) {
             return;
         }
+        if program.sources().script(module).is_none() {
+            initialized.insert(module.clone());
+            return;
+        }
         for import in program.names().imports(module) {
             visit(program, import.target(), initialized, order);
         }

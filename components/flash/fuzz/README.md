@@ -22,7 +22,8 @@ components/flash/target/debug/fsh components/flash/fuzz/run-smoke.fsh 10000
 ```
 
 The runner uses every `.fsh` file below the v1 grammar/lexical corpora and the
-v2 language-foundation grammar, lexical, module, and type corpora as a seed. It
+v2 language-foundation grammar, lexical, module, operation, and type corpora as
+a seed. It
 puts libFuzzer's writable corpus in a temporary directory, so fuzzing never
 modifies the golden sources. Each generated input is limited to 4,096 bytes,
 ten seconds of execution, and 2,048 MiB of resident memory.

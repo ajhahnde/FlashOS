@@ -11,7 +11,355 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::eval::{FrameCallee, RuntimeError};
+use crate::module::{ModuleId, ModuleOrigin, ValueType, substitute_type};
+use crate::stream::ValueStream;
+use crate::structured::{self, DrainOutcome};
 use crate::{FiniteFloat, Range, Record, Value};
+
+/// The stable identity of one compiled, qualified Flash 2 operation.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct OperationId {
+    module: ModuleId,
+    name: String,
+}
+
+impl OperationId {
+    fn new(module: ModuleId, name: impl Into<String>) -> Self {
+        Self {
+            module,
+            name: name.into(),
+        }
+    }
+
+    /// The canonical compiled module exporting this operation.
+    #[must_use]
+    pub const fn module(&self) -> &ModuleId {
+        &self.module
+    }
+
+    /// The exported operation name within its module.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The canonical display spelling, independent of a caller's local alias.
+    #[must_use]
+    pub fn qualified_name(&self) -> String {
+        format!("{}::{}", self.module.path().display(), self.name)
+    }
+}
+
+/// The carrier accepted by one operation overload.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OperationInputType {
+    /// An ordinary immutable Flash value.
+    Value(ValueType),
+    /// A lazy, single-consumer stream whose items have the declared type.
+    ValueStream(ValueType),
+}
+
+/// One member of a descriptor's validated overload set.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationOverload {
+    input: OperationInputType,
+    result: ValueType,
+}
+
+impl OperationOverload {
+    fn new(input: OperationInputType, result: ValueType) -> Self {
+        Self { input, result }
+    }
+
+    /// The first-parameter carrier and type accepted by this overload.
+    #[must_use]
+    pub const fn input(&self) -> &OperationInputType {
+        &self.input
+    }
+
+    /// The value type produced by this overload.
+    #[must_use]
+    pub const fn result(&self) -> &ValueType {
+        &self.result
+    }
+}
+
+/// A compiled standard operation's complete host-free semantic descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationDescriptor {
+    id: OperationId,
+    type_parameters: Vec<String>,
+    overloads: Vec<OperationOverload>,
+    documentation: String,
+    implementation: StandardOperation,
+}
+
+impl OperationDescriptor {
+    /// The stable operation identity shared by analysis, help, and execution.
+    #[must_use]
+    pub const fn id(&self) -> &OperationId {
+        &self.id
+    }
+
+    /// Invariant generic parameters used by the overload set.
+    #[must_use]
+    pub fn type_parameters(&self) -> &[String] {
+        &self.type_parameters
+    }
+
+    /// The complete, construction-validated overload set.
+    #[must_use]
+    pub fn overloads(&self) -> &[OperationOverload] {
+        &self.overloads
+    }
+
+    /// Stable help text shipped with the compiled descriptor.
+    #[must_use]
+    pub fn documentation(&self) -> &str {
+        &self.documentation
+    }
+
+    /// Validates the descriptor as one indivisible overload set.
+    pub fn validate(&self) -> Result<(), OperationDescriptorError> {
+        if self.overloads.is_empty() {
+            return Err(OperationDescriptorError::EmptyOverloadSet);
+        }
+        let mut parameters = std::collections::BTreeSet::new();
+        for parameter in &self.type_parameters {
+            if !parameters.insert(parameter.as_str()) {
+                return Err(OperationDescriptorError::DuplicateTypeParameter {
+                    name: parameter.clone(),
+                });
+            }
+        }
+        for overload in &self.overloads {
+            let input = match &overload.input {
+                OperationInputType::Value(input) | OperationInputType::ValueStream(input) => input,
+            };
+            validate_type_parameters(input, &parameters)?;
+            validate_type_parameters(&overload.result, &parameters)?;
+        }
+        for (index, left) in self.overloads.iter().enumerate() {
+            for right in &self.overloads[index + 1..] {
+                let overlap = match (&left.input, &right.input) {
+                    (OperationInputType::Value(left), OperationInputType::Value(right))
+                    | (
+                        OperationInputType::ValueStream(left),
+                        OperationInputType::ValueStream(right),
+                    ) => types_overlap(left, right),
+                    _ => false,
+                };
+                if overlap {
+                    return Err(OperationDescriptorError::OverlappingOverloads);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Calls the value overload without mapping or carrier conversion.
+    pub fn execute_value(&self, value: Value) -> Result<Value, OperationError> {
+        self.execute_value_with_types(value, &[])
+    }
+
+    /// Calls the value overload with an exact explicit generic instantiation.
+    pub fn execute_value_with_types(
+        &self,
+        value: Value,
+        type_arguments: &[ValueType],
+    ) -> Result<Value, OperationError> {
+        if !type_arguments.is_empty() && type_arguments.len() != self.type_parameters.len() {
+            return Err(OperationError::GenericArity {
+                operation: self.id.qualified_name(),
+                expected: self.type_parameters.len(),
+                actual: type_arguments.len(),
+            });
+        }
+        let substitutions = self
+            .type_parameters
+            .iter()
+            .zip(type_arguments)
+            .map(|(parameter, argument)| (parameter.clone(), argument.clone()))
+            .collect();
+        let Some(overload) = self.overloads.iter().find(|overload| {
+            matches!(&overload.input, OperationInputType::Value(expected)
+                if substitute_type(expected, &substitutions).accepts(&value))
+        }) else {
+            return Err(OperationError::NoMatchingOverload {
+                operation: self.id.qualified_name(),
+                input: format!("Value({})", value.family_name()),
+            });
+        };
+        debug_assert_eq!(overload.result, ValueType::Int);
+        match self.implementation {
+            StandardOperation::Length => match value {
+                Value::List(values) => i64::try_from(values.len()).map(Value::Int).map_err(|_| {
+                    OperationError::LengthOverflow {
+                        operation: self.id.qualified_name(),
+                    }
+                }),
+                _ => unreachable!("the selected value overload accepts only lists"),
+            },
+        }
+    }
+
+    /// Calls the stream overload under an exact item budget.
+    #[must_use]
+    pub fn execute_value_stream(
+        &self,
+        stream: ValueStream,
+        item_limit: usize,
+    ) -> OperationStreamOutcome {
+        if !self
+            .overloads
+            .iter()
+            .any(|overload| matches!(overload.input, OperationInputType::ValueStream(_)))
+        {
+            return OperationStreamOutcome::Rejected(OperationError::NoMatchingOverload {
+                operation: self.id.qualified_name(),
+                input: "ValueStream".to_owned(),
+            });
+        }
+        match self.implementation {
+            StandardOperation::Length => match structured::length(stream, item_limit) {
+                DrainOutcome::Done(value) => OperationStreamOutcome::Value(value),
+                DrainOutcome::LimitExceeded { limit } => {
+                    OperationStreamOutcome::LimitExceeded { limit }
+                }
+                DrainOutcome::Failed(error) => OperationStreamOutcome::Failed(error),
+                DrainOutcome::Cancelled(reason) => OperationStreamOutcome::Cancelled(reason),
+            },
+        }
+    }
+}
+
+/// Every terminal state from a bounded stream operation remains distinct.
+#[derive(Debug)]
+pub enum OperationStreamOutcome {
+    Value(Value),
+    LimitExceeded { limit: usize },
+    Failed(RuntimeError),
+    Cancelled(crate::eval::CancelReason),
+    Rejected(OperationError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StandardOperation {
+    Length,
+}
+
+/// A compiled operation descriptor that cannot enter the standard manifest.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OperationDescriptorError {
+    EmptyOverloadSet,
+    DuplicateTypeParameter { name: String },
+    UnknownTypeParameter { name: String },
+    OverlappingOverloads,
+}
+
+impl fmt::Display for OperationDescriptorError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyOverloadSet => formatter.write_str("operation has no overloads"),
+            Self::DuplicateTypeParameter { name } => {
+                write!(formatter, "operation repeats type parameter `{name}`")
+            }
+            Self::UnknownTypeParameter { name } => {
+                write!(
+                    formatter,
+                    "operation references undeclared type parameter `{name}`"
+                )
+            }
+            Self::OverlappingOverloads => {
+                formatter.write_str("operation has overlapping unifiable overloads")
+            }
+        }
+    }
+}
+
+impl Error for OperationDescriptorError {}
+
+fn validate_type_parameters(
+    value_type: &ValueType,
+    declared: &std::collections::BTreeSet<&str>,
+) -> Result<(), OperationDescriptorError> {
+    match value_type {
+        ValueType::TypeParameter(name) if !declared.contains(name.as_str()) => {
+            Err(OperationDescriptorError::UnknownTypeParameter { name: name.clone() })
+        }
+        ValueType::List(element) => validate_type_parameters(element, declared),
+        ValueType::Nominal { arguments, .. } => {
+            for argument in arguments {
+                validate_type_parameters(argument, declared)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn types_overlap(left: &ValueType, right: &ValueType) -> bool {
+    match (left, right) {
+        (ValueType::Any | ValueType::TypeParameter(_), _)
+        | (_, ValueType::Any | ValueType::TypeParameter(_)) => true,
+        (ValueType::List(left), ValueType::List(right)) => types_overlap(left, right),
+        (
+            ValueType::Nominal {
+                id: left_id,
+                arguments: left_arguments,
+            },
+            ValueType::Nominal {
+                id: right_id,
+                arguments: right_arguments,
+            },
+        ) => {
+            left_id == right_id
+                && left_arguments.len() == right_arguments.len()
+                && left_arguments
+                    .iter()
+                    .zip(right_arguments)
+                    .all(|(left, right)| types_overlap(left, right))
+        }
+        _ => left == right,
+    }
+}
+
+/// Resolves one exported operation from the closed compiled-standard manifest.
+#[must_use]
+pub fn standard_operation(module: &ModuleId, name: &str) -> Option<OperationDescriptor> {
+    let ModuleOrigin::Standard {
+        namespace,
+        module: standard,
+    } = module.origin()
+    else {
+        return None;
+    };
+    if namespace != "std" || standard != "value" || name != "length" {
+        return None;
+    }
+    let descriptor = OperationDescriptor {
+        id: OperationId::new(module.clone(), "length"),
+        type_parameters: vec!["T".to_owned()],
+        overloads: vec![
+            OperationOverload::new(
+                OperationInputType::Value(ValueType::List(Box::new(ValueType::TypeParameter(
+                    "T".to_owned(),
+                )))),
+                ValueType::Int,
+            ),
+            OperationOverload::new(
+                OperationInputType::ValueStream(ValueType::TypeParameter("T".to_owned())),
+                ValueType::Int,
+            ),
+        ],
+        documentation: "Return the number of items in a list or bounded value stream.".to_owned(),
+        implementation: StandardOperation::Length,
+    };
+    descriptor
+        .validate()
+        .expect("the compiled std::value::length descriptor must be valid");
+    Some(descriptor)
+}
 
 /// A pure-operation failure, reported without a source span.
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +388,16 @@ pub enum OperationError {
     MissingField { name: String },
     /// A finite float truncation that falls outside the `Int` range.
     ConversionOutOfRange { value: f64 },
+    /// No declared overload accepts the exact input carrier and value family.
+    NoMatchingOverload { operation: String, input: String },
+    /// A collection length cannot be represented by Flash's signed `Int`.
+    LengthOverflow { operation: String },
+    /// Explicit operation type arguments do not match the descriptor arity.
+    GenericArity {
+        operation: String,
+        expected: usize,
+        actual: usize,
+    },
 }
 
 impl fmt::Display for OperationError {
@@ -77,6 +435,23 @@ impl fmt::Display for OperationError {
             Self::ConversionOutOfRange { value } => {
                 write!(formatter, "{value} is outside the integer range")
             }
+            Self::NoMatchingOverload { operation, input } => {
+                write!(
+                    formatter,
+                    "operation `{operation}` does not accept carrier {input}"
+                )
+            }
+            Self::LengthOverflow { operation } => {
+                write!(formatter, "operation `{operation}` result exceeds Int")
+            }
+            Self::GenericArity {
+                operation,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "operation `{operation}` expects {expected} type arguments, found {actual}"
+            ),
         }
     }
 }

@@ -9,20 +9,23 @@ use crate::command::{
 };
 pub use crate::documentation::{CommandDocumentation, Documentation};
 use crate::module::{FunctionSignature, ModuleId, ModuleProgram, NominalType};
+use crate::operation::OperationDescriptor;
 
-/// The semantic class returned by qualified v2 module/type help.
+/// The semantic class returned by qualified v2 module/type/operation help.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ModuleHelpKind {
     Module,
     NominalType,
+    Operation,
 }
 
-/// One immutable v2 module/type help result backed by canonical program data.
+/// One immutable v2 module/type/operation help result backed by canonical data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModuleHelpEntry {
     kind: ModuleHelpKind,
     module: Option<ModuleId>,
     nominal_type: Option<NominalType>,
+    operation: Option<OperationDescriptor>,
 }
 
 impl ModuleHelpEntry {
@@ -39,6 +42,12 @@ impl ModuleHelpEntry {
     #[must_use]
     pub const fn nominal_type(&self) -> Option<&NominalType> {
         self.nominal_type.as_ref()
+    }
+
+    /// The compiled operation descriptor, when this is operation help.
+    #[must_use]
+    pub const fn operation(&self) -> Option<&OperationDescriptor> {
+        self.operation.as_ref()
     }
 }
 
@@ -69,6 +78,7 @@ impl ModuleHelpCatalog {
                     kind: ModuleHelpKind::Module,
                     module: Some(target.clone()),
                     nominal_type: None,
+                    operation: None,
                 });
             }
             let nominal = self.program.types().nominal(module, segments[0])?.clone();
@@ -76,6 +86,15 @@ impl ModuleHelpCatalog {
                 kind: ModuleHelpKind::NominalType,
                 module: None,
                 nominal_type: Some(nominal),
+                operation: None,
+            });
+        }
+        if let Some(operation) = self.program.resolve_operation(module, &segments) {
+            return Some(ModuleHelpEntry {
+                kind: ModuleHelpKind::Operation,
+                module: None,
+                nominal_type: None,
+                operation: Some(operation),
             });
         }
         let nominal = self
@@ -86,6 +105,7 @@ impl ModuleHelpCatalog {
             kind: ModuleHelpKind::NominalType,
             module: None,
             nominal_type: Some(nominal),
+            operation: None,
         })
     }
 }

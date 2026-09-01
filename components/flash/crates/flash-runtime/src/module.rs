@@ -38,6 +38,7 @@ use crate::command::{
 };
 use crate::documentation::Documentation;
 use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
+use crate::operation::{OperationDescriptor, OperationInputType, standard_operation};
 
 /// Host-free cooperative cancellation for static source analysis.
 #[derive(Clone)]
@@ -1759,6 +1760,20 @@ impl RuntimeBindingTypes {
         Some((self.qualified_nominal(source, nominal)?, *constructor))
     }
 
+    pub(crate) fn qualified_operation(
+        &self,
+        source: SourceId,
+        segments: &[&str],
+    ) -> Option<OperationDescriptor> {
+        let (name, modules) = segments.split_last()?;
+        if modules.is_empty() {
+            return None;
+        }
+        let current = self.modules_by_source.get(&source)?;
+        let owner = self.aliases.resolve(current, modules)?;
+        standard_operation(owner, name)
+    }
+
     pub(crate) fn annotation_type(&self, source: SourceId, span: Span) -> Option<&ValueType> {
         self.annotations_by_source
             .get(&source)?
@@ -3334,6 +3349,11 @@ impl<'a> SignatureValidator<'a> {
         }
         for and_chain in chain.or_terms() {
             for pipeline in and_chain.and_terms() {
+                if pipeline.stages().len() > 1
+                    && self.pipeline_value_with_expected(pipeline, None)?.is_some()
+                {
+                    continue;
+                }
                 for stage in pipeline.stages() {
                     match stage.kind() {
                         StageKind::Expression(expression) => {
@@ -3372,16 +3392,75 @@ impl<'a> SignatureValidator<'a> {
         if chain.or_terms().len() != 1 || chain.or_terms()[0].and_terms().len() != 1 {
             return Ok(None);
         }
-        let pipeline = &chain.or_terms()[0].and_terms()[0];
-        if pipeline.stages().len() != 1 {
-            return Ok(None);
-        }
-        let StageKind::Expression(expression) = pipeline.stages()[0].kind() else {
+        self.pipeline_value_with_expected(&chain.or_terms()[0].and_terms()[0], expected)
+    }
+
+    fn pipeline_value_with_expected(
+        &self,
+        pipeline: &Pipeline,
+        expected: Option<&ValueType>,
+    ) -> Result<Option<(Span, ValueType)>, Box<ModuleTypeError>> {
+        let Some(first) = pipeline.stages().first() else {
             return Ok(None);
         };
-        Ok(self
-            .expression_with_expected(expression, expected)?
-            .map(|value_type| (expression.span(), value_type)))
+        let StageKind::Expression(expression) = first.kind() else {
+            return Ok(None);
+        };
+        let first_expected = (pipeline.stages().len() == 1).then_some(expected).flatten();
+        let Some(mut value_type) = self.expression_with_expected(expression, first_expected)?
+        else {
+            return Ok(None);
+        };
+        let mut result_span = expression.span();
+        for stage in &pipeline.stages()[1..] {
+            let StageKind::Expression(stage_expression) = stage.kind() else {
+                return Ok(None);
+            };
+            let ExpressionKind::Qualified(name) = stage_expression.kind() else {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::InvalidOperationStage {
+                        module: self.entry.module().clone(),
+                        stage_span: stage.span(),
+                    });
+                return Ok(Some((stage.span(), ValueType::Any)));
+            };
+            let Some(operation) = self.operation_for_qualified(name) else {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::InvalidOperationStage {
+                        module: self.entry.module().clone(),
+                        stage_span: stage.span(),
+                    });
+                return Ok(Some((stage.span(), ValueType::Any)));
+            };
+            let (input, result) = operation
+                .overloads()
+                .iter()
+                .find_map(|overload| match overload.input() {
+                    OperationInputType::Value(input) => Some((input, overload.result())),
+                    OperationInputType::ValueStream(_) => None,
+                })
+                .expect("a pipeline-eligible standard operation has a value overload");
+            let mut substitutions = BTreeMap::new();
+            unify_type(input, &value_type, &mut substitutions);
+            let resolved_input = substitute_type(input, &substitutions);
+            if !resolved_input.accepts_type(&value_type) {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::OperationArgumentMismatch {
+                        module: self.entry.module().clone(),
+                        name: operation.id().qualified_name(),
+                        argument_span: stage.span(),
+                        expected: resolved_input,
+                        actual: value_type,
+                    });
+                return Ok(Some((stage.span(), ValueType::Any)));
+            }
+            value_type = substitute_type(result, &substitutions);
+            result_span = stage.span();
+        }
+        Ok(Some((result_span, value_type)))
     }
 
     fn expression(
@@ -4172,6 +4251,26 @@ impl<'a> SignatureValidator<'a> {
         {
             return Ok(Some(value_type));
         }
+        if let ExpressionKind::Qualified(name) = call.callee.kind()
+            && let Some(operation) = self.operation_for_qualified(name)
+        {
+            return self.operation_call_type(&operation, call_span, call);
+        }
+        if let ExpressionKind::Qualified(name) = call.callee.kind()
+            && let Some(unknown) = self.unknown_standard_operation(name)
+        {
+            for argument in &call.arguments {
+                self.expression(argument)?;
+            }
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::UnknownOperation {
+                    module: self.entry.module().clone(),
+                    name: unknown,
+                    span: name.span,
+                });
+            return Ok(Some(ValueType::Any));
+        }
 
         let signature = if let ExpressionKind::Qualified(name) = call.callee.kind() {
             self.function_for_qualified(name)
@@ -4576,6 +4675,135 @@ impl<'a> SignatureValidator<'a> {
             .functions(owner)
             .iter()
             .find(|signature| signature.name() == function)
+    }
+
+    fn operation_for_qualified(
+        &self,
+        name: &flash_syntax::QualifiedName,
+    ) -> Option<OperationDescriptor> {
+        let (operation, modules) = name.segments.split_last()?;
+        if modules.is_empty() {
+            return None;
+        }
+        let modules = modules
+            .iter()
+            .map(|segment| self.text(segment.span()))
+            .collect::<Vec<_>>();
+        let owner = self.aliases.resolve(self.entry.module(), &modules)?;
+        standard_operation(owner, self.text(operation.span()))
+    }
+
+    fn unknown_standard_operation(&self, name: &flash_syntax::QualifiedName) -> Option<String> {
+        let (operation, modules) = name.segments.split_last()?;
+        if modules.is_empty() {
+            return None;
+        }
+        let modules = modules
+            .iter()
+            .map(|segment| self.text(segment.span()))
+            .collect::<Vec<_>>();
+        let owner = self.aliases.resolve(self.entry.module(), &modules)?;
+        matches!(owner.origin(), ModuleOrigin::Standard { .. })
+            .then(|| self.text(operation.span()).to_owned())
+    }
+
+    fn operation_call_type(
+        &self,
+        operation: &OperationDescriptor,
+        call_span: Span,
+        call: &flash_syntax::CallExpression,
+    ) -> Result<Option<ValueType>, Box<ModuleTypeError>> {
+        let overload = operation
+            .overloads()
+            .iter()
+            .find_map(|overload| match overload.input() {
+                OperationInputType::Value(input) => Some((input, overload.result())),
+                OperationInputType::ValueStream(_) => None,
+            })
+            .expect("a callable standard operation has a value overload");
+        if call.arguments.len() != 1 {
+            for argument in &call.arguments {
+                self.expression(argument)?;
+            }
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::OperationCallArity {
+                    module: self.entry.module().clone(),
+                    name: operation.id().qualified_name(),
+                    call_span,
+                    expected: 1,
+                    actual: call.arguments.len(),
+                });
+            return Ok(Some(ValueType::Any));
+        }
+        if call.type_arguments.len() > operation.type_parameters().len() {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::OperationCallArity {
+                    module: self.entry.module().clone(),
+                    name: operation.id().qualified_name(),
+                    call_span,
+                    expected: operation.type_parameters().len(),
+                    actual: call.type_arguments.len(),
+                });
+            return Ok(Some(ValueType::Any));
+        }
+        let mut substitutions = BTreeMap::new();
+        for (parameter, argument) in operation.type_parameters().iter().zip(&call.type_arguments) {
+            let actual = self
+                .types
+                .annotation(self.entry.module(), argument.span)
+                .map_or(ValueType::Any, |annotation| annotation.value_type().clone());
+            substitutions.insert(parameter.clone(), actual);
+        }
+        let expected = substitute_type(overload.0, &substitutions);
+        let actual = self.expression_with_expected(&call.arguments[0], Some(&expected))?;
+        if call.type_arguments.is_empty()
+            && let Some(actual) = actual.as_ref()
+            && !unify_type(overload.0, actual, &mut substitutions)
+        {
+            self.errors
+                .borrow_mut()
+                .push(ModuleTypeError::OperationArgumentMismatch {
+                    module: self.entry.module().clone(),
+                    name: operation.id().qualified_name(),
+                    argument_span: call.arguments[0].span(),
+                    expected: overload.0.clone(),
+                    actual: actual.clone(),
+                });
+            return Ok(Some(ValueType::Any));
+        }
+        for parameter in operation.type_parameters() {
+            if !substitutions.contains_key(parameter) {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::AmbiguousOperationGeneric {
+                        module: self.entry.module().clone(),
+                        name: operation.id().qualified_name(),
+                        parameter: parameter.clone(),
+                        call_span,
+                    });
+                return Ok(Some(ValueType::Any));
+            }
+        }
+        if let Some(actual) = actual
+            && actual != ValueType::Any
+        {
+            let expected = substitute_type(overload.0, &substitutions);
+            if !expected.accepts_type(&actual) {
+                self.errors
+                    .borrow_mut()
+                    .push(ModuleTypeError::OperationArgumentMismatch {
+                        module: self.entry.module().clone(),
+                        name: operation.id().qualified_name(),
+                        argument_span: call.arguments[0].span(),
+                        expected,
+                        actual,
+                    });
+                return Ok(Some(ValueType::Any));
+            }
+        }
+        Ok(Some(substitute_type(overload.1, &substitutions)))
     }
 
     fn nominal_for_qualified_prefix(
@@ -5693,11 +5921,13 @@ impl ModuleEffectRegistry {
     fn analyze(
         graph: &ModuleGraph,
         sources: &ModuleSourceRegistry,
+        aliases: &ModuleAliasRegistry,
         names: &ModuleNameRegistry,
         commands: &CommandRegistry,
         control: &AnalysisControl,
     ) -> Self {
         let mut direct = BTreeMap::new();
+        let semantics = StaticEffectSemantics { aliases, names };
         for entry in sources.entries() {
             if control.is_cancelled() {
                 return Self::default();
@@ -5709,7 +5939,7 @@ impl ModuleEffectRegistry {
                     entry.source(),
                     entry.script(),
                     sources,
-                    names,
+                    &semantics,
                     commands,
                     control,
                 ),
@@ -5765,11 +5995,16 @@ impl ModuleEffectRegistry {
     }
 }
 
+struct StaticEffectSemantics<'a> {
+    aliases: &'a ModuleAliasRegistry,
+    names: &'a ModuleNameRegistry,
+}
+
 struct StaticEffectAnalyzer<'a> {
     module: ModuleId,
     source: SourceFile,
     sources: &'a ModuleSourceRegistry,
-    names: &'a ModuleNameRegistry,
+    semantics: &'a StaticEffectSemantics<'a>,
     commands: &'a CommandRegistry,
     summary: ModuleEffectSummary,
     active_functions: BTreeSet<(ModuleId, usize)>,
@@ -5782,7 +6017,7 @@ impl<'a> StaticEffectAnalyzer<'a> {
         source: &'a SourceFile,
         script: &'a Script,
         sources: &'a ModuleSourceRegistry,
-        names: &'a ModuleNameRegistry,
+        semantics: &'a StaticEffectSemantics<'a>,
         commands: &'a CommandRegistry,
         control: &'a AnalysisControl,
     ) -> ModuleEffectSummary {
@@ -5790,7 +6025,7 @@ impl<'a> StaticEffectAnalyzer<'a> {
             module: module.clone(),
             source: source.clone(),
             sources,
-            names,
+            semantics,
             commands,
             summary: ModuleEffectSummary::default(),
             active_functions: BTreeSet::new(),
@@ -5903,6 +6138,15 @@ impl<'a> StaticEffectAnalyzer<'a> {
         if self.control.is_cancelled() {
             return;
         }
+        if self.pure_operation_pipeline(pipeline) {
+            for stage in pipeline.stages() {
+                let StageKind::Expression(expression) = stage.kind() else {
+                    unreachable!("a pure operation pipeline contains only expressions")
+                };
+                self.expression(expression);
+            }
+            return;
+        }
         if !self.pipeline_is_standalone_help(pipeline) {
             self.summary.push(ModuleEffect::Status, pipeline.span());
         }
@@ -5918,6 +6162,47 @@ impl<'a> StaticEffectAnalyzer<'a> {
                 StageKind::Command(command) => self.command(command, index == last),
             }
         }
+    }
+
+    fn pure_operation_pipeline(&self, pipeline: &Pipeline) -> bool {
+        if self.module.language() != LanguageMajor::V2 || pipeline.stages().len() < 2 {
+            return false;
+        }
+        matches!(pipeline.stages()[0].kind(), StageKind::Expression(_))
+            && pipeline.stages()[1..].iter().all(|stage| {
+                let StageKind::Expression(expression) = stage.kind() else {
+                    return false;
+                };
+                let ExpressionKind::Qualified(name) = expression.kind() else {
+                    return false;
+                };
+                self.qualified_operation(name).is_some()
+            })
+    }
+
+    fn qualified_operation(
+        &self,
+        name: &flash_syntax::QualifiedName,
+    ) -> Option<OperationDescriptor> {
+        let (operation, modules) = name.segments.split_last()?;
+        if modules.is_empty() {
+            return None;
+        }
+        let modules = modules
+            .iter()
+            .map(|segment| {
+                self.source
+                    .slice(segment.span())
+                    .expect("qualified operation spans belong to their source")
+            })
+            .collect::<Vec<_>>();
+        let owner = self.semantics.aliases.resolve(&self.module, &modules)?;
+        standard_operation(
+            owner,
+            self.source
+                .slice(operation.span())
+                .expect("operation spans belong to their source"),
+        )
     }
 
     fn pipeline_is_standalone_help(&self, pipeline: &Pipeline) -> bool {
@@ -6053,6 +6338,7 @@ impl<'a> StaticEffectAnalyzer<'a> {
             ExpressionKind::Literal(literal) => self.literal(literal),
             ExpressionKind::Variable(_) => {
                 if self
+                    .semantics
                     .names
                     .reference(&self.module, expression.span())
                     .is_some_and(|reference| {
@@ -6107,7 +6393,12 @@ impl<'a> StaticEffectAnalyzer<'a> {
         if self.control.is_cancelled() {
             return;
         }
-        let Some(reference) = self.names.reference(&self.module, callee.span()) else {
+        let Some(reference) = self.semantics.names.reference(&self.module, callee.span()) else {
+            if let ExpressionKind::Qualified(name) = callee.kind()
+                && self.qualified_operation(name).is_some()
+            {
+                return;
+            }
             if let ExpressionKind::Symbol(identifier) = callee.kind()
                 && let Some(intrinsic) = self
                     .source
@@ -6403,7 +6694,12 @@ impl<'a> StaticPipelineAnalyzer<'a> {
         for fault in analyze_pipeline_carriers(&contracts, &operators) {
             self.errors.push(self.carrier_diagnostic(pipeline, fault));
         }
-        if pipeline.stages().len() > 1 {
+        let pure_v2_expression_pipeline = self.module.language() == LanguageMajor::V2
+            && pipeline
+                .stages()
+                .iter()
+                .all(|stage| matches!(stage.kind(), StageKind::Expression(_)));
+        if pipeline.stages().len() > 1 && !pure_v2_expression_pipeline {
             for stage in pipeline.stages() {
                 if matches!(stage.kind(), StageKind::Expression(_)) {
                     self.errors.push(ModulePipelineError {
@@ -7131,6 +7427,22 @@ impl ModuleProgram {
         self.types.nominal(owner, name)
     }
 
+    /// Resolves a qualified compiled operation through local aliases and
+    /// explicit alias re-exports.
+    #[must_use]
+    pub fn resolve_operation(
+        &self,
+        module: &ModuleId,
+        qualified: &[&str],
+    ) -> Option<OperationDescriptor> {
+        let (name, modules) = qualified.split_last()?;
+        if modules.is_empty() {
+            return None;
+        }
+        let owner = self.aliases.resolve(module, modules)?;
+        standard_operation(owner, name)
+    }
+
     pub(crate) fn runtime_binding_types(&self) -> RuntimeBindingTypes {
         let mut by_source = BTreeMap::new();
         let mut functions_by_source = BTreeMap::new();
@@ -7470,8 +7782,14 @@ impl<'a> ModuleProgramLoader<'a> {
             }));
         }
         let effect_commands = commands.cloned().unwrap_or_else(standard_registry);
-        let effects =
-            ModuleEffectRegistry::analyze(&graph, &sources, &names, &effect_commands, control);
+        let effects = ModuleEffectRegistry::analyze(
+            &graph,
+            &sources,
+            &aliases,
+            &names,
+            &effect_commands,
+            control,
+        );
         if control.is_cancelled() {
             return ModuleAnalysisOutcome::Cancelled;
         }
@@ -8093,6 +8411,13 @@ pub enum ModuleTypeError {
         expected: usize,
         actual: usize,
     },
+    OperationCallArity {
+        module: ModuleId,
+        name: String,
+        call_span: Span,
+        expected: usize,
+        actual: usize,
+    },
     ArgumentMismatch {
         module: ModuleId,
         name: String,
@@ -8129,6 +8454,28 @@ pub enum ModuleTypeError {
         argument_span: Span,
         expected: &'static str,
         actual: ValueType,
+    },
+    OperationArgumentMismatch {
+        module: ModuleId,
+        name: String,
+        argument_span: Span,
+        expected: ValueType,
+        actual: ValueType,
+    },
+    InvalidOperationStage {
+        module: ModuleId,
+        stage_span: Span,
+    },
+    UnknownOperation {
+        module: ModuleId,
+        name: String,
+        span: Span,
+    },
+    AmbiguousOperationGeneric {
+        module: ModuleId,
+        name: String,
+        parameter: String,
+        call_span: Span,
     },
     ResultMismatch {
         module: ModuleId,
@@ -8219,11 +8566,16 @@ impl ModuleTypeError {
             | Self::InvalidTypeArity { module, .. }
             | Self::CallArity { module, .. }
             | Self::IntrinsicCallArity { module, .. }
+            | Self::OperationCallArity { module, .. }
             | Self::ArgumentMismatch { module, .. }
             | Self::DuplicateNominalField { module, .. }
             | Self::UnknownNominalField { module, .. }
             | Self::MissingNominalField { module, .. }
             | Self::IntrinsicArgumentMismatch { module, .. }
+            | Self::OperationArgumentMismatch { module, .. }
+            | Self::InvalidOperationStage { module, .. }
+            | Self::UnknownOperation { module, .. }
+            | Self::AmbiguousOperationGeneric { module, .. }
             | Self::ResultMismatch { module, .. }
             | Self::ByteCaptureInWord { module, .. }
             | Self::ThrowMismatch { module, .. }
@@ -8242,11 +8594,15 @@ impl ModuleTypeError {
     const fn primary_span(&self) -> Span {
         match self {
             Self::UnknownType { span, .. } | Self::InvalidTypeArity { span, .. } => *span,
-            Self::CallArity { call_span, .. } | Self::IntrinsicCallArity { call_span, .. } => {
-                *call_span
-            }
+            Self::CallArity { call_span, .. }
+            | Self::IntrinsicCallArity { call_span, .. }
+            | Self::OperationCallArity { call_span, .. } => *call_span,
             Self::ArgumentMismatch { argument_span, .. }
-            | Self::IntrinsicArgumentMismatch { argument_span, .. } => *argument_span,
+            | Self::IntrinsicArgumentMismatch { argument_span, .. }
+            | Self::OperationArgumentMismatch { argument_span, .. } => *argument_span,
+            Self::InvalidOperationStage { stage_span, .. } => *stage_span,
+            Self::UnknownOperation { span, .. } => *span,
+            Self::AmbiguousOperationGeneric { call_span, .. } => *call_span,
             Self::DuplicateNominalField { duplicate_span, .. } => *duplicate_span,
             Self::UnknownNominalField { field_span, .. } => *field_span,
             Self::MissingNominalField {
@@ -8305,6 +8661,15 @@ impl ModuleTypeError {
                 *call_span,
                 format!("expected {expected} arguments, found {actual}"),
             ),
+            Self::OperationCallArity {
+                call_span,
+                expected,
+                actual,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG003", self.to_string()).with_primary(
+                *call_span,
+                format!("expected {expected} arguments, found {actual}"),
+            ),
             Self::ArgumentMismatch {
                 argument_span,
                 parameter_span,
@@ -8352,6 +8717,35 @@ impl ModuleTypeError {
             } => Diagnostic::new(Severity::Error, "SIG004", self.to_string()).with_primary(
                 *argument_span,
                 format!("this argument is `{actual}`, expected `{expected}`"),
+            ),
+            Self::OperationArgumentMismatch {
+                argument_span,
+                expected,
+                actual,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG004", self.to_string()).with_primary(
+                *argument_span,
+                format!("this argument is `{actual}`, expected `{expected}`"),
+            ),
+            Self::InvalidOperationStage { stage_span, .. } => {
+                Diagnostic::new(Severity::Error, "OPR001", self.to_string()).with_primary(
+                    *stage_span,
+                    "a pure value pipeline stage must resolve to a compiled operation",
+                )
+            }
+            Self::UnknownOperation { span, name, .. } => {
+                Diagnostic::new(Severity::Error, "OPR002", self.to_string()).with_primary(
+                    *span,
+                    format!("`{name}` is not exported by this compiled module"),
+                )
+            }
+            Self::AmbiguousOperationGeneric {
+                call_span,
+                parameter,
+                ..
+            } => Diagnostic::new(Severity::Error, "SIG010", self.to_string()).with_primary(
+                *call_span,
+                format!("type parameter `{parameter}` is not uniquely inferred"),
             ),
             Self::ResultMismatch {
                 result_span,
@@ -8513,6 +8907,17 @@ impl fmt::Display for ModuleTypeError {
                 "module `{}` calls intrinsic `{name}` with {actual} arguments; expected {expected}",
                 module.path().display()
             ),
+            Self::OperationCallArity {
+                module,
+                name,
+                expected,
+                actual,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` calls operation `{name}` with {actual} arguments; expected {expected}",
+                module.path().display()
+            ),
             Self::ArgumentMismatch {
                 module,
                 name,
@@ -8564,6 +8969,37 @@ impl fmt::Display for ModuleTypeError {
             } => write!(
                 formatter,
                 "module `{}` passes `{actual}` to intrinsic `{name}`; expected `{expected}`",
+                module.path().display()
+            ),
+            Self::OperationArgumentMismatch {
+                module,
+                name,
+                expected,
+                actual,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` passes `{actual}` to operation `{name}`; expected `{expected}`",
+                module.path().display()
+            ),
+            Self::InvalidOperationStage { module, .. } => write!(
+                formatter,
+                "module `{}` uses a non-operation in a pure value pipeline",
+                module.path().display()
+            ),
+            Self::UnknownOperation { module, name, .. } => write!(
+                formatter,
+                "module `{}` calls unknown compiled operation `{name}`",
+                module.path().display()
+            ),
+            Self::AmbiguousOperationGeneric {
+                module,
+                name,
+                parameter,
+                ..
+            } => write!(
+                formatter,
+                "module `{}` cannot infer operation `{name}` type parameter `{parameter}`",
                 module.path().display()
             ),
             Self::ResultMismatch {

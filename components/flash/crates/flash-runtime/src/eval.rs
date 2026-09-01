@@ -2847,6 +2847,47 @@ impl Evaluator<'_> {
         {
             return self.expression_with_expected(expression, scope, expected);
         }
+        if self.binding_types.language(self.source.id()) == Some(LanguageMajor::V2)
+            && pipeline
+                .stages()
+                .iter()
+                .all(|stage| matches!(stage.kind(), StageKind::Expression(_)))
+        {
+            let mut stages = pipeline.stages().iter();
+            let first = stages
+                .next()
+                .expect("a parsed pipeline contains at least one stage");
+            let StageKind::Expression(expression) = first.kind() else {
+                unreachable!("the pure pipeline predicate accepts only expressions")
+            };
+            let mut value = self.expression(expression, scope)?;
+            for stage in stages {
+                self.check_cancel(stage.span())?;
+                let StageKind::Expression(expression) = stage.kind() else {
+                    unreachable!("the pure pipeline predicate accepts only expressions")
+                };
+                let ExpressionKind::Qualified(name) = expression.kind() else {
+                    return Err(
+                        self.unsupported("non-operation value pipeline stage", stage.span())
+                    );
+                };
+                let segments = name
+                    .segments
+                    .iter()
+                    .map(|segment| self.text(segment.span()))
+                    .collect::<Vec<_>>();
+                let Some(operation) = self
+                    .binding_types
+                    .qualified_operation(self.source.id(), &segments)
+                else {
+                    return Err(self.unsupported("unknown value pipeline operation", stage.span()));
+                };
+                value = operation
+                    .execute_value(value)
+                    .map_err(|error| self.operation(error, stage.span()))?;
+            }
+            return Ok(value);
+        }
         if self.host.policy() == EvaluationPolicy::Startup {
             return Err(self.error(
                 RuntimeErrorKind::RestrictedStartup {
@@ -3679,6 +3720,54 @@ impl Evaluator<'_> {
             && let Some(value) = self.variant_value(name, call, scope, span, expected_result)?
         {
             return Ok(value);
+        }
+
+        if let ExpressionKind::Qualified(name) = call.callee.kind() {
+            let segments = name
+                .segments
+                .iter()
+                .map(|segment| self.text(segment.span()))
+                .collect::<Vec<_>>();
+            if let Some(operation) = self
+                .binding_types
+                .qualified_operation(self.source.id(), &segments)
+            {
+                if call.arguments.len() != 1 {
+                    return Err(self.error(
+                        RuntimeErrorKind::ArityMismatch {
+                            expected: 1,
+                            actual: call.arguments.len(),
+                        },
+                        span,
+                    ));
+                }
+                if call.type_arguments.len() > operation.type_parameters().len() {
+                    return Err(self.error(
+                        RuntimeErrorKind::GenericInstantiation {
+                            message: format!(
+                                "expected at most {} type arguments, found {}",
+                                operation.type_parameters().len(),
+                                call.type_arguments.len()
+                            ),
+                        },
+                        span,
+                    ));
+                }
+                let type_arguments = call
+                    .type_arguments
+                    .iter()
+                    .map(|argument| {
+                        self.binding_types
+                            .annotation_type(self.source.id(), argument.span)
+                            .cloned()
+                            .unwrap_or(ValueType::Any)
+                    })
+                    .collect::<Vec<_>>();
+                let argument = self.expression(&call.arguments[0], scope)?;
+                return operation
+                    .execute_value_with_types(argument, &type_arguments)
+                    .map_err(|error| self.operation(error, span));
+            }
         }
 
         if let ExpressionKind::Symbol(identifier) = call.callee.kind() {

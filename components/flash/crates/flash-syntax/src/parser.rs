@@ -2341,10 +2341,15 @@ impl<'source, 'control> Parser<'source, 'control> {
     fn starts_expression_stage(&self) -> bool {
         match self.current_kind() {
             Some(TokenKind::Identifier) => {
-                self.next_non_inline(self.position + 1)
-                    .is_some_and(|token| {
-                        token.kind() == TokenKind::Delimiter(Delimiter::LeftParenthesis)
-                    })
+                let next = self.next_non_inline(self.position + 1);
+                next.is_some_and(|token| {
+                    token.kind() == TokenKind::Delimiter(Delimiter::LeftParenthesis)
+                }) || (self.language == LanguageMajor::V2
+                    && next
+                        .is_some_and(|token| token.kind() == TokenKind::Operator(Operator::Colon))
+                    && self
+                        .next_non_inline(self.position + 2)
+                        .is_some_and(|token| token.kind() == TokenKind::Operator(Operator::Colon)))
             }
             Some(
                 TokenKind::Variable
