@@ -144,18 +144,72 @@ fn an_empty_script_is_silent_success() {
 }
 
 #[test]
-fn completed_program_codes_propagate_exactly_without_diagnostics() {
+fn v2_final_values_and_domain_results_are_silent_successes() {
+    let outcome_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/v2-foundation/language/outcomes/complete");
+
+    for fixture in ["reference.fsh", "domain-error.fsh", "option-none.fsh"] {
+        let output = run_script(
+            &outcome_root.join(fixture),
+            &outcome_root,
+            fixture_directory(),
+        );
+        assert!(output.status.success(), "{fixture}: {output:?}");
+        assert!(output.stdout.is_empty(), "{fixture} printed a final value");
+        assert!(
+            output.stderr.is_empty(),
+            "{fixture} reported a domain value"
+        );
+    }
+}
+
+#[test]
+fn v2_standard_outcome_diagnostics_render_from_the_compiled_descriptor() {
+    let outcome_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/v2-foundation/language/outcomes");
+    let output = run_script(
+        &outcome_root.join("invalid/result-generic-arity.fsh"),
+        &outcome_root,
+        fixture_directory(),
+    );
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("error[SIG009]"), "{stderr}");
+    assert!(stderr.contains("std::outcome"), "{stderr}");
+}
+
+#[test]
+fn v1_and_v2_completed_program_codes_propagate_exactly_without_diagnostics() {
     let temp = TempDir::new("completed-codes");
     let script = temp.path().join("status.fsh");
 
-    for code in [0_u8, 1, 2, 125, 126, 127, 128, 255] {
-        fs::write(&script, format!("^{} exit {code}\n", status_fixture()))
+    for (language, directive) in [("v1", ""), ("v2", "language 2\n\n")] {
+        for code in [0_u8, 1, 2, 125, 126, 127, 128, 255] {
+            fs::write(
+                &script,
+                format!("{directive}^{} exit {code}\n", status_fixture()),
+            )
             .expect("status script should be written");
-        let output = run_script(&script, temp.path(), fixture_directory());
+            let output = run_script(&script, temp.path(), fixture_directory());
 
-        assert_eq!(output.status.code(), Some(i32::from(code)), "{output:?}");
-        assert!(output.stdout.is_empty(), "code {code}: {output:?}");
-        assert!(output.stderr.is_empty(), "code {code}: {output:?}");
+            assert_eq!(
+                output.status.code(),
+                Some(i32::from(code)),
+                "{language}: {output:?}"
+            );
+            assert!(
+                output.stdout.is_empty(),
+                "{language} code {code}: {output:?}"
+            );
+            assert!(
+                output.stderr.is_empty(),
+                "{language} code {code}: {output:?}"
+            );
+        }
     }
 }
 

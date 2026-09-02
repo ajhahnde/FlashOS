@@ -7908,15 +7908,19 @@ impl<'a> ModuleProgramLoader<'a> {
         if control.is_cancelled() {
             return;
         }
-        let bytes = match self.source_loader.load(&module) {
-            Ok(bytes) => bytes,
-            Err(cause) => {
-                issues.push(ModuleAnalysisIssue::new(ModuleProgramError::SourceRead {
-                    module: module.clone(),
-                    imported_by: imported_by.map(Box::new),
-                    cause,
-                }));
-                return;
+        let bytes = if let Some(source) = standard_module_source(&module) {
+            source.as_bytes().to_vec()
+        } else {
+            match self.source_loader.load(&module) {
+                Ok(bytes) => bytes,
+                Err(cause) => {
+                    issues.push(ModuleAnalysisIssue::new(ModuleProgramError::SourceRead {
+                        module: module.clone(),
+                        imported_by: imported_by.map(Box::new),
+                        cause,
+                    }));
+                    return;
+                }
             }
         };
         if control.is_cancelled() {
@@ -8059,7 +8063,7 @@ impl<'a> ModuleProgramLoader<'a> {
                     module: standard,
                     span,
                 } => {
-                    if !is_standard_module(&namespace, &standard) {
+                    if !is_standard_module(&namespace, &standard, self.resolver.language()) {
                         issues.push(ModuleAnalysisIssue::new(ModuleProgramError::Aliases(
                             Box::new(ModuleAliasError::UnknownStandard {
                                 module: module.clone(),
@@ -8069,18 +8073,17 @@ impl<'a> ModuleProgramLoader<'a> {
                         )));
                         continue;
                     }
+                    let target =
+                        ModuleId::standard(&namespace, &standard, self.resolver.language());
+                    let recurse = standard_module_source(&target).is_some();
                     (
                         ModuleImport {
                             importer: module.clone(),
                             requested: PathBuf::from(format!("{namespace}::{standard}")),
-                            target: ModuleId::standard(
-                                &namespace,
-                                &standard,
-                                self.resolver.language(),
-                            ),
+                            target,
                             span,
                         },
-                        false,
+                        recurse,
                     )
                 }
             };
@@ -8104,8 +8107,36 @@ impl<'a> ModuleProgramLoader<'a> {
     }
 }
 
-fn is_standard_module(namespace: &str, module: &str) -> bool {
-    namespace == "std" && module == "value"
+const STANDARD_OUTCOME_MODULE: &str = r#"language 2
+
+export { Result, Option }
+
+enum Result[T, E] {
+    Ok(T),
+    Err(E),
+}
+
+enum Option[T] {
+    Some(T),
+    None,
+}
+"#;
+
+fn standard_module_source(module: &ModuleId) -> Option<&'static str> {
+    (module.language() == LanguageMajor::V2
+        && matches!(
+            module.origin(),
+            ModuleOrigin::Standard {
+                namespace,
+                module,
+            } if namespace == "std" && module == "outcome"
+        ))
+    .then_some(STANDARD_OUTCOME_MODULE)
+}
+
+fn is_standard_module(namespace: &str, module: &str, language: LanguageMajor) -> bool {
+    namespace == "std"
+        && (module == "value" || (module == "outcome" && language == LanguageMajor::V2))
 }
 
 fn parse_source_for_language(

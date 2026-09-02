@@ -375,6 +375,22 @@ impl Session {
         clock: &dyn Clock,
         output: &mut dyn Write,
     ) -> Result<SubmitOutcome, SubmitError> {
+        self.submit_with_value(name, text, probe, platform, clock, output)
+            .map(|(outcome, _)| outcome)
+    }
+
+    /// Evaluates one submission and retains its exact final language value for
+    /// non-interactive embedding boundaries.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn submit_with_value(
+        &mut self,
+        name: impl Into<String>,
+        text: impl Into<String>,
+        probe: &dyn ExecutableProbe,
+        platform: &dyn Platform,
+        clock: &dyn Clock,
+        output: &mut dyn Write,
+    ) -> Result<(SubmitOutcome, Value), SubmitError> {
         let source = Arc::new(SourceFile::new(SourceId::new(self.next_source), name, text));
         self.next_source = self.next_source.wrapping_add(1);
 
@@ -424,7 +440,7 @@ impl Session {
         platform: &dyn Platform,
         clock: &dyn Clock,
         output: &mut dyn Write,
-    ) -> Result<(SubmitOutcome, ScopeStack), SubmitError> {
+    ) -> Result<(SubmitOutcome, ScopeStack, Value), SubmitError> {
         std::mem::swap(&mut self.scope, &mut scope);
         let outcome = self.submit_parsed(
             Arc::new(source.clone()),
@@ -437,7 +453,7 @@ impl Session {
             output,
         );
         std::mem::swap(&mut self.scope, &mut scope);
-        outcome.map(|outcome| (outcome, scope))
+        outcome.map(|(outcome, value)| (outcome, scope, value))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -451,7 +467,7 @@ impl Session {
         platform: &dyn Platform,
         clock: &dyn Clock,
         output: &mut dyn Write,
-    ) -> Result<SubmitOutcome, SubmitError> {
+    ) -> Result<(SubmitOutcome, Value), SubmitError> {
         let source_file = source.as_ref();
         let binding_types =
             binding_types.unwrap_or_else(|| Arc::new(RuntimeBindingTypes::default()));
@@ -465,6 +481,7 @@ impl Session {
             ..
         } = self;
 
+        let mut last_value = Value::Null;
         for statement in script.statements() {
             match statement.kind() {
                 StatementKind::Import(_) if imports_analyzed => continue,
@@ -525,10 +542,10 @@ impl Session {
                         .expect("a parsed chain span belongs to its source");
                     jobs.start(&plan, platform, command)
                         .map_err(|error| runtime(source_file, &error))?;
-                    state.set_current_status(Some(
-                        Status::exit(0, crate::Duration::ZERO)
-                            .expect("zero is a valid launch status"),
-                    ));
+                    let status = Status::exit(0, crate::Duration::ZERO)
+                        .expect("zero is a valid launch status");
+                    state.set_current_status(Some(status.clone()));
+                    last_value = Value::Status(status);
                 }
                 _ => {
                     let mut pending_scope = scope.clone();
@@ -555,14 +572,15 @@ impl Session {
                         )
                     };
                     match evaluated {
-                        Ok(HostedEvaluationOutcome::Value(_)) => {
+                        Ok(HostedEvaluationOutcome::Value(value)) => {
                             *scope = pending_scope;
                             *state = pending_state;
+                            last_value = value;
                         }
                         Ok(HostedEvaluationOutcome::Exit(code)) => {
                             *scope = pending_scope;
                             *state = pending_state;
-                            return Ok(SubmitOutcome::Exit(code));
+                            return Ok((SubmitOutcome::Exit(code), last_value));
                         }
                         Ok(HostedEvaluationOutcome::Stopped(job)) => {
                             debug_assert!(
@@ -584,7 +602,7 @@ impl Session {
             }
         }
 
-        Ok(SubmitOutcome::Continued)
+        Ok((SubmitOutcome::Continued, last_value))
     }
 }
 

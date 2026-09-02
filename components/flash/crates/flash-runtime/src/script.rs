@@ -24,11 +24,18 @@ use flash_platform::Platform;
 /// The normally completed result of one non-interactive source file.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScriptCompletion {
+    value: Value,
     status: Option<Status>,
     background_failures: Vec<BackgroundFailure>,
 }
 
 impl ScriptCompletion {
+    /// The exact final language value retained by the embedding boundary.
+    #[must_use]
+    pub const fn value(&self) -> &Value {
+        &self.value
+    }
+
     /// The final foreground job status, or `None` when no job ran.
     #[must_use]
     pub const fn status(&self) -> Option<&Status> {
@@ -170,7 +177,8 @@ pub fn execute_module_program(
     session.enable_script_job_control(Arc::clone(&clock));
     let binding_types = Arc::new(program.runtime_binding_types());
     let mut instances: BTreeMap<ModuleId, BTreeMap<String, Value>> = BTreeMap::new();
-    let mut outcome: Result<SubmitOutcome, ScriptError> = Ok(SubmitOutcome::Continued);
+    let mut outcome: Result<(SubmitOutcome, Value), ScriptError> =
+        Ok((SubmitOutcome::Continued, Value::Null));
 
     for module in module_initialization_order(program) {
         let mut scope = ScopeStack::new();
@@ -228,7 +236,8 @@ pub fn execute_module_program(
             clock.as_ref(),
             output,
         ) {
-            Ok((SubmitOutcome::Continued, completed_scope)) => {
+            Ok((SubmitOutcome::Continued, completed_scope, value)) => {
+                let is_root = &module == program.graph().root();
                 let exports = program
                     .names()
                     .exports(&module)
@@ -240,9 +249,12 @@ pub fn execute_module_program(
                     })
                     .collect();
                 instances.insert(module, exports);
+                if is_root {
+                    outcome = Ok((SubmitOutcome::Continued, value));
+                }
             }
-            Ok((exit @ SubmitOutcome::Exit(_), _)) => {
-                outcome = Ok(exit);
+            Ok((exit @ SubmitOutcome::Exit(_), _, value)) => {
+                outcome = Ok((exit, value));
                 break;
             }
             Err(error) => {
@@ -381,9 +393,9 @@ pub fn execute_background_capsule(
     );
     session.seed_current_status(current_status);
     let outcome = session
-        .submit(name, text, probe, platform, clock.as_ref(), output)
+        .submit_with_value(name, text, probe, platform, clock.as_ref(), output)
         .map_err(ScriptError::submit)?;
-    let supervisor_outcome = match outcome {
+    let supervisor_outcome = match outcome.0 {
         SubmitOutcome::Continued => SupervisorOutcome::Continued,
         SubmitOutcome::Exit(code) => SupervisorOutcome::Exit(code),
     };
@@ -427,7 +439,7 @@ fn execute_source(
         session.enable_script_job_control(Arc::clone(&clock));
     }
     let outcome = session
-        .submit(name, text, probe, platform, clock.as_ref(), output)
+        .submit_with_value(name, text, probe, platform, clock.as_ref(), output)
         .map_err(ScriptError::submit);
 
     finish_script_session(&mut session, environment, platform, outcome)
@@ -437,7 +449,7 @@ fn finish_script_session(
     session: &mut Session,
     environment: &mut Environment,
     platform: &dyn Platform,
-    outcome: Result<SubmitOutcome, ScriptError>,
+    outcome: Result<(SubmitOutcome, Value), ScriptError>,
 ) -> Result<ScriptCompletion, ScriptError> {
     // The join runs on every exit route, including a failing one: a script must
     // not orphan a child because one of its later statements failed.
@@ -446,6 +458,7 @@ fn finish_script_session(
         Ok(outcome) => outcome,
         Err(error) => return Err(error.with_background_failures(failures)),
     };
+    let (outcome, value) = outcome;
     let foreground = match outcome {
         SubmitOutcome::Continued => session.current_status().cloned(),
         SubmitOutcome::Exit(code) => Some(
@@ -456,6 +469,7 @@ fn finish_script_session(
     let status = background_exit_status(&failures).or(foreground);
     *environment = session.environment().clone();
     Ok(ScriptCompletion {
+        value,
         status,
         background_failures: failures,
     })

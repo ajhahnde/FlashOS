@@ -64,7 +64,9 @@ use flash_runtime::script::{
 };
 use flash_runtime::session::{BackgroundFailure, JobNoticeId, Session, SubmitError, SubmitOutcome};
 use flash_runtime::{Environment, ScopeStack};
-use flash_syntax::LanguageMajor;
+use flash_syntax::{
+    LanguageDetection, LanguageMajor, SourceFile, SourceId, detect_source_language,
+};
 
 #[cfg(target_os = "redox")]
 type NativePlatform = FlashOsPlatform;
@@ -799,7 +801,10 @@ impl InteractiveEvaluator for SessionEvaluator {
 
 fn run_script(path: &Path, arguments: &[String]) -> ExitCode {
     let filesystem = HostModuleFilesystem;
-    let program = match ModuleProgramLoader::new(&filesystem, &filesystem).load_for_frontend(path) {
+    let language = detect_root_language(path);
+    let program = match ModuleProgramLoader::for_language(&filesystem, &filesystem, language)
+        .load_for_frontend(path)
+    {
         Ok(program) => program,
         Err(error) => {
             if error.error().diagnostics().is_empty() {
@@ -838,6 +843,26 @@ fn run_script(path: &Path, arguments: &[String]) -> ExitCode {
     drop(output);
 
     finish_script_report(result, flush)
+}
+
+fn detect_root_language(path: &Path) -> LanguageMajor {
+    let Ok(bytes) = fs::read(path) else {
+        return LanguageMajor::V1;
+    };
+    let Ok(source) = SourceFile::from_bytes(SourceId::new(0), path.to_string_lossy(), bytes) else {
+        return LanguageMajor::V1;
+    };
+    match detect_source_language(&source) {
+        LanguageDetection::Complete(directive) => directive.major(),
+        LanguageDetection::Invalid(diagnostics)
+            if diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code() != "FS2001") =>
+        {
+            LanguageMajor::V2
+        }
+        LanguageDetection::Invalid(_) => LanguageMajor::V1,
+    }
 }
 
 struct HostModuleFilesystem;
