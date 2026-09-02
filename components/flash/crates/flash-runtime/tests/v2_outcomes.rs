@@ -4,6 +4,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use flash_platform::{
     Capabilities, ChildProcess, DescriptorEndpoint, FakePlatform, FileActionError, FileOpenRequest,
@@ -16,17 +17,26 @@ use flash_runtime::module::{
     ModuleCanonicalizer, ModuleId, ModuleOrigin, ModulePathError, ModuleProgram,
     ModuleProgramLoader, ModuleSourceError, ModuleSourceLoader, ValueType,
 };
+use flash_runtime::outcome::{
+    CompletedEvidence, ExecutionOutcome, FatalHostFailure, FatalHostFailureKind, OutcomeEvidence,
+    PartialEffectEvidence, PrimaryOutcome, Refusal, RefusalReason, compose_outcome,
+};
 use flash_runtime::plan::SessionOptions;
 use flash_runtime::resolve::ExecutableProbe;
-use flash_runtime::script::{ScriptCompletion, execute_module_program};
+use flash_runtime::script::{
+    ScriptCompletion, execute_module_program, execute_module_program_outcome,
+};
 use flash_runtime::{Environment, Value};
-use flash_syntax::LanguageMajor;
+use flash_syntax::{LanguageMajor, SourceFile, SourceId};
 
 struct FixtureModules;
 
 struct NoExecutables;
 
-struct ToolExecutable;
+#[derive(Default)]
+struct ToolExecutable {
+    probes: AtomicUsize,
+}
 
 #[derive(Debug)]
 struct StatusChild {
@@ -55,6 +65,7 @@ impl ChildProcess for StatusChild {
 struct StatusPlatform {
     inner: FakePlatform,
     code: i32,
+    spawns: AtomicUsize,
 }
 
 impl StatusPlatform {
@@ -62,6 +73,7 @@ impl StatusPlatform {
         Self {
             inner: FakePlatform::full(),
             code,
+            spawns: AtomicUsize::new(0),
         }
     }
 }
@@ -90,6 +102,7 @@ impl Platform for StatusPlatform {
     }
 
     fn spawn(&self, request: &SpawnRequest<'_>) -> Result<Box<dyn ChildProcess>, SpawnError> {
+        self.spawns.fetch_add(1, Ordering::SeqCst);
         let group = match request.process_group() {
             ProcessGroup::Inherit => None,
             ProcessGroup::New => ProcessGroupId::new(70_006),
@@ -110,6 +123,7 @@ impl ExecutableProbe for NoExecutables {
 
 impl ExecutableProbe for ToolExecutable {
     fn is_executable(&self, path: &OsStr) -> bool {
+        self.probes.fetch_add(1, Ordering::SeqCst);
         path == OsStr::new("/bin/tool")
     }
 }
@@ -141,7 +155,7 @@ fn outcome_manifest_checks_compiled_variants_and_conversion_boundaries() {
         let report = ModuleProgramLoader::for_language(&modules, &modules, LanguageMajor::V2)
             .analyze(&root.join(fields[1]));
         match fields[0] {
-            "complete" => assert!(
+            "complete" | "refused" => assert!(
                 report.issues().is_empty() && report.program().is_some(),
                 "{} must pass shared analysis: {:?}",
                 fields[1],
@@ -251,17 +265,144 @@ fn completed_values_domain_errors_and_statuses_remain_distinct() {
     assert!(option_value.payload().is_empty());
     assert!(option.status().is_none());
 
-    let status = execute_on(
+    let status = execute(
         &load("complete/status-success.fsh"),
-        &ToolExecutable,
-        Environment::from_snapshot([("PATH", "/bin")]),
-        &StatusPlatform::new(7),
+        &NoExecutables,
+        Environment::new(),
     );
-    let Value::Status(value_status) = status.value() else {
-        panic!("a completed process status must remain a Status value");
-    };
-    assert_eq!(value_status.code(), Some(7));
-    assert_eq!(status.status(), Some(value_status));
+    assert_eq!(status.value(), &Value::Null);
+    assert_eq!(
+        status.status().and_then(flash_runtime::Status::code),
+        Some(7)
+    );
+}
+
+#[test]
+fn pure_v2_process_execution_refuses_before_probe_or_spawn() {
+    let program = load("refused/process.fsh");
+    let probe = ToolExecutable::default();
+    let platform = StatusPlatform::new(7);
+    let mut environment = Environment::from_snapshot([("PATH", "/bin")]);
+    let mut output = Vec::new();
+    let outcome = execute_module_program_outcome(
+        &program,
+        &[],
+        &outcome_root(),
+        &mut environment,
+        &standard_registry(),
+        &probe,
+        &SessionOptions::default(),
+        &platform,
+        Arc::new(FakeClock::new()),
+        &mut output,
+    );
+
+    assert!(matches!(
+        outcome.primary(),
+        PrimaryOutcome::Refused(refusal)
+            if refusal.reason() == RefusalReason::Unsupported
+                && refusal.operation() == "process execution"
+    ));
+    assert!(outcome.evidence().is_empty());
+    assert_eq!(probe.probes.load(Ordering::SeqCst), 0);
+    assert_eq!(platform.spawns.load(Ordering::SeqCst), 0);
+    assert!(output.is_empty());
+}
+
+#[test]
+fn outcome_precedence_retains_one_primary_and_ordered_secondary_evidence() {
+    let source = SourceFile::new(SourceId::new(1_701), "matrix.fsh", "effect");
+    let span = source.span(0..6).unwrap();
+    let primary = PrimaryOutcome::<(), &str>::Refused(Refusal::new(
+        RefusalReason::Denied,
+        "network request",
+        span,
+    ));
+    let evidence = vec![
+        OutcomeEvidence::Completed(CompletedEvidence::new("prepare", None)),
+        OutcomeEvidence::PartialEffect(PartialEffectEvidence::new(
+            "network request",
+            "request bytes accepted",
+        )),
+        OutcomeEvidence::CleanupFailure("close failed"),
+    ];
+    let outcome = compose_outcome(Some(primary), evidence).unwrap();
+
+    assert!(matches!(
+        outcome.primary(),
+        PrimaryOutcome::Refused(refusal) if refusal.reason() == RefusalReason::Denied
+    ));
+    assert!(matches!(
+        outcome.evidence(),
+        [
+            OutcomeEvidence::Completed(completed),
+            OutcomeEvidence::PartialEffect(partial),
+            OutcomeEvidence::CleanupFailure("close failed"),
+        ] if completed.operation() == "prepare"
+            && partial.operation() == "network request"
+            && partial.detail() == "request bytes accepted"
+    ));
+
+    let cleanup_only = compose_outcome::<(), _>(
+        None,
+        vec![
+            OutcomeEvidence::CleanupFailure("primary resource error"),
+            OutcomeEvidence::CleanupFailure("secondary resource error"),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        cleanup_only.primary(),
+        &PrimaryOutcome::Error("primary resource error")
+    );
+    assert_eq!(
+        cleanup_only.evidence(),
+        &[OutcomeEvidence::CleanupFailure("secondary resource error")]
+    );
+}
+
+#[test]
+fn cancellation_refusal_and_fatal_host_failure_are_distinct_primary_tags() {
+    let source = SourceFile::new(SourceId::new(1_702), "tags.fsh", "tag");
+    let span = source.span(0..3).unwrap();
+    let cancellation =
+        flash_runtime::eval::Cancellation::new(flash_runtime::eval::CancelReason::Requested, span);
+    let cancelled =
+        ExecutionOutcome::<(), &str>::new(PrimaryOutcome::Cancelled(cancellation), Vec::new());
+    assert!(matches!(
+        cancelled.primary(),
+        PrimaryOutcome::Cancelled(value)
+            if value.reason() == flash_runtime::eval::CancelReason::Requested
+    ));
+
+    for reason in [
+        RefusalReason::Denied,
+        RefusalReason::Unsupported,
+        RefusalReason::Unknown,
+    ] {
+        let refused = ExecutionOutcome::<(), &str>::new(
+            PrimaryOutcome::Refused(Refusal::new(reason, "effect", span)),
+            Vec::new(),
+        );
+        assert!(matches!(
+            refused.primary(),
+            PrimaryOutcome::Refused(value) if value.reason() == reason
+        ));
+    }
+
+    let fatal = ExecutionOutcome::<(), &str>::new(
+        PrimaryOutcome::FatalHostFailure(FatalHostFailure::new(
+            FatalHostFailureKind::Reporting,
+            "diagnostic sink failed",
+        )),
+        Vec::new(),
+    );
+    assert!(matches!(
+        fatal.primary(),
+        PrimaryOutcome::FatalHostFailure(value)
+            if value.kind() == FatalHostFailureKind::Reporting
+                && value.message() == "diagnostic sink failed"
+    ));
 }
 
 fn execute(

@@ -34,6 +34,7 @@ use crate::glob::{DEFAULT_GLOB_ENTRY_LIMIT, GlobPattern};
 use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
 use crate::module::{ResolvedTypeParameter, RuntimeBindingTypes, ValueType};
 use crate::operation::{self, OperationError};
+use crate::outcome::{Refusal, RefusalReason};
 use crate::{
     BindingMutability, Callable, Environment, NativePath, NominalRecordValue, Record, ScopeError,
     ScopeStack, Status, Value, VariantValue,
@@ -1120,7 +1121,7 @@ impl ControlKind {
 /// A structured cancellation outcome, distinct from both a `Value` and a
 /// [`RuntimeError`]. Cancellation stops evaluation cooperatively at loop and call
 /// boundaries; it never selects `else`/`||` and is never a script value.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Cancellation {
     reason: CancelReason,
     span: Span,
@@ -1369,6 +1370,7 @@ pub struct EvalLimits {
 pub(crate) enum EvaluationPolicy {
     General,
     Startup,
+    PureV2,
 }
 
 impl EvalLimits {
@@ -1413,6 +1415,7 @@ pub enum Completion {
 pub(crate) enum HostedEvaluationOutcome {
     Value(Value),
     Cancelled(Cancellation),
+    Refused(Refusal),
     Exit(u8),
     Stopped(crate::job::JobId),
 }
@@ -1433,6 +1436,7 @@ pub(crate) enum HostedEvaluationFailure {
 pub(crate) enum Abort {
     Error(RuntimeError),
     Cancelled(Cancellation),
+    Refused(Refusal),
     Exit(u8),
     Stopped(crate::job::JobId),
     Output(io::Error),
@@ -1691,7 +1695,11 @@ pub(crate) fn evaluate_in_environment_owned_with_binding_types(
             Ok(Completion::Cancelled(cancellation))
         }
         Err(HostedEvaluationFailure::Runtime(error)) => Err(error),
-        Ok(HostedEvaluationOutcome::Exit(_) | HostedEvaluationOutcome::Stopped(_))
+        Ok(
+            HostedEvaluationOutcome::Refused(_)
+            | HostedEvaluationOutcome::Exit(_)
+            | HostedEvaluationOutcome::Stopped(_),
+        )
         | Err(HostedEvaluationFailure::Output(_)) => {
             unreachable!("the pure evaluation host cannot produce session outcomes")
         }
@@ -1720,6 +1728,9 @@ pub(crate) fn evaluate_with_host(
             Ok(flow) => flow,
             Err(Abort::Cancelled(cancellation)) => {
                 return Ok(HostedEvaluationOutcome::Cancelled(cancellation));
+            }
+            Err(Abort::Refused(refusal)) => {
+                return Ok(HostedEvaluationOutcome::Refused(refusal));
             }
             Err(Abort::Error(error)) => {
                 return Err(HostedEvaluationFailure::Runtime(error));
@@ -1803,7 +1814,7 @@ pub(crate) fn evaluate_closure_argument_with_binding_types(
         Err(Abort::Cancelled(_)) => {
             unreachable!("creating a closure does not poll cancellation")
         }
-        Err(Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
+        Err(Abort::Refused(_) | Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
             unreachable!("the pure evaluation host cannot produce session outcomes")
         }
     }
@@ -1871,7 +1882,7 @@ pub fn apply_callable(
         return match abort {
             Abort::Cancelled(cancellation) => Ok(Completion::Cancelled(cancellation)),
             Abort::Error(error) => Err(error),
-            Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_) => {
+            Abort::Refused(_) | Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_) => {
                 unreachable!("the pure evaluation host cannot produce session outcomes")
             }
         };
@@ -1884,7 +1895,7 @@ pub fn apply_callable(
         Ok(value) => Ok(Completion::Value(value)),
         Err(Abort::Cancelled(cancellation)) => Ok(Completion::Cancelled(cancellation)),
         Err(Abort::Error(error)) => Err(error),
-        Err(Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
+        Err(Abort::Refused(_) | Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
             unreachable!("the pure evaluation host cannot produce session outcomes")
         }
     }
@@ -1976,7 +1987,7 @@ pub(crate) fn expand_word_with_environment(
         Err(Abort::Cancelled(_)) => {
             unreachable!("a never-cancelling token cannot produce a cancellation")
         }
-        Err(Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
+        Err(Abort::Refused(_) | Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
             unreachable!("the pure evaluation host cannot produce session outcomes")
         }
     }
@@ -2018,7 +2029,7 @@ pub fn expand_spread(
         Err(Abort::Cancelled(_)) => {
             unreachable!("a never-cancelling token cannot produce a cancellation")
         }
-        Err(Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
+        Err(Abort::Refused(_) | Abort::Exit(_) | Abort::Stopped(_) | Abort::Output(_)) => {
             unreachable!("the pure evaluation host cannot produce session outcomes")
         }
     }
@@ -2268,6 +2279,17 @@ impl Evaluator<'_> {
         environment: &EnvironmentStatement,
         scope: &mut ScopeStack,
     ) -> Eval<()> {
+        if self.host.policy() == EvaluationPolicy::PureV2 {
+            let span = match environment {
+                EnvironmentStatement::Export { name, value: _ }
+                | EnvironmentStatement::Unset { name } => name.span(),
+            };
+            return Err(Abort::Refused(Refusal::new(
+                RefusalReason::Unsupported,
+                "environment mutation",
+                span,
+            )));
+        }
         match environment {
             EnvironmentStatement::Export { name, value } => {
                 let resolved = self.expression(value, scope)?;
@@ -3449,6 +3471,13 @@ impl Evaluator<'_> {
                 value.push(self.encode_scalar(&resolved, span)?);
             }
             WordPartKind::CommandSubstitution(substitution) => {
+                if self.host.policy() == EvaluationPolicy::PureV2 {
+                    return Err(Abort::Refused(Refusal::new(
+                        RefusalReason::Unsupported,
+                        "process execution",
+                        span,
+                    )));
+                }
                 if self.host.policy() == EvaluationPolicy::Startup {
                     return Err(self.error(
                         RuntimeErrorKind::RestrictedStartup {
@@ -3789,6 +3818,13 @@ impl Evaluator<'_> {
                 let argument = self.expression(&call.arguments[0], scope)?;
                 match intrinsic {
                     ExpressionIntrinsic::Env => {
+                        if self.host.policy() == EvaluationPolicy::PureV2 {
+                            return Err(Abort::Refused(Refusal::new(
+                                RefusalReason::Unsupported,
+                                "environment read",
+                                span,
+                            )));
+                        }
                         let Value::String(name) = argument else {
                             return Err(self.operation(
                                 OperationError::UnsupportedOperands {
@@ -4027,6 +4063,13 @@ impl Evaluator<'_> {
     }
 
     fn glob(&mut self, value: &Value, span: Span) -> Eval<Value> {
+        if self.host.policy() == EvaluationPolicy::PureV2 {
+            return Err(Abort::Refused(Refusal::new(
+                RefusalReason::Unsupported,
+                "filesystem read",
+                span,
+            )));
+        }
         if self.host.policy() == EvaluationPolicy::Startup {
             return Err(self.error(
                 RuntimeErrorKind::RestrictedStartup {

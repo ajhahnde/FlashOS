@@ -189,11 +189,8 @@ fn v1_and_v2_completed_program_codes_propagate_exactly_without_diagnostics() {
 
     for (language, directive) in [("v1", ""), ("v2", "language 2\n\n")] {
         for code in [0_u8, 1, 2, 125, 126, 127, 128, 255] {
-            fs::write(
-                &script,
-                format!("{directive}^{} exit {code}\n", status_fixture()),
-            )
-            .expect("status script should be written");
+            fs::write(&script, format!("{directive}exit {code}\n"))
+                .expect("status script should be written");
             let output = run_script(&script, temp.path(), fixture_directory());
 
             assert_eq!(
@@ -211,6 +208,78 @@ fn v1_and_v2_completed_program_codes_propagate_exactly_without_diagnostics() {
             );
         }
     }
+}
+
+#[test]
+fn v2_effectful_process_use_refuses_before_the_process_can_write() {
+    let temp = TempDir::new("v2-process-refusal");
+    let marker = temp.path().join("must-not-exist.txt");
+    let script = temp.script(
+        "refused.fsh",
+        &format!(
+            "language 2\n\n^{} late 0 {} 9\n",
+            status_fixture(),
+            marker.display()
+        ),
+    );
+    let output = run_script(&script, temp.path(), fixture_directory());
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "fsh: refused[unsupported]: operation `process execution` did not begin\n"
+    );
+    assert!(!marker.exists(), "a refused v2 process must never start");
+
+    for source in [
+        format!("language 2\n\nexit 0 > {}\n", marker.display()),
+        format!(
+            "language 2\n\nexit $(^{} late 0 {} 9)\n",
+            status_fixture(),
+            marker.display()
+        ),
+    ] {
+        fs::write(&script, source).expect("refusal script should be replaced");
+        let output = run_script(&script, temp.path(), fixture_directory());
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            "fsh: refused[unsupported]: operation `process execution` did not begin\n"
+        );
+        assert!(
+            !marker.exists(),
+            "effectful host-control syntax must refuse before its effect"
+        );
+    }
+}
+
+#[test]
+fn v2_catch_handles_only_language_error_and_uncaught_error_maps_to_one() {
+    let temp = TempDir::new("v2-error-catch");
+    let caught = temp.script(
+        "caught.fsh",
+        "language 2\n\ntry {\n    throw \"caught\"\n} catch error {\n    null\n}\n2\n",
+    );
+    let caught_output = run_script(&caught, temp.path(), fixture_directory());
+    assert_eq!(caught_output.status.code(), Some(0), "{caught_output:?}");
+    assert!(caught_output.stdout.is_empty());
+    assert!(caught_output.stderr.is_empty());
+
+    let uncaught = temp.script("uncaught.fsh", "language 2\n\nthrow \"uncaught\"\n");
+    let uncaught_output = run_script(&uncaught, temp.path(), fixture_directory());
+    assert_eq!(
+        uncaught_output.status.code(),
+        Some(1),
+        "{uncaught_output:?}"
+    );
+    assert!(uncaught_output.stdout.is_empty());
+    assert!(
+        String::from_utf8(uncaught_output.stderr)
+            .unwrap()
+            .contains("uncaught")
+    );
 }
 
 #[test]

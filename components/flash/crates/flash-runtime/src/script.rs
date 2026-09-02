@@ -13,6 +13,7 @@ use crate::capsule::{
 use crate::command::CommandRegistry;
 use crate::eval::Clock;
 use crate::module::{ModuleId, ModuleProgram, ModuleSourceRegistry};
+use crate::outcome::{ExecutionOutcome, FatalHostFailure, FatalHostFailureKind, PrimaryOutcome};
 use crate::plan::SessionOptions;
 use crate::resolve::ExecutableProbe;
 use crate::session::{
@@ -114,6 +115,30 @@ impl fmt::Display for ScriptError {
 
 impl std::error::Error for ScriptError {}
 
+/// The complete structured result of one non-interactive script boundary.
+pub type ScriptExecutionOutcome = ExecutionOutcome<ScriptCompletion, ScriptError>;
+
+enum ScriptFailure {
+    Error(ScriptError),
+    Fatal(FatalHostFailure),
+}
+
+impl ScriptFailure {
+    fn module_submit(
+        error: SubmitError,
+        source: &flash_syntax::SourceFile,
+        sources: &ModuleSourceRegistry,
+    ) -> Self {
+        match error {
+            SubmitError::Output(error) => Self::Fatal(FatalHostFailure::new(
+                FatalHostFailureKind::Output,
+                error.to_string(),
+            )),
+            other => Self::Error(ScriptError::module_submit(other, source, sources)),
+        }
+    }
+}
+
 /// Parse and execute one source file in statement order.
 ///
 /// Pure statements, environment mutations, internal commands, external
@@ -155,7 +180,7 @@ pub fn execute_script(
 /// load-only dependencies remain dormant. The root module additionally sees
 /// the explicitly supplied immutable `args` list in a synthetic parent frame.
 #[allow(clippy::too_many_arguments)]
-pub fn execute_module_program(
+pub fn execute_module_program_outcome(
     program: &ModuleProgram,
     script_arguments: &[String],
     cwd: &Path,
@@ -166,8 +191,10 @@ pub fn execute_module_program(
     platform: &dyn Platform,
     clock: Arc<dyn Clock>,
     output: &mut dyn Write,
-) -> Result<ScriptCompletion, ScriptError> {
-    let mut session = Session::with_scope_and_registry(
+) -> ScriptExecutionOutcome {
+    let structured_outcomes = program.graph().root().language() == flash_syntax::LanguageMajor::V2;
+    let mut session = Session::with_scope_and_registry_for_language(
+        program.graph().root().language(),
         ScopeStack::new(),
         cwd,
         environment.clone(),
@@ -177,7 +204,7 @@ pub fn execute_module_program(
     session.enable_script_job_control(Arc::clone(&clock));
     let binding_types = Arc::new(program.runtime_binding_types());
     let mut instances: BTreeMap<ModuleId, BTreeMap<String, Value>> = BTreeMap::new();
-    let mut outcome: Result<(SubmitOutcome, Value), ScriptError> =
+    let mut outcome: Result<(SubmitOutcome, Value), ScriptFailure> =
         Ok((SubmitOutcome::Continued, Value::Null));
 
     for module in module_initialization_order(program) {
@@ -257,14 +284,84 @@ pub fn execute_module_program(
                 outcome = Ok((exit, value));
                 break;
             }
+            Ok((cancelled @ SubmitOutcome::Cancelled(_), _, value)) => {
+                outcome = Ok((cancelled, value));
+                break;
+            }
+            Ok((refused @ SubmitOutcome::Refused(_), _, value)) => {
+                outcome = Ok((refused, value));
+                break;
+            }
             Err(error) => {
-                outcome = Err(ScriptError::module_submit(error, source, program.sources()));
+                outcome = Err(if structured_outcomes {
+                    ScriptFailure::module_submit(error, source, program.sources())
+                } else {
+                    ScriptFailure::Error(ScriptError::module_submit(
+                        error,
+                        source,
+                        program.sources(),
+                    ))
+                });
                 break;
             }
         }
     }
 
-    finish_script_session(&mut session, environment, platform, outcome)
+    finish_script_session_outcome(&mut session, environment, platform, outcome)
+}
+
+/// Execute a module program through the legacy `Result` adapter.
+///
+/// New embedding and CLI boundaries should consume
+/// [`execute_module_program_outcome`] so cancellation, refusal, and fatal host
+/// failure remain distinct. This adapter remains for frozen v1 callers.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_module_program(
+    program: &ModuleProgram,
+    script_arguments: &[String],
+    cwd: &Path,
+    environment: &mut Environment,
+    registry: &CommandRegistry,
+    probe: &dyn ExecutableProbe,
+    options: &SessionOptions,
+    platform: &dyn Platform,
+    clock: Arc<dyn Clock>,
+    output: &mut dyn Write,
+) -> Result<ScriptCompletion, ScriptError> {
+    let (primary, _) = execute_module_program_outcome(
+        program,
+        script_arguments,
+        cwd,
+        environment,
+        registry,
+        probe,
+        options,
+        platform,
+        clock,
+        output,
+    )
+    .into_parts();
+    match primary {
+        PrimaryOutcome::Completed(completion) => Ok(completion),
+        PrimaryOutcome::Error(error) => Err(error),
+        PrimaryOutcome::Cancelled(cancellation) => Err(ScriptError {
+            rendered: format!(
+                "fsh: evaluation cancelled ({:?}) at bytes {}..{}\n",
+                cancellation.reason(),
+                cancellation.span().start(),
+                cancellation.span().end()
+            ),
+            background_failures: Vec::new(),
+        }),
+        PrimaryOutcome::Refused(refusal) => Err(ScriptError {
+            rendered: format!("fsh: {refusal}\n"),
+            background_failures: Vec::new(),
+        }),
+        PrimaryOutcome::FatalHostFailure(failure) => Err(ScriptError {
+            rendered: format!("fsh: fatal host {failure}\n"),
+            background_failures: Vec::new(),
+        }),
+    }
 }
 
 fn declare_qualified_alias_values(
@@ -398,6 +495,7 @@ pub fn execute_background_capsule(
     let supervisor_outcome = match outcome.0 {
         SubmitOutcome::Continued => SupervisorOutcome::Continued,
         SubmitOutcome::Exit(code) => SupervisorOutcome::Exit(code),
+        SubmitOutcome::Cancelled(_) | SubmitOutcome::Refused(_) => SupervisorOutcome::Continued,
     };
     let completion = finish_script_session(&mut session, &mut environment, platform, Ok(outcome))?;
     let mut updated_state = SessionState::new(session.cwd(), session.environment().clone());
@@ -465,6 +563,23 @@ fn finish_script_session(
             Status::exit(i64::from(code), crate::Duration::ZERO)
                 .expect("an explicit script exit is a valid status"),
         ),
+        SubmitOutcome::Cancelled(cancellation) => {
+            return Err(ScriptError {
+                rendered: format!(
+                    "fsh: evaluation cancelled ({:?}) at bytes {}..{}\n",
+                    cancellation.reason(),
+                    cancellation.span().start(),
+                    cancellation.span().end()
+                ),
+                background_failures: failures,
+            });
+        }
+        SubmitOutcome::Refused(refusal) => {
+            return Err(ScriptError {
+                rendered: format!("fsh: {refusal}\n"),
+                background_failures: failures,
+            });
+        }
     };
     let status = background_exit_status(&failures).or(foreground);
     *environment = session.environment().clone();
@@ -473,6 +588,46 @@ fn finish_script_session(
         status,
         background_failures: failures,
     })
+}
+
+fn finish_script_session_outcome(
+    session: &mut Session,
+    environment: &mut Environment,
+    platform: &dyn Platform,
+    outcome: Result<(SubmitOutcome, Value), ScriptFailure>,
+) -> ScriptExecutionOutcome {
+    // Cleanup always runs after the primary-producing evaluation route. Pure
+    // v2 currently owns no external resources; later adapters attach their
+    // typed cleanup and partial-effect evidence through `ExecutionOutcome`.
+    let failures = session.join_background_jobs(platform);
+    let primary = match outcome {
+        Err(ScriptFailure::Error(error)) => {
+            PrimaryOutcome::Error(error.with_background_failures(failures))
+        }
+        Err(ScriptFailure::Fatal(failure)) => PrimaryOutcome::FatalHostFailure(failure),
+        Ok((SubmitOutcome::Cancelled(cancellation), _)) => PrimaryOutcome::Cancelled(cancellation),
+        Ok((SubmitOutcome::Refused(refusal), _)) => PrimaryOutcome::Refused(refusal),
+        Ok((outcome, value)) => {
+            let foreground = match outcome {
+                SubmitOutcome::Continued => session.current_status().cloned(),
+                SubmitOutcome::Exit(code) => Some(
+                    Status::exit(i64::from(code), crate::Duration::ZERO)
+                        .expect("an explicit script exit is a valid status"),
+                ),
+                SubmitOutcome::Cancelled(_) | SubmitOutcome::Refused(_) => {
+                    unreachable!("control outcomes are selected before completion")
+                }
+            };
+            let status = background_exit_status(&failures).or(foreground);
+            *environment = session.environment().clone();
+            PrimaryOutcome::Completed(ScriptCompletion {
+                value,
+                status,
+                background_failures: failures,
+            })
+        }
+    };
+    ExecutionOutcome::new(primary, Vec::new())
 }
 
 /// The exit status a failing background job imposes on its script.

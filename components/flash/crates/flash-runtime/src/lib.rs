@@ -23,6 +23,7 @@ pub mod intrinsic;
 pub mod job;
 pub mod module;
 pub mod operation;
+pub mod outcome;
 pub mod plan;
 pub mod presentation;
 pub mod query;

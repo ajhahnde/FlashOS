@@ -57,10 +57,12 @@ use flash_runtime::module::{
     ModuleCanonicalizer, ModulePathError, ModuleProgramLoader, ModuleSourceError,
     ModuleSourceLoader,
 };
+use flash_runtime::outcome::{OutcomeEvidence, PrimaryOutcome};
 use flash_runtime::plan::SessionOptions;
 use flash_runtime::resolve::ExecutableProbe;
 use flash_runtime::script::{
-    ScriptCompletion, ScriptError, execute_background_capsule, execute_module_program,
+    ScriptCompletion, ScriptError, ScriptExecutionOutcome, execute_background_capsule,
+    execute_module_program, execute_module_program_outcome,
 };
 use flash_runtime::session::{BackgroundFailure, JobNoticeId, Session, SubmitError, SubmitOutcome};
 use flash_runtime::{Environment, ScopeStack};
@@ -786,6 +788,19 @@ impl InteractiveEvaluator for SessionEvaluator {
         match outcome {
             Ok(SubmitOutcome::Continued) => Ok(EvaluationControl::Continue),
             Ok(SubmitOutcome::Exit(code)) => Ok(EvaluationControl::Exit(code)),
+            Ok(SubmitOutcome::Cancelled(cancellation)) => Err(InteractiveDiagnostic::new(format!(
+                "cancelled[{:?}] at bytes {}..{}\n",
+                cancellation.reason(),
+                cancellation.span().start(),
+                cancellation.span().end()
+            ))
+            .into()),
+            Ok(SubmitOutcome::Refused(refusal)) => Err(InteractiveDiagnostic::new(format!(
+                "refused[{}]: operation `{}` did not begin\n",
+                refusal.reason(),
+                refusal.operation()
+            ))
+            .into()),
             Err(SubmitError::Diagnostic(rendered)) => {
                 Err(InteractiveDiagnostic::new(rendered).into())
             }
@@ -827,22 +842,39 @@ fn run_script(path: &Path, arguments: &[String]) -> ExitCode {
     let stdout = io::stdout();
     let mut output = stdout.lock();
     let platform = native_platform();
-    let result = execute_module_program(
-        &program,
-        arguments,
-        &cwd,
-        &mut environment,
-        &registry,
-        &NativeExecutableProbe,
-        &SessionOptions::default(),
-        &platform,
-        Arc::new(SystemClock::new()) as Arc<dyn Clock>,
-        &mut output,
-    );
-    let flush = output.flush();
-    drop(output);
-
-    finish_script_report(result, flush)
+    if program.graph().root().language() == LanguageMajor::V2 {
+        let outcome = execute_module_program_outcome(
+            &program,
+            arguments,
+            &cwd,
+            &mut environment,
+            &registry,
+            &NativeExecutableProbe,
+            &SessionOptions::default(),
+            &platform,
+            Arc::new(SystemClock::new()) as Arc<dyn Clock>,
+            &mut output,
+        );
+        let flush = output.flush();
+        drop(output);
+        finish_script_outcome_report(outcome, flush)
+    } else {
+        let result = execute_module_program(
+            &program,
+            arguments,
+            &cwd,
+            &mut environment,
+            &registry,
+            &NativeExecutableProbe,
+            &SessionOptions::default(),
+            &platform,
+            Arc::new(SystemClock::new()) as Arc<dyn Clock>,
+            &mut output,
+        );
+        let flush = output.flush();
+        drop(output);
+        finish_script_report(result, flush)
+    }
 }
 
 fn detect_root_language(path: &Path) -> LanguageMajor {
@@ -1017,6 +1049,106 @@ fn finish_script_report(
             emit_report(HostReport::failure(diagnostics.as_bytes()))
         }
     }
+}
+
+fn finish_script_outcome_report(
+    outcome: ScriptExecutionOutcome,
+    output_flush: io::Result<()>,
+) -> ExitCode {
+    let (primary, evidence) = outcome.into_parts();
+    if let Err(error) = output_flush {
+        let mut diagnostics = render_outcome_evidence(&evidence);
+        diagnostics.push_str(&format!("fsh: fatal[output]: {error}\n"));
+        return emit_report(HostReport::failure(diagnostics.as_bytes()));
+    }
+
+    let evidence = render_outcome_evidence(&evidence);
+    match primary {
+        PrimaryOutcome::Completed(completion) => {
+            let mut diagnostics = render_background_failures(completion.background_failures());
+            diagnostics.push_str(&evidence);
+            match completion.status() {
+                Some(status) if diagnostics.is_empty() => {
+                    emit_report(HostReport::completed(status, b""))
+                }
+                Some(status) => emit_report(HostReport::completed_with_diagnostic(
+                    status,
+                    b"",
+                    diagnostics.as_bytes(),
+                )),
+                None if diagnostics.is_empty() => emit_report(HostReport::success(b"")),
+                None => emit_report(HostReport::success_with_diagnostic(
+                    b"",
+                    diagnostics.as_bytes(),
+                )),
+            }
+        }
+        PrimaryOutcome::Error(error) => {
+            let mut diagnostics = render_background_failures(error.background_failures());
+            diagnostics.push_str(error.render());
+            diagnostics.push_str(&evidence);
+            emit_report(HostReport::failure(diagnostics.as_bytes()))
+        }
+        PrimaryOutcome::Cancelled(cancellation) => {
+            let mut diagnostics = format!(
+                "fsh: cancelled[{:?}] at bytes {}..{}\n",
+                cancellation.reason(),
+                cancellation.span().start(),
+                cancellation.span().end()
+            );
+            diagnostics.push_str(&evidence);
+            emit_report(HostReport::failure(diagnostics.as_bytes()))
+        }
+        PrimaryOutcome::Refused(refusal) => {
+            let mut diagnostics = format!(
+                "fsh: refused[{}]: operation `{}` did not begin\n",
+                refusal.reason(),
+                refusal.operation()
+            );
+            diagnostics.push_str(&evidence);
+            emit_report(HostReport::failure(diagnostics.as_bytes()))
+        }
+        PrimaryOutcome::FatalHostFailure(failure) => {
+            let mut diagnostics = format!(
+                "fsh: fatal[{}]: {}\n",
+                failure.kind().name(),
+                failure.message()
+            );
+            diagnostics.push_str(&evidence);
+            emit_report(HostReport::failure(diagnostics.as_bytes()))
+        }
+    }
+}
+
+fn render_outcome_evidence(evidence: &[OutcomeEvidence<ScriptError>]) -> String {
+    let mut rendered = String::new();
+    for item in evidence {
+        match item {
+            OutcomeEvidence::Completed(completed) => {
+                rendered.push_str(&format!(
+                    "fsh: completed evidence: {}",
+                    completed.operation()
+                ));
+                if let Some(status) = completed.status() {
+                    rendered.push_str(&format!(" ({status})"));
+                }
+                rendered.push('\n');
+            }
+            OutcomeEvidence::PartialEffect(partial) => rendered.push_str(&format!(
+                "fsh: partial effect [{}]: {}\n",
+                partial.operation(),
+                partial.detail()
+            )),
+            OutcomeEvidence::CleanupFailure(error) => {
+                rendered.push_str("fsh: cleanup failure: ");
+                rendered.push_str(error.render().trim_start_matches("fsh: "));
+                if !rendered.ends_with('\n') {
+                    rendered.push('\n');
+                }
+            }
+        }
+    }
+    rendered
 }
 
 fn render_background_failures(failures: &[BackgroundFailure]) -> String {

@@ -30,9 +30,9 @@ use flash_platform::{
     DirectoryStream, FileOpenMode, FileOpenRequest, JobSignal, Platform, ProcessGroupId,
 };
 use flash_syntax::{
-    CommandHeadKind, ConditionalChain, Diagnostic, LanguageMajor, OutputMode, ParseOutcome, Script,
-    Severity, SourceFile, SourceId, Span, StageKind, StatementKind, parse, parse_v2_submission,
-    render_diagnostic,
+    CommandHeadKind, CommandItemKind, ConditionalChain, Diagnostic, LanguageMajor, OutputMode,
+    ParseOutcome, Script, Severity, SourceFile, SourceId, Span, StageKind, StatementKind, Word,
+    WordPartKind, parse, parse_v2_submission, render_diagnostic,
 };
 
 use crate::background::{BackgroundJobs, ForegroundJobOutcome, QuarantinePolicy, escape_job_label};
@@ -56,6 +56,7 @@ use crate::internal::{
 };
 use crate::job::JobPlacement;
 use crate::module::RuntimeBindingTypes;
+use crate::outcome::{Refusal, RefusalReason};
 use crate::plan::{
     ExecutionPlan, InternalStdoutRoute, PlannedResolution, PlannedStage, SessionOptions,
     internal_stdout_route, plan_pipeline_with_options_and_binding_types, preflight,
@@ -79,6 +80,10 @@ pub enum SubmitOutcome {
     Continued,
     /// `exit` requested session termination with this host exit code.
     Exit(u8),
+    /// Evaluation was cooperatively cancelled and cannot be caught by source.
+    Cancelled(crate::eval::Cancellation),
+    /// An effectful operation was refused before host access or execution.
+    Refused(Refusal),
 }
 
 /// A failure raised while submitting one edit buffer.
@@ -471,6 +476,10 @@ impl Session {
         let source_file = source.as_ref();
         let binding_types =
             binding_types.unwrap_or_else(|| Arc::new(RuntimeBindingTypes::default()));
+        let policy = match self.language {
+            LanguageMajor::V1 => EvaluationPolicy::General,
+            LanguageMajor::V2 => EvaluationPolicy::PureV2,
+        };
         let Session {
             language: _,
             scope,
@@ -490,6 +499,16 @@ impl Session {
                     let background_span = job
                         .background_span
                         .expect("the guarded background statement has a marker");
+                    if policy == EvaluationPolicy::PureV2 {
+                        return Ok((
+                            SubmitOutcome::Refused(Refusal::new(
+                                RefusalReason::Unsupported,
+                                "background process execution",
+                                background_span,
+                            )),
+                            last_value,
+                        ));
+                    }
                     let Some(jobs) = jobs.as_mut() else {
                         let error = RuntimeError::new(
                             // flash-v1-boundary(embedding-refusal): Background launch requires an opted-in job coordinator.
@@ -561,6 +580,7 @@ impl Session {
                             clock,
                             jobs,
                             output,
+                            policy,
                         };
                         evaluate_with_host(
                             &one,
@@ -588,8 +608,11 @@ impl Session {
                                 "a stopped managed outcome retains its coordinator record"
                             );
                         }
-                        Ok(HostedEvaluationOutcome::Cancelled(_)) => {
-                            unreachable!("default evaluation limits never cancel")
+                        Ok(HostedEvaluationOutcome::Cancelled(cancellation)) => {
+                            return Ok((SubmitOutcome::Cancelled(cancellation), last_value));
+                        }
+                        Ok(HostedEvaluationOutcome::Refused(refusal)) => {
+                            return Ok((SubmitOutcome::Refused(refusal), last_value));
                         }
                         Err(HostedEvaluationFailure::Runtime(error)) => {
                             return Err(runtime(source_file, &error));
@@ -607,6 +630,23 @@ impl Session {
 }
 
 fn chain_is_standalone_help(chain: &ConditionalChain, source: &SourceFile) -> bool {
+    chain_is_standalone_bare_command(chain, source, "help")
+}
+
+fn chain_is_standalone_exit(chain: &ConditionalChain, source: &SourceFile) -> bool {
+    chain_is_standalone_bare_command(chain, source, "exit")
+}
+
+fn chain_is_pure_v2_host_control(chain: &ConditionalChain, source: &SourceFile) -> bool {
+    (chain_is_standalone_help(chain, source) || chain_is_standalone_exit(chain, source))
+        && chain_standalone_command_has_effect_free_arguments(chain)
+}
+
+fn chain_is_standalone_bare_command(
+    chain: &ConditionalChain,
+    source: &SourceFile,
+    expected: &str,
+) -> bool {
     let [and_chain] = chain.or_terms() else {
         return false;
     };
@@ -620,7 +660,45 @@ fn chain_is_standalone_help(chain: &ConditionalChain, source: &SourceFile) -> bo
         return false;
     };
     command.head.kind() == CommandHeadKind::Bare
-        && source.slice(command.head.word().span()).ok() == Some("help")
+        && source.slice(command.head.word().span()).ok() == Some(expected)
+}
+
+fn chain_standalone_command_has_effect_free_arguments(chain: &ConditionalChain) -> bool {
+    let [and_chain] = chain.or_terms() else {
+        return false;
+    };
+    let [pipeline] = and_chain.and_terms() else {
+        return false;
+    };
+    let [stage] = pipeline.stages() else {
+        return false;
+    };
+    let StageKind::Command(command) = stage.kind() else {
+        return false;
+    };
+    command.items.iter().all(|item| match item.kind() {
+        CommandItemKind::Word(word) => word_has_effect_free_parts(word),
+        CommandItemKind::Spread(_) => true,
+        CommandItemKind::Closure(_) | CommandItemKind::Redirection(_) => false,
+    })
+}
+
+fn word_has_effect_free_parts(word: &Word) -> bool {
+    word.parts().iter().all(|part| match part.kind() {
+        WordPartKind::Bare
+        | WordPartKind::BareEscape
+        | WordPartKind::SingleQuoted
+        | WordPartKind::DoubleText
+        | WordPartKind::DoubleEscape
+        | WordPartKind::Variable(_) => true,
+        WordPartKind::DoubleQuoted(parts) => parts.iter().all(|part| {
+            matches!(
+                part.kind(),
+                WordPartKind::DoubleText | WordPartKind::DoubleEscape | WordPartKind::Variable(_)
+            )
+        }),
+        WordPartKind::BracedInterpolation(_) | WordPartKind::CommandSubstitution(_) => false,
+    })
 }
 
 /// One pipeline's control result inside a conditional chain.
@@ -672,6 +750,7 @@ struct SessionEvaluationHost<'session> {
     clock: &'session dyn Clock,
     jobs: &'session mut Option<BackgroundJobs>,
     output: &'session mut dyn Write,
+    policy: EvaluationPolicy,
 }
 
 impl EvaluationHost for SessionEvaluationHost<'_> {
@@ -684,7 +763,7 @@ impl EvaluationHost for SessionEvaluationHost<'_> {
     }
 
     fn policy(&self) -> EvaluationPolicy {
-        EvaluationPolicy::General
+        self.policy
     }
 
     fn manages_foreground_jobs(&self) -> bool {
@@ -719,6 +798,15 @@ impl EvaluationHost for SessionEvaluationHost<'_> {
         context: EvaluationContext,
     ) -> Result<Status, Abort> {
         let inspection_only = chain_is_standalone_help(chain, &context.source);
+        if self.policy == EvaluationPolicy::PureV2
+            && !chain_is_pure_v2_host_control(chain, &context.source)
+        {
+            return Err(Abort::Refused(Refusal::new(
+                RefusalReason::Unsupported,
+                "process execution",
+                chain.span(),
+            )));
+        }
         let error_source = Arc::clone(&context.source);
         let _ = &context.cancel;
         if context.manage_foreground
@@ -805,6 +893,13 @@ impl EvaluationHost for SessionEvaluationHost<'_> {
         _position: CapturePosition,
         context: EvaluationContext,
     ) -> Result<CapturedChain, Abort> {
+        if self.policy == EvaluationPolicy::PureV2 {
+            return Err(Abort::Refused(Refusal::new(
+                RefusalReason::Unsupported,
+                "process execution",
+                chain.span(),
+            )));
+        }
         let error_source = Arc::clone(&context.source);
         let mut collector = BoundedCapture::new(self.options.capture_limit());
         let mut output = ChainOutput::Capture {
