@@ -4,23 +4,26 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use flash_platform::FakePlatform;
 use flash_runtime::Environment;
 use flash_runtime::Value;
 use flash_runtime::builtin::standard_registry;
-use flash_runtime::eval::FakeClock;
+use flash_runtime::eval::{FakeClock, RuntimeError, RuntimeErrorKind};
 use flash_runtime::help::{ModuleHelpCatalog, ModuleHelpKind};
 use flash_runtime::module::{
     ModuleCanonicalizer, ModuleId, ModulePathError, ModuleProgramLoader, ModuleSourceError,
     ModuleSourceLoader, ValueType,
 };
-use flash_runtime::operation::{OperationInputType, OperationStreamOutcome};
+use flash_runtime::operation::{OperationInputType, OperationStreamPrimary};
 use flash_runtime::plan::SessionOptions;
 use flash_runtime::resolve::ExecutableProbe;
 use flash_runtime::script::execute_module_program;
-use flash_runtime::stream::ValueStream;
-use flash_syntax::LanguageMajor;
+use flash_runtime::stream::{
+    StreamCardinality, StreamCleanupFailure, StreamContractViolation, ValueStream,
+};
+use flash_syntax::{LanguageMajor, SourceFile, SourceId};
 
 struct FixtureModules;
 
@@ -151,20 +154,144 @@ fn operation_identity_overloads_help_and_budgeted_stream_share_one_descriptor() 
             .contains("bounded")
     );
 
-    match direct.execute_value_stream(
-        ValueStream::from_values(vec![Value::Int(1), Value::Int(2)]),
+    let outcome = direct.execute_value_stream(
+        ValueStream::from_values(vec![Value::Int(1), Value::Int(2)])
+            .with_contract(ValueType::Int, StreamCardinality::Exact(2)),
         2,
-    ) {
-        OperationStreamOutcome::Value(Value::Int(2)) => {}
+    );
+    match outcome.primary() {
+        OperationStreamPrimary::Value(Value::Int(2)) => {}
         other => panic!("at-limit stream length must succeed: {other:?}"),
     }
-    match direct.execute_value_stream(
-        ValueStream::from_values(vec![Value::Int(1), Value::Int(2), Value::Int(3)]),
+    assert_eq!(outcome.delivered_items(), 2);
+
+    let outcome = direct.execute_value_stream(
+        ValueStream::from_values(Vec::new())
+            .with_contract(ValueType::Int, StreamCardinality::Exact(0)),
+        0,
+    );
+    assert!(matches!(
+        outcome.primary(),
+        OperationStreamPrimary::Value(Value::Int(0))
+    ));
+    assert_eq!(outcome.delivered_items(), 0);
+
+    let outcome = direct.execute_value_stream(
+        ValueStream::once(Value::Int(1)).with_contract(ValueType::Int, StreamCardinality::Exact(1)),
+        0,
+    );
+    assert!(matches!(
+        outcome.primary(),
+        OperationStreamPrimary::LimitExceeded { limit: 0 }
+    ));
+    assert_eq!(outcome.delivered_items(), 0);
+    let outcome = direct.execute_value_stream(
+        ValueStream::from_values(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+            .with_contract(ValueType::Int, StreamCardinality::Exact(3)),
         2,
-    ) {
-        OperationStreamOutcome::LimitExceeded { limit: 2 } => {}
+    );
+    match outcome.primary() {
+        OperationStreamPrimary::LimitExceeded { limit: 2 } => {}
         other => panic!("first excess stream item must refuse: {other:?}"),
     }
+    assert_eq!(outcome.delivered_items(), 2);
+
+    let cleanup_calls = Arc::new(AtomicUsize::new(0));
+    let outcome = direct.execute_value_stream(
+        ValueStream::from_values(vec![Value::Int(1)]).with_cleanup({
+            let cleanup_calls = Arc::clone(&cleanup_calls);
+            move || {
+                cleanup_calls.fetch_add(1, Ordering::SeqCst);
+                Err(StreamCleanupFailure::new("close failed"))
+            }
+        }),
+        1,
+    );
+    assert!(matches!(
+        outcome.primary(),
+        OperationStreamPrimary::CleanupFailed(failure) if failure.message() == "close failed"
+    ));
+    assert!(outcome.cleanup_failure().is_none());
+    assert_eq!(cleanup_calls.load(Ordering::SeqCst), 1);
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let outcome = direct.execute_value_stream(
+        ValueStream::from_fn({
+            let cancelled = Arc::clone(&cancelled);
+            let mut emitted = false;
+            move || {
+                if emitted {
+                    None
+                } else {
+                    emitted = true;
+                    cancelled.store(true, Ordering::SeqCst);
+                    Some(Ok(Value::Int(1)))
+                }
+            }
+        })
+        .with_contract(ValueType::Int, StreamCardinality::Unknown)
+        .with_cancellation(flash_runtime::eval::CancellationToken::from_fn({
+            let cancelled = Arc::clone(&cancelled);
+            move || cancelled.load(Ordering::SeqCst)
+        }))
+        .with_cleanup(|| Err(StreamCleanupFailure::new("cancel cleanup"))),
+        8,
+    );
+    assert!(matches!(
+        outcome.primary(),
+        OperationStreamPrimary::Cancelled(flash_runtime::eval::CancelReason::Requested)
+    ));
+    assert_eq!(outcome.delivered_items(), 1);
+    assert_eq!(
+        outcome.cleanup_failure().map(StreamCleanupFailure::message),
+        Some("cancel cleanup")
+    );
+
+    let producer_source = SourceFile::new(SourceId::new(900), "producer.fsh", "x");
+    let producer_span = producer_source.span(0..1).unwrap();
+    let mut producer_step = 0;
+    let outcome = direct.execute_value_stream(
+        ValueStream::from_fn(move || {
+            producer_step += 1;
+            match producer_step {
+                1 => Some(Ok(Value::Int(1))),
+                2 => Some(Err(RuntimeError::new(
+                    RuntimeErrorKind::Unsupported {
+                        feature: "producer",
+                    },
+                    producer_span,
+                ))),
+                _ => panic!("a terminal producer failure must not be advanced again"),
+            }
+        })
+        .with_contract(ValueType::Int, StreamCardinality::Unknown)
+        .with_cleanup(|| Err(StreamCleanupFailure::new("failure cleanup"))),
+        8,
+    );
+    assert!(matches!(
+        outcome.primary(),
+        OperationStreamPrimary::Failed(error)
+            if matches!(error.kind(), RuntimeErrorKind::Unsupported { feature: "producer" })
+    ));
+    assert_eq!(outcome.delivered_items(), 1);
+    assert_eq!(
+        outcome.cleanup_failure().map(StreamCleanupFailure::message),
+        Some("failure cleanup")
+    );
+
+    let outcome = direct.execute_value_stream(
+        ValueStream::from_values(vec![Value::Int(1), Value::string("wrong")])
+            .with_contract(ValueType::Int, StreamCardinality::Exact(2)),
+        8,
+    );
+    assert!(matches!(
+        outcome.primary(),
+        OperationStreamPrimary::ContractViolation(StreamContractViolation::ElementType {
+            expected: ValueType::Int,
+            actual: "string",
+        })
+    ));
+    assert_eq!(outcome.delivered_items(), 1);
 }
 
 fn operation_root() -> PathBuf {

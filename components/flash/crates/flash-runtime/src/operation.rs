@@ -12,8 +12,9 @@ use std::sync::Arc;
 
 use crate::eval::{FrameCallee, RuntimeError};
 use crate::module::{ModuleId, ModuleOrigin, ValueType, substitute_type};
-use crate::stream::ValueStream;
-use crate::structured::{self, DrainOutcome};
+use crate::stream::{
+    CheckedStreamPull, StreamCleanupFailure, StreamContractViolation, ValueStream,
+};
 use crate::{FiniteFloat, Range, Record, Value};
 
 /// The stable identity of one compiled, qualified Flash 2 operation.
@@ -207,7 +208,7 @@ impl OperationDescriptor {
     #[must_use]
     pub fn execute_value_stream(
         &self,
-        stream: ValueStream,
+        mut stream: ValueStream,
         item_limit: usize,
     ) -> OperationStreamOutcome {
         if !self
@@ -215,32 +216,109 @@ impl OperationDescriptor {
             .iter()
             .any(|overload| matches!(overload.input, OperationInputType::ValueStream(_)))
         {
-            return OperationStreamOutcome::Rejected(OperationError::NoMatchingOverload {
-                operation: self.id.qualified_name(),
-                input: "ValueStream".to_owned(),
-            });
+            return finish_stream_operation(
+                &mut stream,
+                OperationStreamPrimary::Rejected(OperationError::NoMatchingOverload {
+                    operation: self.id.qualified_name(),
+                    input: "ValueStream".to_owned(),
+                }),
+                0,
+            );
         }
         match self.implementation {
-            StandardOperation::Length => match structured::length(stream, item_limit) {
-                DrainOutcome::Done(value) => OperationStreamOutcome::Value(value),
-                DrainOutcome::LimitExceeded { limit } => {
-                    OperationStreamOutcome::LimitExceeded { limit }
-                }
-                DrainOutcome::Failed(error) => OperationStreamOutcome::Failed(error),
-                DrainOutcome::Cancelled(reason) => OperationStreamOutcome::Cancelled(reason),
-            },
+            StandardOperation::Length => {
+                let mut delivered_items = 0_usize;
+                let primary = loop {
+                    match stream.pull_checked() {
+                        CheckedStreamPull::Item(_) if delivered_items == item_limit => {
+                            break OperationStreamPrimary::LimitExceeded { limit: item_limit };
+                        }
+                        CheckedStreamPull::Item(_) => delivered_items += 1,
+                        CheckedStreamPull::End => {
+                            let value =
+                                i64::try_from(delivered_items).map(Value::Int).map_err(|_| {
+                                    OperationError::LengthOverflow {
+                                        operation: self.id.qualified_name(),
+                                    }
+                                });
+                            break match value {
+                                Ok(value) => OperationStreamPrimary::Value(value),
+                                Err(error) => OperationStreamPrimary::Rejected(error),
+                            };
+                        }
+                        CheckedStreamPull::Failed(error) => {
+                            break OperationStreamPrimary::Failed(error);
+                        }
+                        CheckedStreamPull::Cancelled(reason) => {
+                            break OperationStreamPrimary::Cancelled(reason);
+                        }
+                        CheckedStreamPull::ContractViolation(violation) => {
+                            break OperationStreamPrimary::ContractViolation(violation);
+                        }
+                    }
+                };
+                finish_stream_operation(&mut stream, primary, delivered_items)
+            }
         }
     }
 }
 
-/// Every terminal state from a bounded stream operation remains distinct.
+/// The single primary selected by a bounded stream operation.
 #[derive(Debug)]
-pub enum OperationStreamOutcome {
+pub enum OperationStreamPrimary {
     Value(Value),
     LimitExceeded { limit: usize },
     Failed(RuntimeError),
     Cancelled(crate::eval::CancelReason),
+    ContractViolation(StreamContractViolation),
     Rejected(OperationError),
+    CleanupFailed(StreamCleanupFailure),
+}
+
+/// One stream-operation primary plus delivered-prefix and cleanup evidence.
+#[derive(Debug)]
+pub struct OperationStreamOutcome {
+    primary: OperationStreamPrimary,
+    delivered_items: usize,
+    cleanup_failure: Option<StreamCleanupFailure>,
+}
+
+impl OperationStreamOutcome {
+    /// The sole terminal result of the stream operation.
+    #[must_use]
+    pub const fn primary(&self) -> &OperationStreamPrimary {
+        &self.primary
+    }
+
+    /// Items accepted before the terminal result was established.
+    #[must_use]
+    pub const fn delivered_items(&self) -> usize {
+        self.delivered_items
+    }
+
+    /// Cleanup evidence retained beside a pre-existing primary.
+    #[must_use]
+    pub const fn cleanup_failure(&self) -> Option<&StreamCleanupFailure> {
+        self.cleanup_failure.as_ref()
+    }
+}
+
+fn finish_stream_operation(
+    stream: &mut ValueStream,
+    mut primary: OperationStreamPrimary,
+    delivered_items: usize,
+) -> OperationStreamOutcome {
+    let mut cleanup_failure = stream.close().err();
+    if matches!(primary, OperationStreamPrimary::Value(_))
+        && let Some(failure) = cleanup_failure.take()
+    {
+        primary = OperationStreamPrimary::CleanupFailed(failure);
+    }
+    OperationStreamOutcome {
+        primary,
+        delivered_items,
+        cleanup_failure,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
