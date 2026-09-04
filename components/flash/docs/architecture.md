@@ -116,6 +116,7 @@ Flash is a nested Cargo workspace rooted at [`components/flash/`](../Cargo.toml)
 | Responsibility | Current owner |
 | --- | --- |
 | Source representation, spans, lexical analysis, parsing, syntax trees, formatting, and source diagnostics | [`flash-syntax`](../crates/flash-syntax/) |
+| Read-only v1 source-graph migration analysis and schema rendering | [`flash-migrate`](../crates/flash-migrate/) |
 | Values, scopes, evaluation, functions, command metadata, planning, pipelines, sessions, jobs, module analysis, and shared semantic services | [`flash-runtime`](../crates/flash-runtime/) and syntax-owned analysis interfaces |
 | Portable operating-system capability contracts and deterministic test adapters | [`flash-platform`](../crates/flash-platform/) |
 | Unix-like process, descriptor, filesystem, signal, and terminal integration | [`flash-platform-posix`](../crates/flash-platform-posix/) |
@@ -129,7 +130,10 @@ abstract capability interface. `flash-cli` selects the appropriate runtime
 adapter and user-facing services. `flash-lsp` instead depends directly on
 `flash-syntax` and `flash-runtime`; it has no dependency on `flash-cli`,
 `flash-platform-posix`, or terminal integration and declares no direct
-dependency on `flash-platform`.
+dependency on `flash-platform`. `flash-migrate` depends only on `flash-syntax`
+and JSON serialization; it does not link runtime, platform, CLI, project,
+configuration, or execution owners. Its injected reader receives the remaining
+source-byte ceiling before each read, and exposes no write or execution method.
 
 New crates may be introduced as implementation responsibilities grow, but they must preserve this dependency direction and must not create an alternative grammar, evaluator, name resolver, or platform contract.
 

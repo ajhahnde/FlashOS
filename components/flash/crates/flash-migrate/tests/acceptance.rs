@@ -203,6 +203,16 @@ fn cli_json_preserves_percent_encoded_source_uri_and_exact_statuses() {
             .unwrap()
             .contains("\"findings\":[]")
     );
+
+    let unavailable = Command::new(binary)
+        .args(["--format", "json", "this-source-does-not-exist.fsh"])
+        .output()
+        .unwrap();
+    assert_eq!(unavailable.status.code(), Some(1));
+    assert!(unavailable.stderr.is_empty());
+    let unavailable_json = String::from_utf8(unavailable.stdout).unwrap();
+    assert!(unavailable_json.contains("\"complete\":false"));
+    assert!(unavailable_json.contains("\"kind\":\"source\""));
 }
 
 #[test]
@@ -211,7 +221,7 @@ fn json_rendering_is_byte_deterministic() {
     let first = analyze_roots(&NativeSourceReader, std::slice::from_ref(&root)).unwrap();
     let second = analyze_roots(&NativeSourceReader, &[root]).unwrap();
     assert_eq!(
-        first.render(MigrationFormat::Json),
-        second.render(MigrationFormat::Json)
+        first.render(MigrationFormat::Json).unwrap(),
+        second.render(MigrationFormat::Json).unwrap()
     );
 }

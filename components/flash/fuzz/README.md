@@ -2,11 +2,14 @@
 
 [FlashOS](../../../README.md) › [Flash](../README.md) › Fuzz Targets
 
-The `lexer`, `parser`, and `expander` targets accept arbitrary bytes. Valid
-UTF-8 inputs are passed through the public syntax and ordinary-word expansion
-APIs; invalid UTF-8 inputs exercise source-file loading and are then rejected
-normally. The expander target uses a fixed in-memory scope and never launches
-processes or performs platform I/O.
+The `lexer`, `parser`, `expander`, and `migration` targets accept arbitrary
+bytes. Valid UTF-8 inputs are passed through the public syntax,
+ordinary-word expansion, and read-only migration APIs; invalid UTF-8 inputs
+exercise source-file loading and are then rejected normally. The migration
+target uses a single explicit in-memory root, rejects import reads outside it,
+varies every migration resource ceiling on a dedicated input route, and parses
+every emitted JSON report. The expander and migration targets never launch
+processes or perform platform I/O.
 
 After building Flash, run a short campaign for all targets from the repository
 root:

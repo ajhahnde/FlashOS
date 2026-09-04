@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -8,14 +10,14 @@ use flash_migrate::{MigrationFormat, NativeSourceReader, analyze_roots};
 fn main() -> ExitCode {
     match parse_arguments(env::args_os().skip(1)) {
         Ok((format, roots)) => match analyze_roots(&NativeSourceReader, &roots) {
-            Ok(report) => {
-                println!("{}", report.render(format));
-                ExitCode::from(report.exit_status())
-            }
-            Err(error) => {
-                eprintln!("error: {error}");
-                ExitCode::from(1)
-            }
+            Ok(report) => match report.render(format) {
+                Ok(rendered) => {
+                    println!("{rendered}");
+                    ExitCode::from(report.exit_status())
+                }
+                Err(error) => render_error(&error, format),
+            },
+            Err(error) => render_error(&error, format),
         },
         Err(message) => {
             eprintln!("error: {message}");
@@ -23,6 +25,14 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn render_error(error: &flash_migrate::MigrationError, format: MigrationFormat) -> ExitCode {
+    match format {
+        MigrationFormat::Human => eprintln!("error: {}", error.render(format)),
+        MigrationFormat::Json => println!("{}", error.render(format)),
+    }
+    ExitCode::from(1)
 }
 
 fn parse_arguments(

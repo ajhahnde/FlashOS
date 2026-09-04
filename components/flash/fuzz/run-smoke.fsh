@@ -62,7 +62,7 @@ if !$status.ok {
     exit
 }
 
-for target in ['lexer', 'parser', 'expander'] {
+for target in ['lexer', 'parser', 'expander', 'migration'] {
     let corpus = "$work/$target"
     ^mkdir $corpus
     if !$status.ok {
