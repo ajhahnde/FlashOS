@@ -120,6 +120,28 @@ impl OperationDescriptor {
         &self.documentation
     }
 
+    /// Canonical callable labels for every carrier overload in descriptor order.
+    #[must_use]
+    pub fn signature_labels(&self) -> Vec<String> {
+        self.overloads
+            .iter()
+            .map(|overload| {
+                let generics = if self.type_parameters.is_empty() {
+                    String::new()
+                } else {
+                    format!("[{}]", self.type_parameters.join(", "))
+                };
+                format!(
+                    "{}{}(input: {}) -> {}",
+                    self.id.qualified_name(),
+                    generics,
+                    overload.input(),
+                    overload.result(),
+                )
+            })
+            .collect()
+    }
+
     /// Validates the descriptor as one indivisible overload set.
     pub fn validate(&self) -> Result<(), OperationDescriptorError> {
         if self.overloads.is_empty() {
@@ -259,6 +281,15 @@ impl OperationDescriptor {
                 };
                 finish_stream_operation(&mut stream, primary, delivered_items)
             }
+        }
+    }
+}
+
+impl fmt::Display for OperationInputType {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Value(value_type) => value_type.fmt(formatter),
+            Self::ValueStream(value_type) => write!(formatter, "ValueStream[{value_type}]"),
         }
     }
 }
@@ -437,6 +468,15 @@ pub fn standard_operation(module: &ModuleId, name: &str) -> Option<OperationDesc
         .validate()
         .expect("the compiled std::value::length descriptor must be valid");
     Some(descriptor)
+}
+
+/// Returns the closed compiled operation catalog for one standard module.
+#[must_use]
+pub(crate) fn standard_operations(module: &ModuleId) -> Vec<OperationDescriptor> {
+    ["length"]
+        .into_iter()
+        .filter_map(|name| standard_operation(module, name))
+        .collect()
 }
 
 /// A pure-operation failure, reported without a source span.

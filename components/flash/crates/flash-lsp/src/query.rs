@@ -236,49 +236,62 @@ fn completion(
     ) && let Some(report) = analyze(snapshot, document, &commands, control)?
         && let Some(program) = report.program()
         && let Some(module) = module_for_document(program, document)
-        && let Some(names) = program
-            .semantic_queries(&commands)
-            .visible_names(module, cursor)
     {
-        let prefix = target.prefix().strip_prefix('$').unwrap_or(target.prefix());
-        for name in names
-            .into_iter()
-            .filter(|name| name.name().starts_with(prefix))
-        {
-            match target.context() {
-                CompletionContext::Command { .. }
-                    if matches!(
-                        name.kind(),
-                        NameKind::Intrinsic | NameKind::Function | NameKind::ImportedFunction
-                    ) =>
-                {
-                    candidates.push(CompletionCandidate::new(name.name(), name.name(), 1, 3));
+        let queries = program.semantic_queries(&commands);
+        for operation in queries.operation_candidates(module, target.prefix()) {
+            candidates.push(CompletionCandidate::new(
+                operation.spelling(),
+                operation.spelling(),
+                1,
+                3,
+            ));
+        }
+        if let Some(names) = queries.visible_names(module, cursor) {
+            let prefix = target.prefix().strip_prefix('$').unwrap_or(target.prefix());
+            for name in names
+                .into_iter()
+                .filter(|name| name.name().starts_with(prefix))
+            {
+                match target.context() {
+                    CompletionContext::Command { .. }
+                        if matches!(
+                            name.kind(),
+                            NameKind::Intrinsic | NameKind::Function | NameKind::ImportedFunction
+                        ) =>
+                    {
+                        candidates.push(CompletionCandidate::new(name.name(), name.name(), 1, 3));
+                    }
+                    CompletionContext::Expression
+                        if matches!(
+                            name.kind(),
+                            NameKind::Intrinsic | NameKind::Function | NameKind::ImportedFunction
+                        ) =>
+                    {
+                        candidates.push(CompletionCandidate::new(name.name(), name.name(), 1, 3));
+                    }
+                    CompletionContext::Variable { braced }
+                        if name.kind() != NameKind::Intrinsic =>
+                    {
+                        candidates.push(CompletionCandidate::new(
+                            if *braced {
+                                name.name().to_owned()
+                            } else {
+                                format!("${}", name.name())
+                            },
+                            name.name(),
+                            1,
+                            if matches!(
+                                name.kind(),
+                                NameKind::Function | NameKind::ImportedFunction
+                            ) {
+                                3
+                            } else {
+                                6
+                            },
+                        ));
+                    }
+                    _ => {}
                 }
-                CompletionContext::Expression
-                    if matches!(
-                        name.kind(),
-                        NameKind::Intrinsic | NameKind::Function | NameKind::ImportedFunction
-                    ) =>
-                {
-                    candidates.push(CompletionCandidate::new(name.name(), name.name(), 1, 3));
-                }
-                CompletionContext::Variable { braced } if name.kind() != NameKind::Intrinsic => {
-                    candidates.push(CompletionCandidate::new(
-                        if *braced {
-                            name.name().to_owned()
-                        } else {
-                            format!("${}", name.name())
-                        },
-                        name.name(),
-                        1,
-                        if matches!(name.kind(), NameKind::Function | NameKind::ImportedFunction) {
-                            3
-                        } else {
-                            6
-                        },
-                    ));
-                }
-                _ => {}
             }
         }
     }
@@ -362,6 +375,16 @@ fn hover(
                     nominal.id().name(),
                     nominal.id().module().path().display(),
                     nominal.id().name(),
+                )
+            }
+            Some(SemanticHover::Operation(hover)) => {
+                let operation = hover.operation();
+                let signatures = operation.signature_labels().join("\n");
+                format!(
+                    "```flash\n{signatures}\n```\n\nCanonical identity: `{}`\n\nLanguage: {}\n\n{}",
+                    operation.id().qualified_name(),
+                    operation.id().module().language().get(),
+                    operation.documentation(),
                 )
             }
             Some(SemanticHover::Intrinsic(hover)) => {
@@ -457,6 +480,28 @@ fn signature_help(
             }],
             "activeSignature": 0,
             "activeParameter": signature.active_parameter()
+        }));
+    }
+    if let Some(signature) = queries.operation_signature_at(module, cursor) {
+        let operation = signature.operation();
+        let signatures = operation
+            .signature_labels()
+            .into_iter()
+            .map(|label| {
+                json!({
+                    "label": label,
+                    "documentation": {
+                        "kind": "markdown",
+                        "value": operation.documentation(),
+                    },
+                    "parameters": [{"label": "input"}],
+                })
+            })
+            .collect::<Vec<_>>();
+        return Ok(json!({
+            "signatures": signatures,
+            "activeSignature": 0,
+            "activeParameter": 0,
         }));
     }
     if let Some(signature) = queries.intrinsic_signature_at(module, cursor) {

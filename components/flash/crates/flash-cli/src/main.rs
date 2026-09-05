@@ -53,10 +53,7 @@ use flash_runtime::capsule::{
     MAX_CAPSULE_BYTES, decode_background_capsule, encode_supervisor_completion,
 };
 use flash_runtime::eval::{Clock, SystemClock};
-use flash_runtime::module::{
-    ModuleCanonicalizer, ModulePathError, ModuleProgramLoader, ModuleSourceError,
-    ModuleSourceLoader,
-};
+use flash_runtime::module::ModuleProgramLoader;
 use flash_runtime::outcome::{OutcomeEvidence, PrimaryOutcome};
 use flash_runtime::plan::SessionOptions;
 use flash_runtime::resolve::ExecutableProbe;
@@ -65,7 +62,7 @@ use flash_runtime::script::{
     execute_module_program, execute_module_program_outcome,
 };
 use flash_runtime::session::{BackgroundFailure, JobNoticeId, Session, SubmitError, SubmitOutcome};
-use flash_runtime::{Environment, ScopeStack};
+use flash_runtime::{Environment, ScopeStack, Value};
 use flash_syntax::{
     LanguageDetection, LanguageMajor, SourceFile, SourceId, detect_source_language,
 };
@@ -215,7 +212,8 @@ fn emit_report(report: HostReport<'_>) -> ExitCode {
 }
 
 fn run_checker(source: PathBuf) -> ExitCode {
-    let request = CheckRequest::new(source);
+    let language = detect_root_language(&source);
+    let request = CheckRequest::for_language(source, language);
     let run = check_source(&request, &HostCheckFilesystem);
     if run.is_success() {
         emit_report(HostReport::success(b""))
@@ -244,7 +242,7 @@ fn run_planner(source: PathBuf) -> ExitCode {
 }
 
 fn run_formatter(operation: flash_cli::cli::FormatOperation, paths: Vec<PathBuf>) -> ExitCode {
-    let request = FormatRequest::new(operation, paths);
+    let request = FormatRequest::detecting_language(operation, paths);
     let mut filesystem = HostFormatFilesystem;
     let run = format_files(&request, &mut filesystem);
     if run.is_success() {
@@ -689,17 +687,26 @@ impl SessionEvaluator {
 
 impl InteractiveEvaluator for SessionEvaluator {
     fn completion_catalog(&mut self) -> Option<CompletionCatalog> {
-        Some(if self.completion_enabled {
-            self.completion_provider.snapshot(
-                self.session.registry(),
-                self.session.scope(),
-                self.session.cwd(),
-                self.session.environment(),
-                &|| false,
-            )?
-        } else {
-            CompletionCatalog::new()
-        })
+        if !self.completion_enabled {
+            return Some(CompletionCatalog::new());
+        }
+        if self.session.language() == LanguageMajor::V2 {
+            // Pure v2 has neither external-command nor path authority. Build
+            // its prompt catalog from retained language state only, without
+            // reading PATH or walking the working directory.
+            return Some(
+                CompletionCatalog::from_runtime(self.session.registry(), self.session.scope())
+                    .with_language(LanguageMajor::V2)
+                    .with_operations(self.session.visible_operation_names()),
+            );
+        }
+        self.completion_provider.snapshot(
+            self.session.registry(),
+            self.session.scope(),
+            self.session.cwd(),
+            self.session.environment(),
+            &|| false,
+        )
     }
 
     fn fatal_cleanup(&mut self) -> Vec<String> {
@@ -770,14 +777,34 @@ impl InteractiveEvaluator for SessionEvaluator {
         source: &str,
         output: &mut dyn Write,
     ) -> Result<EvaluationControl, InteractiveEvaluationError> {
-        let outcome = self.session.submit(
-            "<interactive>",
-            source,
-            &self.probe,
-            &self.platform,
-            self.clock.as_ref(),
-            output,
-        );
+        let outcome = if self.session.language() == LanguageMajor::V2 {
+            self.session
+                .submit_with_value(
+                    "<interactive>",
+                    source,
+                    &self.probe,
+                    &self.platform,
+                    self.clock.as_ref(),
+                    output,
+                )
+                .and_then(|(outcome, value)| {
+                    if matches!(outcome, SubmitOutcome::Continued)
+                        && !matches!(value, Value::Null | Value::Status(_))
+                    {
+                        writeln!(output, "{value}").map_err(SubmitError::Output)?;
+                    }
+                    Ok(outcome)
+                })
+        } else {
+            self.session.submit(
+                "<interactive>",
+                source,
+                &self.probe,
+                &self.platform,
+                self.clock.as_ref(),
+                output,
+            )
+        };
         // Any submitted input that is not itself an exit request, successful or
         // failing, clears the refusal: the warning must describe the state the
         // user is actually leaving. An `exit` submission is the second attempt,
@@ -815,7 +842,7 @@ impl InteractiveEvaluator for SessionEvaluator {
 }
 
 fn run_script(path: &Path, arguments: &[String]) -> ExitCode {
-    let filesystem = HostModuleFilesystem;
+    let filesystem = HostCheckFilesystem;
     let language = detect_root_language(path);
     let program = match ModuleProgramLoader::for_language(&filesystem, &filesystem, language)
         .load_for_frontend(path)
@@ -878,6 +905,12 @@ fn run_script(path: &Path, arguments: &[String]) -> ExitCode {
 }
 
 fn detect_root_language(path: &Path) -> LanguageMajor {
+    let Ok(metadata) = fs::metadata(path) else {
+        return LanguageMajor::V1;
+    };
+    if !metadata.file_type().is_file() {
+        return LanguageMajor::V1;
+    }
     let Ok(bytes) = fs::read(path) else {
         return LanguageMajor::V1;
     };
@@ -894,20 +927,6 @@ fn detect_root_language(path: &Path) -> LanguageMajor {
             LanguageMajor::V2
         }
         LanguageDetection::Invalid(_) => LanguageMajor::V1,
-    }
-}
-
-struct HostModuleFilesystem;
-
-impl ModuleCanonicalizer for HostModuleFilesystem {
-    fn canonicalize(&self, candidate: &Path) -> Result<PathBuf, ModulePathError> {
-        fs::canonicalize(candidate).map_err(|error| ModulePathError::new(error.to_string()))
-    }
-}
-
-impl ModuleSourceLoader for HostModuleFilesystem {
-    fn load(&self, module: &flash_runtime::module::ModuleId) -> Result<Vec<u8>, ModuleSourceError> {
-        fs::read(module.path()).map_err(|error| ModuleSourceError::new(error.to_string()))
     }
 }
 

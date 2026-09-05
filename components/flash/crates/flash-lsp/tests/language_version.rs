@@ -236,6 +236,97 @@ fn v2_alias_reexport_and_nominal_type_queries_share_identity_and_provenance() {
     }
 }
 
+#[test]
+fn v2_workflow_operations_share_completion_hover_signature_and_generation() {
+    let directory = TestDirectory::new();
+    fs::create_dir(directory.path("support")).unwrap();
+    let root = include_str!("../../../tests/v2-foundation/workflow/workspace/root.fsh");
+    let facade = include_str!("../../../tests/v2-foundation/workflow/workspace/support/facade.fsh");
+    fs::write(directory.path("root.fsh"), root).unwrap();
+    fs::write(directory.path("support/facade.fsh"), facade).unwrap();
+    let root_uri = directory.uri("root.fsh");
+    let facade_uri = directory.uri("support/facade.fsh");
+    let mut workspace = Workspace::for_language(LanguageMajor::V2);
+    workspace.open(root_uri.clone(), 1, root.into()).unwrap();
+    workspace.open(facade_uri, 1, facade.into()).unwrap();
+
+    let direct = root.find("value::length").unwrap();
+    let completion = lsp_request(
+        &workspace,
+        "textDocument/completion",
+        positional(&root_uri, root, direct + "value::le".len()),
+    );
+    assert!(completion.as_array().unwrap().iter().any(|candidate| {
+        candidate["label"] == "value::length" && candidate["textEdit"]["newText"] == "value::length"
+    }));
+
+    let reexported = root.find("api::value::length").unwrap();
+    let completion = lsp_request(
+        &workspace,
+        "textDocument/completion",
+        positional(&root_uri, root, reexported + "api::value::le".len()),
+    );
+    assert!(completion.as_array().unwrap().iter().any(|candidate| {
+        candidate["label"] == "api::value::length"
+            && candidate["textEdit"]["newText"] == "api::value::length"
+    }));
+
+    let direct_hover = lsp_request(
+        &workspace,
+        "textDocument/hover",
+        positional(&root_uri, root, direct + "value::".len() + 2),
+    );
+    let reexported_hover = lsp_request(
+        &workspace,
+        "textDocument/hover",
+        positional(&root_uri, root, reexported + "api::value::".len() + 2),
+    );
+    assert_eq!(direct_hover, reexported_hover);
+    let hover = direct_hover["contents"]["value"].as_str().unwrap();
+    assert!(
+        hover.contains("Canonical identity: `std::value::length`"),
+        "{hover}"
+    );
+    assert!(
+        hover.contains("std::value::length[T](input: List[T]) -> Int"),
+        "{hover}"
+    );
+
+    let argument = root[direct..].find("\"one\"").unwrap() + direct + 2;
+    let signature = lsp_request(
+        &workspace,
+        "textDocument/signatureHelp",
+        positional(&root_uri, root, argument),
+    );
+    assert_eq!(
+        signature["signatures"][0]["label"],
+        "std::value::length[T](input: List[T]) -> Int"
+    );
+    assert_eq!(signature["activeParameter"], 0);
+
+    let formatting = lsp_request(
+        &workspace,
+        "textDocument/formatting",
+        json!({"textDocument": {"uri": root_uri.as_str()}, "options": {}}),
+    );
+    assert_eq!(formatting, json!([]));
+
+    let prepared = prepare_request(
+        &workspace.diagnostic_snapshot(),
+        PositionEncoding::Utf16,
+        RequestControl::new(),
+        "textDocument/hover",
+        &positional(&root_uri, root, direct + "value::".len() + 2),
+    );
+    workspace
+        .change(&root_uri, Some(2), root.replace("direct()", "reexported()"))
+        .unwrap();
+    assert_eq!(
+        prepared.finish(&workspace),
+        Err(flash_lsp::query::RequestError::ContentModified)
+    );
+}
+
 fn positional(uri: &DocumentUri, text: &str, offset: usize) -> Value {
     let source = SourceFile::new(SourceId::new(999), "<request>", text);
     let position = source

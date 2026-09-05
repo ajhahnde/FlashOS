@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use flash_syntax::{
     Block, CommandItemKind, CompletionContext, ConditionalChain, ControlTransfer, ElseBranch,
-    Expression, ExpressionKind, LiteralKind, MatchArm, Pattern, RecordKey, RedirectionKind,
-    SourceFile, Span, StageKind, Statement, StatementKind, Word, WordPart, WordPartKind,
-    completion_target,
+    Expression, ExpressionKind, LiteralKind, MatchArm, Pattern, QualifiedName, RecordKey,
+    RedirectionKind, SourceFile, Span, StageKind, Statement, StatementKind, Word, WordPart,
+    WordPartKind, completion_target,
 };
 
 use crate::command::{CommandClassification, CommandRegistry, CommandSignature, NamespaceClass};
@@ -15,6 +15,7 @@ use crate::module::{
     FunctionSignature, ModuleEffectSummary, ModuleId, ModuleNameImport, ModuleProgram,
     ModuleReferenceTarget, NominalType, ValueType,
 };
+use crate::operation::{OperationDescriptor, standard_operations};
 
 /// One canonical source location without an editor URI or protocol position.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -243,6 +244,38 @@ pub struct NominalTypeHover {
     nominal: NominalType,
 }
 
+/// Shared hover data for one compiled operation descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationHover {
+    operation: OperationDescriptor,
+}
+
+impl OperationHover {
+    #[must_use]
+    pub const fn operation(&self) -> &OperationDescriptor {
+        &self.operation
+    }
+}
+
+/// One qualified operation spelling backed by its canonical descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationCompletion {
+    spelling: String,
+    operation: OperationDescriptor,
+}
+
+impl OperationCompletion {
+    #[must_use]
+    pub fn spelling(&self) -> &str {
+        &self.spelling
+    }
+
+    #[must_use]
+    pub const fn operation(&self) -> &OperationDescriptor {
+        &self.operation
+    }
+}
+
 impl NominalTypeHover {
     #[must_use]
     pub const fn nominal(&self) -> &NominalType {
@@ -272,6 +305,7 @@ impl NamedImportEffects {
 pub enum SemanticHover {
     Module(ModuleAliasHover),
     NominalType(NominalTypeHover),
+    Operation(OperationHover),
     Intrinsic(IntrinsicHover),
     DynamicBinding(DynamicBindingHover),
     Binding(BindingHover),
@@ -311,6 +345,31 @@ pub struct SignatureContext {
     active_parameter: usize,
     definition: SourceLocation,
     signature: FunctionSignature,
+}
+
+/// One enclosing compiled-operation call and its active input parameter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationSignatureContext {
+    call_span: Span,
+    active_parameter: usize,
+    operation: OperationDescriptor,
+}
+
+impl OperationSignatureContext {
+    #[must_use]
+    pub const fn call_span(&self) -> Span {
+        self.call_span
+    }
+
+    #[must_use]
+    pub const fn active_parameter(&self) -> usize {
+        self.active_parameter
+    }
+
+    #[must_use]
+    pub const fn operation(&self) -> &OperationDescriptor {
+        &self.operation
+    }
 }
 
 impl SignatureContext {
@@ -356,6 +415,34 @@ impl ModuleProgram {
 }
 
 impl SemanticQueries<'_> {
+    /// Completes one qualified compiled-operation path through current aliases.
+    #[must_use]
+    pub fn operation_candidates(
+        &self,
+        module: &ModuleId,
+        qualified_prefix: &str,
+    ) -> Vec<OperationCompletion> {
+        let segments = qualified_prefix.split("::").collect::<Vec<_>>();
+        let Some((name_prefix, modules)) = segments.split_last() else {
+            return Vec::new();
+        };
+        if modules.is_empty() || modules.iter().any(|segment| segment.is_empty()) {
+            return Vec::new();
+        }
+        let Some(owner) = self.program.aliases().resolve(module, modules) else {
+            return Vec::new();
+        };
+        let qualifier = modules.join("::");
+        standard_operations(owner)
+            .into_iter()
+            .filter(|operation| operation.id().name().starts_with(name_prefix))
+            .map(|operation| OperationCompletion {
+                spelling: format!("{qualifier}::{}", operation.id().name()),
+                operation,
+            })
+            .collect()
+    }
+
     /// Returns visible lexical and unshadowed intrinsic names in exact name order.
     #[must_use]
     pub fn visible_names(&self, module: &ModuleId, cursor: usize) -> Option<Vec<VisibleName>> {
@@ -509,6 +596,9 @@ impl SemanticQueries<'_> {
                 nominal: nominal.clone(),
             }));
         }
+        if let Some(operation) = self.operation_at(module, offset) {
+            return Some(SemanticHover::Operation(OperationHover { operation }));
+        }
         if let Some((name, target)) = self.program.names().target_at(module, offset) {
             if matches!(target, ModuleReferenceTarget::DynamicStatus) {
                 return Some(SemanticHover::DynamicBinding(DynamicBindingHover {
@@ -561,6 +651,33 @@ impl SemanticQueries<'_> {
             active_parameter,
             definition,
             signature,
+        })
+    }
+
+    /// Finds the smallest enclosing compiled-operation call and active input.
+    #[must_use]
+    pub fn operation_signature_at(
+        &self,
+        module: &ModuleId,
+        offset: usize,
+    ) -> Option<OperationSignatureContext> {
+        let script = self.program.sources().script(module)?;
+        let source = self.program.sources().source(module)?;
+        let (call, call_span) = CallFinder::new(offset).find(script.statements())?;
+        let ExpressionKind::Qualified(name) = call.callee.kind() else {
+            return None;
+        };
+        let segments = qualified_segments(source, name)?;
+        let operation = self.program.resolve_operation(module, &segments)?;
+        let active_parameter = call
+            .arguments
+            .iter()
+            .position(|argument| offset <= argument.span().end())
+            .unwrap_or(call.arguments.len());
+        Some(OperationSignatureContext {
+            call_span,
+            active_parameter,
+            operation,
         })
     }
 
@@ -657,6 +774,14 @@ impl SemanticQueries<'_> {
             .into_iter()
             .flat_map(CommandSignature::flags)
             .collect()
+    }
+
+    fn operation_at(&self, module: &ModuleId, offset: usize) -> Option<OperationDescriptor> {
+        let script = self.program.sources().script(module)?;
+        let source = self.program.sources().source(module)?;
+        let qualified = CallFinder::new(offset).find_qualified(script.statements())?;
+        let segments = qualified_segments(source, qualified)?;
+        self.program.resolve_operation(module, &segments)
     }
 
     fn target_metadata(
@@ -807,10 +932,21 @@ fn contains(span: Span, offset: usize) -> bool {
     span.start() <= offset && offset < span.end()
 }
 
+fn qualified_segments<'source>(
+    source: &'source SourceFile,
+    name: &QualifiedName,
+) -> Option<Vec<&'source str>> {
+    name.segments
+        .iter()
+        .map(|segment| source.slice(segment.span()).ok())
+        .collect()
+}
+
 struct CallFinder<'a> {
     offset: usize,
     best: Option<(&'a flash_syntax::CallExpression, Span)>,
     best_command: Option<(&'a flash_syntax::CommandStage, Span)>,
+    best_qualified: Option<&'a QualifiedName>,
 }
 
 impl<'a> CallFinder<'a> {
@@ -819,6 +955,7 @@ impl<'a> CallFinder<'a> {
             offset,
             best: None,
             best_command: None,
+            best_qualified: None,
         }
     }
 
@@ -836,6 +973,11 @@ impl<'a> CallFinder<'a> {
     ) -> Option<(&'a flash_syntax::CommandStage, Span)> {
         self.statements(statements);
         self.best_command
+    }
+
+    fn find_qualified(mut self, statements: &'a [Statement]) -> Option<&'a QualifiedName> {
+        self.statements(statements);
+        self.best_qualified
     }
 
     fn statements(&mut self, statements: &'a [Statement]) {
@@ -968,9 +1110,16 @@ impl<'a> CallFinder<'a> {
         }
         match expression.kind() {
             ExpressionKind::Literal(literal) => self.literal(literal),
-            ExpressionKind::Variable(_)
-            | ExpressionKind::Symbol(_)
-            | ExpressionKind::Qualified(_) => {}
+            ExpressionKind::Variable(_) | ExpressionKind::Symbol(_) => {}
+            ExpressionKind::Qualified(name) => {
+                if contains(name.span, self.offset)
+                    && self
+                        .best_qualified
+                        .is_none_or(|best| name.span.len() < best.span.len())
+                {
+                    self.best_qualified = Some(name);
+                }
+            }
             ExpressionKind::List(items) => {
                 for item in items {
                     self.expression(item);

@@ -57,6 +57,17 @@ pub struct ModuleHelpCatalog {
     program: ModuleProgram,
 }
 
+/// Renders one compiled operation's canonical identity, overloads, and docs.
+#[must_use]
+pub fn render_module_operation_help(operation: &OperationDescriptor) -> Vec<u8> {
+    let mut output = format!("operation {}\n", operation.id().qualified_name());
+    for signature in operation.signature_labels() {
+        output.push_str(&format!("  signature: {signature}\n"));
+    }
+    output.push_str(&format!("  documentation: {}\n", operation.documentation()));
+    output.into_bytes()
+}
+
 impl ModuleHelpCatalog {
     #[must_use]
     pub fn snapshot(program: &ModuleProgram) -> Self {

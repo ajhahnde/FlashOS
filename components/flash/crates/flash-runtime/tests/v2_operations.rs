@@ -18,6 +18,7 @@ use flash_runtime::module::{
 };
 use flash_runtime::operation::{OperationInputType, OperationStreamPrimary};
 use flash_runtime::plan::SessionOptions;
+use flash_runtime::query::SemanticHover;
 use flash_runtime::resolve::ExecutableProbe;
 use flash_runtime::script::execute_module_program;
 use flash_runtime::stream::{
@@ -153,6 +154,28 @@ fn operation_identity_overloads_help_and_budgeted_stream_share_one_descriptor() 
             .documentation()
             .contains("bounded")
     );
+
+    let source = program.sources().source(module).unwrap();
+    let commands = standard_registry();
+    let queries = program.semantic_queries(&commands);
+    let operation_cursor = source.text().find("value::length([1, 2])").unwrap() + 9;
+    let SemanticHover::Operation(hover) = queries.hover_at(module, operation_cursor).unwrap()
+    else {
+        panic!("the qualified operation should expose descriptor hover");
+    };
+    assert_eq!(hover.operation().id(), direct.id());
+    assert_eq!(
+        queries
+            .operation_signature_at(module, operation_cursor + 8)
+            .unwrap()
+            .operation()
+            .id(),
+        direct.id()
+    );
+    let candidates = queries.operation_candidates(module, "api::value::le");
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].spelling(), "api::value::length");
+    assert_eq!(candidates[0].operation().id(), direct.id());
 
     let outcome = direct.execute_value_stream(
         ValueStream::from_values(vec![Value::Int(1), Value::Int(2)])
@@ -292,6 +315,38 @@ fn operation_identity_overloads_help_and_budgeted_stream_share_one_descriptor() 
         })
     ));
     assert_eq!(outcome.delivered_items(), 1);
+}
+
+#[test]
+fn golden_workflow_retains_int_two_in_the_embedding_api() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/v2-foundation/v2/source.fsh");
+    let modules = FixtureModules;
+    let program = ModuleProgramLoader::for_language(&modules, &modules, LanguageMajor::V2)
+        .load(&source)
+        .expect("the complete workflow source should analyze");
+    let mut output = Vec::new();
+    let completion = execute_module_program(
+        &program,
+        &["alpha".to_owned(), "beta".to_owned(), "gamma".to_owned()],
+        source.parent().unwrap(),
+        &mut Environment::new(),
+        &standard_registry(),
+        &NoExecutables,
+        &SessionOptions::default(),
+        &FakePlatform::full(),
+        Arc::new(FakeClock::new()),
+        &mut output,
+    )
+    .expect("the pure workflow should execute");
+
+    assert_eq!(completion.value(), &Value::Int(2));
+    assert!(completion.status().is_none());
+    assert!(
+        output.is_empty(),
+        "embedding retains rather than prints the value"
+    );
 }
 
 fn operation_root() -> PathBuf {

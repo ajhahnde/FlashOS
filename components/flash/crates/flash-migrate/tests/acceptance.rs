@@ -225,3 +225,32 @@ fn json_rendering_is_byte_deterministic() {
         second.render(MigrationFormat::Json).unwrap()
     );
 }
+
+#[test]
+fn golden_workflow_reports_the_exact_preserved_source_migration() {
+    let flash = flash_root();
+    let relative = "tests/v2-foundation/v1/preserved.fsh";
+    let path = flash.join(relative);
+    let before = fs::read(&path).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_fsh-migrate-v1-v2"))
+        .current_dir(&flash)
+        .args(["--format", "json", relative])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stderr.is_empty());
+    assert_eq!(fs::read(&path).unwrap(), before, "analysis must not write");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        concat!(
+            "{\"schema\":1,\"sources\":[{\"source_uri\":\"tests/v2-foundation/v1/preserved.fsh\",",
+            "\"digest\":\"sha256:a604ad1257b89169ad1c4add15f9a99a897fd3c19bdc42bb071d52dda4420beb\",",
+            "\"detected_language\":1,\"target_language\":2,\"findings\":[{\"code\":\"MIG2001\",",
+            "\"severity\":\"required\",\"start\":0,\"end\":0,",
+            "\"message\":\"add 'language 2' before the first statement\",",
+            "\"edit\":{\"start\":0,\"end\":0,\"replacement\":\"language 2\\n\\n\"}}],",
+            "\"unresolved\":false}]}\n",
+        )
+    );
+}

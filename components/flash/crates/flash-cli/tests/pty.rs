@@ -284,6 +284,35 @@ fn v2_repl_preselects_its_grammar_without_v1_config_or_history() {
     session.expect_from(mark, "error[FS1000]");
     session.await_prompt(mark);
 
+    let mark = session.mark();
+    session.send(b"import std::value as value");
+    session.send(ENTER);
+    session.await_prompt(mark);
+    assert!(!session.rendered_from(mark).contains("error["));
+
+    let mark = session.mark();
+    session.send(b"value::length([\"one\", \"two\"])");
+    session.send(ENTER);
+    session.expect_from(mark, "2");
+    session.await_prompt(mark);
+
+    let mark = session.mark();
+    session.send(b"help value::length");
+    session.send(ENTER);
+    session.expect_from(mark, "operation std::value::length");
+    session.expect_from(mark, "std::value::length[T](input: List[T]) -> Int");
+    session.await_prompt(mark);
+
+    let mark = session.mark();
+    session.send(b"value::length([\"one\", \"two\"]) | value::length");
+    session.send(ENTER);
+    session.expect_from(mark, "error[RUN001]");
+    session.expect_from(
+        mark,
+        "operation `std::value::length` does not accept carrier Value(int)",
+    );
+    session.await_prompt(mark);
+
     session.send(b"exit 0");
     session.send(ENTER);
     assert_eq!(session.wait_code(), 0);

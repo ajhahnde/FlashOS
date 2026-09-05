@@ -50,12 +50,14 @@ use crate::execute::{
     execute_foreground_status, execute_foreground_with_stdout_drain, start_mixed_pipeline,
 };
 use crate::format::{ToTextStep, to_text};
+use crate::help::render_module_operation_help;
 use crate::internal::{
     DEFAULT_MATERIALIZATION_LIMIT, InternalPayload, InternalPipelineOutcome, StageOutcome,
     execute_internal_pipeline, execute_internal_suffix, execute_stage,
 };
 use crate::job::JobPlacement;
-use crate::module::RuntimeBindingTypes;
+use crate::module::{ModuleAliasRegistry, RuntimeBindingTypes};
+use crate::operation::OperationDescriptor;
 use crate::outcome::{Refusal, RefusalReason};
 use crate::plan::{
     ExecutionPlan, InternalStdoutRoute, PlannedResolution, PlannedStage, SessionOptions,
@@ -131,6 +133,7 @@ pub struct Session {
     registry: CommandRegistry,
     next_source: u32,
     jobs: Option<BackgroundJobs>,
+    v2_aliases: ModuleAliasRegistry,
 }
 
 impl Session {
@@ -225,6 +228,7 @@ impl Session {
             registry,
             next_source: 1,
             jobs: None,
+            v2_aliases: ModuleAliasRegistry::default(),
         }
     }
 
@@ -256,6 +260,12 @@ impl Session {
     #[must_use]
     pub const fn registry(&self) -> &CommandRegistry {
         &self.registry
+    }
+
+    /// Qualified compiled operations visible to the current interactive session.
+    #[must_use]
+    pub fn visible_operation_names(&self) -> Vec<String> {
+        self.v2_aliases.operation_spellings()
     }
 
     /// The most recent normally completed status, if a job has run.
@@ -387,7 +397,7 @@ impl Session {
     /// Evaluates one submission and retains its exact final language value for
     /// non-interactive embedding boundaries.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn submit_with_value(
+    pub fn submit_with_value(
         &mut self,
         name: impl Into<String>,
         text: impl Into<String>,
@@ -417,13 +427,24 @@ impl Session {
             ParseOutcome::Invalid(diagnostics) => return Err(render(&source, &diagnostics)),
         };
 
-        let binding_types = RuntimeBindingTypes::analyze_source(&source, &script)
-            .map_err(|error| render(&source, &[error.diagnostic()]))?;
+        let (binding_types, imports_analyzed) = match self.language {
+            LanguageMajor::V1 => (
+                RuntimeBindingTypes::analyze_source(&source, &script)
+                    .map_err(|error| render(&source, &[error.diagnostic()]))?,
+                false,
+            ),
+            LanguageMajor::V2 => {
+                let binding_types =
+                    RuntimeBindingTypes::analyze_repl_source(&source, &script, &self.v2_aliases)
+                        .map_err(|diagnostic| render(&source, &[diagnostic]))?;
+                (binding_types, true)
+            }
+        };
 
         self.submit_parsed(
             source,
             &script,
-            false,
+            imports_analyzed,
             Some(Arc::new(binding_types)),
             probe,
             platform,
@@ -487,6 +508,7 @@ impl Session {
             options,
             registry,
             jobs,
+            v2_aliases,
             ..
         } = self;
 
@@ -494,7 +516,33 @@ impl Session {
         for statement in script.statements() {
             match statement.kind() {
                 StatementKind::Import(_) if imports_analyzed => continue,
+                StatementKind::ModuleImport(import) if imports_analyzed => {
+                    let alias_name = source_file
+                        .slice(import.alias.span())
+                        .expect("a parsed module alias belongs to its source");
+                    if let Some(alias) = binding_types
+                        .module_alias(source_file.id(), alias_name)
+                        .cloned()
+                    {
+                        v2_aliases.retain_alias(alias);
+                    }
+                    continue;
+                }
                 StatementKind::ModuleExport(_) if imports_analyzed => continue,
+                StatementKind::Job(job)
+                    if policy == EvaluationPolicy::PureV2
+                        && job.background_span.is_none()
+                        && let Some(operation) = standalone_v2_operation_help(
+                            &job.chain,
+                            source_file,
+                            &binding_types,
+                        ) =>
+                {
+                    output
+                        .write_all(&render_module_operation_help(&operation))
+                        .map_err(SubmitError::Output)?;
+                    last_value = Value::Null;
+                }
                 StatementKind::Job(job) if job.background_span.is_some() => {
                     let background_span = job
                         .background_span
@@ -631,6 +679,40 @@ impl Session {
 
 fn chain_is_standalone_help(chain: &ConditionalChain, source: &SourceFile) -> bool {
     chain_is_standalone_bare_command(chain, source, "help")
+}
+
+fn standalone_v2_operation_help(
+    chain: &ConditionalChain,
+    source: &SourceFile,
+    binding_types: &RuntimeBindingTypes,
+) -> Option<OperationDescriptor> {
+    if !chain_is_standalone_help(chain, source) {
+        return None;
+    }
+    let [and_chain] = chain.or_terms() else {
+        return None;
+    };
+    let [pipeline] = and_chain.and_terms() else {
+        return None;
+    };
+    let [stage] = pipeline.stages() else {
+        return None;
+    };
+    let StageKind::Command(command) = stage.kind() else {
+        return None;
+    };
+    let [item] = command.items.as_slice() else {
+        return None;
+    };
+    let CommandItemKind::Word(word) = item.kind() else {
+        return None;
+    };
+    if !word_has_effect_free_parts(word) {
+        return None;
+    }
+    let qualified = source.slice(word.span()).ok()?;
+    let segments = qualified.split("::").collect::<Vec<_>>();
+    binding_types.qualified_operation(source.id(), &segments)
 }
 
 fn chain_is_standalone_exit(chain: &ConditionalChain, source: &SourceFile) -> bool {

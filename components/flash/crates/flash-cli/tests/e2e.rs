@@ -165,6 +165,96 @@ fn v2_final_values_and_domain_results_are_silent_successes() {
 }
 
 #[test]
+fn golden_v2_workflow_formats_checks_and_runs_with_exact_cli_channels() {
+    let workflow = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/v2-foundation/workflow");
+    let foundation = workflow.parent().unwrap();
+    let preserved = foundation.join("v2/preserved.fsh");
+    let source = foundation.join("v2/source.fsh");
+    let workspace = workflow.join("workspace/root.fsh");
+    let facade = workflow.join("workspace/support/facade.fsh");
+
+    let formatted = Command::new(env!("CARGO_BIN_EXE_fsh"))
+        .args(["format", "--check"])
+        .arg(&preserved)
+        .arg(&source)
+        .arg(&workspace)
+        .arg(&facade)
+        .output()
+        .unwrap();
+    assert!(formatted.status.success(), "{formatted:?}");
+    assert!(formatted.stdout.is_empty());
+    assert!(formatted.stderr.is_empty());
+
+    let checked = Command::new(env!("CARGO_BIN_EXE_fsh"))
+        .arg("check")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(checked.status.success(), "{checked:?}");
+    assert!(checked.stdout.is_empty());
+    assert!(checked.stderr.is_empty());
+
+    let checked_workspace = Command::new(env!("CARGO_BIN_EXE_fsh"))
+        .arg("check")
+        .arg(&workspace)
+        .output()
+        .unwrap();
+    assert!(checked_workspace.status.success(), "{checked_workspace:?}");
+    assert!(checked_workspace.stdout.is_empty());
+    assert!(checked_workspace.stderr.is_empty());
+
+    let executed = Command::new(env!("CARGO_BIN_EXE_fsh"))
+        .arg(&source)
+        .args(["alpha", "beta", "gamma"])
+        .current_dir(source.parent().unwrap())
+        .output()
+        .unwrap();
+    assert!(executed.status.success(), "{executed:?}");
+    assert!(executed.stdout.is_empty());
+    assert!(executed.stderr.is_empty());
+
+    let executed_workspace = Command::new(env!("CARGO_BIN_EXE_fsh"))
+        .arg(&workspace)
+        .current_dir(workspace.parent().unwrap())
+        .output()
+        .unwrap();
+    assert!(
+        executed_workspace.status.success(),
+        "{executed_workspace:?}"
+    );
+    assert!(executed_workspace.stdout.is_empty());
+    assert!(executed_workspace.stderr.is_empty());
+}
+
+#[test]
+fn script_roots_reject_directories_and_special_files_before_source_reads() {
+    let temp = TempDir::new("script-special-files");
+    let directory = temp.path().join("directory.fsh");
+    fs::create_dir(&directory).unwrap();
+    let special = temp.path().join("fifo.fsh");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&special)
+            .status()
+            .expect("mkfifo should start")
+            .success()
+    );
+
+    for source in [&directory, &special] {
+        let output = run_script(source, temp.path(), fixture_directory());
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("not a regular file")
+        );
+    }
+}
+
+#[test]
 fn v2_standard_outcome_diagnostics_render_from_the_compiled_descriptor() {
     let outcome_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")

@@ -38,7 +38,9 @@ use crate::command::{
 };
 use crate::documentation::Documentation;
 use crate::intrinsic::{DynamicBinding, ExpressionIntrinsic};
-use crate::operation::{OperationDescriptor, OperationInputType, standard_operation};
+use crate::operation::{
+    OperationDescriptor, OperationInputType, standard_operation, standard_operations,
+};
 
 /// Host-free cooperative cancellation for static source analysis.
 #[derive(Clone)]
@@ -575,6 +577,30 @@ impl ModuleAliasRegistry {
             .get(module)
             .into_iter()
             .flat_map(|aliases| aliases.exports.values())
+    }
+
+    pub(crate) fn operation_spellings(&self) -> Vec<String> {
+        let mut spellings = self
+            .by_module
+            .values()
+            .flat_map(|aliases| aliases.aliases.values())
+            .flat_map(|alias| {
+                standard_operations(alias.target())
+                    .into_iter()
+                    .map(move |operation| format!("{}::{}", alias.name(), operation.id().name()))
+            })
+            .collect::<Vec<_>>();
+        spellings.sort();
+        spellings.dedup();
+        spellings
+    }
+
+    pub(crate) fn retain_alias(&mut self, alias: ModuleAlias) {
+        self.by_module
+            .entry(alias.importer().clone())
+            .or_default()
+            .aliases
+            .insert(alias.name().to_owned(), alias);
     }
 
     /// Resolves a local alias followed only by explicitly re-exported aliases.
@@ -1774,6 +1800,11 @@ impl RuntimeBindingTypes {
         standard_operation(owner, name)
     }
 
+    pub(crate) fn module_alias(&self, source: SourceId, name: &str) -> Option<&ModuleAlias> {
+        let current = self.modules_by_source.get(&source)?;
+        self.aliases.alias(current, name)
+    }
+
     pub(crate) fn annotation_type(&self, source: SourceId, span: Span) -> Option<&ValueType> {
         self.annotations_by_source
             .get(&source)?
@@ -1890,6 +1921,132 @@ impl RuntimeBindingTypes {
             TypeCollector::new(&entry, &aliases, &names, &declarations, &control).collect();
         if let Some(error) = errors.into_iter().next() {
             return Err(Box::new(error));
+        }
+        Ok(Self {
+            by_source: BTreeMap::from([(source.id(), types.bindings)]),
+            functions_by_source: BTreeMap::from([(source.id(), types.functions)]),
+            annotations_by_source: BTreeMap::from([(source.id(), types.annotations)]),
+            modules_by_source: BTreeMap::from([(source.id(), entry.module().clone())]),
+            nominals_by_module: declarations
+                .by_module
+                .into_iter()
+                .map(|(module, types)| (module, types.nominals))
+                .collect(),
+            aliases,
+        })
+    }
+
+    pub(crate) fn analyze_repl_source(
+        source: &SourceFile,
+        script: &Script,
+        inherited_aliases: &ModuleAliasRegistry,
+    ) -> Result<Self, Diagnostic> {
+        let entry = RegisteredModuleSource {
+            module: ModuleId {
+                // Submission names remain diagnostic labels. Interactive state
+                // needs one stable module identity so aliases retained by an
+                // earlier cell resolve from later differently named cells.
+                path: PathBuf::from("<interactive>"),
+                language: LanguageMajor::V2,
+                origin: ModuleOrigin::Local,
+            },
+            source: source.clone(),
+            script: script.clone(),
+        };
+        let mut aliases = inherited_aliases.clone();
+        aliases.by_module.entry(entry.module().clone()).or_default();
+
+        let mut occupied = script
+            .statements()
+            .iter()
+            .flat_map(top_level_declared_identifiers)
+            .map(|identifier| {
+                source
+                    .slice(identifier.span())
+                    .expect("parsed identifiers belong to their source")
+                    .to_owned()
+            })
+            .collect::<BTreeSet<_>>();
+        for alias in aliases.aliases(entry.module()) {
+            occupied.insert(alias.name().to_owned());
+        }
+
+        for statement in script.statements() {
+            let StatementKind::ModuleImport(import) = statement.kind() else {
+                continue;
+            };
+            let alias_name = source
+                .slice(import.alias.span())
+                .expect("parsed aliases belong to their source")
+                .to_owned();
+            if occupied.contains(&alias_name) {
+                return Err(Diagnostic::new(
+                    Severity::Error,
+                    "MOD011",
+                    format!("module alias `{alias_name}` conflicts"),
+                )
+                .with_primary(import.alias.span(), "this alias conflicts"));
+            }
+            let flash_syntax::ModuleImportSource::Standard {
+                namespace,
+                module,
+                span,
+            } = import.source
+            else {
+                return Err(Diagnostic::new(
+                    Severity::Error,
+                    "MOD013",
+                    "interactive local module loading is not available",
+                )
+                .with_primary(
+                    import.source.span(),
+                    "run the versioned module as a source file instead",
+                ));
+            };
+            let namespace = source
+                .slice(namespace.span())
+                .expect("standard namespace belongs to its source");
+            let standard = source
+                .slice(module.span())
+                .expect("standard module belongs to its source");
+            if !is_standard_module(namespace, standard, LanguageMajor::V2) {
+                return Err(ModuleAliasError::UnknownStandard {
+                    module: entry.module().clone(),
+                    name: standard.to_owned(),
+                    span,
+                }
+                .diagnostic());
+            }
+            let target = ModuleId::standard(namespace, standard, LanguageMajor::V2);
+            aliases
+                .by_module
+                .get_mut(entry.module())
+                .expect("the interactive source owns an alias table")
+                .aliases
+                .insert(
+                    alias_name.clone(),
+                    ModuleAlias {
+                        name: alias_name.clone(),
+                        importer: entry.module().clone(),
+                        target,
+                        requested: None,
+                        declaration_span: import.alias.span(),
+                    },
+                );
+            occupied.insert(alias_name);
+        }
+
+        let control = AnalysisControl::never();
+        let names = ModuleNameRegistry::default();
+        let mut declarations = ModuleTypeRegistry::default();
+        declarations.by_module.insert(
+            entry.module().clone(),
+            TypeCollector::declarations(&entry, &control),
+        );
+        let (types, errors) =
+            TypeCollector::new(&entry, &aliases, &names, &declarations, &control).collect();
+        if let Some(error) = errors.into_iter().next() {
+            return Err(error.diagnostic());
         }
         Ok(Self {
             by_source: BTreeMap::from([(source.id(), types.bindings)]),
