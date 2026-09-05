@@ -387,7 +387,15 @@ impl ModuleCanonicalizer for HostFileSystem {
 
 impl ModuleSourceLoader for HostFileSystem {
     fn load(&self, module: &ModuleId) -> Result<Vec<u8>, ModuleSourceError> {
-        let mut file =
+        self.load_bounded(module, usize::MAX)
+    }
+
+    fn load_bounded(
+        &self,
+        module: &ModuleId,
+        maximum: usize,
+    ) -> Result<Vec<u8>, ModuleSourceError> {
+        let file =
             File::open(module.path()).map_err(|error| ModuleSourceError::new(error.to_string()))?;
         let metadata = file
             .metadata()
@@ -396,7 +404,8 @@ impl ModuleSourceLoader for HostFileSystem {
             return Err(ModuleSourceError::new("path is not a regular file"));
         }
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
+        file.take(maximum as u64)
+            .read_to_end(&mut bytes)
             .map_err(|error| ModuleSourceError::new(error.to_string()))?;
         Ok(bytes)
     }
@@ -756,6 +765,23 @@ impl WorkspaceSnapshot {
             ) {
                 ModuleAnalysisOutcome::Complete(report) => report,
                 ModuleAnalysisOutcome::Cancelled => return Ok(None),
+                ModuleAnalysisOutcome::BudgetExceeded(exceeded) => {
+                    by_uri
+                        .entry(root.uri.clone())
+                        .or_default()
+                        .push(WorkspaceDiagnostic {
+                            range: zero_range(),
+                            severity: Severity::Error,
+                            code: Some("ANL001".to_owned()),
+                            message: exceeded.to_string(),
+                            primary_annotation: None,
+                            related_information: Vec::new(),
+                            notes: vec![
+                                "analysis produced no partial executable program".to_owned(),
+                            ],
+                        });
+                    continue;
+                }
             };
             self.normalize_report(root, &report, encoding, &mut by_uri)?;
         }
@@ -897,14 +923,23 @@ impl ModuleCanonicalizer for WorkspaceSnapshot {
 
 impl ModuleSourceLoader for WorkspaceSnapshot {
     fn load(&self, module: &ModuleId) -> Result<Vec<u8>, ModuleSourceError> {
+        self.load_bounded(module, usize::MAX)
+    }
+
+    fn load_bounded(
+        &self,
+        module: &ModuleId,
+        maximum: usize,
+    ) -> Result<Vec<u8>, ModuleSourceError> {
         if let Some(uri) = self.owners.get(module.path()) {
             let document = self
                 .documents
                 .get(uri)
                 .expect("every snapshot overlay owner has an open document");
-            return Ok(document.text.as_bytes().to_vec());
+            let bytes = document.text.as_bytes();
+            return Ok(bytes[..bytes.len().min(maximum)].to_vec());
         }
-        self.host.load(module)
+        self.host.load_bounded(module, maximum)
     }
 }
 
@@ -939,14 +974,23 @@ impl ModuleCanonicalizer for Workspace {
 
 impl ModuleSourceLoader for Workspace {
     fn load(&self, module: &ModuleId) -> Result<Vec<u8>, ModuleSourceError> {
+        self.load_bounded(module, usize::MAX)
+    }
+
+    fn load_bounded(
+        &self,
+        module: &ModuleId,
+        maximum: usize,
+    ) -> Result<Vec<u8>, ModuleSourceError> {
         if let Some(uri) = self.owners.get(module.path()) {
             let document = self
                 .documents
                 .get(uri)
                 .expect("every overlay owner has an open document");
-            return Ok(document.text.as_bytes().to_vec());
+            let bytes = document.text.as_bytes();
+            return Ok(bytes[..bytes.len().min(maximum)].to_vec());
         }
-        self.host.load(module)
+        self.host.load_bounded(module, maximum)
     }
 }
 

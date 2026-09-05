@@ -109,6 +109,33 @@ A missing capability produces a specific diagnostic. It is not silently emulated
 
 Streams remain lazy wherever the operation permits it. Operations that must retain command output, collect a stream, parse a complete document, or format buffered data enforce explicit resource limits rather than treating available memory as an unbounded contract.
 
+### Flash 2 resource contract
+
+Flash 2 module analysis uses deterministic counters for retained source bytes,
+canonical modules and import depth, structural syntax nodes, type depth, generic
+instantiations, operation-overload candidates, diagnostics, and cooperative
+work units. Host source adapters receive the remaining byte ceiling and read at
+most one byte beyond it, so a refusal does not require allocating the complete
+hostile file. The executable defaults and measurement names live in
+`AnalysisLimits`; callers may supply stricter ceilings for an isolated analysis.
+
+Reaching a ceiling exactly succeeds. The first charge beyond it returns a
+structured budget refusal and exposes neither a partial program nor a truncated
+successful report. Explicit cancellation remains a distinct outcome. Editor
+diagnostics publish `ANL001` for budget exhaustion, while individual semantic
+requests return a visible analysis-limit error instead of stale or partial
+semantic data.
+
+Pure Flash 2 execution shares one `ResourceBudget` across every statement,
+callable invocation, and module initializer in a requested run. It counts
+evaluation steps, nested call depth, retained collection elements, and newly
+retained string/collection bytes; stream, capture, formatting, and migration
+owners retain their more specific item/byte ceilings. Runtime exhaustion is a
+structured resource error, cancellation is not converted into that error, and
+already selected primary outcome and cleanup precedence remain unchanged.
+Frozen Flash 1 analysis and execution keep their established compatibility
+path.
+
 ## Workspace and dependency direction
 
 Flash is a nested Cargo workspace rooted at [`components/flash/`](../Cargo.toml). The workspace manifest is authoritative for current package membership. The architecture is defined by responsibilities and dependency direction rather than by a permanent number of crates.

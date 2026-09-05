@@ -11,7 +11,7 @@ use crate::capsule::{
     BackgroundCapsule, SupervisorCompletion, SupervisorOutcome, supervisor_completion,
 };
 use crate::command::CommandRegistry;
-use crate::eval::Clock;
+use crate::eval::{CancellationToken, Clock, EvalLimits, ResourceBudget};
 use crate::module::{ModuleId, ModuleProgram, ModuleSourceRegistry};
 use crate::outcome::{ExecutionOutcome, FatalHostFailure, FatalHostFailureKind, PrimaryOutcome};
 use crate::plan::SessionOptions;
@@ -192,6 +192,43 @@ pub fn execute_module_program_outcome(
     clock: Arc<dyn Clock>,
     output: &mut dyn Write,
 ) -> ScriptExecutionOutcome {
+    let limits = if program.graph().root().language() == flash_syntax::LanguageMajor::V2 {
+        EvalLimits::pure_v2(CancellationToken::never(), ResourceBudget::v2())
+    } else {
+        EvalLimits::default()
+    };
+    execute_module_program_outcome_with_limits(
+        program,
+        script_arguments,
+        cwd,
+        environment,
+        registry,
+        probe,
+        options,
+        platform,
+        clock,
+        output,
+        &limits,
+    )
+}
+
+/// Executes a module program under one cancellation token and shared step budget.
+///
+/// The same budget crosses statement and module-initialization boundaries.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_module_program_outcome_with_limits(
+    program: &ModuleProgram,
+    script_arguments: &[String],
+    cwd: &Path,
+    environment: &mut Environment,
+    registry: &CommandRegistry,
+    probe: &dyn ExecutableProbe,
+    options: &SessionOptions,
+    platform: &dyn Platform,
+    clock: Arc<dyn Clock>,
+    output: &mut dyn Write,
+    limits: &EvalLimits,
+) -> ScriptExecutionOutcome {
     let structured_outcomes = program.graph().root().language() == flash_syntax::LanguageMajor::V2;
     let mut session = Session::with_scope_and_registry_for_language(
         program.graph().root().language(),
@@ -206,6 +243,7 @@ pub fn execute_module_program_outcome(
     let mut instances: BTreeMap<ModuleId, BTreeMap<String, Value>> = BTreeMap::new();
     let mut outcome: Result<(SubmitOutcome, Value), ScriptFailure> =
         Ok((SubmitOutcome::Continued, Value::Null));
+    let mut budget = limits.resource_budget();
 
     for module in module_initialization_order(program) {
         let mut scope = ScopeStack::new();
@@ -258,6 +296,8 @@ pub fn execute_module_program_outcome(
             script,
             scope,
             Arc::clone(&binding_types),
+            limits,
+            &mut budget,
             probe,
             platform,
             clock.as_ref(),

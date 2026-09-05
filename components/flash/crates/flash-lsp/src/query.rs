@@ -71,6 +71,7 @@ impl RequestControl {
 pub enum RequestError {
     RequestCancelled,
     ContentModified,
+    AnalysisLimitExceeded,
     InvalidParams,
 }
 
@@ -81,6 +82,7 @@ impl RequestError {
         match self {
             Self::RequestCancelled => -32_800,
             Self::ContentModified => -32_801,
+            Self::AnalysisLimitExceeded => -32_803,
             Self::InvalidParams => -32_602,
         }
     }
@@ -91,6 +93,7 @@ impl RequestError {
         match self {
             Self::RequestCancelled => "Request cancelled",
             Self::ContentModified => "Content modified",
+            Self::AnalysisLimitExceeded => "Analysis limit exceeded",
             Self::InvalidParams => "Invalid params",
         }
     }
@@ -776,6 +779,7 @@ fn analyze(
     ) {
         ModuleAnalysisOutcome::Complete(report) => Ok(Some(report)),
         ModuleAnalysisOutcome::Cancelled => Err(RequestError::RequestCancelled),
+        ModuleAnalysisOutcome::BudgetExceeded(_) => Err(RequestError::AnalysisLimitExceeded),
     }
 }
 
@@ -794,6 +798,9 @@ fn analyze_all(
         ) {
             ModuleAnalysisOutcome::Complete(report) => reports.push(*report),
             ModuleAnalysisOutcome::Cancelled => return Err(RequestError::RequestCancelled),
+            ModuleAnalysisOutcome::BudgetExceeded(_) => {
+                return Err(RequestError::AnalysisLimitExceeded);
+            }
         }
     }
     Ok(reports)

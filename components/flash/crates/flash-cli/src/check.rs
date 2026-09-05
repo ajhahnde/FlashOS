@@ -76,7 +76,15 @@ impl ModuleCanonicalizer for HostCheckFilesystem {
 
 impl ModuleSourceLoader for HostCheckFilesystem {
     fn load(&self, module: &ModuleId) -> Result<Vec<u8>, ModuleSourceError> {
-        let mut file =
+        self.load_bounded(module, usize::MAX)
+    }
+
+    fn load_bounded(
+        &self,
+        module: &ModuleId,
+        maximum: usize,
+    ) -> Result<Vec<u8>, ModuleSourceError> {
+        let file =
             File::open(module.path()).map_err(|error| ModuleSourceError::new(error.to_string()))?;
         let metadata = file
             .metadata()
@@ -85,7 +93,8 @@ impl ModuleSourceLoader for HostCheckFilesystem {
             return Err(ModuleSourceError::new("path is not a regular file"));
         }
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
+        file.take(maximum as u64)
+            .read_to_end(&mut bytes)
             .map_err(|error| ModuleSourceError::new(error.to_string()))?;
         Ok(bytes)
     }

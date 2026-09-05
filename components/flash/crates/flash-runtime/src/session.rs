@@ -42,8 +42,8 @@ use crate::command::CommandRegistry;
 use crate::eval::{
     Abort, CancellationToken, CapturePosition, CapturedChain, Clock, EvalLimits, EvaluationContext,
     EvaluationHost, EvaluationPolicy, ExpandedWord, HostedEvaluationFailure,
-    HostedEvaluationOutcome, ResourceBudget, RuntimeError, RuntimeErrorKind, evaluate_with_host,
-    expand_word_with_environment,
+    HostedEvaluationOutcome, ResourceBudget, RuntimeError, RuntimeErrorKind,
+    evaluate_with_host_and_budget, expand_word_with_environment,
 };
 use crate::execute::{
     BoundedCapture, CommandCapture, MixedPipelineControl, MixedSegment, aggregate_statuses,
@@ -440,12 +440,21 @@ impl Session {
                 (binding_types, true)
             }
         };
+        let limits = match self.language {
+            LanguageMajor::V1 => EvalLimits::default(),
+            LanguageMajor::V2 => {
+                EvalLimits::pure_v2(CancellationToken::never(), ResourceBudget::v2())
+            }
+        };
+        let mut budget = limits.resource_budget();
 
         self.submit_parsed(
             source,
             &script,
             imports_analyzed,
             Some(Arc::new(binding_types)),
+            &limits,
+            &mut budget,
             probe,
             platform,
             clock,
@@ -462,6 +471,8 @@ impl Session {
         script: &Script,
         mut scope: ScopeStack,
         binding_types: Arc<RuntimeBindingTypes>,
+        limits: &EvalLimits,
+        budget: &mut ResourceBudget,
         probe: &dyn ExecutableProbe,
         platform: &dyn Platform,
         clock: &dyn Clock,
@@ -473,6 +484,8 @@ impl Session {
             script,
             true,
             Some(binding_types),
+            limits,
+            budget,
             probe,
             platform,
             clock,
@@ -489,6 +502,8 @@ impl Session {
         script: &Script,
         imports_analyzed: bool,
         binding_types: Option<Arc<RuntimeBindingTypes>>,
+        limits: &EvalLimits,
+        budget: &mut ResourceBudget,
         probe: &dyn ExecutableProbe,
         platform: &dyn Platform,
         clock: &dyn Clock,
@@ -630,11 +645,12 @@ impl Session {
                             output,
                             policy,
                         };
-                        evaluate_with_host(
+                        evaluate_with_host_and_budget(
                             &one,
                             Arc::clone(&source),
                             &mut pending_scope,
-                            &EvalLimits::default(),
+                            limits,
+                            budget,
                             Arc::clone(&binding_types),
                             &mut host,
                         )

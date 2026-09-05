@@ -88,7 +88,7 @@ export PATH = "$nightly_directory:$inherited_path"
 ^mkdir "$campaign/corpus" "$campaign/artifacts" || exit
 ^printf '%s\n' "campaign directory: $campaign" || exit
 
-for target in ['lexer', 'parser', 'expander', 'migration'] {
+for target in ['lexer', 'parser', 'expander', 'migration', 'resources'] {
     let corpus = "$campaign/corpus/$target"
     let artifacts = "$campaign/artifacts/$target"
     ^mkdir -p $corpus $artifacts || exit

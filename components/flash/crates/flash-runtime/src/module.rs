@@ -15,7 +15,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use flash_syntax::{
     BinaryOperator, Block, Closure, CommandHeadKind, CommandItemKind, ConditionalChain,
@@ -46,6 +47,8 @@ use crate::operation::{
 #[derive(Clone)]
 pub struct AnalysisControl {
     is_cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
+    cancelled: Arc<AtomicBool>,
+    budget: Option<Arc<Mutex<AnalysisBudget>>>,
 }
 
 impl AnalysisControl {
@@ -62,13 +65,285 @@ impl AnalysisControl {
     pub fn cooperative(predicate: impl Fn() -> bool + Send + Sync + 'static) -> Self {
         Self {
             is_cancelled: Arc::new(predicate),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            budget: None,
         }
     }
 
     /// Whether the current analysis should stop at its next polling boundary.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        (self.is_cancelled)()
+        if self.cancelled.load(Ordering::Acquire) {
+            return true;
+        }
+        if (self.is_cancelled)() {
+            self.cancelled.store(true, Ordering::Release);
+            return true;
+        }
+        !self.charge(AnalysisLimitKind::WorkUnits, 1)
+    }
+
+    fn for_run(&self, limits: AnalysisLimits) -> Self {
+        Self {
+            is_cancelled: Arc::clone(&self.is_cancelled),
+            cancelled: Arc::clone(&self.cancelled),
+            budget: Some(Arc::new(Mutex::new(AnalysisBudget::new(limits)))),
+        }
+    }
+
+    fn charge(&self, kind: AnalysisLimitKind, amount: u64) -> bool {
+        self.budget.as_ref().is_none_or(|budget| {
+            budget
+                .lock()
+                .expect("analysis budget state must not be poisoned")
+                .charge(kind, amount)
+        })
+    }
+
+    fn observe(&self, kind: AnalysisLimitKind, value: u64) -> bool {
+        self.budget.as_ref().is_none_or(|budget| {
+            budget
+                .lock()
+                .expect("analysis budget state must not be poisoned")
+                .observe(kind, value)
+        })
+    }
+
+    fn remaining(&self, kind: AnalysisLimitKind) -> Option<u64> {
+        self.budget.as_ref().and_then(|budget| {
+            budget
+                .lock()
+                .expect("analysis budget state must not be poisoned")
+                .remaining(kind)
+        })
+    }
+
+    fn limit_exceeded(&self) -> Option<AnalysisLimitExceeded> {
+        self.budget.as_ref().and_then(|budget| {
+            budget
+                .lock()
+                .expect("analysis budget state must not be poisoned")
+                .exceeded
+        })
+    }
+
+    fn usage(&self) -> AnalysisUsage {
+        self.budget
+            .as_ref()
+            .map_or_else(AnalysisUsage::default, |budget| {
+                budget
+                    .lock()
+                    .expect("analysis budget state must not be poisoned")
+                    .usage()
+            })
+    }
+}
+
+/// One deterministic resource dimension charged by Flash 2 analysis.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AnalysisLimitKind {
+    SourceBytes,
+    Modules,
+    ModuleDepth,
+    AstNodes,
+    TypeDepth,
+    GenericInstantiations,
+    OverloadCandidates,
+    Diagnostics,
+    WorkUnits,
+}
+
+impl AnalysisLimitKind {
+    const COUNT: usize = 9;
+
+    const fn index(self) -> usize {
+        match self {
+            Self::SourceBytes => 0,
+            Self::Modules => 1,
+            Self::ModuleDepth => 2,
+            Self::AstNodes => 3,
+            Self::TypeDepth => 4,
+            Self::GenericInstantiations => 5,
+            Self::OverloadCandidates => 6,
+            Self::Diagnostics => 7,
+            Self::WorkUnits => 8,
+        }
+    }
+
+    /// Stable machine-readable name for this measurement unit.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::SourceBytes => "source-bytes",
+            Self::Modules => "modules",
+            Self::ModuleDepth => "module-depth",
+            Self::AstNodes => "ast-nodes",
+            Self::TypeDepth => "type-depth",
+            Self::GenericInstantiations => "generic-instantiations",
+            Self::OverloadCandidates => "overload-candidates",
+            Self::Diagnostics => "diagnostics",
+            Self::WorkUnits => "work-units",
+        }
+    }
+}
+
+/// Exact configured ceilings for one Flash 2 root-closure analysis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AnalysisLimits {
+    limits: [Option<u64>; AnalysisLimitKind::COUNT],
+}
+
+/// Exact deterministic counters consumed by one complete analysis.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AnalysisUsage {
+    used: [u64; AnalysisLimitKind::COUNT],
+}
+
+impl AnalysisUsage {
+    /// The consumed count for one measurement dimension.
+    #[must_use]
+    pub const fn get(self, kind: AnalysisLimitKind) -> u64 {
+        self.used[kind.index()]
+    }
+}
+
+impl AnalysisLimits {
+    /// Default Flash 2 ceilings. These are semantic counters, never clocks.
+    pub const V2: Self = Self {
+        limits: [
+            Some(8 * 1024 * 1024),
+            Some(256),
+            Some(64),
+            Some(1_000_000),
+            Some(64),
+            Some(100_000),
+            Some(100_000),
+            Some(1_024),
+            Some(5_000_000),
+        ],
+    };
+
+    /// No resource ceilings, retained only for the frozen v1 path and tests.
+    #[must_use]
+    pub const fn unlimited() -> Self {
+        Self {
+            limits: [None; AnalysisLimitKind::COUNT],
+        }
+    }
+
+    /// Replaces one measurement ceiling while retaining every other setting.
+    #[must_use]
+    pub const fn with_limit(mut self, kind: AnalysisLimitKind, limit: u64) -> Self {
+        self.limits[kind.index()] = Some(limit);
+        self
+    }
+
+    /// The configured ceiling for one dimension, or `None` when unlimited.
+    #[must_use]
+    pub const fn limit(self, kind: AnalysisLimitKind) -> Option<u64> {
+        self.limits[kind.index()]
+    }
+}
+
+impl Default for AnalysisLimits {
+    fn default() -> Self {
+        Self::V2
+    }
+}
+
+/// A deterministic analysis refusal at the first charge beyond one ceiling.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AnalysisLimitExceeded {
+    kind: AnalysisLimitKind,
+    limit: u64,
+}
+
+impl AnalysisLimitExceeded {
+    /// The exhausted measurement dimension.
+    #[must_use]
+    pub const fn kind(self) -> AnalysisLimitKind {
+        self.kind
+    }
+
+    /// The exact inclusive ceiling that was exceeded.
+    #[must_use]
+    pub const fn limit(self) -> u64 {
+        self.limit
+    }
+}
+
+impl fmt::Display for AnalysisLimitExceeded {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "Flash 2 analysis exceeded the {} limit of {}",
+            self.kind.name(),
+            self.limit
+        )
+    }
+}
+
+#[derive(Debug)]
+struct AnalysisBudget {
+    limits: AnalysisLimits,
+    used: [u64; AnalysisLimitKind::COUNT],
+    exceeded: Option<AnalysisLimitExceeded>,
+}
+
+impl AnalysisBudget {
+    const fn new(limits: AnalysisLimits) -> Self {
+        Self {
+            limits,
+            used: [0; AnalysisLimitKind::COUNT],
+            exceeded: None,
+        }
+    }
+
+    fn charge(&mut self, kind: AnalysisLimitKind, amount: u64) -> bool {
+        if self.exceeded.is_some() {
+            return false;
+        }
+        let index = kind.index();
+        let Some(limit) = self.limits.limit(kind) else {
+            self.used[index] = self.used[index].saturating_add(amount);
+            return true;
+        };
+        let Some(next) = self.used[index].checked_add(amount) else {
+            self.exceeded = Some(AnalysisLimitExceeded { kind, limit });
+            return false;
+        };
+        if next > limit {
+            self.exceeded = Some(AnalysisLimitExceeded { kind, limit });
+            return false;
+        }
+        self.used[index] = next;
+        true
+    }
+
+    fn observe(&mut self, kind: AnalysisLimitKind, value: u64) -> bool {
+        if self.exceeded.is_some() {
+            return false;
+        }
+        let Some(limit) = self.limits.limit(kind) else {
+            self.used[kind.index()] = self.used[kind.index()].max(value);
+            return true;
+        };
+        if value > limit {
+            self.exceeded = Some(AnalysisLimitExceeded { kind, limit });
+            return false;
+        }
+        self.used[kind.index()] = self.used[kind.index()].max(value);
+        true
+    }
+
+    fn remaining(&self, kind: AnalysisLimitKind) -> Option<u64> {
+        self.limits
+            .limit(kind)
+            .map(|limit| limit.saturating_sub(self.used[kind.index()]))
+    }
+
+    const fn usage(&self) -> AnalysisUsage {
+        AnalysisUsage { used: self.used }
     }
 }
 
@@ -120,6 +395,21 @@ impl std::error::Error for ModulePathError {}
 pub trait ModuleSourceLoader {
     /// Reads all source bytes for `module`.
     fn load(&self, module: &ModuleId) -> Result<Vec<u8>, ModuleSourceError>;
+
+    /// Reads at most `maximum` bytes for a resource-bounded analysis.
+    ///
+    /// Host adapters should stop reading at this boundary. The default keeps
+    /// compatibility with injected in-memory loaders while ensuring callers
+    /// never retain more than the requested amount.
+    fn load_bounded(
+        &self,
+        module: &ModuleId,
+        maximum: usize,
+    ) -> Result<Vec<u8>, ModuleSourceError> {
+        let mut bytes = self.load(module)?;
+        bytes.truncate(maximum);
+        Ok(bytes)
+    }
 }
 
 /// A host-independent source read failure.
@@ -3639,6 +3929,16 @@ impl<'a> SignatureValidator<'a> {
                     });
                 return Ok(Some((stage.span(), ValueType::Any)));
             };
+            if !self.control.charge(
+                AnalysisLimitKind::OverloadCandidates,
+                operation.overloads().len() as u64,
+            ) || (!operation.type_parameters().is_empty()
+                && !self
+                    .control
+                    .charge(AnalysisLimitKind::GenericInstantiations, 1))
+            {
+                return Ok(None);
+            }
             let (input, result) = operation
                 .overloads()
                 .iter()
@@ -3894,6 +4194,13 @@ impl<'a> SignatureValidator<'a> {
             }
         }
         let nominal = self.nominal_for_qualified_prefix(name)?;
+        if !nominal.type_parameters().is_empty()
+            && !self
+                .control
+                .charge(AnalysisLimitKind::GenericInstantiations, 1)
+        {
+            return None;
+        }
         let constructor = self.text(name.segments.last()?.span());
         if nominal.kind() != NominalTypeKind::Variant
             || !nominal
@@ -3954,6 +4261,13 @@ impl<'a> SignatureValidator<'a> {
             });
             return Ok(Some(ValueType::Any));
         };
+        if !nominal.type_parameters().is_empty()
+            && !self
+                .control
+                .charge(AnalysisLimitKind::GenericInstantiations, 1)
+        {
+            return Ok(None);
+        }
         let mut substitutions = BTreeMap::new();
         if let Some(ValueType::Nominal { id, arguments }) = expected_result
             && id.as_ref() == nominal.id()
@@ -4552,6 +4866,13 @@ impl<'a> SignatureValidator<'a> {
             }
             return Ok(None);
         };
+        if !signature.type_parameters().is_empty()
+            && !self
+                .control
+                .charge(AnalysisLimitKind::GenericInstantiations, 1)
+        {
+            return Ok(None);
+        }
         if !call.type_arguments.is_empty()
             && call.type_arguments.len() != signature.type_parameters().len()
         {
@@ -4718,6 +5039,13 @@ impl<'a> SignatureValidator<'a> {
         let Some(nominal) = self.nominal_for_qualified_prefix(name) else {
             return Ok(None);
         };
+        if !nominal.type_parameters().is_empty()
+            && !self
+                .control
+                .charge(AnalysisLimitKind::GenericInstantiations, 1)
+        {
+            return Ok(None);
+        }
         let Some(variant) = nominal
             .variants()
             .iter()
@@ -4947,6 +5275,16 @@ impl<'a> SignatureValidator<'a> {
         call_span: Span,
         call: &flash_syntax::CallExpression,
     ) -> Result<Option<ValueType>, Box<ModuleTypeError>> {
+        if !self.control.charge(
+            AnalysisLimitKind::OverloadCandidates,
+            operation.overloads().len() as u64,
+        ) || (!operation.type_parameters().is_empty()
+            && !self
+                .control
+                .charge(AnalysisLimitKind::GenericInstantiations, 1))
+        {
+            return Ok(None);
+        }
         let overload = operation
             .overloads()
             .iter()
@@ -7513,6 +7851,7 @@ pub struct ModuleAnalysisReport {
     sources: Vec<ModuleAnalysisSource>,
     issues: Vec<ModuleAnalysisIssue>,
     program: Option<ModuleProgram>,
+    usage: AnalysisUsage,
 }
 
 /// A controlled analysis either exposes one complete report or no partial state.
@@ -7520,6 +7859,7 @@ pub struct ModuleAnalysisReport {
 pub enum ModuleAnalysisOutcome {
     Complete(Box<ModuleAnalysisReport>),
     Cancelled,
+    BudgetExceeded(AnalysisLimitExceeded),
 }
 
 impl ModuleAnalysisReport {
@@ -7539,6 +7879,12 @@ impl ModuleAnalysisReport {
     #[must_use]
     pub const fn program(&self) -> Option<&ModuleProgram> {
         self.program.as_ref()
+    }
+
+    /// Deterministic resource counters consumed by this complete analysis.
+    #[must_use]
+    pub const fn usage(&self) -> AnalysisUsage {
+        self.usage
     }
 
     /// Whether at least one error-classified issue prevents a complete program.
@@ -7802,7 +8148,9 @@ impl<'a> ModuleProgramLoader<'a> {
     /// accumulates independent annotation, known-call, and result failures.
     #[must_use]
     pub fn analyze(&self, requested: &Path) -> ModuleAnalysisReport {
-        self.complete_never_cancelled(self.analyze_controlled(requested, &AnalysisControl::never()))
+        self.complete_without_cancellation(
+            self.analyze_controlled(requested, &AnalysisControl::never()),
+        )
     }
 
     /// Analyzes with cooperative cancellation and never exposes a partial
@@ -7813,7 +8161,32 @@ impl<'a> ModuleProgramLoader<'a> {
         requested: &Path,
         control: &AnalysisControl,
     ) -> ModuleAnalysisOutcome {
-        self.analyze_internal(requested, None, control)
+        self.analyze_with_limits_controlled(requested, control, self.default_limits())
+    }
+
+    /// Analyzes with explicit deterministic resource ceilings.
+    #[must_use]
+    pub fn analyze_with_limits(
+        &self,
+        requested: &Path,
+        limits: AnalysisLimits,
+    ) -> ModuleAnalysisReport {
+        self.complete_without_cancellation(self.analyze_with_limits_controlled(
+            requested,
+            &AnalysisControl::never(),
+            limits,
+        ))
+    }
+
+    /// Analyzes with cooperative cancellation and explicit resource ceilings.
+    #[must_use]
+    pub fn analyze_with_limits_controlled(
+        &self,
+        requested: &Path,
+        control: &AnalysisControl,
+        limits: AnalysisLimits,
+    ) -> ModuleAnalysisOutcome {
+        self.analyze_internal(requested, None, control, limits)
     }
 
     /// Performs full non-executing analysis, including static pipeline carrier
@@ -7829,7 +8202,7 @@ impl<'a> ModuleProgramLoader<'a> {
         requested: &Path,
         commands: &CommandRegistry,
     ) -> ModuleAnalysisReport {
-        self.complete_never_cancelled(self.analyze_with_commands_controlled(
+        self.complete_without_cancellation(self.analyze_with_commands_controlled(
             requested,
             commands,
             &AnalysisControl::never(),
@@ -7844,16 +8217,74 @@ impl<'a> ModuleProgramLoader<'a> {
         commands: &CommandRegistry,
         control: &AnalysisControl,
     ) -> ModuleAnalysisOutcome {
-        self.analyze_internal(requested, Some(commands), control)
+        self.analyze_with_commands_and_limits_controlled(
+            requested,
+            commands,
+            control,
+            self.default_limits(),
+        )
     }
 
-    fn complete_never_cancelled(&self, outcome: ModuleAnalysisOutcome) -> ModuleAnalysisReport {
+    /// Performs command-aware analysis with explicit deterministic ceilings.
+    #[must_use]
+    pub fn analyze_with_commands_and_limits(
+        &self,
+        requested: &Path,
+        commands: &CommandRegistry,
+        limits: AnalysisLimits,
+    ) -> ModuleAnalysisReport {
+        self.complete_without_cancellation(self.analyze_with_commands_and_limits_controlled(
+            requested,
+            commands,
+            &AnalysisControl::never(),
+            limits,
+        ))
+    }
+
+    /// Performs command-aware controlled analysis with explicit ceilings.
+    #[must_use]
+    pub fn analyze_with_commands_and_limits_controlled(
+        &self,
+        requested: &Path,
+        commands: &CommandRegistry,
+        control: &AnalysisControl,
+        limits: AnalysisLimits,
+    ) -> ModuleAnalysisOutcome {
+        self.analyze_internal(requested, Some(commands), control, limits)
+    }
+
+    fn default_limits(&self) -> AnalysisLimits {
+        match self.resolver.language() {
+            LanguageMajor::V1 => AnalysisLimits::unlimited(),
+            LanguageMajor::V2 => AnalysisLimits::default(),
+        }
+    }
+
+    fn complete_without_cancellation(
+        &self,
+        outcome: ModuleAnalysisOutcome,
+    ) -> ModuleAnalysisReport {
         match outcome {
             ModuleAnalysisOutcome::Complete(report) => *report,
             ModuleAnalysisOutcome::Cancelled => {
                 unreachable!("a never-cancelled analysis control cannot cancel")
             }
+            ModuleAnalysisOutcome::BudgetExceeded(exceeded) => ModuleAnalysisReport {
+                sources: Vec::new(),
+                issues: vec![ModuleAnalysisIssue::new(
+                    ModuleProgramError::BudgetExceeded(exceeded),
+                )],
+                program: None,
+                usage: AnalysisUsage::default(),
+            },
         }
+    }
+
+    fn stopped_outcome(control: &AnalysisControl) -> ModuleAnalysisOutcome {
+        control.limit_exceeded().map_or(
+            ModuleAnalysisOutcome::Cancelled,
+            ModuleAnalysisOutcome::BudgetExceeded,
+        )
     }
 
     fn analyze_internal(
@@ -7861,13 +8292,15 @@ impl<'a> ModuleProgramLoader<'a> {
         requested: &Path,
         commands: Option<&CommandRegistry>,
         control: &AnalysisControl,
+        limits: AnalysisLimits,
     ) -> ModuleAnalysisOutcome {
+        let control = control.for_run(limits);
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         let root_result = self.resolver.resolve_root(requested);
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         let root = match root_result {
             Ok(root) => root,
@@ -7878,11 +8311,12 @@ impl<'a> ModuleProgramLoader<'a> {
                         error,
                     ))],
                     program: None,
+                    usage: control.usage(),
                 }));
             }
         };
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         let mut graph = ModuleGraph::new(root.clone());
         let mut sources = ModuleSourceRegistry::default();
@@ -7897,16 +8331,17 @@ impl<'a> ModuleProgramLoader<'a> {
             &mut retained,
             &mut attempted,
             &mut issues,
-            control,
+            &control,
+            1,
         );
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         let mut pipeline_issues = Vec::new();
         if let Some(commands) = commands {
             for entry in &retained {
                 if control.is_cancelled() {
-                    return ModuleAnalysisOutcome::Cancelled;
+                    return Self::stopped_outcome(&control);
                 }
                 if let Some(script) = entry.script() {
                     pipeline_issues.extend(
@@ -7915,7 +8350,7 @@ impl<'a> ModuleProgramLoader<'a> {
                             entry.source(),
                             script,
                             commands,
-                            control,
+                            &control,
                         )
                         .into_iter()
                         .map(|error| {
@@ -7926,7 +8361,17 @@ impl<'a> ModuleProgramLoader<'a> {
             }
         }
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
+        }
+
+        if !control.charge(
+            AnalysisLimitKind::Diagnostics,
+            analysis_issue_count(&issues),
+        ) || !control.charge(
+            AnalysisLimitKind::Diagnostics,
+            analysis_issue_count(&pipeline_issues),
+        ) {
+            return Self::stopped_outcome(&control);
         }
 
         if !issues.is_empty() {
@@ -7935,16 +8380,20 @@ impl<'a> ModuleProgramLoader<'a> {
                 sources: retained,
                 issues,
                 program: None,
+                usage: control.usage(),
             }));
         }
 
-        let aliases_result = ModuleAliasRegistry::analyze(&graph, &sources, control);
+        let aliases_result = ModuleAliasRegistry::analyze(&graph, &sources, &control);
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         let aliases = match aliases_result {
             Ok(aliases) => aliases,
             Err(errors) => {
+                if !control.charge(AnalysisLimitKind::Diagnostics, errors.len() as u64) {
+                    return Self::stopped_outcome(&control);
+                }
                 let mut issues = errors
                     .into_iter()
                     .map(|error| {
@@ -7956,16 +8405,20 @@ impl<'a> ModuleProgramLoader<'a> {
                     sources: retained,
                     issues,
                     program: None,
+                    usage: control.usage(),
                 }));
             }
         };
-        let names_result = ModuleNameRegistry::analyze(&graph, &sources, &aliases, control);
+        let names_result = ModuleNameRegistry::analyze(&graph, &sources, &aliases, &control);
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         let names = match names_result {
             Ok(names) => names,
             Err(errors) => {
+                if !control.charge(AnalysisLimitKind::Diagnostics, errors.len() as u64) {
+                    return Self::stopped_outcome(&control);
+                }
                 let mut issues = errors
                     .into_iter()
                     .map(|error| {
@@ -7977,19 +8430,23 @@ impl<'a> ModuleProgramLoader<'a> {
                     sources: retained,
                     issues,
                     program: None,
+                    usage: control.usage(),
                 }));
             }
         };
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
-        let types_result = ModuleTypeRegistry::analyze(&sources, &aliases, &names, control);
+        let types_result = ModuleTypeRegistry::analyze(&sources, &aliases, &names, &control);
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         let types = match types_result {
             Ok(types) => types,
             Err(errors) => {
+                if !control.charge(AnalysisLimitKind::Diagnostics, errors.len() as u64) {
+                    return Self::stopped_outcome(&control);
+                }
                 let mut issues = errors
                     .into_iter()
                     .map(|error| {
@@ -8001,11 +8458,12 @@ impl<'a> ModuleProgramLoader<'a> {
                     sources: retained,
                     issues,
                     program: None,
+                    usage: control.usage(),
                 }));
             }
         };
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         if pipeline_issues
             .iter()
@@ -8015,6 +8473,7 @@ impl<'a> ModuleProgramLoader<'a> {
                 sources: retained,
                 issues: pipeline_issues,
                 program: None,
+                usage: control.usage(),
             }));
         }
         let effect_commands = commands.cloned().unwrap_or_else(standard_registry);
@@ -8024,10 +8483,10 @@ impl<'a> ModuleProgramLoader<'a> {
             &aliases,
             &names,
             &effect_commands,
-            control,
+            &control,
         );
         if control.is_cancelled() {
-            return ModuleAnalysisOutcome::Cancelled;
+            return Self::stopped_outcome(&control);
         }
         ModuleAnalysisOutcome::Complete(Box::new(ModuleAnalysisReport {
             sources: retained,
@@ -8040,6 +8499,7 @@ impl<'a> ModuleProgramLoader<'a> {
                 types,
                 effects,
             }),
+            usage: control.usage(),
         }))
     }
 
@@ -8054,6 +8514,7 @@ impl<'a> ModuleProgramLoader<'a> {
         attempted: &mut BTreeSet<ModuleId>,
         issues: &mut Vec<ModuleAnalysisIssue>,
         control: &AnalysisControl,
+        depth: u64,
     ) {
         if control.is_cancelled() {
             return;
@@ -8061,14 +8522,24 @@ impl<'a> ModuleProgramLoader<'a> {
         if !attempted.insert(module.clone()) {
             return;
         }
+        if !control.observe(AnalysisLimitKind::Modules, graph.modules().len() as u64)
+            || !control.observe(AnalysisLimitKind::ModuleDepth, depth)
+        {
+            return;
+        }
 
         if control.is_cancelled() {
             return;
         }
+        let remaining = control
+            .remaining(AnalysisLimitKind::SourceBytes)
+            .and_then(|remaining| usize::try_from(remaining).ok())
+            .unwrap_or(usize::MAX);
+        let read_limit = remaining.saturating_add(1);
         let bytes = if let Some(source) = standard_module_source(&module) {
-            source.as_bytes().to_vec()
+            source.as_bytes()[..source.len().min(read_limit)].to_vec()
         } else {
-            match self.source_loader.load(&module) {
+            match self.source_loader.load_bounded(&module, read_limit) {
                 Ok(bytes) => bytes,
                 Err(cause) => {
                     issues.push(ModuleAnalysisIssue::new(ModuleProgramError::SourceRead {
@@ -8080,6 +8551,9 @@ impl<'a> ModuleProgramLoader<'a> {
                 }
             }
         };
+        if !control.charge(AnalysisLimitKind::SourceBytes, bytes.len() as u64) {
+            return;
+        }
         if control.is_cancelled() {
             return;
         }
@@ -8146,6 +8620,12 @@ impl<'a> ModuleProgramLoader<'a> {
             }
         };
         if control.is_cancelled() {
+            return;
+        }
+        let metrics = SyntaxMetrics::for_script(&script);
+        if !control.charge(AnalysisLimitKind::AstNodes, metrics.nodes)
+            || !control.observe(AnalysisLimitKind::TypeDepth, metrics.type_depth)
+        {
             return;
         }
 
@@ -8248,6 +8728,12 @@ impl<'a> ModuleProgramLoader<'a> {
                 issues.push(ModuleAnalysisIssue::new(ModuleProgramError::Graph(error)));
                 continue;
             }
+            if !control.observe(AnalysisLimitKind::Modules, graph.modules().len() as u64) {
+                return;
+            }
+            if !control.observe(AnalysisLimitKind::ModuleDepth, depth.saturating_add(1)) {
+                return;
+            }
             if recurse {
                 self.discover_module(
                     import.target().clone(),
@@ -8258,6 +8744,7 @@ impl<'a> ModuleProgramLoader<'a> {
                     attempted,
                     issues,
                     control,
+                    depth.saturating_add(1),
                 );
             }
         }
@@ -8315,6 +8802,360 @@ fn parse_source_for_language(
                 diagnostics,
             )) => ControlledParseOutcome::Parsed(ParseOutcome::Invalid(diagnostics)),
         },
+    }
+}
+
+fn analysis_issue_count(issues: &[ModuleAnalysisIssue]) -> u64 {
+    issues
+        .iter()
+        .map(|issue| issue.error().diagnostics().len().max(1) as u64)
+        .sum()
+}
+
+/// Deterministic syntax measurements charged before semantic analysis begins.
+///
+/// `nodes` counts structural AST owners (statements, expressions, patterns,
+/// type references, blocks/chains/pipelines/stages, command items, word parts,
+/// and redirections). Identifiers and spans are payload, not separate nodes.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct SyntaxMetrics {
+    nodes: u64,
+    type_depth: u64,
+}
+
+impl SyntaxMetrics {
+    fn for_script(script: &Script) -> Self {
+        let mut metrics = Self {
+            nodes: 1,
+            type_depth: 0,
+        };
+        metrics.statements(script.statements());
+        metrics
+    }
+
+    fn statements(&mut self, statements: &[Statement]) {
+        for statement in statements {
+            self.statement(statement);
+        }
+    }
+
+    fn statement(&mut self, statement: &Statement) {
+        self.nodes += 1;
+        match statement.kind() {
+            StatementKind::Import(_)
+            | StatementKind::ModuleImport(_)
+            | StatementKind::ModuleExport(_) => {}
+            StatementKind::NominalType(declaration) => {
+                for field in &declaration.fields {
+                    self.type_reference(&field.value_type, 1);
+                }
+            }
+            StatementKind::VariantType(declaration) => {
+                for variant in &declaration.variants {
+                    for payload in &variant.payload {
+                        self.type_reference(payload, 1);
+                    }
+                }
+            }
+            StatementKind::Declaration(declaration) => {
+                self.pattern(&declaration.pattern);
+                if let Some(annotation) = &declaration.type_annotation {
+                    self.type_reference(annotation, 1);
+                }
+                self.expression(&declaration.value);
+            }
+            StatementKind::Assignment(assignment) => {
+                self.expression(&assignment.value);
+            }
+            StatementKind::Environment(flash_syntax::EnvironmentStatement::Export {
+                value,
+                ..
+            }) => {
+                self.expression(value);
+            }
+            StatementKind::Environment(flash_syntax::EnvironmentStatement::Unset { .. }) => {}
+            StatementKind::Function(function) => {
+                for parameter in &function.parameters {
+                    self.pattern(&parameter.pattern);
+                    if let Some(annotation) = &parameter.type_annotation {
+                        self.type_reference(annotation, 1);
+                    }
+                }
+                if let Some(result) = &function.return_type {
+                    self.type_reference(result, 1);
+                }
+                self.block(&function.body);
+            }
+            StatementKind::If(statement) => {
+                self.chain(&statement.condition);
+                self.block(&statement.then_block);
+                if let Some(branch) = &statement.else_branch {
+                    match branch {
+                        ElseBranch::Block(block) => self.block(block),
+                        ElseBranch::If(statement) => {
+                            self.nodes += 1;
+                            self.chain(&statement.kind().condition);
+                            self.block(&statement.kind().then_block);
+                            if let Some(branch) = &statement.kind().else_branch {
+                                self.else_branch(branch);
+                            }
+                        }
+                    }
+                }
+            }
+            StatementKind::While(statement) => {
+                self.chain(&statement.condition);
+                self.block(&statement.body);
+            }
+            StatementKind::For(statement) => {
+                self.expression(&statement.iterable);
+                self.block(&statement.body);
+            }
+            StatementKind::Match(statement) => {
+                self.expression(&statement.value);
+                for arm in &statement.arms {
+                    self.nodes += 1;
+                    self.pattern(&arm.pattern);
+                    if let Some(guard) = &arm.guard {
+                        self.expression(guard);
+                    }
+                    self.block(&arm.body);
+                }
+            }
+            StatementKind::Try(statement) => {
+                self.block(&statement.try_block);
+                self.block(&statement.catch_block);
+            }
+            StatementKind::Throw(expression) => {
+                self.expression(expression);
+            }
+            StatementKind::Control(ControlTransfer::Return(Some(expression))) => {
+                self.expression(expression);
+            }
+            StatementKind::Control(
+                ControlTransfer::Break | ControlTransfer::Continue | ControlTransfer::Return(None),
+            ) => {}
+            StatementKind::Job(job) => self.chain(&job.chain),
+        }
+    }
+
+    fn else_branch(&mut self, branch: &ElseBranch) {
+        match branch {
+            ElseBranch::Block(block) => self.block(block),
+            ElseBranch::If(statement) => {
+                self.nodes += 1;
+                self.chain(&statement.kind().condition);
+                self.block(&statement.kind().then_block);
+                if let Some(branch) = &statement.kind().else_branch {
+                    self.else_branch(branch);
+                }
+            }
+        }
+    }
+
+    fn block(&mut self, block: &Block) {
+        self.nodes += 1;
+        self.statements(&block.statements);
+    }
+
+    fn type_reference(&mut self, reference: &TypeReference, depth: u64) {
+        self.nodes += 1;
+        self.type_depth = self.type_depth.max(depth);
+        for argument in &reference.arguments {
+            self.type_reference(argument, depth.saturating_add(1));
+        }
+    }
+
+    fn pattern(&mut self, pattern: &Pattern) {
+        self.nodes += 1;
+        match pattern {
+            Pattern::List(pattern) => {
+                for element in &pattern.elements {
+                    self.pattern(element);
+                }
+            }
+            Pattern::NominalRecord(pattern) => {
+                for field in &pattern.fields {
+                    self.pattern(&field.pattern);
+                }
+            }
+            Pattern::Variant(pattern) => {
+                for payload in &pattern.payload {
+                    self.pattern(payload);
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_) | Pattern::Binding(_) => {}
+        }
+    }
+
+    fn expression(&mut self, expression: &Expression) -> u64 {
+        self.nodes += 1;
+        match expression.kind() {
+            ExpressionKind::Literal(literal) => {
+                if let LiteralKind::DoubleQuoted(parts) = literal.kind() {
+                    self.word_parts(parts);
+                }
+                1
+            }
+            ExpressionKind::List(elements) => {
+                let depth = 1_u64.saturating_add(
+                    elements
+                        .iter()
+                        .map(|element| self.expression(element))
+                        .max()
+                        .unwrap_or(1),
+                );
+                self.type_depth = self.type_depth.max(depth);
+                depth
+            }
+            ExpressionKind::Record(entries) => {
+                for entry in entries {
+                    if let RecordKey::DoubleQuoted(part) = &entry.key {
+                        self.word_part(part);
+                    }
+                    self.expression(&entry.value);
+                }
+                1
+            }
+            ExpressionKind::NominalRecord(record) => {
+                for field in &record.fields {
+                    self.expression(&field.value);
+                }
+                1
+            }
+            ExpressionKind::Closure(closure) => {
+                for parameter in &closure.parameters {
+                    self.pattern(&parameter.pattern);
+                    if let Some(annotation) = &parameter.type_annotation {
+                        self.type_reference(annotation, 1);
+                    }
+                }
+                if let Some(result) = &closure.result_type {
+                    self.type_reference(result, 1);
+                }
+                self.chain(&closure.body);
+                1
+            }
+            ExpressionKind::CommandSubstitution(substitution) => {
+                self.chain(substitution.chain());
+                1
+            }
+            ExpressionKind::GroupedJob(chain) => {
+                self.chain(chain);
+                1
+            }
+            ExpressionKind::Call(call) => {
+                self.expression(&call.callee);
+                for argument in &call.type_arguments {
+                    self.type_reference(argument, 1);
+                }
+                for argument in &call.arguments {
+                    self.expression(argument);
+                }
+                1
+            }
+            ExpressionKind::Index(index) => {
+                self.expression(&index.target);
+                self.expression(&index.index);
+                1
+            }
+            ExpressionKind::Member(member) => {
+                self.expression(&member.target);
+                1
+            }
+            ExpressionKind::Unary(unary) => {
+                self.expression(&unary.operand);
+                1
+            }
+            ExpressionKind::Binary(binary) => {
+                self.expression(&binary.left);
+                self.expression(&binary.right);
+                1
+            }
+            ExpressionKind::Variable(_)
+            | ExpressionKind::Symbol(_)
+            | ExpressionKind::Qualified(_) => 1,
+        }
+    }
+
+    fn chain(&mut self, chain: &ConditionalChain) {
+        self.nodes += 1;
+        for and_chain in chain.or_terms() {
+            self.nodes += 1;
+            for pipeline in and_chain.and_terms() {
+                self.nodes += 1;
+                for stage in pipeline.stages() {
+                    self.nodes += 1;
+                    match stage.kind() {
+                        StageKind::Expression(expression) => {
+                            self.expression(expression);
+                        }
+                        StageKind::Command(command) => {
+                            self.word(command.head.word());
+                            for item in &command.items {
+                                self.nodes += 1;
+                                match item.kind() {
+                                    CommandItemKind::Word(word) => self.word(word),
+                                    CommandItemKind::Closure(closure) => {
+                                        for parameter in &closure.parameters {
+                                            self.pattern(&parameter.pattern);
+                                            if let Some(annotation) = &parameter.type_annotation {
+                                                self.type_reference(annotation, 1);
+                                            }
+                                        }
+                                        if let Some(result) = &closure.result_type {
+                                            self.type_reference(result, 1);
+                                        }
+                                        self.chain(&closure.body);
+                                    }
+                                    CommandItemKind::Redirection(redirection) => {
+                                        self.redirection(redirection.kind())
+                                    }
+                                    CommandItemKind::Spread(_) => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn word(&mut self, word: &Word) {
+        self.nodes += 1;
+        self.word_parts(word.parts());
+    }
+
+    fn word_parts(&mut self, parts: &[WordPart]) {
+        for part in parts {
+            self.word_part(part);
+        }
+    }
+
+    fn word_part(&mut self, part: &WordPart) {
+        self.nodes += 1;
+        match part.kind() {
+            WordPartKind::DoubleQuoted(parts) => self.word_parts(parts),
+            WordPartKind::BracedInterpolation(expression) => {
+                self.expression(expression);
+            }
+            WordPartKind::CommandSubstitution(substitution) => self.chain(substitution.chain()),
+            WordPartKind::Bare
+            | WordPartKind::BareEscape
+            | WordPartKind::SingleQuoted
+            | WordPartKind::DoubleText
+            | WordPartKind::DoubleEscape
+            | WordPartKind::Variable(_) => {}
+        }
+    }
+
+    fn redirection(&mut self, redirection: &RedirectionKind) {
+        self.nodes += 1;
+        match redirection {
+            RedirectionKind::Input { target, .. } => self.word(target),
+            RedirectionKind::File(file) => self.word(&file.target),
+            RedirectionKind::Duplicate { .. } | RedirectionKind::Close { .. } => {}
+        }
     }
 }
 
@@ -9479,6 +10320,8 @@ pub enum ModuleProgramError {
     Signatures(Box<ModuleTypeError>),
     /// Static command-pipeline carrier analysis failed.
     Pipelines(Box<ModulePipelineError>),
+    /// Deterministic Flash 2 analysis resource exhaustion.
+    BudgetExceeded(AnalysisLimitExceeded),
     /// More source identities were required than `SourceId` can represent.
     SourceIdentityExhausted,
 }
@@ -9511,9 +10354,9 @@ impl ModuleProgramError {
             Self::Names(error) => vec![error.diagnostic()],
             Self::Signatures(error) => vec![error.diagnostic()],
             Self::Pipelines(error) => vec![error.diagnostic().clone()],
-            Self::Graph(ModuleGraphError::UnknownImporter(_)) | Self::SourceIdentityExhausted => {
-                Vec::new()
-            }
+            Self::Graph(ModuleGraphError::UnknownImporter(_))
+            | Self::BudgetExceeded(_)
+            | Self::SourceIdentityExhausted => Vec::new(),
         }
     }
 
@@ -9529,7 +10372,10 @@ impl ModuleProgramError {
             Self::Names(error) => Some(error.module()),
             Self::Signatures(error) => Some(error.module()),
             Self::Pipelines(error) => Some(error.module()),
-            Self::Resolution(_) | Self::Graph(_) | Self::SourceIdentityExhausted => None,
+            Self::Resolution(_)
+            | Self::Graph(_)
+            | Self::BudgetExceeded(_)
+            | Self::SourceIdentityExhausted => None,
         }
     }
 }
@@ -9562,6 +10408,7 @@ impl fmt::Display for ModuleProgramError {
             Self::Names(error) => error.fmt(formatter),
             Self::Signatures(error) => error.fmt(formatter),
             Self::Pipelines(error) => error.fmt(formatter),
+            Self::BudgetExceeded(error) => error.fmt(formatter),
             Self::SourceIdentityExhausted => {
                 formatter.write_str("module program exhausted stable source identities")
             }
@@ -9579,7 +10426,10 @@ impl std::error::Error for ModuleProgramError {
             Self::Names(error) => Some(error),
             Self::Signatures(error) => Some(error),
             Self::Pipelines(error) => Some(error),
-            Self::InvalidUtf8 { .. } | Self::Syntax { .. } | Self::SourceIdentityExhausted => None,
+            Self::InvalidUtf8 { .. }
+            | Self::Syntax { .. }
+            | Self::BudgetExceeded(_)
+            | Self::SourceIdentityExhausted => None,
         }
     }
 }

@@ -1309,15 +1309,33 @@ impl fmt::Debug for CancellationToken {
     }
 }
 
-/// A bound on the number of evaluation steps a script may charge.
+/// Default statement/expression charges permitted for one Flash 2 evaluation.
+pub const DEFAULT_V2_EVALUATION_STEPS: u64 = 1_000_000;
+/// Default nested callable depth permitted for one Flash 2 evaluation.
+pub const DEFAULT_V2_CALL_DEPTH: u64 = 256;
+/// Default retained collection elements permitted for one Flash 2 evaluation.
+pub const DEFAULT_V2_COLLECTION_ITEMS: u64 = 1_000_000;
+/// Default newly retained string/collection bytes permitted for one Flash 2 evaluation.
+pub const DEFAULT_V2_COLLECTION_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Deterministic resource limits and counters for one evaluation boundary.
 ///
 /// The evaluator charges one step at each statement and each expression.
-/// Exhausting the budget is a [`RuntimeErrorKind::ResourceBudgetExceeded`] runtime
-/// error, not a cancellation.
+/// Exhausting any ceiling is a [`RuntimeErrorKind::ResourceBudgetExceeded`]
+/// runtime error, not a cancellation. The value remains `Copy` so existing
+/// Flash 1 embedding code retains its value semantics; an execution owner passes
+/// one mutable copy across all statements and modules in a logical evaluation.
 #[derive(Clone, Copy, Debug)]
 pub struct ResourceBudget {
-    limit: Option<u64>,
-    used: u64,
+    step_limit: Option<u64>,
+    used_steps: u64,
+    call_depth_limit: Option<u64>,
+    call_depth: u64,
+    peak_call_depth: u64,
+    collection_item_limit: Option<u64>,
+    collection_items: u64,
+    collection_byte_limit: Option<u64>,
+    collection_bytes: u64,
 }
 
 impl ResourceBudget {
@@ -1325,8 +1343,15 @@ impl ResourceBudget {
     #[must_use]
     pub const fn unlimited() -> Self {
         Self {
-            limit: None,
-            used: 0,
+            step_limit: None,
+            used_steps: 0,
+            call_depth_limit: None,
+            call_depth: 0,
+            peak_call_depth: 0,
+            collection_item_limit: None,
+            collection_items: 0,
+            collection_byte_limit: None,
+            collection_bytes: 0,
         }
     }
 
@@ -1334,21 +1359,135 @@ impl ResourceBudget {
     #[must_use]
     pub const fn steps(steps: u64) -> Self {
         Self {
-            limit: Some(steps),
-            used: 0,
+            step_limit: Some(steps),
+            used_steps: 0,
+            call_depth_limit: None,
+            call_depth: 0,
+            peak_call_depth: 0,
+            collection_item_limit: None,
+            collection_items: 0,
+            collection_byte_limit: None,
+            collection_bytes: 0,
         }
+    }
+
+    /// The complete default Flash 2 evaluator contract.
+    #[must_use]
+    pub const fn v2() -> Self {
+        Self {
+            step_limit: Some(DEFAULT_V2_EVALUATION_STEPS),
+            used_steps: 0,
+            call_depth_limit: Some(DEFAULT_V2_CALL_DEPTH),
+            call_depth: 0,
+            peak_call_depth: 0,
+            collection_item_limit: Some(DEFAULT_V2_COLLECTION_ITEMS),
+            collection_items: 0,
+            collection_byte_limit: Some(DEFAULT_V2_COLLECTION_BYTES),
+            collection_bytes: 0,
+        }
+    }
+
+    /// Adds an exact nested-call ceiling to this budget.
+    #[must_use]
+    pub const fn with_call_depth(mut self, limit: u64) -> Self {
+        self.call_depth_limit = Some(limit);
+        self
+    }
+
+    /// Adds an exact cumulative retained-collection-item ceiling.
+    #[must_use]
+    pub const fn with_collection_items(mut self, limit: u64) -> Self {
+        self.collection_item_limit = Some(limit);
+        self
+    }
+
+    /// Adds an exact cumulative newly retained string/collection-byte ceiling.
+    #[must_use]
+    pub const fn with_collection_bytes(mut self, limit: u64) -> Self {
+        self.collection_byte_limit = Some(limit);
+        self
     }
 
     /// Charges one step, returning `false` when the budget is exhausted.
     fn charge(&mut self) -> bool {
-        let Some(limit) = self.limit else {
-            return true;
+        if let Some(limit) = self.step_limit {
+            if self.used_steps >= limit {
+                return false;
+            }
+            self.used_steps += 1;
+        }
+        true
+    }
+
+    fn charge_collection_items(&mut self, amount: usize) -> bool {
+        let Ok(amount) = u64::try_from(amount) else {
+            return false;
         };
-        if self.used >= limit {
+        let Some(next) = self.collection_items.checked_add(amount) else {
+            return false;
+        };
+        if self.collection_item_limit.is_some_and(|limit| next > limit) {
             return false;
         }
-        self.used += 1;
+        self.collection_items = next;
         true
+    }
+
+    fn charge_collection_bytes(&mut self, amount: usize) -> bool {
+        let Ok(amount) = u64::try_from(amount) else {
+            return false;
+        };
+        let Some(next) = self.collection_bytes.checked_add(amount) else {
+            return false;
+        };
+        if self.collection_byte_limit.is_some_and(|limit| next > limit) {
+            return false;
+        }
+        self.collection_bytes = next;
+        true
+    }
+
+    fn enter_call(&mut self) -> bool {
+        let Some(next) = self.call_depth.checked_add(1) else {
+            return false;
+        };
+        if self.call_depth_limit.is_some_and(|limit| next > limit) {
+            return false;
+        }
+        self.call_depth = next;
+        self.peak_call_depth = self.peak_call_depth.max(next);
+        true
+    }
+
+    fn leave_call(&mut self) {
+        self.call_depth = self
+            .call_depth
+            .checked_sub(1)
+            .expect("every entered runtime call leaves exactly once");
+    }
+
+    /// Charges already consumed by this shared evaluation budget.
+    #[must_use]
+    pub const fn used(&self) -> u64 {
+        self.used_steps
+    }
+
+    /// Peak nested callable depth observed by this shared budget.
+    #[must_use]
+    pub const fn peak_call_depth(&self) -> u64 {
+        self.peak_call_depth
+    }
+
+    /// Cumulative retained collection elements charged by this budget.
+    #[must_use]
+    pub const fn collection_items(&self) -> u64 {
+        self.collection_items
+    }
+
+    /// Cumulative newly retained string/collection bytes charged by this budget.
+    #[must_use]
+    pub const fn collection_bytes(&self) -> u64 {
+        self.collection_bytes
     }
 }
 
@@ -1392,6 +1531,20 @@ impl EvalLimits {
             budget,
             policy: EvaluationPolicy::Startup,
         }
+    }
+
+    /// Limits for pure Flash 2 evaluation under the configured resource owner.
+    #[must_use]
+    pub const fn pure_v2(cancel: CancellationToken, budget: ResourceBudget) -> Self {
+        Self {
+            cancel,
+            budget,
+            policy: EvaluationPolicy::PureV2,
+        }
+    }
+
+    pub(crate) const fn resource_budget(&self) -> ResourceBudget {
+        self.budget
     }
 }
 
@@ -1714,12 +1867,34 @@ pub(crate) fn evaluate_with_host(
     binding_types: Arc<RuntimeBindingTypes>,
     host: &mut dyn EvaluationHost,
 ) -> Result<HostedEvaluationOutcome, HostedEvaluationFailure> {
+    let mut budget = limits.budget;
+    evaluate_with_host_and_budget(
+        script,
+        source,
+        scope,
+        limits,
+        &mut budget,
+        binding_types,
+        host,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn evaluate_with_host_and_budget(
+    script: &flash_syntax::Script,
+    source: Arc<SourceFile>,
+    scope: &mut ScopeStack,
+    limits: &EvalLimits,
+    budget: &mut ResourceBudget,
+    binding_types: Arc<RuntimeBindingTypes>,
+    host: &mut dyn EvaluationHost,
+) -> Result<HostedEvaluationOutcome, HostedEvaluationFailure> {
     let mut evaluator = Evaluator {
         source,
         binding_types,
         current_result_type: None,
         cancel: limits.cancel.clone(),
-        budget: limits.budget,
+        budget,
         host,
     };
     let mut last = Value::Null;
@@ -1800,12 +1975,13 @@ pub(crate) fn evaluate_closure_argument_with_binding_types(
         environment: &mut env,
         policy: limits.policy,
     };
+    let mut budget = limits.budget;
     let evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types,
         current_result_type: None,
         cancel: limits.cancel,
-        budget: limits.budget,
+        budget: &mut budget,
         host: &mut host,
     };
     match evaluator.make_closure(closure, scope) {
@@ -1869,12 +2045,13 @@ pub fn apply_callable(
         environment: env,
         policy: limits.policy,
     };
+    let mut budget = limits.budget;
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::clone(&function.binding_types),
         current_result_type: None,
         cancel: limits.cancel.clone(),
-        budget: limits.budget,
+        budget: &mut budget,
         host: &mut host,
     };
     // Cancellation is polled before entering the body, matching an ordinary call.
@@ -1973,12 +2150,13 @@ pub(crate) fn expand_word_with_environment(
         environment: &mut env,
         policy: limits.policy,
     };
+    let mut budget = limits.budget;
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::new(RuntimeBindingTypes::default()),
         current_result_type: None,
         cancel: limits.cancel.clone(),
-        budget: limits.budget,
+        budget: &mut budget,
         host: &mut host,
     };
     match evaluator.expand_word(word, scope) {
@@ -2015,12 +2193,13 @@ pub fn expand_spread(
         environment: &mut env,
         policy: limits.policy,
     };
+    let mut budget = limits.budget;
     let mut evaluator = Evaluator {
         source: Arc::new(source.clone()),
         binding_types: Arc::new(RuntimeBindingTypes::default()),
         current_result_type: None,
         cancel: limits.cancel.clone(),
-        budget: limits.budget,
+        budget: &mut budget,
         host: &mut host,
     };
     match evaluator.expand_spread(variable, item_span, scope) {
@@ -2068,16 +2247,16 @@ struct FlowValue {
     span: Span,
 }
 
-struct Evaluator<'host> {
+struct Evaluator<'budget, 'host> {
     source: Arc<SourceFile>,
     binding_types: Arc<RuntimeBindingTypes>,
     current_result_type: Option<ValueType>,
     cancel: CancellationToken,
-    budget: ResourceBudget,
+    budget: &'budget mut ResourceBudget,
     host: &'host mut dyn EvaluationHost,
 }
 
-impl Evaluator<'_> {
+impl Evaluator<'_, '_> {
     /// Aborts with a cancellation when the token trips at a boundary.
     fn check_cancel(&self, span: Span) -> Eval<()> {
         if self.cancel.is_cancelled() {
@@ -2540,6 +2719,12 @@ impl Evaluator<'_> {
                     }
                 }
                 if let Some(rest) = pattern.rest {
+                    let retained = values.len() - pattern.elements.len();
+                    if !self.budget.charge_collection_items(retained) {
+                        return Err(
+                            self.error(RuntimeErrorKind::ResourceBudgetExceeded, rest.span())
+                        );
+                    }
                     let name = self.text(rest.span());
                     self.ensure_lexical_name(name, rest.span())?;
                     let rest_type = match expected_type {
@@ -3002,6 +3187,9 @@ impl Evaluator<'_> {
                 }
             }
             ExpressionKind::List(elements) => {
+                if !self.budget.charge_collection_items(elements.len()) {
+                    return Err(self.error(RuntimeErrorKind::ResourceBudgetExceeded, span));
+                }
                 let mut values = Vec::with_capacity(elements.len());
                 let expected_element = match expected {
                     Some(ValueType::List(element)) => Some(element.as_ref()),
@@ -3013,6 +3201,9 @@ impl Evaluator<'_> {
                 Ok(Value::list(values))
             }
             ExpressionKind::Record(entries) => {
+                if !self.budget.charge_collection_items(entries.len()) {
+                    return Err(self.error(RuntimeErrorKind::ResourceBudgetExceeded, span));
+                }
                 let mut pairs = Vec::with_capacity(entries.len());
                 for entry in entries {
                     let key = self.record_key(&entry.key, scope)?;
@@ -3155,6 +3346,9 @@ impl Evaluator<'_> {
                 },
                 span,
             ));
+        }
+        if !self.budget.charge_collection_items(record.fields.len()) {
+            return Err(self.error(RuntimeErrorKind::ResourceBudgetExceeded, span));
         }
         let mut substitutions = BTreeMap::new();
         if let Some(ValueType::Nominal { id, arguments }) = expected_result
@@ -3347,6 +3541,8 @@ impl Evaluator<'_> {
             LiteralKind::Integer => self.integer(span),
             LiteralKind::Float => self.float(span),
             LiteralKind::SingleQuoted => {
+                let retained = span.end().saturating_sub(span.start()).saturating_sub(2);
+                self.retain_collection_bytes(retained, span)?;
                 let raw = self.text(span);
                 // The span includes both surrounding single quotes; content is exact.
                 let inner = &raw[1..raw.len() - 1];
@@ -3451,18 +3647,28 @@ impl Evaluator<'_> {
 
         let before = value.len();
         match part.kind() {
-            WordPartKind::Bare | WordPartKind::DoubleText => value.push(self.text(span)),
+            WordPartKind::Bare | WordPartKind::DoubleText => {
+                let retained = self.text(span).len();
+                self.retain_collection_bytes(retained, span)?;
+                value.push(self.text(span));
+            }
             WordPartKind::SingleQuoted => {
                 // The span includes both single quotes; the content is exact.
+                let retained = self.text(span).len().saturating_sub(2);
+                self.retain_collection_bytes(retained, span)?;
                 let raw = self.text(span);
                 value.push(&raw[1..raw.len() - 1]);
             }
             WordPartKind::BareEscape => {
                 // A bare backslash quotes exactly the next scalar literally.
+                let retained = self.text(span).len().saturating_sub(1);
+                self.retain_collection_bytes(retained, span)?;
                 let raw = self.text(span);
                 value.push(&raw[1..]);
             }
             WordPartKind::DoubleEscape => {
+                let retained = decode_double_escape(self.text(span)).len();
+                self.retain_collection_bytes(retained, span)?;
                 value.push(decode_double_escape(self.text(span)));
             }
             WordPartKind::Variable(identifier) => {
@@ -3510,15 +3716,35 @@ impl Evaluator<'_> {
 
     /// Encodes a word-eligible scalar with its canonical word encoding. Ineligible
     /// families are a [`RuntimeErrorKind::WordValueNotWordEligible`] error at `span`.
-    fn encode_scalar(&self, value: &Value, span: Span) -> Eval<OsString> {
-        word_encoding(value).ok_or_else(|| {
+    fn encode_scalar(&mut self, value: &Value, span: Span) -> Eval<OsString> {
+        let existing_bytes = match value {
+            Value::String(text) => Some(text.len()),
+            Value::Path(path) => Some(path.as_os_str().as_encoded_bytes().len()),
+            _ => None,
+        };
+        if let Some(bytes) = existing_bytes {
+            self.retain_collection_bytes(bytes, span)?;
+        }
+        let encoded = word_encoding(value).ok_or_else(|| {
             self.error(
                 RuntimeErrorKind::WordValueNotWordEligible {
                     actual: value.family_name(),
                 },
                 span,
             )
-        })
+        })?;
+        if existing_bytes.is_none() {
+            self.retain_collection_bytes(encoded.len(), span)?;
+        }
+        Ok(encoded)
+    }
+
+    fn retain_collection_bytes(&mut self, amount: usize, span: Span) -> Eval<()> {
+        if self.budget.charge_collection_bytes(amount) {
+            Ok(())
+        } else {
+            Err(self.error(RuntimeErrorKind::ResourceBudgetExceeded, span))
+        }
     }
 
     /// Expands a `...$name` spread into zero or more native arguments. The binding
@@ -3986,6 +4212,9 @@ impl Evaluator<'_> {
                 span,
             ));
         }
+        if !self.budget.charge_collection_items(call.arguments.len()) {
+            return Err(self.error(RuntimeErrorKind::ResourceBudgetExceeded, span));
+        }
         let mut substitutions = BTreeMap::new();
         if !call.type_arguments.is_empty() {
             if call.type_arguments.len() != nominal.type_parameters().len() {
@@ -4259,6 +4488,9 @@ impl Evaluator<'_> {
                 ));
             }
         }
+        if !self.budget.enter_call() {
+            return Err(self.error(RuntimeErrorKind::ResourceBudgetExceeded, span));
+        }
 
         // The captured snapshot underlies a fresh self frame (recursion) and a
         // fresh parameter frame, so parameters shadow captured names by ordinary
@@ -4320,6 +4552,7 @@ impl Evaluator<'_> {
         })();
         self.source = caller_source;
         self.binding_types = caller_binding_types;
+        self.budget.leave_call();
         result
     }
 
@@ -5280,12 +5513,13 @@ mod tests {
             environment: Environment::new(),
             advances: Arc::clone(&advances),
         };
+        let mut budget = ResourceBudget::unlimited();
         let mut evaluator = Evaluator {
             source,
             binding_types: Arc::new(RuntimeBindingTypes::default()),
             current_result_type: None,
             cancel: CancellationToken::never(),
-            budget: ResourceBudget::unlimited(),
+            budget: &mut budget,
             host: &mut host,
         };
 
