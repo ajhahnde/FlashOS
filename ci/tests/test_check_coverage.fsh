@@ -24,7 +24,7 @@ def run_validator(runtime, script, temporary, label, report) {
 }
 
 def expect_success(result, label) {
-    if $result.code != 0 || !('coverage contract: ok' in $result.stdout) || !('workspace members: 7' in $result.stdout) || $result.stderr != '' {
+    if $result.code != 0 || !('coverage contract: ok' in $result.stdout) || !('workspace members: 8' in $result.stdout) || $result.stderr != '' {
         test_error("$label expected success, observed status ${$result.code}, stdout '${$result.stdout}', stderr '${$result.stderr}'")
     }
 }
@@ -73,7 +73,7 @@ while $remaining {
     if !$status.ok { test_error('cannot create complete coverage report') }
     $index = $index + 1
 }
-if $index != 7 { test_error("expected seven Flash workspace members, observed $index") }
+if $index != 8 { test_error("expected eight Flash workspace members, observed $index") }
 
 let accepted = run_validator($runtime, $script, $temporary, 'complete', $complete)
 expect_success($accepted, 'complete workspace report')
