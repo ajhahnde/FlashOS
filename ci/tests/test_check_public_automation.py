@@ -76,7 +76,7 @@ class PublicAutomationTests(unittest.TestCase):
         automation.check_documentation()
         contract = automation.load_documentation_contract()
         self.assertEqual(contract["schema"], 1)
-        self.assertEqual(len(contract["documents"]), 43)
+        self.assertEqual(len(contract["documents"]), 45)
         self.assertEqual(
             {entry["path"] for entry in contract["examples"]},
             automation.PUBLIC_EXAMPLES,
@@ -107,6 +107,12 @@ class PublicAutomationTests(unittest.TestCase):
         self.assertEqual(
             automation.disposition(
                 "components/flash/tests/golden/grammar/complete/commands.fsh"
+            ),
+            "generated-or-test-data",
+        )
+        self.assertEqual(
+            automation.disposition(
+                "components/flash/tests/v2-foundation/v2/source.fsh"
             ),
             "generated-or-test-data",
         )

@@ -239,6 +239,39 @@ SCRIPT_SUFFIXES = {
     ".zsh",
 }
 
+FUZZ_BASELINE_TARGETS = ("lexer", "parser", "expander")
+FUZZ_TARGETS = (*FUZZ_BASELINE_TARGETS, "migration", "resources")
+FUZZ_BASELINE_SEEDS = (
+    "components/flash/tests/golden/grammar/complete",
+    "components/flash/tests/golden/grammar/incomplete",
+    "components/flash/tests/golden/grammar/invalid",
+    "components/flash/tests/golden/lexical/complete",
+    "components/flash/tests/golden/lexical/incomplete",
+    "components/flash/tests/golden/lexical/invalid",
+)
+FUZZ_CAMPAIGN_SEEDS = (
+    *FUZZ_BASELINE_SEEDS,
+    "components/flash/tests/v2-foundation/language/grammar/complete",
+    "components/flash/tests/v2-foundation/language/grammar/incomplete",
+    "components/flash/tests/v2-foundation/language/grammar/invalid",
+    "components/flash/tests/v2-foundation/language/grammar/repl",
+    "components/flash/tests/v2-foundation/language/lexical",
+    "components/flash/tests/v2-foundation/language/modules/complete",
+    "components/flash/tests/v2-foundation/language/modules/invalid",
+)
+FUZZ_SMOKE_SEEDS = (
+    *FUZZ_CAMPAIGN_SEEDS,
+    "components/flash/tests/v2-foundation/language/outcomes/complete",
+    "components/flash/tests/v2-foundation/language/outcomes/invalid",
+    "components/flash/tests/v2-foundation/language/outcomes/refused",
+    "components/flash/tests/v2-foundation/language/operations/complete",
+    "components/flash/tests/v2-foundation/language/operations/invalid",
+    "components/flash/tests/v2-foundation/language/rest-spread/complete",
+    "components/flash/tests/v2-foundation/language/rest-spread/invalid",
+    "components/flash/tests/v2-foundation/language/types/complete",
+    "components/flash/tests/v2-foundation/language/types/invalid",
+)
+
 EXPECTED_EMBEDDED = {
     "cookbook-shell-body": 164,
     "docker-command": 1,
@@ -670,7 +703,13 @@ def check_documentation(
 
 def is_test_data(path: str) -> bool:
     return path in TEST_DATA or (
-        path.startswith("components/flash/tests/golden/") and path.endswith(".fsh")
+        path.startswith(
+            (
+                "components/flash/tests/golden/",
+                "components/flash/tests/v2-foundation/",
+            )
+        )
+        and path.endswith(".fsh")
     )
 
 
@@ -1187,11 +1226,18 @@ def sha256_file(path: Path) -> str:
 
 
 def candidate_source_digest(root: Path = ROOT) -> str:
-    paths = run_process(["git", "ls-files", "-co", "--exclude-standard"], cwd=root)
+    paths = subprocess.run(
+        ["git", "ls-files", "-co", "--exclude-standard", "-z"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
     if paths.returncode != 0:
-        fail(f"cannot enumerate candidate sources: {paths.stderr.strip()}")
+        detail = paths.stderr.decode(encoding="utf-8", errors="replace").strip()
+        fail(f"cannot enumerate candidate sources: {detail}")
     digest = hashlib.sha256()
-    for relative in sorted(filter(None, paths.stdout.splitlines())):
+    for encoded_relative in sorted(filter(None, paths.stdout.split(b"\0"))):
+        relative = encoded_relative.decode(encoding="utf-8")
         if relative.startswith("components/flash/target/"):
             continue
         if relative == "components/flash/exercises/evidence/host-v1.json":
@@ -1199,7 +1245,7 @@ def candidate_source_digest(root: Path = ROOT) -> str:
         path = root / relative
         if not path.is_file():
             continue
-        digest.update(relative.encode())
+        digest.update(encoded_relative)
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")
@@ -2047,6 +2093,51 @@ def filesystem_snapshot(directory: Path) -> list[tuple[str, str, int, str]]:
     return snapshot
 
 
+def project_fuzz_records_to_baseline(
+    records: list[dict[str, object]], root: Path
+) -> list[dict[str, object]]:
+    added_seeds = {
+        str(root / relative)
+        for relative in FUZZ_SMOKE_SEEDS
+        if relative not in FUZZ_BASELINE_SEEDS
+    }
+    projected: list[dict[str, object]] = []
+    for record in records:
+        if record["name"] != "cargo":
+            projected.append(record)
+            continue
+        argv = record.get("argv")
+        if not isinstance(argv, list) or len(argv) < 5:
+            fail(f"fuzz baseline projection received invalid Cargo record: {record!r}")
+        if argv[4] not in FUZZ_BASELINE_TARGETS:
+            continue
+        selected = dict(record)
+        selected["argv"] = [
+            argument for argument in argv if argument not in added_seeds
+        ]
+        projected.append(selected)
+    return projected
+
+
+def project_fuzz_files_to_baseline(
+    snapshot: list[tuple[str, str, int, str]],
+) -> list[tuple[str, str, int, str]]:
+    added_roots = tuple(
+        f"{kind}/{target}"
+        for kind in ("artifacts", "corpus")
+        for target in FUZZ_TARGETS
+        if target not in FUZZ_BASELINE_TARGETS
+    )
+    return [
+        entry
+        for entry in snapshot
+        if not any(
+            entry[0] == root or entry[0].startswith(f"{root}/")
+            for root in added_roots
+        )
+    ]
+
+
 def check_baseline_oracle_parity(runtime: Path, root: Path) -> None:
     cases = (
         (
@@ -2100,6 +2191,11 @@ def check_baseline_oracle_parity(runtime: Path, root: Path) -> None:
             )
             migrated_records = read_report(report)
             migrated_files = filesystem_snapshot(campaign)
+            if relative == "components/flash/fuzz/run-campaign.sh":
+                migrated_records = project_fuzz_records_to_baseline(
+                    migrated_records, fake_root
+                )
+                migrated_files = project_fuzz_files_to_baseline(migrated_files)
             observed = (
                 migrated_result.returncode,
                 migrated_result.stdout,
@@ -2173,6 +2269,9 @@ def check_smoke_baseline_oracle_parity(runtime: Path, root: Path) -> None:
                 label="migrated oracle fuzz smoke",
             )
             migrated_records = normalized_smoke_records(read_report(report))
+            migrated_records = project_fuzz_records_to_baseline(
+                migrated_records, fake_root
+            )
             if list(temporary.iterdir()):
                 fail("migrated fuzz smoke did not clean its temporary corpus")
 
@@ -2239,7 +2338,7 @@ def check_fuzz_campaign_parity(runtime: Path, root: Path) -> None:
             stderr="",
             label="fuzz campaign success",
         )
-        targets = ("lexer", "parser", "expander")
+        targets = FUZZ_TARGETS
         require_paths(
             [
                 campaign / kind / target
@@ -2261,12 +2360,7 @@ def check_fuzz_campaign_parity(runtime: Path, root: Path) -> None:
                 str(root / "components/flash/fuzz"),
                 target,
                 str(campaign / "corpus" / target),
-                str(root / "components/flash/tests/golden/grammar/complete"),
-                str(root / "components/flash/tests/golden/grammar/incomplete"),
-                str(root / "components/flash/tests/golden/grammar/invalid"),
-                str(root / "components/flash/tests/golden/lexical/complete"),
-                str(root / "components/flash/tests/golden/lexical/incomplete"),
-                str(root / "components/flash/tests/golden/lexical/invalid"),
+                *(str(root / relative) for relative in FUZZ_CAMPAIGN_SEEDS),
                 "--",
                 "-max_total_time=3",
                 "-max_len=4096",
@@ -2324,7 +2418,7 @@ def check_fuzz_smoke_parity(runtime: Path, root: Path) -> None:
             label=f"fuzz smoke invalid {argument!r}",
         )
 
-    targets = ("lexer", "parser", "expander")
+    targets = FUZZ_TARGETS
     success_cases = (
         ((), "1000"),
         (("",), "1000"),
@@ -2379,12 +2473,7 @@ def check_fuzz_smoke_parity(runtime: Path, root: Path) -> None:
                     str(root / "components/flash/fuzz"),
                     target,
                     str(work / target),
-                    str(root / "components/flash/tests/golden/grammar/complete"),
-                    str(root / "components/flash/tests/golden/grammar/incomplete"),
-                    str(root / "components/flash/tests/golden/grammar/invalid"),
-                    str(root / "components/flash/tests/golden/lexical/complete"),
-                    str(root / "components/flash/tests/golden/lexical/incomplete"),
-                    str(root / "components/flash/tests/golden/lexical/invalid"),
+                    *(str(root / relative) for relative in FUZZ_SMOKE_SEEDS),
                     "--",
                     f"-runs={expected_runs}",
                     "-max_len=4096",

@@ -176,7 +176,8 @@ A successful non-interactive pure script retains its final value in the
 structured API and writes nothing implicitly to stdout. The interactive shell
 may present that value. The complete checked-in workflow demonstrates the
 same `Int(2)` through migration, formatting, checking, execution, help, and
-editor queries under [`tests/v2-foundation/workflow/`](../tests/v2-foundation/workflow/).
+editor queries under the
+[Flash 2 foundation workflow fixtures](../tests/v2-foundation/workflow/README.md).
 
 ### Planning
 
