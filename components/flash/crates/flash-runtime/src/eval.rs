@@ -2889,6 +2889,7 @@ impl Evaluator<'_> {
                     unreachable!("the pure pipeline predicate accepts only expressions")
                 };
                 let ExpressionKind::Qualified(name) = expression.kind() else {
+                    // flash-v1-boundary(carrier-refusal): V2 value pipelines accept only qualified operation stages.
                     return Err(
                         self.unsupported("non-operation value pipeline stage", stage.span())
                     );
@@ -2902,6 +2903,7 @@ impl Evaluator<'_> {
                     .binding_types
                     .qualified_operation(self.source.id(), &segments)
                 else {
+                    // flash-v1-boundary(carrier-refusal): Unknown V2 operation stages cannot consume a value carrier.
                     return Err(self.unsupported("unknown value pipeline operation", stage.span()));
                 };
                 value = operation
@@ -3112,6 +3114,7 @@ impl Evaluator<'_> {
                 ))));
             }
         }
+        // flash-v1-boundary(carrier-refusal): Unresolved V2 qualified names are not runtime values.
         Err(self.unsupported("qualified value", span))
     }
 
@@ -3123,6 +3126,7 @@ impl Evaluator<'_> {
         expected_result: Option<&ValueType>,
     ) -> Eval<Value> {
         let Some(type_segment) = record.name.segments.last() else {
+            // flash-v1-boundary(carrier-refusal): A malformed nominal constructor cannot produce a runtime value.
             return Err(self.unsupported("nominal record construction", span));
         };
         let type_name = self.text(type_segment.span()).to_owned();
