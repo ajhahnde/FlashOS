@@ -30,6 +30,7 @@ pub mod query;
 pub mod resolve;
 mod scope;
 pub mod script;
+pub mod seam;
 pub mod session;
 pub mod stream;
 pub mod structured;

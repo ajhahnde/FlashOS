@@ -151,6 +151,23 @@ fn cross_module_nominal_annotations_keep_one_semantic_identity() {
 }
 
 #[test]
+fn named_function_signatures_expose_only_empty_downstream_slots() {
+    let root = type_root();
+    let modules = FixtureModules;
+    let program = ModuleProgramLoader::for_language(&modules, &modules, LanguageMajor::V2)
+        .load(&root.join("complete/generic-inference.fsh"))
+        .expect("the generic function fixture must load");
+    let signatures = program.types().functions(program.graph().root());
+
+    assert!(!signatures.is_empty());
+    assert!(
+        signatures
+            .iter()
+            .all(|signature| signature.downstream().is_foundation_only())
+    );
+}
+
+#[test]
 fn constructors_and_patterns_share_nominal_semantic_queries_through_reexports() {
     let root = type_root();
     let modules = FixtureModules;

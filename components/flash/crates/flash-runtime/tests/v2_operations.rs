@@ -16,7 +16,7 @@ use flash_runtime::module::{
     ModuleCanonicalizer, ModuleId, ModulePathError, ModuleProgramLoader, ModuleSourceError,
     ModuleSourceLoader, ValueType,
 };
-use flash_runtime::operation::{OperationInputType, OperationStreamPrimary};
+use flash_runtime::operation::{OperationInputType, OperationPurity, OperationStreamPrimary};
 use flash_runtime::plan::SessionOptions;
 use flash_runtime::query::SemanticHover;
 use flash_runtime::resolve::ExecutableProbe;
@@ -123,6 +123,8 @@ fn operation_identity_overloads_help_and_budgeted_stream_share_one_descriptor() 
     assert_eq!(direct.id().qualified_name(), "std::value::length");
     assert_eq!(direct.type_parameters(), &["T"]);
     assert_eq!(direct.validate(), Ok(()));
+    assert_eq!(direct.purity(), OperationPurity::Pure);
+    assert!(direct.downstream().is_foundation_only());
     assert_eq!(direct.overloads().len(), 2);
     assert!(matches!(
         direct.overloads()[0].input(),

@@ -368,7 +368,7 @@ pub fn execute_module_program(
     clock: Arc<dyn Clock>,
     output: &mut dyn Write,
 ) -> Result<ScriptCompletion, ScriptError> {
-    let (primary, _) = execute_module_program_outcome(
+    let (primary, _, _) = execute_module_program_outcome(
         program,
         script_arguments,
         cwd,

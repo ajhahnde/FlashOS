@@ -1935,6 +1935,7 @@ pub struct FunctionSignature {
     result: ValueType,
     result_annotation_span: Option<Span>,
     documentation: Option<Documentation>,
+    downstream: crate::seam::DownstreamCallMetadata,
 }
 
 impl FunctionSignature {
@@ -1972,6 +1973,12 @@ impl FunctionSignature {
     #[must_use]
     pub const fn documentation(&self) -> Option<&Documentation> {
         self.documentation.as_ref()
+    }
+
+    /// Opaque attachment points reserved for later action/project owners.
+    #[must_use]
+    pub const fn downstream(&self) -> &crate::seam::DownstreamCallMetadata {
+        &self.downstream
     }
 }
 
@@ -2814,6 +2821,7 @@ impl<'a> TypeCollector<'a> {
                         .documentation
                         .as_ref()
                         .map(|block| Documentation::from_block(self.entry.source(), block)),
+                    downstream: crate::seam::DownstreamCallMetadata::foundation(),
                 });
                 self.type_parameter_scopes.pop();
                 self.statements(&function.body.statements)

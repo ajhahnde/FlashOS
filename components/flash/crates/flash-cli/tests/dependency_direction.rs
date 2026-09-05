@@ -103,3 +103,47 @@ fn migration_tool_has_no_mutation_or_execution_host_api() {
     assert!(source.contains(".read_to_end(&mut bytes)"));
     assert!(source.contains("env::args_os().skip(1)"));
 }
+
+#[test]
+fn downstream_seams_have_no_owner_implementation_or_wire_contract() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let source = fs::read_to_string(workspace.join("crates/flash-runtime/src/seam.rs"))
+        .expect("the downstream seam owner should be readable");
+
+    for required in [
+        "EvaluationContextId",
+        "EffectSet",
+        "CapabilityRequest",
+        "AuthorityVerdict",
+        "ResourceOwnerId",
+        "CancellationScopeId",
+        "Deadline",
+        "CleanupOutcome",
+        "ActionId",
+        "ProjectId",
+        "TaskId",
+    ] {
+        assert!(source.contains(required), "missing typed seam `{required}`");
+    }
+
+    for forbidden in [
+        "std::env",
+        "std::fs",
+        "std::net",
+        "std::process",
+        "std::thread",
+        "std::time",
+        "flash_platform",
+        "serde",
+        "serialize",
+        "deserialize",
+        "pub fn grant",
+        "pub fn execute",
+        "pub fn discover",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "downstream seam source must not implement `{forbidden}`"
+        );
+    }
+}

@@ -26,6 +26,7 @@ use flash_runtime::resolve::ExecutableProbe;
 use flash_runtime::script::{
     ScriptCompletion, execute_module_program, execute_module_program_outcome,
 };
+use flash_runtime::seam::{OpaqueSlot, OpaqueSlotState, ProjectId};
 use flash_runtime::{Environment, Value};
 use flash_syntax::{LanguageMajor, SourceFile, SourceId};
 
@@ -328,6 +329,10 @@ fn outcome_precedence_retains_one_primary_and_ordered_secondary_evidence() {
     ];
     let outcome = compose_outcome(Some(primary), evidence).unwrap();
 
+    assert!(outcome.downstream().is_foundation_only());
+    let (_, _, downstream) = outcome.clone().into_parts();
+    assert!(downstream.is_foundation_only());
+
     assert!(matches!(
         outcome.primary(),
         PrimaryOutcome::Refused(refusal) if refusal.reason() == RefusalReason::Denied
@@ -359,6 +364,9 @@ fn outcome_precedence_retains_one_primary_and_ordered_secondary_evidence() {
         cleanup_only.evidence(),
         &[OutcomeEvidence::CleanupFailure("secondary resource error")]
     );
+
+    let unknown_project = OpaqueSlot::<ProjectId>::unknown();
+    assert_eq!(unknown_project.state(), OpaqueSlotState::Unknown);
 }
 
 #[test]

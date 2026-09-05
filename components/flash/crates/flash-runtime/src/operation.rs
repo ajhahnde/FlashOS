@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::eval::{FrameCallee, RuntimeError};
 use crate::module::{ModuleId, ModuleOrigin, ValueType, substitute_type};
+use crate::seam::DownstreamCallMetadata;
 use crate::stream::{
     CheckedStreamPull, StreamCleanupFailure, StreamContractViolation, ValueStream,
 };
@@ -92,7 +93,18 @@ pub struct OperationDescriptor {
     type_parameters: Vec<String>,
     overloads: Vec<OperationOverload>,
     documentation: String,
+    purity: OperationPurity,
+    downstream: DownstreamCallMetadata,
     implementation: StandardOperation,
+}
+
+/// Whether a compiled operation can run without a later authority contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationPurity {
+    /// The operation uses only language-owned data and its explicit budget.
+    Pure,
+    /// The operation must refuse until an explicit authority owner is present.
+    RequiresAuthorityContract,
 }
 
 impl OperationDescriptor {
@@ -118,6 +130,18 @@ impl OperationDescriptor {
     #[must_use]
     pub fn documentation(&self) -> &str {
         &self.documentation
+    }
+
+    /// The descriptor-owned purity classification.
+    #[must_use]
+    pub const fn purity(&self) -> OperationPurity {
+        self.purity
+    }
+
+    /// Opaque attachment points reserved for later execution/project owners.
+    #[must_use]
+    pub const fn downstream(&self) -> &DownstreamCallMetadata {
+        &self.downstream
     }
 
     /// Canonical callable labels for every carrier overload in descriptor order.
@@ -462,6 +486,8 @@ pub fn standard_operation(module: &ModuleId, name: &str) -> Option<OperationDesc
             ),
         ],
         documentation: "Return the number of items in a list or bounded value stream.".to_owned(),
+        purity: OperationPurity::Pure,
+        downstream: DownstreamCallMetadata::foundation(),
         implementation: StandardOperation::Length,
     };
     descriptor

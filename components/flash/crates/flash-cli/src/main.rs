@@ -40,7 +40,7 @@ use flash_cli::interactive::{
     InteractiveEvaluator, InteractiveNotice, InteractiveNoticeError, InteractiveNoticeId,
     format_job_notice, format_live_jobs, run_interactive_driver,
 };
-use flash_cli::plan::{PlanRequest, inspect_source};
+use flash_cli::plan::{PlanHost, inspect_host_source};
 use flash_cli::report::{HostReport, write_report};
 use flash_platform::{Platform, PlatformError};
 #[cfg(target_os = "redox")]
@@ -162,12 +162,17 @@ Options:
       --         Stop parsing planner options; the next operand is SOURCE
       --help     Print planner help
 
-Inspection parses and statically analyzes SOURCE, expands its one pipeline against
-an empty lexical scope and the inherited environment, resolves executables through
-read-only PATH metadata checks, and performs structural preflight. It does not load
-configuration or history, evaluate command substitution, mutate session state, open
-redirections, create pipes, spawn processes, or access a terminal. The deterministic
-plan is written to stdout; diagnostics are written to stderr.
+For Flash 1, inspection parses and statically analyzes SOURCE, expands its one
+pipeline against an empty lexical scope and the inherited environment, resolves
+executables through read-only PATH metadata checks, and performs structural
+preflight. Flash 2 planning is refused before the planner captures cwd,
+environment, PATH, or executable state until explicit authority and
+controlled-planning contracts exist. Resolving an explicitly supplied relative
+SOURCE still uses the launcher's working directory to locate that input.
+
+Inspection does not load configuration or history, evaluate command substitution,
+mutate session state, open redirections, create pipes, spawn processes, or access a
+terminal. A Flash 1 plan is written to stdout; diagnostics are written to stderr.
 The plan includes inherited environment values and may contain secrets; treat the
 output as sensitive.
 ";
@@ -224,15 +229,7 @@ fn run_checker(source: PathBuf) -> ExitCode {
 }
 
 fn run_planner(source: PathBuf) -> ExitCode {
-    let cwd = match env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(error) => {
-            let diagnostic = format!("fsh: cannot read the current directory: {error}\n");
-            return emit_report(HostReport::failure(diagnostic.as_bytes()));
-        }
-    };
-    let request = PlanRequest::new(source, cwd, process_environment());
-    let run = inspect_source(&request, &HostCheckFilesystem, &NativeExecutableProbe);
+    let run = inspect_host_source(&source, &HostCheckFilesystem, &NativeExecutableProbe);
     if let Some(plan) = run.rendered_plan() {
         emit_report(HostReport::success(plan.as_bytes()))
     } else {
@@ -1074,7 +1071,7 @@ fn finish_script_outcome_report(
     outcome: ScriptExecutionOutcome,
     output_flush: io::Result<()>,
 ) -> ExitCode {
-    let (primary, evidence) = outcome.into_parts();
+    let (primary, evidence, _downstream) = outcome.into_parts();
     if let Err(error) = output_flush {
         let mut diagnostics = render_outcome_evidence(&evidence);
         diagnostics.push_str(&format!("fsh: fatal[output]: {error}\n"));
@@ -1183,5 +1180,15 @@ impl ExecutableProbe for NativeExecutableProbe {
     fn is_executable(&self, path: &OsStr) -> bool {
         fs::metadata(Path::new(path))
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    }
+}
+
+impl PlanHost for NativeExecutableProbe {
+    fn current_dir(&self) -> Result<PathBuf, String> {
+        env::current_dir().map_err(|error| error.to_string())
+    }
+
+    fn environment(&self) -> Environment {
+        process_environment()
     }
 }

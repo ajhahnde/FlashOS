@@ -6,6 +6,7 @@ use std::sync::Arc;
 use flash_syntax::Span;
 
 use crate::Status;
+use crate::seam::DownstreamOutcomeMetadata;
 
 /// Why an operation was refused before its effect began.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -234,13 +235,18 @@ pub enum OutcomeEvidence<E> {
 pub struct ExecutionOutcome<T, E> {
     primary: PrimaryOutcome<T, E>,
     evidence: Vec<OutcomeEvidence<E>>,
+    downstream: DownstreamOutcomeMetadata,
 }
 
 impl<T, E> ExecutionOutcome<T, E> {
     /// Build an outcome whose primary is already known.
     #[must_use]
     pub fn new(primary: PrimaryOutcome<T, E>, evidence: Vec<OutcomeEvidence<E>>) -> Self {
-        Self { primary, evidence }
+        Self {
+            primary,
+            evidence,
+            downstream: DownstreamOutcomeMetadata::foundation(),
+        }
     }
 
     /// The sole primary outcome.
@@ -255,10 +261,22 @@ impl<T, E> ExecutionOutcome<T, E> {
         &self.evidence
     }
 
-    /// Consume the record into its primary and ordered evidence.
+    /// Opaque attachment points reserved for later execution/resource owners.
     #[must_use]
-    pub fn into_parts(self) -> (PrimaryOutcome<T, E>, Vec<OutcomeEvidence<E>>) {
-        (self.primary, self.evidence)
+    pub const fn downstream(&self) -> &DownstreamOutcomeMetadata {
+        &self.downstream
+    }
+
+    /// Consume the record into its primary, ordered evidence, and downstream metadata.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        PrimaryOutcome<T, E>,
+        Vec<OutcomeEvidence<E>>,
+        DownstreamOutcomeMetadata,
+    ) {
+        (self.primary, self.evidence, self.downstream)
     }
 }
 
